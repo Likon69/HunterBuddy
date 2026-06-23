@@ -16,9 +16,12 @@ classes/
 *.ipr
 *.iws
 
-# Vendored reference codebases — read-only, never committed
-# (BepHaxAddon, meteor-stashhunting-addon — for reading patterns only)
 /.reference/
+
+# Agent / AI instruction files
+agent.md
+AGENTS.md
+CLAUDE.md
 
 # vscode
 
