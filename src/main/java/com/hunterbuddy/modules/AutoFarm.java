@@ -1,4 +1,4 @@
-package org.linytech.trader.modules;
+package com.hunterbuddy.modules;
 
 
 import meteordevelopment.meteorclient.events.entity.player.BreakBlockEvent;
@@ -27,7 +27,7 @@ import net.minecraft.world.WorldView;
 
 import java.util.*;
 
-import org.linytech.trader.modules.tradingsystem.utilites.WorldUtils;
+import com.hunterbuddy.modules.tradingsystem.utilites.WorldUtils;
 
 public class AutoFarm extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();

@@ -1,4 +1,4 @@
-package org.linytech.trader.modules.tradingsystem;
+package com.hunterbuddy.modules.tradingsystem;
 
 import baritone.api.BaritoneAPI;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
@@ -16,9 +16,9 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.Nullable;
-import org.linytech.trader.modules.tradingsystem.stages.*;
-import org.linytech.trader.modules.tradingsystem.utilites.RenderUtils;
-import org.linytech.trader.modules.tradingsystem.utilites.Stage;
+import com.hunterbuddy.modules.tradingsystem.stages.*;
+import com.hunterbuddy.modules.tradingsystem.utilites.RenderUtils;
+import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
 import java.util.ArrayList;
 import java.util.List;

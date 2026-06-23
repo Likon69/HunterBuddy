@@ -3,15 +3,15 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.stages;
+package com.hunterbuddy.modules.tradingsystem.stages;
 
 import baritone.api.pathing.goals.GoalBlock;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
-import org.linytech.trader.modules.tradingsystem.ExperienceTraderModule;
-import org.linytech.trader.modules.tradingsystem.utilites.Stage;
-import org.linytech.trader.modules.tradingsystem.utilites.TraderUtils;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
+import com.hunterbuddy.modules.tradingsystem.utilites.TraderUtils;
 
 public class SprintStage extends Stage {
     private BlockPos targetPosition;

@@ -3,10 +3,10 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.stages;
+package com.hunterbuddy.modules.tradingsystem.stages;
 
-import org.linytech.trader.modules.tradingsystem.ExperienceTraderModule;
-import org.linytech.trader.modules.tradingsystem.utilites.Stage;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
 public class EmptyStage extends Stage {
     public EmptyStage(ExperienceTraderModule main) {

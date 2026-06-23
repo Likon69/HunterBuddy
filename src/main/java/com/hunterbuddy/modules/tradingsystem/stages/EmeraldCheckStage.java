@@ -3,11 +3,11 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.stages;
+package com.hunterbuddy.modules.tradingsystem.stages;
 
 import net.minecraft.item.Items;
-import org.linytech.trader.modules.tradingsystem.ExperienceTraderModule;
-import org.linytech.trader.modules.tradingsystem.utilites.Stage;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
 public class EmeraldCheckStage extends Stage {
     public EmeraldCheckStage(ExperienceTraderModule main) {

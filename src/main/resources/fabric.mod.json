@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "id": "trader-addon",
+  "id": "hunterbuddy",
   "version": "${version}",
-  "name": "Auto Trader Addon",
+  "name": "HunterBuddy",
   "authors": [
-    "LinyTech"
+    "HunterBuddy"
   ],
-  "accessWidener": "trader-addon.accessWidener",
-  "icon": "assets/template/icon.png",
+  "accessWidener": "hunterbuddy.accessWidener",
+  "icon": "assets/hunterbuddy/icon.png",
   "environment": "client",
   "entrypoints": {
     "meteor": [
-      "org.linytech.trader.TraderAddon"
+      "com.hunterbuddy.HunterBuddyAddon"
     ]
   },
   "custom": {
@@ -19,7 +19,7 @@
   },
   "depends": {
     "java": ">=17",
-    "minecraft": ["1.20.4","${mc_version}"],
+    "minecraft": ["1.21.4","${mc_version}"],
     "meteor-client": "*"
   }
 }

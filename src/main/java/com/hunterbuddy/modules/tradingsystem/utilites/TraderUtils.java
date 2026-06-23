@@ -3,7 +3,7 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.utilites;
+package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.player.PlayerEntity;
