@@ -3,7 +3,7 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.utilites;
+package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;

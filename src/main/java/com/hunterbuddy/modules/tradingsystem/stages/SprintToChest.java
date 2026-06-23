@@ -3,7 +3,7 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.stages;
+package com.hunterbuddy.modules.tradingsystem.stages;
 
 import baritone.api.pathing.goals.GoalBlock;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
@@ -11,8 +11,8 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
-import org.linytech.trader.modules.tradingsystem.ExperienceTraderModule;
-import org.linytech.trader.modules.tradingsystem.utilites.Stage;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
 public class SprintToChest extends Stage {
     private boolean isPacketSent = false;

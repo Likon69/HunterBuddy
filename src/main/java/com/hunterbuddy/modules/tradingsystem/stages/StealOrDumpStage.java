@@ -3,7 +3,7 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.stages;
+package com.hunterbuddy.modules.tradingsystem.stages;
 
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
@@ -13,8 +13,8 @@ import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.screen.ScreenHandler;
-import org.linytech.trader.modules.tradingsystem.ExperienceTraderModule;
-import org.linytech.trader.modules.tradingsystem.utilites.Stage;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 

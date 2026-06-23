@@ -1,4 +1,4 @@
-package org.linytech.trader.modules;
+package com.hunterbuddy.modules;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalBlock;

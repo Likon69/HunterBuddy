@@ -1,4 +1,4 @@
-package org.linytech.trader.modules;
+package com.hunterbuddy.modules;
 
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.Setting;

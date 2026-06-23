@@ -3,14 +3,14 @@
  * Copyright (c) Meteor Development.
  */
 
-package org.linytech.trader.modules.tradingsystem.utilites;
+package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.process.ICustomGoalProcess;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import org.jetbrains.annotations.NotNull;
-import org.linytech.trader.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 
 import java.util.Objects;
 

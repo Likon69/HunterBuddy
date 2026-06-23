@@ -1,4 +1,4 @@
-package org.linytech.trader.modules;
+package com.hunterbuddy.modules;
 
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Module;

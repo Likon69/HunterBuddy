@@ -1,4 +1,4 @@
-package org.linytech.trader.modules.tradingsystem.utilites;
+package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
