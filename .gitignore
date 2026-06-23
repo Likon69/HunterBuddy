@@ -1,0 +1,37 @@
+# gradle
+
+.gradle/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vendored reference codebases — read-only, never committed
+# (BepHaxAddon, meteor-stashhunting-addon — for reading patterns only)
+/.reference/
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# fabric
+
+run/
