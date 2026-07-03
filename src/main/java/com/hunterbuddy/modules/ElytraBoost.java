@@ -127,6 +127,14 @@ public class ElytraBoost extends Module {
         .build()
     );
 
+    private final Setting<Boolean> yawLockVisual = sgGeneral.add(new BoolSetting.Builder()
+        .name("yaw-lock-visual")
+        .description("Also visually lock the player's yaw each tick. When OFF (default), only the outgoing packet is locked — the camera still rotates freely with the mouse.")
+        .defaultValue(false)
+        .visible(() -> yawLock.get() != YawLockMode.Off)
+        .build()
+    );
+
     private final Setting<Boolean> pitchSpoofEnabled = sgGeneral.add(new BoolSetting.Builder()
         .name("pitch-spoof")
         .description("Send a different pitch to the server than what's rendered. Server gets spoof-pitch; player sees the visual pitch.")
@@ -172,6 +180,7 @@ public class ElytraBoost extends Module {
     private boolean wasGliding = false;
     private float lockedYaw = 0;
     private Float preSpoofPitch = null;  // visual pitch saved between Pre / Post
+    private Float preLockedYaw = null;   // visual yaw saved between Pre / Post
     private final TakeOffHelper takeOffHelper = new TakeOffHelper();
 
     public ElytraBoost(Category category) {
@@ -186,7 +195,17 @@ public class ElytraBoost extends Module {
         // Capture the player's current facing for the "Forward" yaw-lock mode.
         if (mc.player != null) lockedYaw = mc.player.getYaw();
         preSpoofPitch = null;
+        preLockedYaw = null;
         if (autoTakeOff.get()) takeOffHelper.start();
+    }
+
+    @Override
+    public void onDeactivate() {
+        // If the user disables the module mid-takeoff, abort the state machine so
+        // a subsequent activation doesn't inherit a half-finished sequence.
+        takeOffHelper.reset();
+        preSpoofPitch = null;
+        preLockedYaw = null;
     }
 
     @EventHandler
@@ -209,22 +228,37 @@ public class ElytraBoost extends Module {
 
     @EventHandler
     private void onSendMovementPacketsPre(SendMovementPacketsEvent.Pre event) {
-        if (!isActive() || mc.player == null) return;
-        if (!mc.player.isGliding()) return;
-        if (!pitchSpoofEnabled.get()) return;
+        if (!isActive() || mc.player == null || !mc.player.isGliding()) return;
 
-        // Save the visual pitch and swap in the spoofed pitch. The C2S packet
-        // is built right after this event, so it carries the spoofed pitch.
-        preSpoofPitch = mc.player.getPitch();
-        mc.player.setPitch(spoofPitch.get().floatValue());
+        // Yaw lock for the packet (always done when yawLock != Off).
+        if (yawLock.get() != YawLockMode.Off) {
+            preLockedYaw = mc.player.getYaw();
+            float packetYaw = (yawLock.get() == YawLockMode.Forward)
+                ? lockedYaw
+                : fixedYaw.get().floatValue();
+            mc.player.setYaw(packetYaw);
+        }
+
+        // Pitch spoof (opt-in).
+        if (pitchSpoofEnabled.get()) {
+            preSpoofPitch = mc.player.getPitch();
+            mc.player.setPitch(spoofPitch.get().floatValue());
+        }
     }
 
     @EventHandler
     private void onSendMovementPacketsPost(SendMovementPacketsEvent.Post event) {
-        if (preSpoofPitch == null) return;
-        // Restore the visual pitch after the packet has been sent.
-        if (mc.player != null) mc.player.setPitch(preSpoofPitch);
-        preSpoofPitch = null;
+        // Restore both saved values, if any. Pre/Post is fast (sub-tick) so the
+        // player only 'sees' the locked values for the packet window, not long
+        // enough to be visible — unless yawLockVisual is also on.
+        if (preLockedYaw != null && mc.player != null) {
+            mc.player.setYaw(preLockedYaw);
+            preLockedYaw = null;
+        }
+        if (preSpoofPitch != null && mc.player != null) {
+            mc.player.setPitch(preSpoofPitch);
+            preSpoofPitch = null;
+        }
     }
 
     @EventHandler
@@ -233,11 +267,13 @@ public class ElytraBoost extends Module {
 
         if (pauseInLiquids.get() && (mc.player.isTouchingWater() || mc.player.isInLava())) return;
 
-        // Yaw lock: force the player's yaw before the packet is built.
-        switch (yawLock.get()) {
-            case Forward -> mc.player.setYaw(lockedYaw);
-            case Custom  -> mc.player.setYaw(fixedYaw.get().floatValue());
-            case Off     -> { /* let the player rotate freely */ }
+        // Yaw lock visual (optional): only when the user explicitly wants the
+        // camera frozen too. Otherwise the yaw lock is packet-only (done in Pre/Post).
+        if (yawLockVisual.get() && yawLock.get() != YawLockMode.Off) {
+            float packetYaw = (yawLock.get() == YawLockMode.Forward)
+                ? lockedYaw
+                : fixedYaw.get().floatValue();
+            mc.player.setYaw(packetYaw);
         }
 
         // Compute target speed.
@@ -252,7 +288,7 @@ public class ElytraBoost extends Module {
         targetSpeed = Math.min(targetSpeed, speedLimit.get());
 
         // Acceleration curve: pick how the speed approaches target each tick.
-        double delta = curveDelta(accelerationCurve.get(), acceleration.get(), targetSpeed, currentSpeed);
+        double delta = curveDelta(accelerationCurve.get(), acceleration.get(), targetSpeed, currentSpeed, speedLimit.get());
         currentSpeed += (targetSpeed - currentSpeed) * delta;
 
         // Client-side pitch clamp only. Server-side spam is done in Pre/Post events above.
@@ -270,25 +306,32 @@ public class ElytraBoost extends Module {
     /**
      * Returns the per-tick interpolation factor (0..1) for the chosen curve.
      *
-     * @param curve     The curve type
-     * @param a         Acceleration knob (raw setting value, 0..1)
-     * @param target    Target speed (block/tick)
-     * @param current   Current speed (block/tick)
+     * @param curve       The curve type
+     * @param a           Acceleration knob (raw setting value, 0..1)
+     * @param target      Target speed (block/tick)
+     * @param current     Current speed (block/tick)
+     * @param speedLimit  The configured speed cap — used to normalize the
+     *                    exponential curve so its 'feel' is independent of the
+     *                    speed scale.
      */
-    private static double curveDelta(AccelCurve curve, double a, double target, double current) {
+    private static double curveDelta(AccelCurve curve, double a, double target, double current, double speedLimit) {
         switch (curve) {
             case Linear -> {
                 return a;
             }
             case Exponential -> {
-                // Asymptotic approach: faster when far away, slower as we close in.
-                return 1.0 - Math.exp(-a * Math.abs(target - current));
+                // Normalize the gap by the speed-limit scale so that changing
+                // speedLimit doesn't change the ramp feel. A normalized diff
+                // of 1.0 means 'we are still a full speedLimit away from target'.
+                double scale = Math.max(0.001, Math.abs(speedLimit));
+                double normalizedDiff = Math.abs(target - current) / scale;
+                return 1.0 - Math.exp(-a * normalizedDiff);
             }
             case Smoothstep -> {
-                // Classic ease curve: 3x^2 - 2x^3.
                 double x = clamp01(a);
                 double s = x * x * (3.0 - 2.0 * x);
-                // Also damp when very close to target so we don't overshoot in tight loops.
+                // Close-factor dampens the last few percent of the gap so we
+                // don't oscillate around the target value.
                 double closeFactor = Math.min(1.0, Math.abs(target - current) * 4.0);
                 return s * closeFactor;
             }
