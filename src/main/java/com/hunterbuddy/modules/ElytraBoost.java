@@ -68,9 +68,9 @@ public class ElytraBoost extends Module {
     private final Setting<Double> manualSpeed = sgGeneral.add(new DoubleSetting.Builder()
         .name("speed")
         .description("Target speed when automatic-speed is off, in blocks/tick.")
-        .defaultValue(0.5)
+        .defaultValue(1.5)
         .min(0.0)
-        .sliderMax(2.0)
+        .sliderMax(3.0)
         .visible(() -> !automaticSpeed.get())
         .build()
     );
@@ -334,7 +334,7 @@ public class ElytraBoost extends Module {
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = -100)
     private void onPlayerMove(PlayerMoveEvent event) {
         if (mc.player == null || !mc.player.isFallFlying()) return;
 
@@ -360,8 +360,11 @@ public class ElytraBoost extends Module {
         double targetSpeed;
         if (automaticSpeed.get()) {
             float pitch = mc.player.getPitch();
-            // Base formula: faster when pitching down. Pitch up slows you down.
-            targetSpeed = 0.3 + Math.max(0, -pitch) * 0.012;
+            // Linear approximation of vanilla equilibrium speed (b/t) by pitch:
+            //   pitch -30 -> ~0.5,  pitch 0 -> 1.5,  pitch 30 -> 2.5,  pitch 52 -> 3.2.
+            // The dynamic cap below clamps against the actual per-pitch vanilla
+            // equilibrium, so values slightly above vanilla don't trigger anti-cheat.
+            targetSpeed = 1.5 + pitch * 0.033;
         } else {
             targetSpeed = manualSpeed.get();
         }
