@@ -61,6 +61,16 @@ public class ElytraAutoFly extends Module {
         .build()
     );
 
+    private final Setting<Integer> levelPitch = sgGeneral.add(new IntSetting.Builder()
+        .name("level-pitch")
+        .description("Pitch angle during the 'level' stage (after descent, before cycling back). 0 = look straight ahead.")
+        .defaultValue(0)
+        .min(-89)
+        .max(89)
+        .sliderRange(-89, 89)
+        .build()
+    );
+
     private final Setting<Double> boundGap = sgGeneral.add(new DoubleSetting.Builder()
         .name("bound-gap")
         .description("Gap between upper and lower bounds inside Meteor's Pitch40 mode.")
@@ -122,6 +132,7 @@ public class ElytraAutoFly extends Module {
 
         stages.add(new ClimbStage());
         stages.add(new DescendStage());
+        stages.add(new LevelStage());
         resetStages();
     }
 
@@ -215,6 +226,10 @@ public class ElytraAutoFly extends Module {
         @Override
         public boolean work() {
             meteorElytraFly.flightMode.set(ElytraFlightModes.Pitch40);
+            // Workaround: Meteor 0.5.8's Pitch40 mode is unreliable on MC 1.21.1
+            // (its ElytraFly instance was force-registered without event subscriptions).
+            // Force the player pitch directly so the climb is visible.
+            mc.player.setPitch(-40f);
 
             // -40 pitch = looking up (Meteor's Pitch40 mode)
             if (mc.player.getPitch() == -40) {
@@ -258,6 +273,24 @@ public class ElytraAutoFly extends Module {
             meteorElytraFly.flightMode.set(ElytraFlightModes.Vanilla);
             mc.player.setPitch(downPitch.get().floatValue());
             return mc.player.getY() <= lowAltitude.get();
+        }
+
+        @Override
+        public void reset() {
+            // No state.
+        }
+    }
+
+    /** Level phase: stay at current altitude looking straight (or per level-pitch setting). */
+    private class LevelStage extends ElytraFlyStage {
+        @Override
+        public boolean work() {
+            meteorElytraFly.flightMode.set(ElytraFlightModes.Vanilla);
+            mc.player.setPitch(levelPitch.get().floatValue());
+            // Never advance: this is the terminal stage. The user can deactivate the
+            // module when they want to land / restart the cycle. Velocity maintenance
+            // (anti-gravity) is provided by HunterBuddy's ElytraBoost in maintain-altitude.
+            return false;
         }
 
         @Override
