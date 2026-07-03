@@ -37,7 +37,7 @@ import net.minecraft.util.math.Vec3d;
  * game-state reads (player position, settings) and writes (player yaw,
  * forward-key, velocity).
  */
-public class SearchAreaHunterBuddy extends Module {
+public class SearchArea extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgPolar = settings.createGroup("Polar Spiral");
 
@@ -356,7 +356,7 @@ public class SearchAreaHunterBuddy extends Module {
     private IState currentMode = new RectangleState();
     private boolean goingToStart = true;
 
-    public SearchAreaHunterBuddy() {
+    public SearchArea() {
         super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "search-area",
             "Walks the player in a chunk-loading pattern (Rectangle / Spiral / PolarSpiral). Useful with stash finder / map mods.");
     }

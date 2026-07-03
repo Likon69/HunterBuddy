@@ -10,7 +10,7 @@ import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraF
 
 import com.hunterbuddy.modules.AnvilRename;
 import com.hunterbuddy.modules.AutoFarm;
-import com.hunterbuddy.modules.AutoPortalHunterBuddy;
+import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.CaveAirESP;
 import com.hunterbuddy.modules.ControlFly;
 import com.hunterbuddy.modules.ElytraAutoFly;
@@ -18,7 +18,7 @@ import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.ItemsSucker;
 import com.hunterbuddy.modules.SandMineAddon;
-import com.hunterbuddy.modules.SearchAreaHunterBuddy;
+import com.hunterbuddy.modules.SearchArea;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.ShulkerColor;
 import com.hunterbuddy.modules.VanityESP;
@@ -49,9 +49,9 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new ElytraRecast());
         Modules.get().add(new ControlFly());
-        Modules.get().add(new AutoPortalHunterBuddy());
+        Modules.get().add(new AutoPortal());
         Modules.get().add(new SignRender());
-        Modules.get().add(new SearchAreaHunterBuddy());
+        Modules.get().add(new SearchArea());
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
         Modules.get().add(new VanityESP());
