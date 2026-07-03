@@ -169,7 +169,7 @@ public class ElytraAutoFly extends Module {
         }
 
         if (!meteorElytraFly.isActive()) return;
-        if (!mc.player.isGliding()) return;
+        if (!mc.player.isFallFlying()) return;
 
         if (fireworkCooldown > 0) fireworkCooldown--;
 

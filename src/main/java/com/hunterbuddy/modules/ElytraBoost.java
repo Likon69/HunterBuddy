@@ -1,6 +1,8 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.modules.elytraboost.MovementNoise;
 import com.hunterbuddy.modules.elytraboost.TakeOffHelper;
+import com.hunterbuddy.modules.elytraboost.VanillaElytraSimulator;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -14,6 +16,8 @@ import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.math.Vec3d;
+
+import java.util.Random;
 
 /**
  * ElytraBoost — elytra flight via client-side velocity injection, with
@@ -38,6 +42,7 @@ import net.minecraft.util.math.Vec3d;
  */
 public class ElytraBoost extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgAntiDetect = settings.createGroup("Anti-Detect");
 
     public enum YawLockMode {
         Off,
@@ -174,6 +179,73 @@ public class ElytraBoost extends Module {
         .build()
     );
 
+    // ---- Anti-Detect: Dynamic Speed Cap ----
+
+    private final Setting<Boolean> useDynamicCap = sgAntiDetect.add(new BoolSetting.Builder()
+        .name("dynamic-speed-cap")
+        .description("Cap speed based on simulated vanilla elytra physics instead of a fixed limit. Makes speed look legitimate.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> vanillaMultiplier = sgAntiDetect.add(new DoubleSetting.Builder()
+        .name("vanilla-multiplier")
+        .description("Multiplier over vanilla equilibrium speed. 1.0 = identical to vanilla, 1.5 = 50% faster.")
+        .defaultValue(1.0)
+        .min(1.0)
+        .sliderMax(3.0)
+        .visible(useDynamicCap::get)
+        .build()
+    );
+
+    // ---- Anti-Detect: Noise Injection ----
+
+    private final Setting<Boolean> noiseEnabled = sgAntiDetect.add(new BoolSetting.Builder()
+        .name("noise")
+        .description("Add subtle random noise to the movement vector so it doesn't look perfectly mechanical.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> speedNoise = sgAntiDetect.add(new DoubleSetting.Builder()
+        .name("speed-noise")
+        .description("Standard deviation for speed noise, as a fraction. 0.02 = ±2% variation per tick.")
+        .defaultValue(0.02)
+        .min(0.0)
+        .sliderMax(0.1)
+        .visible(noiseEnabled::get)
+        .build()
+    );
+
+    private final Setting<Double> directionNoise = sgAntiDetect.add(new DoubleSetting.Builder()
+        .name("direction-noise")
+        .description("Standard deviation for directional noise, in degrees. 0.5 = ±0.5° per tick.")
+        .defaultValue(0.5)
+        .min(0.0)
+        .sliderMax(3.0)
+        .visible(noiseEnabled::get)
+        .build()
+    );
+
+    // ---- Anti-Detect: Packet Timing Variation ----
+
+    private final Setting<Boolean> timingVariation = sgAntiDetect.add(new BoolSetting.Builder()
+        .name("timing-variation")
+        .description("Randomly skip applying the boost on some ticks, letting vanilla physics run instead. Breaks the perfect tick-by-tick pattern.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> skipChance = sgAntiDetect.add(new DoubleSetting.Builder()
+        .name("skip-chance")
+        .description("Probability of skipping the boost on each tick. 0.05 = ~1 tick in 20 is pure vanilla.")
+        .defaultValue(0.05)
+        .min(0.0)
+        .sliderMax(0.20)
+        .visible(timingVariation::get)
+        .build()
+    );
+
     // ---- Runtime state ----
 
     private double currentSpeed = 0;
@@ -182,6 +254,7 @@ public class ElytraBoost extends Module {
     private Float preSpoofPitch = null;  // visual pitch saved between Pre / Post
     private Float preLockedYaw = null;   // visual yaw saved between Pre / Post
     private final TakeOffHelper takeOffHelper = new TakeOffHelper();
+    private final Random rng = new Random();
 
     public ElytraBoost(Category category) {
         super(category, "elytra-boost",
@@ -219,7 +292,7 @@ public class ElytraBoost extends Module {
         }
 
         // Auto-redeploy: detect a fresh landing and restart.
-        boolean gliding = mc.player.isGliding();
+        boolean gliding = mc.player.isFallFlying();
         if (autoRedeploy.get() && wasGliding && !gliding && mc.player.isOnGround()) {
             takeOffHelper.start();
         }
@@ -228,7 +301,7 @@ public class ElytraBoost extends Module {
 
     @EventHandler
     private void onSendMovementPacketsPre(SendMovementPacketsEvent.Pre event) {
-        if (!isActive() || mc.player == null || !mc.player.isGliding()) return;
+        if (!isActive() || mc.player == null || !mc.player.isFallFlying()) return;
 
         // Yaw lock for the packet (always done when yawLock != Off).
         if (yawLock.get() != YawLockMode.Off) {
@@ -263,9 +336,16 @@ public class ElytraBoost extends Module {
 
     @EventHandler
     private void onPlayerMove(PlayerMoveEvent event) {
-        if (mc.player == null || !mc.player.isGliding()) return;
+        if (mc.player == null || !mc.player.isFallFlying()) return;
 
         if (pauseInLiquids.get() && (mc.player.isTouchingWater() || mc.player.isInLava())) return;
+
+        // ---- Anti-Detect: Packet timing variation ----
+        // Randomly skip the boost on some ticks, letting vanilla physics run
+        // instead. This breaks the perfect tick-by-tick mechanical pattern.
+        if (timingVariation.get() && rng.nextDouble() < skipChance.get()) {
+            return;  // vanilla physics this tick
+        }
 
         // Yaw lock visual (optional): only when the user explicitly wants the
         // camera frozen too. Otherwise the yaw lock is packet-only (done in Pre/Post).
@@ -285,7 +365,19 @@ public class ElytraBoost extends Module {
         } else {
             targetSpeed = manualSpeed.get();
         }
-        targetSpeed = Math.min(targetSpeed, speedLimit.get());
+
+        // ---- Anti-Detect: Dynamic speed cap ----
+        // Instead of a fixed speedLimit, compute vanilla equilibrium speed for
+        // the current pitch and cap to vanillaSpeed × multiplier.
+        if (useDynamicCap.get()) {
+            double vanillaSpeed = VanillaElytraSimulator.estimateEquilibriumSpeedFast(
+                mc.player.getPitch(), mc.player.getYaw());
+            double dynamicCap = vanillaSpeed * vanillaMultiplier.get();
+            targetSpeed = Math.min(targetSpeed, dynamicCap);
+        } else {
+            // Fixed speed limit only when dynamic cap is off.
+            targetSpeed = Math.min(targetSpeed, speedLimit.get());
+        }
 
         // Acceleration curve: pick how the speed approaches target each tick.
         double delta = curveDelta(accelerationCurve.get(), acceleration.get(), targetSpeed, currentSpeed, speedLimit.get());
@@ -300,7 +392,17 @@ public class ElytraBoost extends Module {
             ? playerForwardVector(mc.player.getYaw(), usedPitch)
             : mc.player.getRotationVector();
 
-        event.movement = direction.multiply(currentSpeed);
+        Vec3d movement = direction.multiply(currentSpeed);
+
+        // ---- Anti-Detect: Noise injection ----
+        // Add subtle Gaussian noise to the movement vector so it doesn't look
+        // like a perfectly mechanical trajectory.
+        if (noiseEnabled.get()) {
+            movement = MovementNoise.applyNoise(
+                movement, speedNoise.get(), directionNoise.get(), rng);
+        }
+
+        event.movement = movement;
     }
 
     /**
