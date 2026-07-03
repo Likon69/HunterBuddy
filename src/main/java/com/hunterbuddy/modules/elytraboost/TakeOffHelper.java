@@ -98,7 +98,7 @@ public class TakeOffHelper {
             }
 
             case WAITING_FOR_FLIGHT -> {
-                if (mc.player.isGliding()) {
+                if (mc.player.isFallFlying()) {
                     reset();
                 } else if (ticksInState == 3) {
                     // Minecraft elytra flight requires a double-tap of jump while falling.
