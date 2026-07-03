@@ -184,19 +184,25 @@ public class ElytraAutoFly extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (elytraFly.isActive()) {
-            if (currentPhase == Phase.CLIMB) {
-                tickClimb();
-            } else {
-                tickDescend();
+        // Dispatch on currentPhase FIRST, not on elytraFly.isActive(). During
+        // DESCEND ElytraFly is intentionally OFF (player glides pure-vanilla at
+        // the manual pitch), so checking isActive() here would fall into the
+        // reconnect branch and re-enable ElytraFly -> oscillation spam at the
+        // boundary altitude.
+        if (currentPhase == Phase.CLIMB) {
+            // Reconnect: if ElytraFly was turned off (2b2t queue exit, manual
+            // toggle), re-enable when the player can fly again.
+            if (!elytraFly.isActive()) {
+                if (!mc.player.getAbilities().allowFlying) {
+                    elytraFly.toggle();
+                    enterClimb();
+                }
+                return;
             }
+            tickClimb();
         } else {
-            // Wait for the player to drop out of the 2b2t queue (allowFlying -> false),
-            // then re-enable ElytraFly and reset the bounds for a fresh climb.
-            if (!mc.player.getAbilities().allowFlying) {
-                elytraFly.toggle();
-                enterClimb();
-            }
+            // DESCEND phase: ElytraFly is intentionally OFF. Don't touch it.
+            tickDescend();
         }
     }
 
