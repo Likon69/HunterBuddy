@@ -85,7 +85,7 @@ public class TakeOffHelper {
 
             case JUMPING -> {
                 // First jump starts the fall. If already falling-flying, we're done.
-                if (mc.player.isFallFlying()) {
+                if (mc.player.isGliding()) {
                     reset();
                     return;
                 }
@@ -95,7 +95,7 @@ public class TakeOffHelper {
             }
 
             case WAITING_FOR_FLIGHT -> {
-                if (mc.player.isFallFlying()) {
+                if (mc.player.isGliding()) {
                     reset();
                 } else if (ticksInState == 3) {
                     // Minecraft elytra flight requires a double-tap of jump while falling.
@@ -132,7 +132,7 @@ public class TakeOffHelper {
             ItemStack elytra = stack.copy();
 
             mc.player.getInventory().setStack(slot, chestBefore);
-            mc.player.equip(CHEST, elytra);
+            mc.player.equipStack(CHEST, elytra);
             mc.player.getInventory().markDirty();
             return true;
         }

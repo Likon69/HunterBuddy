@@ -91,16 +91,16 @@ public class BuyingStage extends Stage {
         offers.forEach(offer -> {
             System.out.println("Sell: " + offer.copySellItem().getItem() +
                 " First Buy: " + offer.getOriginalFirstBuyItem().getItem() +
-                " Second Buy: " + (offer.getSecondBuyItem() == null ? "None" : offer.getSecondBuyItem().getItem()) +
+                " Second Buy: " + (offer.getSecondBuyItem().isPresent() ? offer.getSecondBuyItem().get().toString() : "None") +
                 " Disabled: " + offer.isDisabled());
         });
 
         Optional<TradeOffer> targetOffer = offers.parallelStream()
             .filter(tradeOffer -> !tradeOffer.isDisabled())
             .filter(tradeOffer -> tradeOffer.copySellItem().getItem().equals(Items.EXPERIENCE_BOTTLE))
-            .filter(tradeOffer -> tradeOffer.getAdjustedFirstBuyItem().getItem().equals(Items.EMERALD))
-            .filter(tradeOffer -> tradeOffer.getAdjustedFirstBuyItem().getCount() <= super.mainModule.maxPrice.get())
-            .filter(tradeOffer -> tradeOffer.getSecondBuyItem().getItem().equals(Items.AIR))
+            .filter(tradeOffer -> tradeOffer.getOriginalFirstBuyItem().getItem().equals(Items.EMERALD))
+            .filter(tradeOffer -> tradeOffer.getOriginalFirstBuyItem().getCount() <= super.mainModule.maxPrice.get())
+            .filter(tradeOffer -> tradeOffer.getSecondBuyItem().isEmpty())
             .findAny();
 
         if (targetOffer.isPresent()) {

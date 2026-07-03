@@ -126,7 +126,7 @@ public class ElytraBoost extends Module {
         }
 
         // Auto-redeploy: detect a fresh landing and restart.
-        boolean gliding = mc.player.isFallFlying();
+        boolean gliding = mc.player.isGliding();
         if (autoRedeploy.get() && wasGliding && !gliding && mc.player.isOnGround()) {
             takeOffHelper.start();
         }
@@ -135,7 +135,7 @@ public class ElytraBoost extends Module {
 
     @EventHandler
     private void onPlayerMove(PlayerMoveEvent event) {
-        if (mc.player == null || !mc.player.isFallFlying()) return;
+        if (mc.player == null || !mc.player.isGliding()) return;
 
         if (pauseInLiquids.get() && (mc.player.isTouchingWater() || mc.player.isInLava())) return;
 

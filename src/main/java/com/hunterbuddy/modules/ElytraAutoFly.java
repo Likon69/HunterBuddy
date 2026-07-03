@@ -11,6 +11,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
 import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFlightModes;
+import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.Items;
@@ -168,7 +169,7 @@ public class ElytraAutoFly extends Module {
         }
 
         if (!meteorElytraFly.isActive()) return;
-        if (!mc.player.isFallFlying()) return;
+        if (!mc.player.isGliding()) return;
 
         if (fireworkCooldown > 0) fireworkCooldown--;
 
@@ -223,7 +224,7 @@ public class ElytraAutoFly extends Module {
                     && mc.player.getVelocity().y < velocityThreshold.get()
                     && mc.player.getY() < pitch40UpperBounds().get()) {
                     if (fireworkCooldown == 0) {
-                        InvUtils.FindItemResult result = InvUtils.findInHotbar(Items.FIREWORK_ROCKET);
+                        FindItemResult result = InvUtils.findInHotbar(Items.FIREWORK_ROCKET);
                         if (result.found() && result.isHotbar()) {
                             InvUtils.swap(result.slot(), true);
                             mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
@@ -255,7 +256,7 @@ public class ElytraAutoFly extends Module {
         @Override
         public boolean work() {
             meteorElytraFly.flightMode.set(ElytraFlightModes.Vanilla);
-            mc.player.setXRot(downPitch.get());
+            mc.player.setPitch(downPitch.get().floatValue());
             return mc.player.getY() <= lowAltitude.get();
         }
 
