@@ -171,6 +171,10 @@ public class FlowESP extends Module {
     // same chunk being queued twice if ChunkData fires while a scan is in
     // progress.
     private final Set<Long> processing = ConcurrentHashMap.newKeySet();
+    // Chunks queued for background scanning. onChunkData adds here, onTick
+    // drains in batches. Without batching, many chunks loading at once
+    // (e.g. fast travel) fill the executor queue.
+    private final Set<Long> pendingChunks = ConcurrentHashMap.newKeySet();
     // Background scan pool. The scan iterates 16*16*~120 = 30k+ block states
     // per chunk; running that on the main thread freezes the game when the
     // player moves and many chunks load at once. Reference uses 2 daemon
@@ -189,6 +193,7 @@ public class FlowESP extends Module {
         netherCache.clear();
         scannedOverworld.clear();
         scannedNether.clear();
+        pendingChunks.clear();
         processing.clear();
         tick = 0;
         scanExecutor = Executors.newFixedThreadPool(2, r -> {
@@ -209,6 +214,7 @@ public class FlowESP extends Module {
         netherCache.clear();
         scannedOverworld.clear();
         scannedNether.clear();
+        pendingChunks.clear();
         processing.clear();
         tick = 0;
     }
@@ -222,27 +228,13 @@ public class FlowESP extends Module {
         boolean nether = mc.world.getRegistryKey() == World.NETHER;
         if (nether && scannedNether.contains(key)) return;
         if (!nether && scannedOverworld.contains(key)) return;
-        if (!processing.add(key)) return;
 
-        scanExecutor.submit(() -> {
-            try {
-                ChunkData data = scanChunk(chunk, nether);
-                if (data != null
-                    && data.total >= minSize.get()
-                    && data.total <= maxSize.get()
-                    && data.flowRatio >= minFlowRatio.get()) {
-                    if (nether) {
-                        netherCache.put(key, data);
-                        scannedNether.add(key);
-                    } else {
-                        overworldCache.put(key, data);
-                        scannedOverworld.add(key);
-                    }
-                }
-            } finally {
-                processing.remove(key);
-            }
-        });
+        // Queue for background processing in onTick. Direct submit would
+        // fill the executor with one task per chunk when the player moves
+        // fast, which can starve other tasks. Reference mlep FlowESP.java
+        // uses a single processing-set guard but scans synchronously; we do
+        // the scan async but still batch.
+        pendingChunks.add(key);
     }
 
     private ChunkData scanChunk(Chunk chunk, boolean nether) {

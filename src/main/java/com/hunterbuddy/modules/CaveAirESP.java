@@ -122,7 +122,13 @@ public class CaveAirESP extends Module {
 
     // ConcurrentHashMap.newKeySet() because ChunkDataEvent fires on the
     // network thread and the scanExecutor below runs scans off the main thread.
+    // ConcurrentHashMap.newKeySet() because ChunkDataEvent fires on the
+    // network thread and the scanExecutor below runs scans off the main thread.
     private final Set<Long> scannedChunks = ConcurrentHashMap.newKeySet();
+    // Chunks queued for scanning; onChunkData and onBlockUpdate both add
+    // here. onTick's processPendingChunks drains this queue to the scan
+    // executor in batches of 4 per tick. Reference mlep CaveAirESP.java.
+    private final Set<Long> pendingChunks = ConcurrentHashMap.newKeySet();
     // Tracks chunks currently being scanned in the background; prevents
     // duplicate submissions.
     private final Set<Long> processingChunks = ConcurrentHashMap.newKeySet();
@@ -184,41 +190,21 @@ public class CaveAirESP extends Module {
     @EventHandler
     private void onChunkData(ChunkDataEvent event) {
         if (!isDimensionEnabled()) return;
-        if (scanExecutor == null || scanExecutor.isShutdown()) return;
-        Chunk chunk = event.chunk();
-        long key = chunk.getPos().toLong();
-        if (scannedChunks.contains(key)) return;
-        // Deduplicate: skip if a scan for this chunk is already in flight.
-        if (!processingChunks.add(key)) return;
-        scannedChunks.add(key);
-
-        // Scan off the main thread. The scan iterates 16*16*~192 = ~49k
-        // block states per chunk; sync scanning freezes the game when the
-        // player moves.
-        scanExecutor.submit(() -> {
-            try {
-                scanChunk(chunk);
-            } finally {
-                processingChunks.remove(key);
-            }
-        });
+        // Reference mlep: onChunkData just queues the chunk; the actual scan
+        // happens in processPendingChunks() during onTick. This batches
+        // multiple chunk loads into a single batch of executor submissions.
+        pendingChunks.add(event.chunk().getPos().toLong());
     }
 
     @EventHandler
     private void onBlockUpdate(BlockUpdateEvent event) {
         if (!isDimensionEnabled()) return;
-        BlockPos pos = event.pos;
-        int cx = pos.getX() >> 4;
-        int cz = pos.getZ() >> 4;
-        long key = ChunkPos.toLong(cx, cz);
-        // Invalidate cache entry and re-scan synchronously. Without the re-scan,
-        // the chunk is already loaded so onChunkData won't fire again, leaving
-        // us with stale detection. Block updates are rare (player break/place)
-        // so a sync scan here is cheap.
+        // Same batching: a single BlockUpdateEvent can fire many times in
+        // succession (water/lava flow, falling sand, etc.). Queue the
+        // re-scan and let onTick drain in batches.
+        long key = ChunkPos.toLong(event.pos.getX() >> 4, event.pos.getZ() >> 4);
         scannedChunks.remove(key);
-        if (mc.world != null && mc.world.isChunkLoaded(cx, cz)) {
-            scanChunk(mc.world.getChunk(cx, cz));
-        }
+        pendingChunks.add(key);
     }
 
     @EventHandler

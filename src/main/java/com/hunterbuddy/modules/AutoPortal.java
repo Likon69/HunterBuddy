@@ -37,7 +37,7 @@ import java.util.List;
  * meteor-stashhunting-addon's {@code AutoPortal}. The Baritone teleport
  * is the HunterBuddy extension.
  */
-public class AutoPortalHunterBuddy extends Module {
+public class AutoPortal extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final List<BlockPos> waitingForBreak = new ArrayList<>();
 
@@ -104,7 +104,7 @@ public class AutoPortalHunterBuddy extends Module {
     private Phase phase = Phase.BUILDING;
     private int waitTicksRemaining = 0;
 
-    public AutoPortalHunterBuddy() {
+    public AutoPortal() {
         super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "auto-portal",
             "Builds a nether portal frame, lights it, and (optionally) paths the player into it via Baritone.");
     }
