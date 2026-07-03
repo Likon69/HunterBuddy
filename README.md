@@ -23,6 +23,7 @@ This is **not** a public release project. It is a private toolbox built for ours
 | `Items Sucker` | `ItemsSucker` | Pathfind and collect dropped items via Baritone |
 | `sand-mine-addon` | `SandMineAddon` | Baritone-based block miner, stops when inventory is full |
 | `shulker-color` | `ShulkerColor` | Auto-dye Shulker Boxes with Lime Dye |
+| `elytra-auto-fly` | `ElytraAutoFly` | Auto elytra cycle: climb to `high-altitude` via Meteor's Pitch40 + auto-bound-adjust + auto-firework, then descend to `low-altitude` via Vanilla + manual pitch, repeats |
 | `Villager Trading` | `ExperienceTraderModule` | Full XP-bottle trading bot (Cleric villagers, chest dump/steal, stage pipeline) |
 | `Experience Trader Starter` | `ExperienceTraderStarterModule` | Scheduler — auto-enables `Villager Trading` at a configured time |
 
