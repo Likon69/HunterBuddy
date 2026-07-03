@@ -143,6 +143,58 @@ public final class VanillaElytraSimulator {
     }
 
     /**
+     * Estimate the vanilla equilibrium VELOCITY VECTOR for a given pitch/yaw by
+     * running the physics simulation until it converges. Returns the final Vec3d
+     * (with proper X, Y, Z components) — not just the speed magnitude.
+     *
+     * <p>This is what ElytraBoost uses to override {@code mc.player.setVelocity}
+     * with a value that matches what GrimAC's vanilla simulation produces.
+     * Using just {@code lookVector * speed} would set motionY to 0 at pitch 0,
+     * but vanilla equilibrium at pitch 0 actually has motionY ≈ -1.0 (player
+     * descends). GrimAC's Simulation check compares the actual client position
+     * against simulated vanilla physics per tick — any deviation > 0.03 blocks
+     * triggers a rubberband.
+     *
+     * <p>Note: 50 iterations is enough for convergence at any pitch; the loop
+     * returns early once the per-tick speed change drops below 1e-5.
+     *
+     * @param pitchDeg  pitch in degrees
+     * @param yawDeg    yaw in degrees
+     * @return equilibrium velocity vector in blocks/tick
+     */
+    public static Vec3d calculateEquilibriumVelocity(float pitchDeg, float yawDeg) {
+        Vec3d look = lookVector(pitchDeg, yawDeg);
+        Vec3d velocity = look.multiply(0.5);
+
+        for (int tick = 0; tick < 50; tick++) {
+            Vec3d next = simulateOneTick(velocity, pitchDeg, yawDeg);
+            if (Math.abs(next.length() - velocity.length()) < 1e-5) {
+                return next;
+            }
+            velocity = next;
+        }
+        return velocity;
+    }
+
+    /**
+     * Fast lookup: approximate equilibrium velocity vector for common pitch values
+     * without running the full simulation. Falls back to
+     * {@link #calculateEquilibriumVelocity} for values not in the table.
+     *
+     * <p>Returns a Vec3d in the look direction with magnitude = equilibrium speed
+     * at that pitch. Approximate — use {@link #calculateEquilibriumVelocity} when
+     * exact match with GrimAC's simulation is critical.
+     *
+     * @param pitchDeg  pitch in degrees
+     * @param yawDeg    yaw in degrees (only used for simulation fallback)
+     * @return approximate equilibrium velocity vector in blocks/tick
+     */
+    public static Vec3d estimateEquilibriumVelocityFast(float pitchDeg, float yawDeg) {
+        double speed = estimateEquilibriumSpeedFast(pitchDeg, yawDeg);
+        return lookVector(pitchDeg, yawDeg).multiply(speed);
+    }
+
+    /**
      * Quick lookup: returns approximate vanilla equilibrium speed for common
      * pitch values without running the full simulation. Falls back to
      * {@link #calculateEquilibriumSpeed} for values not in the table.
