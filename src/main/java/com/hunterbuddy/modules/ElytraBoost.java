@@ -3,7 +3,6 @@ package com.hunterbuddy.modules;
 import com.hunterbuddy.modules.elytraboost.MovementNoise;
 import com.hunterbuddy.modules.elytraboost.TakeOffHelper;
 import com.hunterbuddy.modules.elytraboost.VanillaElytraSimulator;
-import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -20,25 +19,21 @@ import net.minecraft.util.math.Vec3d;
 import java.util.Random;
 
 /**
- * ElytraBoost — elytra flight via client-side velocity injection, with
- * optional server-side pitch spoof.
+ * ElytraBoost — vanilla-safe elytra flight via client-side velocity injection.
  *
- * <p>Each tick, while {@code mc.player.isGliding()}, intercepts the
- * {@link PlayerMoveEvent} and replaces {@code event.movement} with an
- * interpolated velocity vector aimed at a target speed. The interpolation
- * (Linear / Exponential / Smoothstep) decides how the speed ramps up to
- * the target.
+ * <p>Each tick while the player is fall-flying, the module sets
+ * {@code mc.player.setVelocity(targetVel)} in {@link TickEvent#Pre} — i.e. before
+ * {@code LivingEntity.travel()} runs — so vanilla physics (gravity, lift, glide
+ * boost) are applied on top of our velocity rather than replacing it.
  *
- * <p>Optional server-side pitch spoof: when enabled, the player's pitch
- * is temporarily swapped to a user-chosen value just before the movement
- * packet is sent (in {@link SendMovementPacketsEvent.Pre}), then restored
- * to the visual value right after (in {@code Post}). The server sees the
- * spoofed pitch and uses it for elytra physics, while the player sees the
- * original pitch.
+ * <p>The target velocity is computed from the player's pitch/yaw and the
+ * configured speed model (automatic pitch-based formula or manual speed),
+ * then capped against the per-pitch vanilla equilibrium ×
+ * {@code vanillaMultiplier} (default 1.0 = identical to vanilla).
  *
- * <p>Yaw lock and curve settings are client-side; they don't lie to the
- * server beyond what the locked yaw looks like in the next C2S packet
- * (which any client can do simply by holding the mouse still).
+ * <p>Anti-detect: Gaussian noise on speed and direction, optional packet
+ * timing skips (some ticks run pure vanilla), and optional yaw-lock /
+ * pitch-spoof in the SendMovementPackets Pre/Post events.
  */
 public class ElytraBoost extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -46,14 +41,14 @@ public class ElytraBoost extends Module {
 
     public enum YawLockMode {
         Off,
-        Forward,    // Lock to player's facing at module-activation.
-        Custom      // Lock to fixed-yaw setting.
+        Forward,
+        Custom
     }
 
     public enum AccelCurve {
-        Linear,      // constant-rate approach
-        Exponential, // fast initial, slow approaching target
-        Smoothstep   // smooth at both ends
+        Linear,
+        Exponential,
+        Smoothstep
     }
 
     // ---- Settings ----
@@ -77,7 +72,7 @@ public class ElytraBoost extends Module {
 
     private final Setting<Double> speedLimit = sgGeneral.add(new DoubleSetting.Builder()
         .name("speed-limit")
-        .description("Cap on absolute speed, in blocks/tick.")
+        .description("Cap on absolute speed, in blocks/tick. Only used when dynamic-speed-cap is OFF.")
         .defaultValue(1.5)
         .min(0.1)
         .sliderMax(3.0)
@@ -179,7 +174,7 @@ public class ElytraBoost extends Module {
         .build()
     );
 
-    // ---- Anti-Detect: Dynamic Speed Cap ----
+    // ---- Anti-Detect ----
 
     private final Setting<Boolean> useDynamicCap = sgAntiDetect.add(new BoolSetting.Builder()
         .name("dynamic-speed-cap")
@@ -197,8 +192,6 @@ public class ElytraBoost extends Module {
         .visible(useDynamicCap::get)
         .build()
     );
-
-    // ---- Anti-Detect: Noise Injection ----
 
     private final Setting<Boolean> noiseEnabled = sgAntiDetect.add(new BoolSetting.Builder()
         .name("noise")
@@ -227,11 +220,9 @@ public class ElytraBoost extends Module {
         .build()
     );
 
-    // ---- Anti-Detect: Packet Timing Variation ----
-
     private final Setting<Boolean> timingVariation = sgAntiDetect.add(new BoolSetting.Builder()
         .name("timing-variation")
-        .description("Randomly skip applying the boost on some ticks, letting vanilla physics run instead. Breaks the perfect tick-by-tick pattern.")
+        .description("Randomly skip applying the boost on some ticks, letting vanilla physics run instead.")
         .defaultValue(true)
         .build()
     );
@@ -251,21 +242,20 @@ public class ElytraBoost extends Module {
     private double currentSpeed = 0;
     private boolean wasGliding = false;
     private float lockedYaw = 0;
-    private Float preSpoofPitch = null;  // visual pitch saved between Pre / Post
-    private Float preLockedYaw = null;   // visual yaw saved between Pre / Post
+    private Float preSpoofPitch = null;
+    private Float preLockedYaw = null;
     private final TakeOffHelper takeOffHelper = new TakeOffHelper();
     private final Random rng = new Random();
 
     public ElytraBoost(Category category) {
         super(category, "elytra-boost",
-            "Boost-based elytra flight with optional yaw lock, acceleration curves, and server-side pitch spoof.");
+            "Vanilla-safe elytra speed via setVelocity in TickEvent.Pre. Cap against vanilla equilibrium × multiplier.");
     }
 
     @Override
     public void onActivate() {
         currentSpeed = 0;
         wasGliding = false;
-        // Capture the player's current facing for the "Forward" yaw-lock mode.
         if (mc.player != null) lockedYaw = mc.player.getYaw();
         preSpoofPitch = null;
         preLockedYaw = null;
@@ -274,22 +264,81 @@ public class ElytraBoost extends Module {
 
     @Override
     public void onDeactivate() {
-        // If the user disables the module mid-takeoff, abort the state machine so
-        // a subsequent activation doesn't inherit a half-finished sequence.
         takeOffHelper.reset();
         preSpoofPitch = null;
         preLockedYaw = null;
     }
 
     @EventHandler
-    private void onTick(TickEvent.Post event) {
+    private void onTickPre(TickEvent.Pre event) {
         if (mc.player == null) return;
-
-        // Drive the take-off state machine.
+        if (!mc.player.isFallFlying()) return;
         if (takeOffHelper.isRunning()) {
             takeOffHelper.tick();
             return;
         }
+        if (pauseInLiquids.get() && (mc.player.isTouchingWater() || mc.player.isInLava())) return;
+
+        // Anti-detect: packet timing variation
+        if (timingVariation.get() && rng.nextDouble() < skipChance.get()) return;
+
+        // Yaw lock visual (optional, packet-only by default via Pre/Post events below)
+        if (yawLockVisual.get() && yawLock.get() != YawLockMode.Off) {
+            float packetYaw = (yawLock.get() == YawLockMode.Forward)
+                ? lockedYaw
+                : fixedYaw.get().floatValue();
+            mc.player.setYaw(packetYaw);
+        }
+
+        // ---- Compute target speed ----
+        double targetSpeed;
+        if (automaticSpeed.get()) {
+            float pitch = mc.player.getPitch();
+            // Linear approximation of vanilla equilibrium (b/t) by pitch:
+            //   pitch -30 -> ~0.5,  pitch 0 -> 1.5,  pitch 30 -> 2.5,  pitch 52 -> 3.2.
+            targetSpeed = 1.5 + pitch * 0.033;
+        } else {
+            targetSpeed = manualSpeed.get();
+        }
+
+        // ---- Dynamic speed cap ----
+        if (useDynamicCap.get()) {
+            double vanillaSpeed = VanillaElytraSimulator.estimateEquilibriumSpeedFast(
+                mc.player.getPitch(), mc.player.getYaw());
+            double dynamicCap = vanillaSpeed * vanillaMultiplier.get();
+            targetSpeed = Math.min(targetSpeed, dynamicCap);
+        } else {
+            targetSpeed = Math.min(targetSpeed, speedLimit.get());
+        }
+
+        // ---- Acceleration curve ----
+        double delta = curveDelta(accelerationCurve.get(), acceleration.get(), targetSpeed, currentSpeed, speedLimit.get());
+        currentSpeed += (targetSpeed - currentSpeed) * delta;
+
+        // ---- Direction vector ----
+        float pitch = mc.player.getPitch();
+        float usedPitch = pitchCheck.get() ? Math.max(-89, Math.min(89, pitch)) : pitch;
+        Vec3d direction = useForward.get()
+            ? playerForwardVector(mc.player.getYaw(), usedPitch)
+            : mc.player.getRotationVector();
+
+        Vec3d newVel = direction.multiply(currentSpeed);
+
+        // ---- Anti-Detect: Noise injection ----
+        if (noiseEnabled.get()) {
+            newVel = MovementNoise.applyNoise(newVel, speedNoise.get(), directionNoise.get(), rng);
+        }
+
+        // ---- Override velocity BEFORE LivingEntity.travel() runs ----
+        // travel() will then apply gravity/lift on top of this, so the player
+        // moves at our velocity + small per-tick physics delta. To maintain
+        // altitude at pitch 0, we set motionY = 0 explicitly.
+        mc.player.setVelocity(newVel);
+    }
+
+    @EventHandler
+    private void onTickPost(TickEvent.Post event) {
+        if (mc.player == null) return;
 
         // Auto-redeploy: detect a fresh landing and restart.
         boolean gliding = mc.player.isFallFlying();
@@ -303,7 +352,6 @@ public class ElytraBoost extends Module {
     private void onSendMovementPacketsPre(SendMovementPacketsEvent.Pre event) {
         if (!isActive() || mc.player == null || !mc.player.isFallFlying()) return;
 
-        // Yaw lock for the packet (always done when yawLock != Off).
         if (yawLock.get() != YawLockMode.Off) {
             preLockedYaw = mc.player.getYaw();
             float packetYaw = (yawLock.get() == YawLockMode.Forward)
@@ -312,7 +360,6 @@ public class ElytraBoost extends Module {
             mc.player.setYaw(packetYaw);
         }
 
-        // Pitch spoof (opt-in).
         if (pitchSpoofEnabled.get()) {
             preSpoofPitch = mc.player.getPitch();
             mc.player.setPitch(spoofPitch.get().floatValue());
@@ -321,9 +368,6 @@ public class ElytraBoost extends Module {
 
     @EventHandler
     private void onSendMovementPacketsPost(SendMovementPacketsEvent.Post event) {
-        // Restore both saved values, if any. Pre/Post is fast (sub-tick) so the
-        // player only 'sees' the locked values for the packet window, not long
-        // enough to be visible — unless yawLockVisual is also on.
         if (preLockedYaw != null && mc.player != null) {
             mc.player.setYaw(preLockedYaw);
             preLockedYaw = null;
@@ -334,100 +378,12 @@ public class ElytraBoost extends Module {
         }
     }
 
-    @EventHandler(priority = -100)
-    private void onPlayerMove(PlayerMoveEvent event) {
-        if (mc.player == null || !mc.player.isFallFlying()) return;
-
-        if (pauseInLiquids.get() && (mc.player.isTouchingWater() || mc.player.isInLava())) return;
-
-        // ---- Anti-Detect: Packet timing variation ----
-        // Randomly skip the boost on some ticks, letting vanilla physics run
-        // instead. This breaks the perfect tick-by-tick mechanical pattern.
-        if (timingVariation.get() && rng.nextDouble() < skipChance.get()) {
-            return;  // vanilla physics this tick
-        }
-
-        // Yaw lock visual (optional): only when the user explicitly wants the
-        // camera frozen too. Otherwise the yaw lock is packet-only (done in Pre/Post).
-        if (yawLockVisual.get() && yawLock.get() != YawLockMode.Off) {
-            float packetYaw = (yawLock.get() == YawLockMode.Forward)
-                ? lockedYaw
-                : fixedYaw.get().floatValue();
-            mc.player.setYaw(packetYaw);
-        }
-
-        // Compute target speed.
-        double targetSpeed;
-        if (automaticSpeed.get()) {
-            float pitch = mc.player.getPitch();
-            // Linear approximation of vanilla equilibrium speed (b/t) by pitch:
-            //   pitch -30 -> ~0.5,  pitch 0 -> 1.5,  pitch 30 -> 2.5,  pitch 52 -> 3.2.
-            // The dynamic cap below clamps against the actual per-pitch vanilla
-            // equilibrium, so values slightly above vanilla don't trigger anti-cheat.
-            targetSpeed = 1.5 + pitch * 0.033;
-        } else {
-            targetSpeed = manualSpeed.get();
-        }
-
-        // ---- Anti-Detect: Dynamic speed cap ----
-        // Instead of a fixed speedLimit, compute vanilla equilibrium speed for
-        // the current pitch and cap to vanillaSpeed × multiplier.
-        if (useDynamicCap.get()) {
-            double vanillaSpeed = VanillaElytraSimulator.estimateEquilibriumSpeedFast(
-                mc.player.getPitch(), mc.player.getYaw());
-            double dynamicCap = vanillaSpeed * vanillaMultiplier.get();
-            targetSpeed = Math.min(targetSpeed, dynamicCap);
-        } else {
-            // Fixed speed limit only when dynamic cap is off.
-            targetSpeed = Math.min(targetSpeed, speedLimit.get());
-        }
-
-        // Acceleration curve: pick how the speed approaches target each tick.
-        double delta = curveDelta(accelerationCurve.get(), acceleration.get(), targetSpeed, currentSpeed, speedLimit.get());
-        currentSpeed += (targetSpeed - currentSpeed) * delta;
-
-        // Client-side pitch clamp only. Server-side spam is done in Pre/Post events above.
-        float pitch = mc.player.getPitch();
-        float usedPitch = pitchCheck.get() ? Math.max(-89, Math.min(89, pitch)) : pitch;
-
-        // Direction vector: forward (yaw + pitch) or pure look-vector.
-        Vec3d direction = useForward.get()
-            ? playerForwardVector(mc.player.getYaw(), usedPitch)
-            : mc.player.getRotationVector();
-
-        Vec3d movement = direction.multiply(currentSpeed);
-
-        // ---- Anti-Detect: Noise injection ----
-        // Add subtle Gaussian noise to the movement vector so it doesn't look
-        // like a perfectly mechanical trajectory.
-        if (noiseEnabled.get()) {
-            movement = MovementNoise.applyNoise(
-                movement, speedNoise.get(), directionNoise.get(), rng);
-        }
-
-        event.movement = movement;
-    }
-
-    /**
-     * Returns the per-tick interpolation factor (0..1) for the chosen curve.
-     *
-     * @param curve       The curve type
-     * @param a           Acceleration knob (raw setting value, 0..1)
-     * @param target      Target speed (block/tick)
-     * @param current     Current speed (block/tick)
-     * @param speedLimit  The configured speed cap — used to normalize the
-     *                    exponential curve so its 'feel' is independent of the
-     *                    speed scale.
-     */
     private static double curveDelta(AccelCurve curve, double a, double target, double current, double speedLimit) {
         switch (curve) {
             case Linear -> {
                 return a;
             }
             case Exponential -> {
-                // Normalize the gap by the speed-limit scale so that changing
-                // speedLimit doesn't change the ramp feel. A normalized diff
-                // of 1.0 means 'we are still a full speedLimit away from target'.
                 double scale = Math.max(0.001, Math.abs(speedLimit));
                 double normalizedDiff = Math.abs(target - current) / scale;
                 return 1.0 - Math.exp(-a * normalizedDiff);
@@ -435,8 +391,6 @@ public class ElytraBoost extends Module {
             case Smoothstep -> {
                 double x = clamp01(a);
                 double s = x * x * (3.0 - 2.0 * x);
-                // Close-factor dampens the last few percent of the gap so we
-                // don't oscillate around the target value.
                 double closeFactor = Math.min(1.0, Math.abs(target - current) * 4.0);
                 return s * closeFactor;
             }
