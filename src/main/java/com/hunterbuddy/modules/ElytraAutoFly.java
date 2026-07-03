@@ -161,12 +161,23 @@ public class ElytraAutoFly extends Module {
 
     private void enterDescend() {
         currentPhase = Phase.DESCEND;
-        elytraFlyMode.set(ElytraFlightModes.Vanilla);
+        // Deactivate Meteor's ElytraFly entirely so the player glides with
+        // pure vanilla physics at the manual descend pitch. The mode setting
+        // (Pitch40) is preserved, so re-activation on enterClimb() resumes
+        // straight back into the climb.
+        if (elytraFly.isActive()) {
+            elytraFly.toggle();
+        }
     }
 
     private void enterClimb() {
         currentPhase = Phase.CLIMB;
+        // Ensure Pitch40 mode (in case the user changed it via the GUI), then
+        // re-enable ElytraFly for a fresh climb.
         elytraFlyMode.set(ElytraFlightModes.Pitch40);
+        if (!elytraFly.isActive()) {
+            elytraFly.toggle();
+        }
         goingUp = true;
         resetBounds();
     }
