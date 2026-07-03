@@ -8,14 +8,20 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
 
-import com.hunterbuddy.modules.AireForce;
 import com.hunterbuddy.modules.AnvilRename;
 import com.hunterbuddy.modules.AutoFarm;
+import com.hunterbuddy.modules.AutoPortalHunterBuddy;
+import com.hunterbuddy.modules.CaveAirESP;
+import com.hunterbuddy.modules.ControlFly;
 import com.hunterbuddy.modules.ElytraAutoFly;
-import com.hunterbuddy.modules.ElytraBoost;
+import com.hunterbuddy.modules.ElytraRecast;
+import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.ItemsSucker;
 import com.hunterbuddy.modules.SandMineAddon;
+import com.hunterbuddy.modules.SearchAreaHunterBuddy;
+import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.ShulkerColor;
+import com.hunterbuddy.modules.VanityESP;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
 import org.slf4j.Logger;
@@ -35,14 +41,20 @@ public class HunterBuddyAddon extends MeteorAddon {
         LOG.info("Initializing HunterBuddy Addon");
 
         // HunterBuddy modules
-        Modules.get().add(new AireForce(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new SandMineAddon(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new ShulkerColor(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new ItemsSucker(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new AutoFarm(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new AnvilRename(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new ElytraAutoFly());
-        Modules.get().add(new ElytraBoost(HUNTER_BUDDY_CATEGORY));
+        Modules.get().add(new ElytraRecast());
+        Modules.get().add(new ControlFly());
+        Modules.get().add(new AutoPortalHunterBuddy());
+        Modules.get().add(new SignRender());
+        Modules.get().add(new SearchAreaHunterBuddy());
+        Modules.get().add(new FlowESP());
+        Modules.get().add(new CaveAirESP());
+        Modules.get().add(new VanityESP());
         ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
         Modules.get().add(module);
         Modules.get().add(new ExperienceTraderStarterModule(HUNTER_BUDDY_CATEGORY, module));
