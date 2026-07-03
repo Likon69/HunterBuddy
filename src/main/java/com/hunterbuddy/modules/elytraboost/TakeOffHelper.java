@@ -35,6 +35,12 @@ public class TakeOffHelper {
     private static final EquipmentSlot CHEST = EquipmentSlot.CHEST;
     private static final int MAX_WAIT_TICKS = 20;
 
+    // PlayerInventory global slot indices: 0..8 hotbar, 9..35 main inventory,
+    // 36..39 armor (boots, leggings, chestplate, helmet), 40 offhand.
+    // The chestplate slot is index 2 inside the 4-slot armor array, which is
+    // global slot 36 + 2 = 38.
+    private static final int CHEST_SLOT_INDEX = 36 + 2;
+
     private final MinecraftClient mc;
     private State state = State.IDLE;
     private int ticksInState = 0;
@@ -84,11 +90,8 @@ public class TakeOffHelper {
             }
 
             case JUMPING -> {
-                // First jump starts the fall. If already falling-flying, we're done.
-                if (mc.player.isGliding()) {
-                    reset();
-                    return;
-                }
+                // Single jump to engage elytra flight; the actual 'is gliding?' check
+                // belongs to WAITING_FOR_FLIGHT, where it's actually meaningful.
                 mc.player.jump();
                 state = State.WAITING_FOR_FLIGHT;
                 ticksInState = 0;
@@ -125,8 +128,8 @@ public class TakeOffHelper {
             ItemStack stack = mc.player.getInventory().getStack(slot);
             if (stack.getItem() != Items.ELYTRA) continue;
             // Don't accidentally read the chest slot as an inventory slot
-            // (PlayerInventory slots are global; the chest armor lives at slot 38).
-            if (slot == 38) continue;
+            // (PlayerInventory slots are global; see CHEST_SLOT_INDEX).
+            if (slot == CHEST_SLOT_INDEX) continue;
 
             ItemStack chestBefore = current.copy();
             ItemStack elytra = stack.copy();
