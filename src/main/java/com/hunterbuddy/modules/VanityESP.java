@@ -264,6 +264,20 @@ public class VanityESP extends Module {
         .visible(() -> highlightTreasure.get() && treasureSound.get()).build()
     );
 
+    // ---- Buried Treasure : Xaero waypoint integration ----
+    private final Setting<Boolean> treasureWaypoints = sgTreasure.add(new BoolSetting.Builder()
+        .name("add-waypoints").description("Adds waypoints to your Xaeros map for treasure chests.")
+        .defaultValue(false)
+        .visible(() -> highlightTreasure.get() && com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.isAvailable()).build()
+    );
+
+    private final Setting<Boolean> treasureTempWaypoints = sgTreasure.add(new BoolSetting.Builder()
+        .name("temporary-waypoints").description("Temporary waypoints are removed when you disconnect.")
+        .defaultValue(true)
+        .visible(() -> highlightTreasure.get() && com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.isAvailable()
+            && treasureWaypoints.get()).build()
+    );
+
     private final Setting<SettingColor> treasureFillColor = sgTreasure.add(new ColorSetting.Builder()
         .name("side-color").description("Fill color for treasure chests.")
         .defaultValue(new SettingColor(147, 233, 190, 25)).visible(highlightTreasure::get).build()
@@ -383,6 +397,20 @@ public class VanityESP extends Module {
     private final Setting<Integer> stackedEntitiesMinCount = sgStackedEntities.add(new IntSetting.Builder()
         .name("min-stacked-count").description("Minimum number of entities stacked together to trigger detection.")
         .min(2).defaultValue(2).sliderMin(2).sliderMax(10).visible(highlightStackedEntities::get).build()
+    );
+
+    // ---- Stacked Entities : Xaero waypoint integration ----
+    private final Setting<Boolean> stackedEntitiesWaypoints = sgStackedEntities.add(new BoolSetting.Builder()
+        .name("add-waypoints").description("Adds waypoints to your Xaeros map for stacked entities.")
+        .defaultValue(true)
+        .visible(() -> highlightStackedEntities.get() && com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.isAvailable()).build()
+    );
+
+    private final Setting<Boolean> stackedEntitiesTempWaypoints = sgStackedEntities.add(new BoolSetting.Builder()
+        .name("temporary-waypoints").description("Temporary waypoints are removed when you disconnect.")
+        .defaultValue(false)
+        .visible(() -> highlightStackedEntities.get() && com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.isAvailable()
+            && stackedEntitiesWaypoints.get()).build()
     );
 
     private final Setting<SettingColor> stackedEntitiesFillColor = sgStackedEntities.add(new ColorSetting.Builder()
@@ -565,14 +593,18 @@ public class VanityESP extends Module {
 
     @EventHandler
     private void onInteractBlock(InteractBlockEvent event) {
-        // When the player opens a chest that we already flagged as buried
-        // treasure, mark it looted so we stop rendering it.
+        // When the player opens a chest we already flagged as buried
+        // treasure, mark it looted so we stop rendering it and remove its
+        // Xaero waypoint. Reference mlep VanityESP.java:510-520.
         if (highlightTreasure.get() && mc.player != null && mc.world != null) {
             BlockPos pos = event.result.getBlockPos();
             if (notifiedTreasure.contains(pos)
                 && event.result.getType() == HitResult.Type.BLOCK
                 && mc.world.getBlockState(pos).getBlock() instanceof ChestBlock) {
                 lootedTreasure.add(pos);
+                if (treasureWaypoints.get()) {
+                    com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.removeWaypoint("VanityESP", pos);
+                }
             }
         }
     }
@@ -813,6 +845,13 @@ public class VanityESP extends Module {
         if (stackedEntitiesSound.get() && mc.player != null) {
             mc.player.playSound(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, stackedEntitiesVolume.get().floatValue(), 0.5f);
         }
+
+        if (stackedEntitiesWaypoints.get()) {
+            com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.addWaypoint(
+                "VanityESP", pos, "Stacked " + type + " x" + count,
+                "⚠", "Gold", stackedEntitiesTempWaypoints.get()
+            );
+        }
     }
 
     private String getEntityTypeName(Entity entity) {
@@ -864,6 +903,11 @@ public class VanityESP extends Module {
                     ? "§3§oFound buried treasure at §8[§7§o" + pos.getX() + "§8, §7§o" + pos.getY() + "§8, §7§o" + pos.getZ() + "§8]"
                     : "§3§oFound buried treasure§7§o!";
                 info(msg);
+            }
+            if (treasureWaypoints.get()) {
+                com.hunterbuddy.modules.vanityesp.XaeroWaypointHelper.addWaypoint(
+                    "VanityESP", pos, "Buried Treasure", "★", "Blue", treasureTempWaypoints.get()
+                );
             }
         }
     }
