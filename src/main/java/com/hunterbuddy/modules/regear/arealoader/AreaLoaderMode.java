@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.regear.arealoader;
 
+import com.hunterbuddy.modules.regear.arealoader.AreaLoader.NetherPathMode;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.hunterbuddy.HunterBuddyAddon;
@@ -19,6 +20,7 @@ import baritone.api.process.IElytraProcess;
 import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.RocketFly;
+import com.hunterbuddy.modules.WaypointFollower;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.registry.RegistryKey;
