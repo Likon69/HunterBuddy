@@ -13,307 +13,374 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
-/**
- * Reference parity: mlep.util.ElytraTakeoff. A full state-machine elytra
- * takeoff sequence (IDLE → COOLDOWN → PREPARE → JUMPING → DEPLOYING → BOOSTING).
- *
- * <p>Distinct from the slimmer {@code com.hunterbuddy.modules.elytraboost.ElytraTakeoff}
- * used by ElytraRecast; AutoFlyingRegear requires the full state machine with
- * deployment retries and listener callbacks.
- */
 public class ElytraTakeoff {
-    public enum Phase {
-        IDLE, COOLDOWN, PREPARE, JUMPING, DEPLOYING, BOOSTING
-    }
+   public enum Phase {
+      IDLE,
+      COOLDOWN,
+      PREPARE,
+      JUMPING,
+      DEPLOYING,
+      BOOSTING
+   }
 
-    public interface Listener {
-        void onTakeoffSuccess(double speedBps);
-        void onTakeoffFailed(String reason);
-        default void onTakeoffDebug(String message) {}
-    }
+   public interface Listener {
+      void onTakeoffSuccess(double speedBps);
 
-    private static final int PREPARE_TICKS = 4;
-    private static final int JUMP_HOLD_TICKS = 6;
-    private static final int JUMP_TIMEOUT_TICKS = 40;
-    private static final int MIN_AIRBORNE_TICKS = 3;
-    private static final int AIR_WAIT_TICKS = 2;
-    private static final int DEPLOY_TIMEOUT_TICKS = 40;
-    private static final int DEPLOY_GROUND_GRACE_TICKS = 4;
-    private static final int DEPLOY_RETRY_INTERVAL = 4;
-    private static final int MAX_DEPLOY_ATTEMPTS = 4;
-    private static final int BOOST_CONFIRM_TICKS = 8;
-    private static final int RETRY_COOLDOWN_TICKS = 25;
-    private static final int MAX_ATTEMPTS = 5;
-    private static final double MIN_SPEED_BPS = 5.0;
+      void onTakeoffFailed(String reason);
 
-    private Phase phase = Phase.IDLE;
-    private int phaseTicks = 0;
-    private int attempts = 0;
-    private int cooldownTicks = 0;
-    private int airborneTicks = 0;
-    private int deployAttempts = 0;
-    private int jumpHoldTicks = 0;
-    private int groundTicks = 0;
-    private boolean jumpedThisAttempt = false;
-    private boolean boosted = false;
-    private int rocketSlot = -1;
-    private Listener listener;
+      default void onTakeoffDebug(String message) {
+      }
+   }
 
-    public boolean isActive() { return this.phase != Phase.IDLE; }
-    public Phase getPhase() { return this.phase; }
+   private static final int PREPARE_TICKS = 4;
+   private static final int JUMP_HOLD_TICKS = 6;
+   private static final int JUMP_TIMEOUT_TICKS = 40;
+   private static final int MIN_AIRBORNE_TICKS = 3;
+   private static final int AIR_WAIT_TICKS = 2;
+   private static final int DEPLOY_TIMEOUT_TICKS = 40;
+   private static final int DEPLOY_GROUND_GRACE_TICKS = 4;
+   private static final int DEPLOY_RETRY_INTERVAL = 4;
+   private static final int MAX_DEPLOY_ATTEMPTS = 4;
+   private static final int BOOST_CONFIRM_TICKS = 8;
+   private static final int RETRY_COOLDOWN_TICKS = 25;
+   private static final int MAX_ATTEMPTS = 5;
+   private static final double MIN_SPEED_BPS = 5.0;
 
-    public void start(int rocketHotbarSlot, Listener listener) {
-        MinecraftClient mc = MeteorClient.mc;
-        if (mc.player == null) return;
+   private Phase phase = Phase.IDLE;
+   private int phaseTicks = 0;
+   private int attempts = 0;
+   private int cooldownTicks = 0;
+   private int airborneTicks = 0;
+   private int deployAttempts = 0;
+   private int jumpHoldTicks = 0;
+   private int groundTicks = 0;
+   private boolean jumpedThisAttempt = false;
+   private boolean boosted = false;
+   private int rocketSlot = -1;
+   private Listener listener;
 
-        this.listener = listener;
-        this.rocketSlot = rocketHotbarSlot;
-        this.attempts = 0;
-        this.cooldownTicks = 0;
-        this.phase = Phase.PREPARE;
-        this.phaseTicks = 0;
-        this.airborneTicks = 0;
-        this.deployAttempts = 0;
-        this.jumpHoldTicks = 0;
-        this.groundTicks = 0;
-        this.jumpedThisAttempt = false;
-        this.boosted = false;
-        RotationUtils.getInstance().clearRotations();
-        this.releaseJump();
-        Utils.setPressed(mc.options.sneakKey, false);
-        if (listener != null) listener.onTakeoffDebug("Takeoff started");
-    }
+   public boolean isActive() {
+      return this.phase != Phase.IDLE;
+   }
 
-    public void cancel() {
-        this.releaseJump();
-        this.phase = Phase.IDLE;
-        this.listener = null;
-    }
+   public Phase getPhase() {
+      return this.phase;
+   }
 
-    public void tickPre() {
-        MinecraftClient mc = MeteorClient.mc;
-        if (mc.player == null || this.phase == Phase.IDLE || this.phase == Phase.COOLDOWN) return;
+   public void start(int rocketHotbarSlot, Listener listener) {
+      MinecraftClient mc = MeteorClient.mc;
+      if (mc.player == null) {
+         return;
+      }
 
-        switch (this.phase) {
-            case JUMPING:
-                if (mc.player.isOnGround()) {
-                    if (!this.jumpedThisAttempt) {
-                        Utils.holdJump(mc);
-                        this.jumpedThisAttempt = true;
-                        this.jumpHoldTicks = JUMP_HOLD_TICKS;
-                        if (this.listener != null) this.listener.onTakeoffDebug("Takeoff jump (baritone input)");
-                    } else if (this.jumpHoldTicks > 0) {
-                        Utils.holdJump(mc);
-                    }
-                } else {
-                    Utils.holdJump(mc);
-                }
-                break;
-            case DEPLOYING:
-                Utils.holdJump(mc);
-                break;
-            default:
-                break;
-        }
-    }
+      this.listener = listener;
+      this.rocketSlot = rocketHotbarSlot;
+      this.attempts = 0;
+      this.cooldownTicks = 0;
+      this.phase = Phase.PREPARE;
+      this.phaseTicks = 0;
+      this.airborneTicks = 0;
+      this.deployAttempts = 0;
+      this.jumpHoldTicks = 0;
+      this.groundTicks = 0;
+      this.jumpedThisAttempt = false;
+      this.boosted = false;
+      RotationUtils.getInstance().clearRotations();
+      this.releaseJump();
+      Utils.setPressed(mc.options.sneakKey, false);
+      if (listener != null) {
+         listener.onTakeoffDebug("Takeoff started");
+      }
+   }
 
-    public void tickPost() {
-        MinecraftClient mc = MeteorClient.mc;
-        if (mc.player == null || mc.world == null || this.phase == Phase.IDLE) return;
+   public void cancel() {
+      this.releaseJump();
+      this.phase = Phase.IDLE;
+      this.listener = null;
+   }
 
-        if (this.phase == Phase.COOLDOWN) {
-            if (this.cooldownTicks-- <= 0) this.beginAttempt();
-            return;
-        }
+   public void tickPre() {
+      MinecraftClient mc = MeteorClient.mc;
+      if (mc.player == null || this.phase == Phase.IDLE || this.phase == Phase.COOLDOWN) {
+         return;
+      }
 
-        this.phaseTicks++;
-
-        switch (this.phase) {
-            case PREPARE:
-                if (this.phaseTicks >= PREPARE_TICKS) this.beginAttempt();
-                break;
-            case JUMPING:
-                this.tickJumping(mc);
-                break;
-            case DEPLOYING:
-                this.tickDeploying(mc);
-                break;
-            case BOOSTING:
-                this.tickBoosting(mc);
-                break;
-            default:
-                break;
-        }
-
-        if (this.phase == Phase.JUMPING && this.jumpHoldTicks > 0) this.jumpHoldTicks--;
-    }
-
-    private void beginAttempt() {
-        this.phase = Phase.JUMPING;
-        this.phaseTicks = 0;
-        this.airborneTicks = 0;
-        this.deployAttempts = 0;
-        this.jumpHoldTicks = 0;
-        this.groundTicks = 0;
-        this.jumpedThisAttempt = false;
-        this.boosted = false;
-        this.attempts++;
-        this.releaseJump();
-        if (this.listener != null) this.listener.onTakeoffDebug("Takeoff attempt " + this.attempts + "/" + MAX_ATTEMPTS);
-    }
-
-    private void tickJumping(MinecraftClient mc) {
-        // Yarn 1.21.1: `isFallFlying()` was renamed to `isGliding()` in 1.21.2+.
-        if (mc.player.isFallFlying()) { this.enterBoosting(); return; }
-        if (!mc.player.isOnGround()) {
-            this.airborneTicks++;
-            if (this.airborneTicks >= MIN_AIRBORNE_TICKS) {
-                this.phase = Phase.DEPLOYING;
-                this.phaseTicks = 0;
-                this.airborneTicks = 0;
-                this.deployAttempts = 0;
-                this.groundTicks = 0;
-                if (this.listener != null) this.listener.onTakeoffDebug("Airborne - deploying elytra");
+      switch (this.phase) {
+         case JUMPING:
+            if (mc.player.isOnGround()) {
+               if (!this.jumpedThisAttempt) {
+                  Utils.holdJump(mc);
+                  this.jumpedThisAttempt = true;
+                  this.jumpHoldTicks = JUMP_HOLD_TICKS;
+                  if (this.listener != null) {
+                     this.listener.onTakeoffDebug("Takeoff jump (baritone input)");
+                  }
+               } else if (this.jumpHoldTicks > 0) {
+                  Utils.holdJump(mc);
+               }
+            } else {
+               Utils.holdJump(mc);
             }
-            return;
-        }
-        this.airborneTicks = 0;
-        if (this.jumpedThisAttempt && this.phaseTicks > JUMP_TIMEOUT_TICKS) {
-            this.scheduleRetry("jump did not leave ground");
-        }
-    }
+            break;
+         case DEPLOYING:
+            Utils.holdJump(mc);
+            break;
+         default:
+            break;
+      }
+   }
 
-    private void tickDeploying(MinecraftClient mc) {
-        if (mc.player.isFallFlying()) { this.enterBoosting(); return; }
-        if (mc.player.isOnGround()) {
-            this.groundTicks++;
-            if (this.phaseTicks >= DEPLOY_GROUND_GRACE_TICKS && this.groundTicks >= 2) {
-                this.scheduleRetry("landed before elytra deployed");
+   public void tickPost() {
+      MinecraftClient mc = MeteorClient.mc;
+      if (mc.player == null || mc.world == null || this.phase == Phase.IDLE) {
+         return;
+      }
+
+      if (this.phase == Phase.COOLDOWN) {
+         if (this.cooldownTicks-- <= 0) {
+            this.beginAttempt();
+         }
+
+         return;
+      }
+
+      this.phaseTicks++;
+
+      switch (this.phase) {
+         case PREPARE:
+            if (this.phaseTicks >= PREPARE_TICKS) {
+               this.beginAttempt();
             }
-        } else {
+            break;
+         case JUMPING:
+            this.tickJumping(mc);
+            break;
+         case DEPLOYING:
+            this.tickDeploying(mc);
+            break;
+         case BOOSTING:
+            this.tickBoosting(mc);
+            break;
+         default:
+            break;
+      }
+
+      if (this.phase == Phase.JUMPING && this.jumpHoldTicks > 0) {
+         this.jumpHoldTicks--;
+      }
+   }
+
+   private void beginAttempt() {
+      this.phase = Phase.JUMPING;
+      this.phaseTicks = 0;
+      this.airborneTicks = 0;
+      this.deployAttempts = 0;
+      this.jumpHoldTicks = 0;
+      this.groundTicks = 0;
+      this.jumpedThisAttempt = false;
+      this.boosted = false;
+      this.attempts++;
+      this.releaseJump();
+      if (this.listener != null) {
+         this.listener.onTakeoffDebug("Takeoff attempt " + this.attempts + "/" + MAX_ATTEMPTS);
+      }
+   }
+
+   private void tickJumping(MinecraftClient mc) {
+      if (mc.player.isFallFlying()) {
+         this.enterBoosting();
+         return;
+      }
+
+      if (!mc.player.isOnGround()) {
+         this.airborneTicks++;
+         if (this.airborneTicks >= MIN_AIRBORNE_TICKS) {
+            this.phase = Phase.DEPLOYING;
+            this.phaseTicks = 0;
+            this.airborneTicks = 0;
+            this.deployAttempts = 0;
             this.groundTicks = 0;
-            this.airborneTicks++;
-            if (this.airborneTicks >= AIR_WAIT_TICKS
-                && (this.deployAttempts == 0 || this.airborneTicks % DEPLOY_RETRY_INTERVAL == 0)
-                && this.deployAttempts < MAX_DEPLOY_ATTEMPTS) {
-                this.deployElytra(mc);
-                this.deployAttempts++;
-                if (this.listener != null) this.listener.onTakeoffDebug("Deploy attempt " + this.deployAttempts);
+            if (this.listener != null) {
+               this.listener.onTakeoffDebug("Airborne - deploying elytra");
             }
-        }
-        if (this.phaseTicks > DEPLOY_TIMEOUT_TICKS) this.scheduleRetry("elytra deploy timed out");
-    }
+         }
 
-    private void tickBoosting(MinecraftClient mc) {
-        if (!mc.player.isFallFlying()) {
-            if (this.phaseTicks > 6) this.scheduleRetry("lost glide before boost completed");
-            return;
-        }
-        if (!this.boosted && this.phaseTicks >= 2) {
+         return;
+      }
+
+      this.airborneTicks = 0;
+      if (this.jumpedThisAttempt && this.phaseTicks > JUMP_TIMEOUT_TICKS) {
+         this.scheduleRetry("jump did not leave ground");
+      }
+   }
+
+   private void tickDeploying(MinecraftClient mc) {
+      if (mc.player.isFallFlying()) {
+         this.enterBoosting();
+         return;
+      }
+
+      if (mc.player.isOnGround()) {
+         this.groundTicks++;
+         if (this.phaseTicks >= DEPLOY_GROUND_GRACE_TICKS && this.groundTicks >= 2) {
+            this.scheduleRetry("landed before elytra deployed");
+         }
+      } else {
+         this.groundTicks = 0;
+         this.airborneTicks++;
+         if (this.airborneTicks >= AIR_WAIT_TICKS
+            && (this.deployAttempts == 0 || this.airborneTicks % DEPLOY_RETRY_INTERVAL == 0)
+            && this.deployAttempts < MAX_DEPLOY_ATTEMPTS) {
+            this.deployElytra(mc);
+            this.deployAttempts++;
+            if (this.listener != null) {
+               this.listener.onTakeoffDebug("Deploy attempt " + this.deployAttempts);
+            }
+         }
+      }
+
+      if (this.phaseTicks > DEPLOY_TIMEOUT_TICKS) {
+         this.scheduleRetry("elytra deploy timed out");
+      }
+   }
+
+   private void tickBoosting(MinecraftClient mc) {
+      if (!mc.player.isFallFlying()) {
+         if (this.phaseTicks > 6) {
+            this.scheduleRetry("lost glide before boost completed");
+         }
+
+         return;
+      }
+
+      if (!this.boosted && this.phaseTicks >= 2) {
+         if (this.useFirework(mc)) {
+            this.boosted = true;
+            this.phaseTicks = 0;
+            if (this.listener != null) {
+               this.listener.onTakeoffDebug("Firework boost while gliding");
+            }
+         } else if (this.phaseTicks > 20) {
+            this.scheduleRetry("no firework for boost");
+         }
+
+         return;
+      }
+
+      if (this.boosted) {
+         double speed = this.getSpeedBps(mc);
+         if (this.phaseTicks >= BOOST_CONFIRM_TICKS && (speed >= MIN_SPEED_BPS || mc.player.getVelocity().y > 0.08)) {
+            this.finishSuccess(speed);
+         } else if (this.phaseTicks == 14 && speed < MIN_SPEED_BPS) {
             if (this.useFirework(mc)) {
-                this.boosted = true;
-                this.phaseTicks = 0;
-                if (this.listener != null) this.listener.onTakeoffDebug("Firework boost while gliding");
-            } else if (this.phaseTicks > 20) this.scheduleRetry("no firework for boost");
-            return;
-        }
-        if (this.boosted) {
-            double speed = this.getSpeedBps(mc);
-            if (this.phaseTicks >= BOOST_CONFIRM_TICKS && (speed >= MIN_SPEED_BPS || mc.player.getVelocity().y > 0.08)) {
-                this.finishSuccess(speed);
-            } else if (this.phaseTicks == 14 && speed < MIN_SPEED_BPS) {
-                if (this.useFirework(mc)) {
-                    this.phaseTicks = 0;
-                    if (this.listener != null) this.listener.onTakeoffDebug("Second firework boost");
-                }
-            } else if (this.phaseTicks > 40) this.scheduleRetry("boost did not reach flight speed");
-        }
-    }
+               this.phaseTicks = 0;
+               if (this.listener != null) {
+                  this.listener.onTakeoffDebug("Second firework boost");
+               }
+            }
+         } else if (this.phaseTicks > 40) {
+            this.scheduleRetry("boost did not reach flight speed");
+         }
+      }
+   }
 
-    private void enterBoosting() {
-        this.phase = Phase.BOOSTING;
-        this.phaseTicks = 0;
-        this.boosted = false;
-        this.releaseJump();
-        if (this.listener != null) this.listener.onTakeoffDebug("Elytra gliding");
-    }
+   private void enterBoosting() {
+      this.phase = Phase.BOOSTING;
+      this.phaseTicks = 0;
+      this.boosted = false;
+      this.releaseJump();
+      if (this.listener != null) {
+         this.listener.onTakeoffDebug("Elytra gliding");
+      }
+   }
 
-    private void scheduleRetry(String reason) {
-        this.releaseJump();
-        if (this.attempts >= MAX_ATTEMPTS) { this.finishFailed(reason + " (max attempts)"); return; }
-        this.phase = Phase.COOLDOWN;
-        this.cooldownTicks = RETRY_COOLDOWN_TICKS;
-        this.phaseTicks = 0;
-        if (this.listener != null) this.listener.onTakeoffDebug("Retry in " + RETRY_COOLDOWN_TICKS + " ticks: " + reason);
-    }
+   private void scheduleRetry(String reason) {
+      this.releaseJump();
+      if (this.attempts >= MAX_ATTEMPTS) {
+         this.finishFailed(reason + " (max attempts)");
+         return;
+      }
 
-    private void finishSuccess(double speedBps) {
-        this.releaseJump();
-        this.phase = Phase.IDLE;
-        Listener current = this.listener;
-        this.listener = null;
-        if (current != null) current.onTakeoffSuccess(speedBps);
-    }
+      this.phase = Phase.COOLDOWN;
+      this.cooldownTicks = RETRY_COOLDOWN_TICKS;
+      this.phaseTicks = 0;
+      if (this.listener != null) {
+         this.listener.onTakeoffDebug("Retry in " + RETRY_COOLDOWN_TICKS + " ticks: " + reason);
+      }
+   }
 
-    private void finishFailed(String reason) {
-        this.releaseJump();
-        this.phase = Phase.IDLE;
-        Listener current = this.listener;
-        this.listener = null;
-        if (current != null) current.onTakeoffFailed(reason);
-    }
+   private void finishSuccess(double speedBps) {
+      this.releaseJump();
+      this.phase = Phase.IDLE;
+      Listener current = this.listener;
+      this.listener = null;
+      if (current != null) {
+         current.onTakeoffSuccess(speedBps);
+      }
+   }
 
-    private void releaseJump() {
-        Utils.releaseJump(MeteorClient.mc);
-    }
+   private void finishFailed(String reason) {
+      this.releaseJump();
+      this.phase = Phase.IDLE;
+      Listener current = this.listener;
+      this.listener = null;
+      if (current != null) {
+         current.onTakeoffFailed(reason);
+      }
+   }
 
-    private void deployElytra(MinecraftClient mc) {
-        if (mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, Mode.START_FALL_FLYING));
-        }
-        // Yarn 1.21.1 doesn't expose startGliding() on LivingEntity — it was
-        // renamed/added in newer Yarn mappings. Use reflection to invoke it if
-        // present, so the regear ElytraTakeoff works on both Yarn 1.21.1 and
-        // Yarn 1.21.4+ without compile-time dependence.
-        try {
-            mc.player.getClass().getMethod("startGliding").invoke(mc.player);
-        } catch (ReflectiveOperationException ignored) {
-            // Already gliding (server flag set the state); the client flag will
-            // catch up on the next tick.
-        }
-    }
+   private void releaseJump() {
+      Utils.releaseJump(MeteorClient.mc);
+   }
 
-    private boolean useFirework(MinecraftClient mc) {
-        if (mc.interactionManager == null) return false;
-        if (this.rocketSlot >= 0 && this.rocketSlot < 9) {
-            ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(this.rocketSlot);
-        }
-        FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
-        if (!hotbar.found()) return false;
-        if (hotbar.isOffhand()) {
-            mc.interactionManager.interactItem(mc.player, Hand.OFF_HAND);
-            mc.player.swingHand(Hand.OFF_HAND);
-            return true;
-        }
-        if (!hotbar.isMainHand()) {
-            InvUtils.swap(hotbar.slot(), true);
-            mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-            mc.player.swingHand(Hand.MAIN_HAND);
-            InvUtils.swapBack();
-            return true;
-        }
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-        mc.player.swingHand(Hand.MAIN_HAND);
-        return true;
-    }
+   private void deployElytra(MinecraftClient mc) {
+      if (mc.getNetworkHandler() != null) {
+         mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, Mode.START_FALL_FLYING));
+      }
 
-    private double getSpeedBps(MinecraftClient mc) {
-        Vec3d velocity = mc.player.getVelocity();
-        return Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z) * 20.0;
-    }
+      try { ((net.minecraft.entity.LivingEntity)mc.player).getClass().getMethod("startGliding").invoke(mc.player); } catch (ReflectiveOperationException e) {};
+   }
 
-    public static boolean isOverSolidGround(MinecraftClient mc) {
-        BlockPos below = mc.player.getBlockPos().down();
-        return !mc.world.getBlockState(below).isReplaceable();
-    }
+   private boolean useFirework(MinecraftClient mc) {
+      if (mc.interactionManager == null) {
+         return false;
+      }
+
+      if (this.rocketSlot >= 0 && this.rocketSlot < 9) {
+         ((PlayerInventoryAccessor)mc.player.getInventory()).setSelectedSlot(this.rocketSlot);
+      }
+
+      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      if (!hotbar.found()) {
+         return false;
+      }
+
+      if (hotbar.isOffhand()) {
+         mc.interactionManager.interactItem(mc.player, Hand.OFF_HAND);
+         mc.player.swingHand(Hand.OFF_HAND);
+         return true;
+      }
+
+      if (!hotbar.isMainHand()) {
+         InvUtils.swap(hotbar.slot(), true);
+         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+         mc.player.swingHand(Hand.MAIN_HAND);
+         InvUtils.swapBack();
+         return true;
+      }
+
+      mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+      mc.player.swingHand(Hand.MAIN_HAND);
+      return true;
+   }
+
+   private double getSpeedBps(MinecraftClient mc) {
+      Vec3d velocity = mc.player.getVelocity();
+      return Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z) * 20.0;
+   }
+
+   public static boolean isOverSolidGround(MinecraftClient mc) {
+      BlockPos below = mc.player.getBlockPos().down();
+      return !mc.world.getBlockState(below).isReplaceable();
+   }
 }

@@ -21,6 +21,7 @@ import com.hunterbuddy.modules.SandMineAddon;
 import com.hunterbuddy.modules.SearchArea;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.ShulkerColor;
+import com.hunterbuddy.modules.StashFinder;
 import com.hunterbuddy.modules.VanityESP;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
@@ -55,6 +56,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
         Modules.get().add(new VanityESP());
+        Modules.get().add(new StashFinder());
         ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
         Modules.get().add(module);
         Modules.get().add(new ExperienceTraderStarterModule(HUNTER_BUDDY_CATEGORY, module));
