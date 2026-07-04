@@ -26,6 +26,7 @@ import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -210,8 +211,66 @@ public class CaveAirESP extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null || mc.world == null || !isDimensionEnabled()) return;
+        processPendingChunks();
         computeColors();
         rebuildClusterCache();
+    }
+
+    /**
+     * Drain up to 4 queued chunks per tick to the background scan executor,
+     * closest chunks first. Without batching, dozens of chunks loading at
+     * once (e.g. fast travel, teleport) would fill the executor queue.
+     * Reference: mlep CaveAirESP.java uses the same 4-per-tick drain pattern.
+     */
+    private void processPendingChunks() {
+        if (pendingChunks.isEmpty() || scanExecutor == null || scanExecutor.isShutdown()) return;
+        if (mc.player == null || mc.world == null) return;
+
+        // Snapshot the queue and sort by distance to player. Sorting on a
+        // ConcurrentHashMap.newKeySet() is safer than on the live set
+        // (which can be mutated during sort by onChunkData on the net thread).
+        List<Long> queued = new ArrayList<>(pendingChunks);
+        if (queued.isEmpty()) return;
+        queued.sort(Comparator.comparingLong(this::chunkDistSqToPlayer));
+
+        int drained = 0;
+        for (long key : queued) {
+            if (drained >= 4) break;
+            // Drain atomically: only proceed if we actually removed this
+            // chunk from pendingChunks (prevents two ticks from double-submit).
+            if (!pendingChunks.remove(key)) continue;
+            if (scannedChunks.contains(key)) continue;
+            if (!processingChunks.add(key)) continue;
+            scannedChunks.add(key);
+
+            int cx = (int) (key & 0xFFFFFFFFL);
+            int cz = (int) (key >>> 32);
+            if (!mc.world.isChunkLoaded(cx, cz)) {
+                // Chunk unloaded before we got to it. Let onChunkData re-queue.
+                processingChunks.remove(key);
+                scannedChunks.remove(key);
+                continue;
+            }
+            Chunk chunk = mc.world.getChunk(cx, cz);
+            drained++;
+            scanExecutor.submit(() -> {
+                try {
+                    scanChunk(chunk);
+                } finally {
+                    processingChunks.remove(key);
+                }
+            });
+        }
+    }
+
+    private long chunkDistSqToPlayer(long key) {
+        int cx = (int) (key & 0xFFFFFFFFL);
+        int cz = (int) (key >>> 32);
+        int pcx = mc.player.getChunkPos().x;
+        int pcz = mc.player.getChunkPos().z;
+        int dx = cx - pcx;
+        int dz = cz - pcz;
+        return (long) dx * dx + (long) dz * dz;
     }
 
     private void scanChunk(Chunk chunk) {
