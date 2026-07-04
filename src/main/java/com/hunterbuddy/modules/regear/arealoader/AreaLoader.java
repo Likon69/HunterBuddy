@@ -1,7 +1,7 @@
 package com.hunterbuddy.modules.regear.arealoader;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.AutoFlyingRegear;
+import com.hunterbuddy.modules.regear.arealoader.AreaLoader.NetherPathMode;
 import com.hunterbuddy.modules.regear.arealoader.modes.Rectangle;
 import com.hunterbuddy.modules.regear.arealoader.modes.Spiral;
 import com.hunterbuddy.modules.regear.arealoader.modes.ZigZag;
@@ -117,10 +117,10 @@ public class AreaLoader extends Module {
             .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Spiral).build()
     );
 
-    public final meteordevelopment.meteorclient.settings.Setting<AutoFlyingRegear.NetherPathMode> netherPathMode = this.sgNether.add(
-        new Builder<AutoFlyingRegear.NetherPathMode>().name("nether-path-mode")
+    public final meteordevelopment.meteorclient.settings.Setting<NetherPathMode> netherPathMode = this.sgNether.add(
+        new Builder<NetherPathMode>().name("nether-path-mode")
             .description("How AreaLoader navigates in Nether. BARITONE_ELYTRA uses Baritone elytra pathing, OTHER does nothing (manual control).")
-            .defaultValue(AutoFlyingRegear.NetherPathMode.BARITONE_ELYTRA).build()
+            .defaultValue(NetherPathMode.BARITONE_ELYTRA).build()
     );
 
     public final meteordevelopment.meteorclient.settings.Setting<Integer> netherWaypointDistance = this.sgNether.add(
@@ -128,7 +128,7 @@ public class AreaLoader extends Module {
             .name("nether-waypoint-distance")
             .description("Distance in blocks between Baritone waypoints in the Nether. Smaller = more accurate but slower.")
             .defaultValue(100).min(50).sliderRange(50, 500)
-            .visible(() -> this.netherPathMode.get() == AutoFlyingRegear.NetherPathMode.BARITONE_ELYTRA).build()
+            .visible(() -> this.netherPathMode.get() == NetherPathMode.BARITONE_ELYTRA).build()
     );
 
     public final meteordevelopment.meteorclient.settings.Setting<Integer> netherWaypointReachDistance = this.sgNether.add(
@@ -136,7 +136,7 @@ public class AreaLoader extends Module {
             .name("nether-reach-distance")
             .description("How close to a waypoint before considering it reached and moving to next.")
             .defaultValue(30).min(10).sliderRange(10, 100)
-            .visible(() -> this.netherPathMode.get() == AutoFlyingRegear.NetherPathMode.BARITONE_ELYTRA).build()
+            .visible(() -> this.netherPathMode.get() == NetherPathMode.BARITONE_ELYTRA).build()
     );
 
     public final meteordevelopment.meteorclient.settings.Setting<Boolean> debugMode = this.sgDebug.add(
@@ -225,5 +225,9 @@ public class AreaLoader extends Module {
 
     public enum OverworldFlightMode {
         ROCKETS, PITCH40, OTHER
+    }
+
+    public enum NetherPathMode {
+        BARITONE_ELYTRA, OTHER
     }
 }
