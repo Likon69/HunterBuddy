@@ -12,7 +12,7 @@ public interface PlayerInventoryAccessor {
     int getSelectedSlot();
 
     @Accessor("selectedSlot")
-    void setSelectedSlot(int value);
+    void setSelectedSlot(int var1);
 
     @Accessor("main")
     DefaultedList<ItemStack> getMain();
