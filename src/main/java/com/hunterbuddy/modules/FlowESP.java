@@ -2,6 +2,7 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
+import meteordevelopment.meteorclient.events.world.BlockUpdateEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -19,14 +20,15 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -160,8 +162,17 @@ public class FlowESP extends Module {
         .build()
     );
 
-    private final LRUCache<Long, ChunkData> overworldCache = new LRUCache<>(2000);
-    private final LRUCache<Long, ChunkData> netherCache = new LRUCache<>(2000);
+    // ConcurrentHashMap (not LinkedHashMap) because:
+    //  - onChunkData fires on network thread, scanExecutor writes on bg
+    //    thread, onRender reads on render thread → needs concurrent-safe map.
+    //  - LinkedHashMap with accessOrder=true triggers AIOOBE on
+    //    values().toArray() (JDK bug — afterNodeAccess reorders mid-iter).
+    //  - Distance-based eviction is already handled by evictDistant() every
+    //    200 ticks, so we don't need an internal LRU bound; the cache size
+    //    only grows when many chunks load at once and shrinks when they leave
+    //    render-distance (or when the module is reactivated).
+    private final Map<Long, ChunkData> overworldCache = new ConcurrentHashMap<>();
+    private final Map<Long, ChunkData> netherCache = new ConcurrentHashMap<>();
     // ConcurrentHashMap.newKeySet() because ChunkDataEvent fires on the
     // network thread and these are mutated/iterated from multiple threads.
     // Reference mlep FlowESP.java:142-144 also uses ConcurrentHashMap.newKeySet().
@@ -234,6 +245,19 @@ public class FlowESP extends Module {
         // fast, which can starve other tasks. Reference mlep FlowESP.java
         // uses a single processing-set guard but scans synchronously; we do
         // the scan async but still batch.
+        pendingChunks.add(key);
+    }
+
+    @EventHandler
+    private void onBlockUpdate(BlockUpdateEvent event) {
+        if (mc.world == null || mc.world.getRegistryKey() == World.END) return;
+        // Lava/water flow generates BlockUpdateEvent for every block that
+        // changes. Without re-queueing here, the chunk stays in scannedNether
+        // / scannedOverworld and the player's view of flowing fluids stops
+        // updating the instant a block transitions. invalidate + queue.
+        long key = ChunkPos.toLong(event.pos.getX() >> 4, event.pos.getZ() >> 4);
+        scannedNether.remove(key);
+        scannedOverworld.remove(key);
         pendingChunks.add(key);
     }
 
@@ -338,11 +362,68 @@ public class FlowESP extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.world == null || mc.player == null) return;
+        processPendingChunks();
         tick++;
         if (tick >= 200) {
             tick = 0;
             evictDistant();
         }
+    }
+
+    /**
+     * Drain up to 4 queued chunks per tick to the background scan executor,
+     * closest chunks first. Without batching, dozens of chunks loading at
+     * once (e.g. fast travel, teleport) would fill the executor queue.
+     * Reference: mlep FlowESP.java uses the same drain-on-tick pattern.
+     */
+    private void processPendingChunks() {
+        if (pendingChunks.isEmpty() || scanExecutor == null || scanExecutor.isShutdown()) return;
+
+        List<Long> queued = new ArrayList<>(pendingChunks);
+        if (queued.isEmpty()) return;
+        queued.sort(Comparator.comparingLong(this::chunkDistSqToPlayer));
+
+        int drained = 0;
+        for (long key : queued) {
+            if (drained >= 4) break;
+            if (!pendingChunks.remove(key)) continue;
+
+            boolean nether = mc.world.getRegistryKey() == World.NETHER;
+            if (nether && scannedNether.contains(key)) continue;
+            if (!nether && scannedOverworld.contains(key)) continue;
+            if (!processing.add(key)) continue;
+
+            int cx = (int) (key & 0xFFFFFFFFL);
+            int cz = (int) (key >>> 32);
+            if (!mc.world.isChunkLoaded(cx, cz)) {
+                processing.remove(key);
+                continue;
+            }
+            Chunk chunk = mc.world.getChunk(cx, cz);
+            if (nether) scannedNether.add(key); else scannedOverworld.add(key);
+            drained++;
+            scanExecutor.submit(() -> {
+                try {
+                    ChunkData data = scanChunk(chunk, nether);
+                    if (data != null) {
+                        if (nether) netherCache.put(key, data);
+                        else overworldCache.put(key, data);
+                    }
+                } finally {
+                    processing.remove(key);
+                }
+            });
+        }
+    }
+
+    private long chunkDistSqToPlayer(long key) {
+        int cx = (int) (key & 0xFFFFFFFFL);
+        int cz = (int) (key >>> 32);
+        int pcx = mc.player.getChunkPos().x;
+        int pcz = mc.player.getChunkPos().z;
+        int dx = cx - pcx;
+        int dz = cz - pcz;
+        return (long) dx * dx + (long) dz * dz;
     }
 
     private void evictDistant() {
@@ -380,18 +461,16 @@ public class FlowESP extends Module {
         int rdist = renderDistance.get();
         int rdistSq = rdist * rdist;
         boolean nether = mc.world.getRegistryKey() == World.NETHER;
-        LRUCache<Long, ChunkData> cache = nether ? netherCache : overworldCache;
+        Map<Long, ChunkData> cache = nether ? netherCache : overworldCache;
 
         SettingColor lc = lavaColor.get();
         SettingColor wc = waterColor.get();
 
-        // Snapshot the cache before iterating. onChunkData may fire on the
-        // network thread while we iterate on the render thread, so a live
-        // entrySet() would CME. Same for render-triggered LRU evictions.
-        ChunkData[] snapshot;
-        synchronized (cache) {
-            snapshot = cache.values().toArray(new ChunkData[0]);
-        }
+        // ConcurrentHashMap iteration is weakly consistent: safe under
+        // concurrent writes from scanExecutor / onChunkData / evictDistant,
+        // no CME. We may miss a fresh entry or see a stale one for one frame
+        // at most — acceptable for an ESP HUD.
+        ChunkData[] snapshot = cache.values().toArray(new ChunkData[0]);
 
         for (ChunkData data : snapshot) {
             long key = data.chunkKey;
@@ -448,20 +527,6 @@ public class FlowESP extends Module {
             this.flowLen = flowLen;
             this.isLava = isLava;
             this.hasSource = hasSource;
-        }
-    }
-
-    private static class LRUCache<K, V> extends LinkedHashMap<K, V> {
-        private final int max;
-
-        LRUCache(int max) {
-            super(max / 4, 0.75f, true);
-            this.max = max;
-        }
-
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
-            return size() > max;
         }
     }
 }
