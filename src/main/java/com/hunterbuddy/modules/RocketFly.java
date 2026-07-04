@@ -48,7 +48,7 @@ public class RocketFly extends Module {
     public void onActivate() {
         this.launched = false;
         this.yTarget = -1.0;
-        if (this.mc.player == null || !this.mc.player.isGliding()) {
+        if (this.mc.player == null || !this.mc.player.isFallFlying()) {
             this.info("You must be flying before enabling RocketFly.");
         }
     }
@@ -56,7 +56,7 @@ public class RocketFly extends Module {
     public void tickFlyLogic() {
         if (this.mc.player != null) {
             double currentY = this.mc.player.getY();
-            if (this.mc.player.isGliding()) {
+            if (this.mc.player.isFallFlying()) {
                 if (this.yTarget == -1.0 || !this.launched) {
                     if (this.useManualY.get()) this.yTarget = this.manualYLevel.get();
                     else this.yTarget = currentY;
