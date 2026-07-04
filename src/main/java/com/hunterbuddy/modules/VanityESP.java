@@ -723,7 +723,9 @@ public class VanityESP extends Module {
         for (Entity entity : mc.world.getEntities()) {
             if (!(entity instanceof EndermanEntity enderman)) continue;
             BlockState carried = enderman.getCarriedBlock();
-            if (carried.isAir()) continue;
+            // getCarriedBlock() can return null on 1.21 (no Optional wrap),
+            // NPEs the renderer when the Enderman is not carrying anything.
+            if (carried == null || carried.isAir()) continue;
             event.renderer.box(entity.getBoundingBox(), fill, line, mode, 0);
             if (endermanRenderTracer.get()) {
                 event.renderer.line(
