@@ -5,7 +5,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalBlock;
 // Mlep class removed; use HunterBuddyAddon.HUNTER_BUDDY_CATEGORY directly
-import com.hunterbuddy.modules.regear.mixin.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
 import com.hunterbuddy.modules.regear.util.PlacementUtils;
