@@ -1,7 +1,7 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.mixin.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.util.InventoryManager;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import java.awt.Color;

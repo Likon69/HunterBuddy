@@ -1,6 +1,6 @@
 package com.hunterbuddy.modules.regear.util;
 
-import com.hunterbuddy.modules.regear.mixin.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;

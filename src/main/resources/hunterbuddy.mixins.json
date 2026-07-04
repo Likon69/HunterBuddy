@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.hunterbuddy.modules.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "MlepScaffoldMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "mixins": [
+  ]
+}

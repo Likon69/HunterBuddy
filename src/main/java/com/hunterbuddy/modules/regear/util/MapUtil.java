@@ -20,7 +20,6 @@ import xaero.hud.minimap.world.MinimapWorld;
 import xaero.hud.minimap.world.container.MinimapWorldRootContainer;
 import xaeroplus.settings.Settings;
 
-/** Reference parity: mlep.util.MapUtil. 100% faithful — direct XaeroPlus imports. */
 public class MapUtil {
 
     public static void addWaypoint(BlockPos pos, String name, String initials, Purpose purpose, WpColor color, boolean temp) {
@@ -29,7 +28,7 @@ public class MapUtil {
         }
     }
 
-    public static void addWaypoint(BlockPos pos, String name, String initials, Purpose purpose, WpColor color, boolean temp, @Nullable String dimension) {
+    public static void addWaypoint(BlockPos pos, String name, String initials, Purpose purpose, WpColor color, boolean temp, String dimension) {
         if (Utils.XAERO_AVAILABLE) {
             XaeroIntegration.addWaypoint(pos, name, initials, purpose, color, temp, dimension);
         }
@@ -62,6 +61,7 @@ public class MapUtil {
 
                 MinimapWorld targetWorld = getWaypointWorld();
 
+                // Nether to Overworld scaling support (XaeroPlus)
                 if (usesNetherOverworldScaling(dimension)) {
                     waypointX = pos.getX() * 8;
                     waypointZ = pos.getZ() * 8;
@@ -82,6 +82,7 @@ public class MapUtil {
                     return;
                 }
 
+                // Prevent duplicates
                 for (Waypoint wp : set.getWaypoints()) {
                     if (wp.getX() == waypointX && wp.getZ() == waypointZ) {
                         LogUtil.warn("Skipping duplicate waypoint: " + name, "MapUtil");
@@ -170,10 +171,13 @@ public class MapUtil {
             } catch (Exception ignored) {}
         }
 
+        // ==================== Helper Methods ====================
+
         static boolean usesNetherOverworldScaling(@Nullable String dimension) {
             if (dimension == null || !dimension.equals("the_nether")) {
                 return false;
             }
+
             try {
                 return Settings.REGISTRY.owAutoWaypointDimension.get();
             } catch (Exception ignored) {
@@ -185,6 +189,7 @@ public class MapUtil {
             if (MeteorClient.mc.world == null) {
                 return false;
             }
+
             return usesNetherOverworldScaling(MeteorClient.mc.world.getRegistryKey().getValue().getPath());
         }
 
@@ -202,10 +207,12 @@ public class MapUtil {
                 if (session == null) {
                     return null;
                 }
+
                 MinimapWorldRootContainer rootContainer = session.getWorldManager().getCurrentRootContainer();
                 if (rootContainer == null) {
                     return null;
                 }
+
                 for (MinimapWorld world : rootContainer.getWorlds()) {
                     try {
                         String dimPath = world.getDimId().getValue().getPath();

@@ -974,7 +974,7 @@ public class WaypointFollower extends Module {
         // Main Inventory (slots 9-35)
         for (int i = 9; i < 36; i++) {
             if (inv.getStack(i).isOf(Items.FIREWORK_ROCKET)) {
-                int selected = ((com.hunterbuddy.modules.regear.mixin.PlayerInventoryAccessor) inv).getSelectedSlot();
+                int selected = ((com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor) inv).getSelectedSlot();
                 InvUtils.move().from(i).to(selected);
                 mc.interactionManager.interactItem(player, Hand.MAIN_HAND);
                 InvUtils.move().from(selected).to(i);

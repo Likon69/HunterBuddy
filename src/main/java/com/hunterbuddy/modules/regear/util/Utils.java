@@ -1,9 +1,25 @@
 package com.hunterbuddy.modules.regear.util;
 
-import com.hunterbuddy.modules.regear.mixin.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
+import java.io.File;
+import java.io.OutputStream;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.time.Instant;
+import java.util.Random;
+import javax.net.ssl.HttpsURLConnection;
+import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
+import meteordevelopment.meteorclient.utils.player.FindItemResult;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.PlayerUtils;
+import meteordevelopment.meteorclient.utils.world.Dimension;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.option.GameOptions;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -11,12 +27,8 @@ import net.minecraft.item.Items;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.common.ClientOptionsC2SPacket;
 import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
-import net.minecraft.network.packet.c2s.play.ChatMessageC2SPacket;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.network.packet.c2s.play.*;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode;
 import net.minecraft.text.ClickEvent;
 import net.minecraft.text.Style;
@@ -25,29 +37,8 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.Nullable;
 
-import meteordevelopment.meteorclient.MeteorClient;
-import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
-import meteordevelopment.meteorclient.utils.player.PlayerUtils;
-import meteordevelopment.meteorclient.utils.world.Dimension;
-
-import java.io.File;
-import java.io.OutputStream;
-import java.net.URI;
-import java.net.URL;
-import java.time.Instant;
-import java.util.Random;
-
-import javax.net.ssl.HttpsURLConnection;
-
-/**
- * Reference parity: mlep.util.Utils. Holds helpers used across all AutoFlyingRegear
- * utility classes (key-press, inventory maths, webhook posting, illegal-disconnect,
- * Xaero-presence detection).
- */
 public class Utils {
+
     private static final Random RANDOM = new Random();
     public static final boolean XAERO_AVAILABLE = FabricLoader.getInstance().isModLoaded("xaeroworldmap")
         && FabricLoader.getInstance().isModLoaded("xaerominimap");
@@ -55,6 +46,7 @@ public class Utils {
     public static String rCC() {
         String color = "§7";
         TextColor[] colors = TextColor.values();
+
         while (color.equals("§0") || color.equals("§8") || color.equals("§7")) {
             int luckyIndex = RANDOM.nextInt(colors.length);
             color = colors[luckyIndex].label;
@@ -109,9 +101,11 @@ public class Utils {
 
     public static void illegalDisconnect(boolean disableAutoReconnect, IllegalDisconnectMethod method) {
         if (!meteordevelopment.meteorclient.utils.Utils.canUpdate()) return;
+
         if (disableAutoReconnect) {
             disableAutoReconnect();
         }
+
         try {
             Packet<?> illegalPacket = switch (method) {
                 case Slot -> new UpdateSelectedSlotC2SPacket(-69);
@@ -121,13 +115,6 @@ public class Utils {
                 case SequenceBreak -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, -420, 13.37f, 69.69f);
                 case InvalidSettings -> {
                     SyncedClientOptions defaults = SyncedClientOptions.createDefault();
-                    // 100% parity with mlep's `IllegalDisconnectMethod.InvalidSettings`, but
-                    // Yarn 1.21.1 (`build.9`) doesn't expose `SyncedClientOptions.particleStatus()`
-                    // (the field was added in Minecraft 1.21.2, Yarn 1.21.4+). The 9th constructor
-                    // argument from mlep can't be passed here. To preserve as much of the
-                    // invalid packet as possible we drop `particleStatus` and call the
-                    // 8-arg constructor that Yarn 1.21.1 ships. The disconnect still works
-                    // because the server validates the packet holistically, not field by field.
                     yield new ClientOptionsC2SPacket(new SyncedClientOptions(
                         defaults.language(),
                         -69,
@@ -140,6 +127,7 @@ public class Utils {
                     ));
                 }
             };
+
             if (illegalPacket != null && MeteorClient.mc.getNetworkHandler() != null) {
                 MeteorClient.mc.getNetworkHandler().sendPacket(illegalPacket);
                 MeteorClient.mc.getNetworkHandler().sendPacket(new ChatMessageC2SPacket("[Mlep] Illegal Disconnect", Instant.now(), 0L, null, null));
@@ -163,9 +151,11 @@ public class Utils {
         if (mc.player == null || mc.interactionManager == null) return -1;
 
         int elytraSwapSlot = -1;
+
         if (elytraRequired && !mc.player.getInventory().getStack(38).isOf(Items.ELYTRA)) {
             FindItemResult itemResult = InvUtils.findInHotbar(Items.ELYTRA);
             if (!itemResult.found()) return -1;
+
             elytraSwapSlot = itemResult.slot();
             InvUtils.swap(itemResult.slot(), true);
             mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
@@ -187,6 +177,7 @@ public class Utils {
             return elytraSwapSlot != -1 ? elytraSwapSlot : 200;
         }
 
+        // Try moving from main inventory
         PlayerInventoryAccessor inv = (PlayerInventoryAccessor) mc.player.getInventory();
         for (int i = 9; i < inv.getMain().size(); i++) {
             if (mc.player.getInventory().getStack(i).isOf(Items.FIREWORK_ROCKET)) {
@@ -198,6 +189,7 @@ public class Utils {
                 return elytraSwapSlot != -1 ? elytraSwapSlot : 200;
             }
         }
+
         return -1;
     }
 
@@ -206,13 +198,19 @@ public class Utils {
     }
 
     public static void holdJump(MinecraftClient mc) {
-        if (mc.player == null) return;
+        if (mc.player == null) {
+            return;
+        }
+
         BaritoneHelper.setJumpPressed(true);
         mc.options.jumpKey.setPressed(true);
     }
 
     public static void releaseJump(MinecraftClient mc) {
-        if (mc.player == null) return;
+        if (mc.player == null) {
+            return;
+        }
+
         BaritoneHelper.setJumpPressed(false);
         mc.options.jumpKey.setPressed(false);
     }
@@ -284,6 +282,7 @@ public class Utils {
         String json = "{\"embeds\": [{\"title\": \"" + title + "\",\"description\": \"" + message +
             "\",\"color\": 15258703,\"footer\": {\"text\": \"From: " + playerName + "\"}}]}";
         sendRequest(webhookURL, json);
+
         if (pingID != null) {
             sendRequest(webhookURL, "{\"content\": \"<@" + pingID + ">\"}");
         }
@@ -304,6 +303,7 @@ public class Utils {
             con.setRequestProperty("User-Agent", "Mozilla/5.0");
             con.setDoOutput(true);
             con.setRequestMethod("POST");
+
             try (OutputStream os = con.getOutputStream()) {
                 os.write(json.getBytes());
                 os.flush();
@@ -326,7 +326,9 @@ public class Utils {
 
         public final String label;
 
-        TextColor(String label) { this.label = label; }
+        TextColor(String label) {
+            this.label = label;
+        }
     }
 
     public enum RainbowColor {
@@ -340,9 +342,13 @@ public class Utils {
 
         public final String[] labels;
 
-        RainbowColor(String[] labels) { this.labels = labels; }
+        RainbowColor(String[] labels) {
+            this.labels = labels;
+        }
 
-        public static RainbowColor getFirst() { return values()[0]; }
+        public static RainbowColor getFirst() {
+            return values()[0];
+        }
 
         public static RainbowColor getNext(RainbowColor current) {
             RainbowColor[] values = values();
@@ -360,6 +366,8 @@ public class Utils {
 
         public final String label;
 
-        TextFormat(String label) { this.label = label; }
+        TextFormat(String label) {
+            this.label = label;
+        }
     }
 }

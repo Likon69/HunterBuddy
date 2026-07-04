@@ -14,6 +14,9 @@
       "com.hunterbuddy.HunterBuddyAddon"
     ]
   },
+  "mixins": [
+    "hunterbuddy.mixins.json"
+  ],
   "custom": {
     "meteor-client:color": "225,25,25"
   },
