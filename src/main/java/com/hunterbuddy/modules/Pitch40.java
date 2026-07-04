@@ -224,7 +224,7 @@ public class Pitch40 extends Module {
 
     private void checkAndUseFirework() {
         if (this.autoFirework.get() && this.fireworkCooldown <= 0) {
-            if (this.mc.player != null && this.mc.player.isGliding()) {
+            if (this.mc.player != null && this.mc.player.isFallFlying()) {
                 if (this.elytraRecast == null || !this.elytraRecast.isActive() || !this.elytraRecast.isRecovering()) {
                     double currentSpeed = this.getSpeedBPS();
                     double playerY = this.mc.player.getY();
