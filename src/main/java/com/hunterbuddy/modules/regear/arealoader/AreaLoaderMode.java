@@ -176,7 +176,7 @@ public abstract class AreaLoaderMode {
                         this.currentDimension, this.mc.world.getRegistryKey().getValue().toString());
                     if (this.currentDimension == CurrentDimension.NETHER) {
                         this.debugInfo("AreaLoader: In Nether, skipping overworld flight modules.");
-                        if (this.searchArea.netherPathMode.get() == AutoFlyingRegear.NetherPathMode.BARITONE_ELYTRA) {
+                        if (this.searchArea.netherPathMode.get() == NetherPathMode.BARITONE_ELYTRA) {
                             try {
                                 Class.forName("baritone.api.BaritoneAPI");
                                 this.debugInfo("AreaLoader: Nether detected, using Baritone elytra mode.");
@@ -304,7 +304,7 @@ public abstract class AreaLoaderMode {
     }
 
     protected void setBaritoneGoal(BlockPos goal) {
-        if (this.searchArea.netherPathMode.get() == AutoFlyingRegear.NetherPathMode.BARITONE_ELYTRA) {
+        if (this.searchArea.netherPathMode.get() == NetherPathMode.BARITONE_ELYTRA) {
             if (goal != null) {
                 if (!BaritoneHelper.hasElytraProcess()) {
                     this.debugInfo("Baritone with elytra support required for elytra pathfinding");
