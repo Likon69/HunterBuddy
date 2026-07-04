@@ -3,7 +3,10 @@
   "package": "com.hunterbuddy.modules.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "MlepScaffoldMixin"
+    "MlepScaffoldMixin",
+    "com.hunterbuddy.modules.regear.mixin.accessor.LivingEntityAccessor",
+    "com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor",
+    "com.hunterbuddy.modules.regear.mixin.accessor.UpdateSelectedSlotS2CPacketAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
