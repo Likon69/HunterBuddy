@@ -19,7 +19,6 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
@@ -453,7 +452,14 @@ public class CaveAirESP extends Module {
     }
 
     private int unpackZ(long packed) {
-        return (int) (packed & 0x3FFFFFF);
+        // 26-bit sign-extended — packed & 0x3FFFFFF extracts unsigned; the
+        // (x << 6) >> 6 idiom shifts bit 25 (the sign bit of the 26-bit
+        // value) into bit 31, then arithmetic right-shift propagates it.
+        // Without this, chunks at negative Z (e.g. 2b2t where the player
+        // is at Z=-3 738 329 → chunk Z=-233 645) get unpacked as huge
+        // positive ints, putting every cluster's bounding box thousands of
+        // chunks away from the player. Reference mlep CaveAirESP.java:330.
+        return (int) (packed & 0x3FFFFFFL) << 6 >> 6;
     }
 
     private List<DisturbanceCluster> clusterDisturbances(Set<Long> positions) {
@@ -497,14 +503,9 @@ public class CaveAirESP extends Module {
                 int W = facesX ? widthZ : widthX;
                 int H = height;
                 if (W >= 4 && H >= 5 && W <= maxW && H <= maxH) {
-                    int filledRect = W * H;
-                    int noCorners = filledRect - 4;
-                    boolean validDimensions = (blockCount == filledRect) || (blockCount == noCorners);
+                    boolean validDimensions = isValidPortalDimensions(W, H, blockCount);
                     if (validDimensions) {
-                        Set<Long> set = new HashSet<>(cluster);
-                        boolean validShape = (blockCount == filledRect)
-                            ? validateFilledRectangle(set, minX, minY2, minZ, W, H, facesX)
-                            : (blockCount == noCorners) && validateFrameWithoutCorners(set, minX, minY2, minZ, W, H, facesX);
+                        boolean validShape = isValidPortalShape(cluster, minX, minY2, minZ, W, H, blockCount, facesX);
                         if (validShape) {
                             MergedBox bounds = new MergedBox(minX, minY2, minZ, maxX, maxY2, maxZ);
                             clusters.add(new DisturbanceCluster(bounds, blockCount, true));
@@ -514,6 +515,25 @@ public class CaveAirESP extends Module {
             }
         }
         return clusters;
+    }
+
+    private boolean isValidPortalDimensions(int W, int H, int blockCount) {
+        int filledRect = W * H;
+        int noCorners = filledRect - 4;
+        return blockCount == filledRect || blockCount == noCorners;
+    }
+
+    private boolean isValidPortalShape(List<Long> cluster, int minX, int minY, int minZ,
+                                       int W, int H, int blockCount, boolean facesX) {
+        int filledRect = W * H;
+        int noCorners = filledRect - 4;
+        Set<Long> positions = new HashSet<>(cluster);
+        if (blockCount == filledRect) {
+            return validateFilledRectangle(positions, minX, minY, minZ, W, H, facesX);
+        } else {
+            return blockCount == noCorners
+                && validateFrameWithoutCorners(positions, minX, minY, minZ, W, H, facesX);
+        }
     }
 
     private boolean validateFilledRectangle(Set<Long> positions, int minX, int minY, int minZ,
@@ -723,6 +743,31 @@ public class CaveAirESP extends Module {
         if (debug.get() && !toRemove.isEmpty()) info("Evicted " + toRemove.size() + " distant chunks");
     }
 
+    /** Drop all cached chunk scan results. Reference parity with mlep CaveAirESP. */
+    public void clearCache() {
+        chunkCache.clear();
+        pendingChunks.clear();
+        renderClusters = Collections.emptyList();
+        renderCaveAir = Collections.emptyList();
+        renderAirInCave = Collections.emptyList();
+        info("Cache cleared");
+    }
+
+    /** @return human-readable stats about the current cache. Reference parity with mlep CaveAirESP. */
+    public String stats() {
+        int chunks = chunkCache.size();
+        int portals = (int) chunkCache.values().stream()
+            .flatMap(c -> c.clusters.stream())
+            .filter(c -> c.portalShaped)
+            .count();
+        int totalClusters = chunkCache.values().stream().mapToInt(c -> c.clusters.size()).sum();
+        int caveAirBoxes = chunkCache.values().stream().mapToInt(c -> c.caveAirBoxes.size()).sum();
+        return "Chunks: " + chunks
+            + " | Portals: " + portals
+            + " | Clusters: " + totalClusters
+            + " | CaveAir boxes: " + caveAirBoxes;
+    }
+
     private static double nearestPointDistanceSq(Vec3d point, MergedBox box) {
         double dx = Math.max(0.0, Math.max(box.minX - point.x, point.x - (box.maxX + 1)));
         double dy = Math.max(0.0, Math.max(box.minY - point.y, point.y - (box.maxY + 1)));
@@ -799,6 +844,30 @@ public class CaveAirESP extends Module {
         MergedBox(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
             this.minX = minX; this.minY = minY; this.minZ = minZ;
             this.maxX = maxX; this.maxY = maxY; this.maxZ = maxZ;
+        }
+
+        // Reference parity: mlep's MergedBox exposes these helpers even
+        // though CaveAirESP.java itself doesn't call them. Keep them so
+        // external reflection-based consumers (or future modules) keep
+        // working.
+        int width() {
+            return this.maxX - this.minX + 1;
+        }
+
+        int height() {
+            return this.maxY - this.minY + 1;
+        }
+
+        int depth() {
+            return this.maxZ - this.minZ + 1;
+        }
+
+        Vec3d center() {
+            return new Vec3d(
+                (this.minX + this.maxX + 1) / 2.0,
+                (this.minY + this.maxY + 1) / 2.0,
+                (this.minZ + this.maxZ + 1) / 2.0
+            );
         }
     }
 
