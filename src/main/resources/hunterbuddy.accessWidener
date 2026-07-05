@@ -1,5 +1,24 @@
 accessWidener	v1	named
 
+accessible	method	net/minecraft/client/network/ClientPlayerInteractionManager syncSelectedSlot ()V
+accessible	method	net/minecraft/client/network/ClientPlayerInteractionManager sendSequencedPacket (Lnet/minecraft/client/world/ClientWorld;Lnet/minecraft/client/network/SequencedPacketCreator;)V
+accessible	method	net/minecraft/client/world/ClientWorld getPendingUpdateManager ()Lnet/minecraft/client/network/PendingUpdateManager;
+accessible	method	net/minecraft/client/texture/NativeImage setColor (III)V
+
+accessible	class	net/minecraft/network/packet/c2s/play/PlayerInteractEntityC2SPacket$InteractType
+accessible	class	net/minecraft/network/packet/c2s/play/PlayerInteractEntityC2SPacket$InteractTypeHandler
+accessible	method	net/minecraft/network/packet/c2s/play/PlayerInteractEntityC2SPacket$InteractTypeHandler getType ()Lnet/minecraft/network/packet/c2s/play/PlayerInteractEntityC2SPacket$InteractType;
+
+accessible	method	net/minecraft/client/gui/screen/Screen addDrawableChild (Lnet/minecraft/client/gui/Element;)Lnet/minecraft/client/gui/Element;
+accessible	field	net/minecraft/entity/TrackedPosition pos Lnet/minecraft/util/math/Vec3d;
+accessible	field	net/minecraft/entity/LivingEntity leaningPitch F
+accessible	field	net/minecraft/entity/LivingEntity lastLeaningPitch F
+accessible	method	net/minecraft/client/MinecraftClient doAttack ()Z
+
+extendable	class	net/minecraft/client/gui/screen/multiplayer/MultiplayerServerListWidget$Entry
+extendable	method	net/minecraft/client/gui/screen/multiplayer/MultiplayerServerListWidget$Entry isOfSameType (Lnet/minecraft/client/gui/screen/multiplayer/MultiplayerServerListWidget$Entry;)Z
+
+# HunterBuddy-specific (not in mlep)
 accessible	field	net/minecraft/client/gui/screen/ingame/AnvilScreen nameField Lnet/minecraft/client/gui/widget/TextFieldWidget;
 accessible	method	net/minecraft/client/gui/screen/ingame/HandledScreen onMouseClick (Lnet/minecraft/screen/slot/Slot;IILnet/minecraft/screen/slot/SlotActionType;)V
 accessible	field	net/minecraft/client/gui/screen/ingame/MerchantScreen selectedIndex I
