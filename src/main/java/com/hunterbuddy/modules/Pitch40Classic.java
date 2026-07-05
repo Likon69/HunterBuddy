@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.regear.util.Utils;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -8,10 +9,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.util.Hand;
 
 public class Pitch40Classic extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -44,46 +42,48 @@ public class Pitch40Classic extends Module {
         .build()
     );
 
+    // ---- Auto Firework (porté de JEFF Pitch40Util) ----
+
     public final Setting<Boolean> autoFirework = this.sgFirework.add(new BoolSetting.Builder()
         .name("auto-firework")
-        .description("Pop un feu d'artifice automatique quand la vitesse verticale est trop basse.")
+        .description("Pop un feu d'artifice automatiquement (logique JEFF Pitch40Util).")
         .defaultValue(true)
         .build()
     );
 
-    public final Setting<Double> minVerticalSpeed = this.sgFirework.add(new DoubleSetting.Builder()
-        .name("min-vertical-speed")
-        .description("Vitesse verticale minimum avant de pop un feu (blocks/sec).")
-        .defaultValue(1.0)
-        .min(0.0)
-        .sliderMax(5.0)
+    public final Setting<Double> velocityThreshold = this.sgFirework.add(new DoubleSetting.Builder()
+        .name("velocity-threshold")
+        .description("Velocity must be below this value when going up for firework to activate.")
+        .defaultValue(-0.05)
+        .sliderRange(-0.5, 1.0)
+        .visible(autoFirework::get)
         .build()
     );
 
-    public final Setting<Integer> fireworkCooldown = this.sgFirework.add(new IntSetting.Builder()
-        .name("firework-cooldown-ticks")
-        .description("Cooldown en ticks entre les feux d'artifice.")
-        .defaultValue(100)
-        .min(0)
-        .sliderMax(200)
+    public final Setting<Integer> fireworkCooldownTicks = this.sgFirework.add(new IntSetting.Builder()
+        .name("cooldown-ticks")
+        .description("Cooldown after using a firework in ticks.")
+        .defaultValue(10)
+        .sliderRange(0, 100)
+        .visible(autoFirework::get)
         .build()
     );
 
     private boolean pitchingDown = true;
-    private double lastY = 0.0;
-    private int fireworkCooldownCounter = 0;
+    private boolean goingUp = true;
+    private int fireworkCooldown = 0;
 
     public Pitch40Classic() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "pitch40-classic", "Oscillation elytra fixe +40/-40, standalone (n'utilise PAS ElytraFly de Meteor). Auto-firework optionnel.");
+        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "pitch40-classic", "Oscillation elytra fixe +40/-40, standalone (n'utilise PAS ElytraFly de Meteor). Firework logique JEFF Pitch40Util.");
     }
 
     @Override
     public void onActivate() {
         if (this.mc.player != null) {
             this.pitchingDown = this.mc.player.getY() >= this.upperBound.get();
-            this.lastY = this.mc.player.getY();
         }
-        this.fireworkCooldownCounter = 0;
+        this.goingUp = true;
+        this.fireworkCooldown = 0;
     }
 
     @Override
@@ -94,15 +94,14 @@ public class Pitch40Classic extends Module {
     }
 
     @EventHandler
-    private void onTick(TickEvent.Post event) {
+    private void onTick(TickEvent.Pre event) {
         if (this.mc.player == null || !this.mc.player.isGliding()) return;
 
         double y = this.mc.player.getY();
-        double verticalSpeed = y - this.lastY;
-        this.lastY = y;
 
-        if (this.fireworkCooldownCounter > 0) {
-            this.fireworkCooldownCounter--;
+        // Cooldown
+        if (this.fireworkCooldown > 0) {
+            this.fireworkCooldown--;
         }
 
         // Bound switching
@@ -120,27 +119,20 @@ public class Pitch40Classic extends Module {
             : Math.max(current - rate, -40.0f);
         this.mc.player.setPitch(updated);
 
-        // Auto-firework: if vertical speed is too low while pitching up, pop a firework
-        if (this.autoFirework.get() && !this.pitchingDown && verticalSpeed < this.minVerticalSpeed.get()
-            && this.fireworkCooldownCounter == 0) {
-            this.popFirework();
+        // Auto-firework (logique exacte de JEFF Pitch40Util)
+        if (current == -40.0f) {
+            // -40 pitch = facing up
+            this.goingUp = true;
+            if (this.autoFirework.get()
+                && this.mc.player.getVelocity().y < this.velocityThreshold.get()
+                && y < this.upperBound.get()) {
+                if (this.fireworkCooldown == 0) {
+                    int launchStatus = Utils.firework(this.mc, false);
+                    if (launchStatus >= 0) {
+                        this.fireworkCooldown = this.fireworkCooldownTicks.get();
+                    }
+                }
+            }
         }
-    }
-
-    private void popFirework() {
-        if (this.mc.player == null) return;
-        FindItemResult result = InvUtils.findInHotbar(net.minecraft.item.Items.FIREWORK_ROCKET);
-        if (!result.found()) return;
-
-        if (result.isOffhand()) {
-            this.mc.interactionManager.interactItem(this.mc.player, Hand.OFF_HAND);
-            this.mc.player.swingHand(Hand.OFF_HAND);
-        } else {
-            InvUtils.swap(result.slot(), false);
-            this.mc.interactionManager.interactItem(this.mc.player, Hand.MAIN_HAND);
-            this.mc.player.swingHand(Hand.MAIN_HAND);
-            InvUtils.swapBack();
-        }
-        this.fireworkCooldownCounter = this.fireworkCooldown.get();
     }
 }

@@ -15,8 +15,8 @@ import meteordevelopment.orbit.EventHandler;
  * Custom 2-phase elytra cycle driving our standalone {@link Pitch40Classic} module.
  *
  * <p>Original interface preserved (same settings as before) but uses our
- * {@link Pitch40Classic} (standalone, classic 0.5.8 behavior) instead of
- * Meteor's broken ElytraFly.
+ * {@link Pitch40Classic} (standalone, classic +40/-40 behavior) instead of
+ * Meteor's ElytraFly.
  *
  * <ol>
  *   <li><b>CLIMB</b>: Activate {@link Pitch40Classic}, set bounds.
@@ -30,7 +30,7 @@ public class ElytraAutoFly extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgCycle = settings.createGroup("Cycle");
 
-    // ---- Pitch40-style climb settings ----
+    // ---- Pitch40Util-style climb settings ----
 
     public final Setting<Boolean> autoBoundAdjust = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-adjust-bounds")
@@ -90,7 +90,7 @@ public class ElytraAutoFly extends Module {
 
     public ElytraAutoFly() {
         super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "elytra-auto-fly",
-            "Custom elytra cycle: Pitch40Classic + auto-bound up to max-altitude, then manual-pitch descend to min-altitude, loop.");
+            "Custom elytra cycle driving Pitch40Classic: climb (Pitch40Classic) + auto-bound, then manual-pitch descend, loop.");
     }
 
     @Override
@@ -106,13 +106,16 @@ public class ElytraAutoFly extends Module {
 
     @Override
     public void onDeactivate() {
-        enterStandby();
+        if (pitch40Classic != null && pitch40Classic.isActive()) {
+            pitch40Classic.toggle();
+        }
     }
 
     private void resetBounds() {
+        if (mc.player == null) return;
         double y = mc.player.getY();
-        pitch40Classic.lowerBound.set(y - boundGap.get());
-        pitch40Classic.upperBound.set(y);
+        pitch40Classic.upperBound.set(y - 5);
+        pitch40Classic.lowerBound.set(y - 5 - boundGap.get());
     }
 
     private void enterClimb() {
@@ -127,15 +130,7 @@ public class ElytraAutoFly extends Module {
 
     private void enterDescend() {
         currentPhase = Phase.DESCEND;
-        // Deactivate Pitch40Classic (which controls pitch itself)
         if (pitch40Classic.isActive()) {
-            pitch40Classic.toggle();
-        }
-    }
-
-    private void enterStandby() {
-        // Restore Pitch40Classic to whatever state it was in before we activated.
-        if (pitch40Classic != null && pitch40Classic.isActive() && !pitch40WasActiveBefore) {
             pitch40Classic.toggle();
         }
     }
@@ -145,8 +140,7 @@ public class ElytraAutoFly extends Module {
         if (mc.player == null) return;
 
         if (currentPhase == Phase.CLIMB) {
-            // Reconnect: if Pitch40Classic was turned off (2b2t queue exit, manual
-            // toggle), re-enable when the player can fly again.
+            // Reconnect: if Pitch40Classic was turned off, re-enable when can fly
             if (!pitch40Classic.isActive()) {
                 if (mc.player.getAbilities().allowFlying) {
                     enterClimb();
@@ -160,6 +154,12 @@ public class ElytraAutoFly extends Module {
     }
 
     private void tickClimb() {
+        // Player fell below lower bound - 10: reset (from JEFF Pitch40Util)
+        if (autoBoundAdjust.get() && mc.player.getY() <= pitch40Classic.lowerBound.get() - 10) {
+            resetBounds();
+            return;
+        }
+
         // Cycle: switch to descend phase when max altitude reached.
         if (mc.player.getY() >= maxAltitude.get()) {
             enterDescend();
