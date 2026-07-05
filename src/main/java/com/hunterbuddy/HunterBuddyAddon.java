@@ -7,7 +7,6 @@ import com.hunterbuddy.hud.SpeedKMH;
 import com.hunterbuddy.modules.AFKVanillaFly;
 import com.hunterbuddy.modules.AnvilRename;
 import com.hunterbuddy.modules.AutoEXPPlus;
-import com.hunterbuddy.modules.AutoFarm;
 import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
@@ -19,7 +18,6 @@ import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
-import com.hunterbuddy.modules.ItemsSucker;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.NoHurtCam;
@@ -27,7 +25,6 @@ import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketFly;
-import com.hunterbuddy.modules.SandMineAddon;
 import com.hunterbuddy.modules.SearchArea;
 import com.hunterbuddy.modules.ShulkerColor;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
@@ -91,10 +88,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new VanityESP());
 
         // HunterBuddy-original modules
-        Modules.get().add(new SandMineAddon(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new ShulkerColor(HUNTER_BUDDY_CATEGORY));
-        Modules.get().add(new ItemsSucker(HUNTER_BUDDY_CATEGORY));
-        Modules.get().add(new AutoFarm(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new AnvilRename(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new SearchArea());
