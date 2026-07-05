@@ -35,7 +35,6 @@ dependencies {
     // Caffeine + Gson (runtime-only) are used by mlep's ported modules.
     modImplementation "com.github.ben-manes.caffeine:caffeine:3.1.8"
     modImplementation files("libs/LambdaEvents-2.4.2.jar")
-    include files("libs/LambdaEvents-2.4.2.jar")
     modImplementation "com.google.code.gson:gson:2.10.1"
     // Xaero mods — bundled locally (same versions as mlep references).
     modImplementation files("libs/XaeroPlus-2.32.0+fabric-1.21.11.jar")
