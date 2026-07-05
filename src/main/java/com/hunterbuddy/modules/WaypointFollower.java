@@ -213,7 +213,7 @@ public class WaypointFollower extends Module {
         .build());
 
     public WaypointFollower() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "hb-waypoint-follower", "Advanced waypoint following system with multi-dimensional flight support");
+        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "waypoint-follower", "Advanced waypoint following system with multi-dimensional flight support");
     }
 
     @Override

@@ -710,7 +710,7 @@ public class StashFinder extends Module {
    private static final String CATEGORY = "StashFinder";
 
    public StashFinder() {
-      super(Categories.World, "hb-stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
+      super(Categories.World, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
    }
 
    public void onActivate() {
