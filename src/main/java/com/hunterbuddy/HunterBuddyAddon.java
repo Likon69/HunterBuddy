@@ -5,7 +5,6 @@ import com.hunterbuddy.hud.ElytraHelperHud;
 import com.hunterbuddy.hud.MovementStatusHud;
 import com.hunterbuddy.hud.SpeedKMH;
 import com.hunterbuddy.modules.AFKVanillaFly;
-import com.hunterbuddy.modules.AnvilRename;
 import com.hunterbuddy.modules.AutoEXPPlus;
 import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
@@ -23,10 +22,10 @@ import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.NoHurtCam;
 import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.Pitch40;
+import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.SearchArea;
-import com.hunterbuddy.modules.ShulkerColor;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.StashFinder;
@@ -81,6 +80,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Replenish());
         Modules.get().add(new StashFinder());
         Modules.get().add(new Pitch40());
+        Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
         Modules.get().add(new SignRender());
         Modules.get().add(new FlowESP());
@@ -88,8 +88,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new VanityESP());
 
         // HunterBuddy-original modules
-        Modules.get().add(new ShulkerColor(HUNTER_BUDDY_CATEGORY));
-        Modules.get().add(new AnvilRename(HUNTER_BUDDY_CATEGORY));
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new SearchArea());
         ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);

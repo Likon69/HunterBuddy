@@ -4,7 +4,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.process.IElytraProcess;
 import com.hunterbuddy.modules.ElytraRecast;
-import com.hunterbuddy.modules.Pitch40;
+import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.WaypointFollower;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
@@ -196,7 +196,7 @@ public abstract class AreaLoaderMode {
 
                   this.enabledOverworldMode = (AreaLoader.OverworldFlightMode)this.searchArea.overworldFlightMode.get();
                   if (this.enabledOverworldMode == AreaLoader.OverworldFlightMode.PITCH40) {
-                     Module pitch40Module = Modules.get().get(Pitch40.class);
+                     Module pitch40Module = Modules.get().get(Pitch40Classic.class);
                      if (pitch40Module != null) {
                         Setting<Boolean> autoRecastSetting = (Setting<Boolean>) pitch40Module.settings.get("auto-recast");
                         if (autoRecastSetting != null) {
@@ -266,7 +266,7 @@ public abstract class AreaLoaderMode {
 
    private void cleanupOverworldModules() {
       WaypointFollower waypointFollower = (WaypointFollower)Modules.get().get(WaypointFollower.class);
-      Module pitch40Module = Modules.get().get(Pitch40.class);
+      Module pitch40Module = Modules.get().get(Pitch40Classic.class);
       if (pitch40Module != null) {
          if (this.pitch40SettingsModified) {
             Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>) pitch40Module.settings.get("auto-bound-adjust");
