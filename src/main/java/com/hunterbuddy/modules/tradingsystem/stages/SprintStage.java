@@ -47,7 +47,7 @@ public class SprintStage extends Stage {
         }
 
         boolean isAlreadyWithin = targetPosition.isWithinDistance(
-            getPlayer().getPos(),
+            getPlayer().getEntityPos(),
             super.mainModule.baritoneStopDistance.get()
         );
 

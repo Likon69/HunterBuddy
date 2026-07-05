@@ -25,7 +25,7 @@ public class RenderUtils {
         for (Entity entity : world.getEntities()) {
             if (blocked.contains(entity.getId())) continue;
             if (!(entity instanceof VillagerEntity villager)) continue;
-            if (!villager.getVillagerData().getProfession().equals(VillagerProfession.CLERIC)) continue;
+            if (!villager.getVillagerData().profession().equals(VillagerProfession.CLERIC)) continue;
 
             drawBoundingBox(event, entity);
         }

@@ -58,8 +58,8 @@ public class RotationUtils {
    @EventHandler(priority = 200)
    public void onPacketReceive(Receive event) {
       if (event.packet instanceof PlayerPositionLookS2CPacket packet) {
-         this.serverYaw = packet.getYaw();
-         this.serverPitch = packet.getPitch();
+         this.serverYaw = packet.change().yaw();
+         this.serverPitch = packet.change().pitch();
          this.currentYaw = this.serverYaw;
          this.currentPitch = this.serverPitch;
          this.clearRotations();
@@ -308,7 +308,7 @@ public class RotationUtils {
    }
 
    public static Vec3d getHitVector(Entity entity, RotationUtils.HitVector hitVector) {
-      Vec3d feetPos = entity.getPos();
+      Vec3d feetPos = entity.getEntityPos();
 
       return switch (hitVector) {
          case FEET -> feetPos;

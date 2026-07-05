@@ -187,7 +187,7 @@ public class ElytraTakeoff {
    }
 
    private void tickJumping(MinecraftClient mc) {
-      if (mc.player.isFallFlying()) {
+      if (mc.player.isGliding()) {
          this.enterBoosting();
          return;
       }
@@ -215,7 +215,7 @@ public class ElytraTakeoff {
    }
 
    private void tickDeploying(MinecraftClient mc) {
-      if (mc.player.isFallFlying()) {
+      if (mc.player.isGliding()) {
          this.enterBoosting();
          return;
       }
@@ -245,7 +245,7 @@ public class ElytraTakeoff {
    }
 
    private void tickBoosting(MinecraftClient mc) {
-      if (!mc.player.isFallFlying()) {
+      if (!mc.player.isGliding()) {
          if (this.phaseTicks > 6) {
             this.scheduleRetry("lost glide before boost completed");
          }
@@ -338,7 +338,7 @@ public class ElytraTakeoff {
          mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, Mode.START_FALL_FLYING));
       }
 
-      try { ((net.minecraft.entity.LivingEntity)mc.player).getClass().getMethod("startGliding").invoke(mc.player); } catch (ReflectiveOperationException e) {};
+      mc.player.startGliding();
    }
 
    private boolean useFirework(MinecraftClient mc) {

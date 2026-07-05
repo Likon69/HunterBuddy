@@ -1312,7 +1312,10 @@ public class StashFinder extends Module {
             }
             break;
          case Toast: {
-            MeteorToast toast = new meteordevelopment.meteorclient.utils.render.MeteorToast(Items.CHEST, this.title, "Stash Found!");
+            MeteorToast toast = new meteordevelopment.meteorclient.utils.render.MeteorToast.Builder(this.title)
+               .icon(Items.CHEST)
+               .text("Stash Found!")
+               .build();
             this.mc.getToastManager().add(toast);
             break;
          }
@@ -1326,7 +1329,10 @@ public class StashFinder extends Module {
                ChatUtils.info("StashFinder", new Object[]{"Found stash! Use secure menu to view coordinates."});
             }
 
-            MeteorToast toast = new meteordevelopment.meteorclient.utils.render.MeteorToast(Items.CHEST, this.title, "Stash Found!");
+            MeteorToast toast = new meteordevelopment.meteorclient.utils.render.MeteorToast.Builder(this.title)
+               .icon(Items.CHEST)
+               .text("Stash Found!")
+               .build();
             this.mc.getToastManager().add(toast);
             break;
          }
@@ -1337,7 +1343,10 @@ public class StashFinder extends Module {
                ChatUtils.info("StashFinder", new Object[]{"Found stash! Use secure menu to view coordinates."});
             }
 
-            MeteorToast toast = new meteordevelopment.meteorclient.utils.render.MeteorToast(Items.CHEST, this.title, "Stash Found!");
+            MeteorToast toast = new meteordevelopment.meteorclient.utils.render.MeteorToast.Builder(this.title)
+               .icon(Items.CHEST)
+               .text("Stash Found!")
+               .build();
             this.mc.getToastManager().add(toast);
             this.playDingSound();
             break;

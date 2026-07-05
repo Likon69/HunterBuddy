@@ -80,11 +80,11 @@ public class SandMineAddon extends Module {
     // Méthode pour vérifier si l'inventaire est plein
     private boolean isInventoryFull() {
         // Vérifier uniquement les emplacements 9 à 35 (inventaire principal, sans la hotbar)
-        for (int i = 9; i < mc.player.getInventory().main.size(); i++) {
-            if (mc.player.getInventory().main.get(i).isEmpty()) {
+        for (int i = 9; i < mc.player.getInventory().getMainStacks().size(); i++) {
+            if (mc.player.getInventory().getMainStacks().get(i).isEmpty()) {
                 return false; // Un emplacement est vide
             }
-            if (mc.player.getInventory().main.get(i).getCount() < mc.player.getInventory().main.get(i).getMaxCount()) {
+            if (mc.player.getInventory().getMainStacks().get(i).getCount() < mc.player.getInventory().getMainStacks().get(i).getMaxCount()) {
                 return false; // Un emplacement n'est pas plein
             }
         }

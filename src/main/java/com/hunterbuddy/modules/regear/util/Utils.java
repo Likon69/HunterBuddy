@@ -61,7 +61,7 @@ public class Utils {
                 if (file.createNewFile()) {
                     if (mc.player != null) {
                         MsgUtil.sendMsg("Created " + file.getName() + " in your meteor-client folder.");
-                        Style style = Style.EMPTY.withClickEvent(new ClickEvent(ClickEvent.Action.OPEN_FILE, file.getAbsolutePath()));
+                        Style style = Style.EMPTY.withClickEvent(new ClickEvent.OpenFile(file.getAbsolutePath()));
                         MsgUtil.sendMsg("Click §2§lhere §r§7to open the file.", style);
                     }
                     return true;
@@ -111,7 +111,7 @@ public class Utils {
                 case Slot -> new UpdateSelectedSlotC2SPacket(-69);
                 case Chat -> new ChatMessageC2SPacket("§", Instant.now(), 0L, null, null);
                 case Interact -> PlayerInteractEntityC2SPacket.attack(MeteorClient.mc.player, false);
-                case Movement -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.NaN, Double.NaN, Double.NaN, false);
+                case Movement -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.NaN, Double.NaN, Double.NaN, false, false);
                 case SequenceBreak -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, -420, 13.37f, 69.69f);
                 case InvalidSettings -> {
                     SyncedClientOptions defaults = SyncedClientOptions.createDefault();
@@ -123,7 +123,8 @@ public class Utils {
                         defaults.playerModelParts(),
                         defaults.mainArm(),
                         defaults.filtersText(),
-                        defaults.allowsServerListing()
+                        defaults.allowsServerListing(),
+                        defaults.particleStatus()
                     ));
                 }
             };

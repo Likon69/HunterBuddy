@@ -320,7 +320,7 @@ public class MlepScaffold extends Module {
       }
 
       this.updateNormalTargetPos();
-      if (this.bp.getY() < this.mc.world.getBottomY() || this.bp.getY() > this.mc.world.getTopY()) {
+      if (this.bp.getY() < this.mc.world.getBottomY() || this.bp.getY() > this.mc.world.getTopYInclusive()) {
          return;
       }
 
@@ -356,7 +356,7 @@ public class MlepScaffold extends Module {
 
    private void updateNormalTargetPos() {
       if ((Boolean) this.airPlace.get()) {
-         Vec3d vec = this.mc.player.getPos().add(this.mc.player.getVelocity()).add(0.0, -0.5, 0.0);
+         Vec3d vec = this.mc.player.getEntityPos().add(this.mc.player.getVelocity()).add(0.0, -0.5, 0.0);
          this.bp.set(vec.getX(), vec.getY(), vec.getZ());
          return;
       }
@@ -366,7 +366,7 @@ public class MlepScaffold extends Module {
          return;
       }
 
-      Vec3d pos = this.mc.player.getPos().add(0.0, -0.98, 0.0).add(this.mc.player.getVelocity());
+      Vec3d pos = this.mc.player.getEntityPos().add(0.0, -0.98, 0.0).add(this.mc.player.getVelocity());
 
       if (PlayerUtils.distanceTo(this.prevBp) > (Double) this.placeRange.get()) {
          List<BlockPos> solidBlocks = new ArrayList<>();
@@ -376,7 +376,7 @@ public class MlepScaffold extends Module {
             for (int z = (int) (this.mc.player.getZ() - range); z < this.mc.player.getZ() + range; z++) {
                for (
                   int y = (int) Math.max(this.mc.world.getBottomY(), this.mc.player.getY() - range);
-                  y < Math.min(this.mc.world.getTopY(), this.mc.player.getY() + range);
+                  y < Math.min(this.mc.world.getTopYInclusive(), this.mc.player.getY() + range);
                   y++
                ) {
                   this.bp.set(x, y, z);
@@ -411,7 +411,7 @@ public class MlepScaffold extends Module {
 
    private List<BlockPos> getRegearPlacementPositions() {
       List<BlockPos> positions = new ArrayList<>();
-      Vec3d playerPos = this.mc.player.getPos();
+      Vec3d playerPos = this.mc.player.getEntityPos();
       Vec3d velocity = this.mc.player.getVelocity();
       double multiplier = 3.0;
       Vec3d predictedPos = playerPos;

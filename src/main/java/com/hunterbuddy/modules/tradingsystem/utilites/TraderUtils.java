@@ -15,7 +15,7 @@ import java.util.List;
 
 public class TraderUtils {
     public static VillagerEntity getNearestCleric(PlayerEntity player, List<Integer> blocked, int range) {
-        return player.getWorld().getEntitiesByClass(
+        return player.getEntityWorld().getEntitiesByClass(
                 VillagerEntity.class,
                 new Box(player.getBlockPos()).expand(range),
                 (villager) -> {
@@ -23,7 +23,7 @@ public class TraderUtils {
                         return false;
                     }
 
-                    return villager.getVillagerData().getProfession().equals(VillagerProfession.CLERIC);
+                    return villager.getVillagerData().profession().equals(VillagerProfession.CLERIC);
                 }
             )
             .parallelStream()
