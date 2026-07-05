@@ -3,7 +3,7 @@ package com.hunterbuddy.modules;
 import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.mixin.accessor.LivingEntityAccessor;
+import com.hunterbuddy.modules.mixin.accessors.LivingEntityAccessor;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.Utils;
 import java.util.List;

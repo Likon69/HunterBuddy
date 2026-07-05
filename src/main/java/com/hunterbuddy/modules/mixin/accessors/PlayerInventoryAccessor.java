@@ -1,4 +1,4 @@
-package com.hunterbuddy.modules.regear.mixin.accessor;
+package com.hunterbuddy.modules.mixin.accessors;
 
 import net.minecraft.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;

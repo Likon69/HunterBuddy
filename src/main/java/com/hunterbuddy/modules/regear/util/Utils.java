@@ -1,6 +1,6 @@
 package com.hunterbuddy.modules.regear.util;
 
-import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import java.io.File;
 import java.io.OutputStream;
 import java.net.MalformedURLException;

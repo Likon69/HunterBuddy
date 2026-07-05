@@ -1,8 +1,8 @@
 package com.hunterbuddy.modules.regear.util;
 
 import com.hunterbuddy.modules.regear.accessor.InputAccessor;
-import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
-import com.hunterbuddy.modules.regear.mixin.accessor.UpdateSelectedSlotS2CPacketAccessor;
+import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.mixin.accessors.UpdateSelectedSlotS2CPacketAccessor;
 import java.util.Arrays;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;

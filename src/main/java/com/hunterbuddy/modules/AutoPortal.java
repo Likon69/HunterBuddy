@@ -1,7 +1,7 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.mixin.accessor.ClientPlayerInteractionManagerAccessor;
+import com.hunterbuddy.modules.mixin.accessors.ClientPlayerInteractionManagerAccessor;
 import com.hunterbuddy.modules.regear.util.PlacementUtils;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import java.util.ArrayList;

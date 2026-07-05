@@ -1,17 +1,17 @@
 {
   "required": true,
-  "package": "",
+  "package": "com.hunterbuddy.modules.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "com.hunterbuddy.modules.mixin.MlepScaffoldMixin",
-    "com.hunterbuddy.modules.mixin.InGameHudMixin",
-    "com.hunterbuddy.modules.mixin.MixinGuiMapWaypointFollower",
-    "com.hunterbuddy.modules.mixin.LivingEntityMixin",
-    "com.hunterbuddy.modules.regear.mixin.accessor.LivingEntityAccessor",
-    "com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor",
-    "com.hunterbuddy.modules.regear.mixin.accessor.UpdateSelectedSlotS2CPacketAccessor",
-    "com.hunterbuddy.modules.regear.mixin.accessor.DisconnectS2CPacketAccessor",
-    "com.hunterbuddy.modules.regear.mixin.accessor.ClientPlayerInteractionManagerAccessor"
+    "MlepScaffoldMixin",
+    "InGameHudMixin",
+    "MixinGuiMapWaypointFollower",
+    "LivingEntityMixin",
+    "accessors.LivingEntityAccessor",
+    "accessors.PlayerInventoryAccessor",
+    "accessors.UpdateSelectedSlotS2CPacketAccessor",
+    "accessors.DisconnectS2CPacketAccessor",
+    "accessors.ClientPlayerInteractionManagerAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
