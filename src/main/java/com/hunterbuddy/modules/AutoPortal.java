@@ -1,7 +1,6 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.mixin.accessors.ClientPlayerInteractionManagerAccessor;
 import com.hunterbuddy.modules.regear.util.PlacementUtils;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import java.util.ArrayList;
@@ -273,7 +272,7 @@ public class AutoPortal extends Module {
       for (int i = 0; i < 9; i++) {
          if (this.mc.player.getInventory().getStack(i).getItem() == Items.OBSIDIAN) {
             this.mc.player.getInventory().setSelectedSlot(i);
-            ((ClientPlayerInteractionManagerAccessor) this.mc.interactionManager).invokeSyncSelectedSlot();
+            this.mc.interactionManager.syncSelectedSlot();
             return true;
          }
       }
@@ -297,7 +296,7 @@ public class AutoPortal extends Module {
             this.toggle();
          } else {
             this.mc.player.getInventory().setSelectedSlot(slot);
-            ((ClientPlayerInteractionManagerAccessor) this.mc.interactionManager).invokeSyncSelectedSlot();
+            this.mc.interactionManager.syncSelectedSlot();
             if (this.mc.player.getMainHandStack().getItem() == Items.FLINT_AND_STEEL) {
                BlockPos fireBlock = this.portalBlocks.get(0);
                Vec3d hitVec = Vec3d.ofCenter(fireBlock).add(0.0, 0.5, 0.0);
