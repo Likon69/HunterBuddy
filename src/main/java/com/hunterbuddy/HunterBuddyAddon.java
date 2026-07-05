@@ -4,8 +4,11 @@ package com.hunterbuddy;
 import com.hunterbuddy.hud.ElytraHelperHud;
 import com.hunterbuddy.hud.MovementStatusHud;
 import com.hunterbuddy.hud.SpeedKMH;
+import com.hunterbuddy.modules.AFKVanillaFly;
 import com.hunterbuddy.modules.AnvilRename;
+import com.hunterbuddy.modules.AutoEXPPlus;
 import com.hunterbuddy.modules.AutoFarm;
+import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.CaveAirESP;
@@ -31,6 +34,7 @@ import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.StashFinder;
 import com.hunterbuddy.modules.TrailFollower;
+import com.hunterbuddy.modules.UnfocusedFpsLimiter;
 import com.hunterbuddy.modules.VanityESP;
 import com.hunterbuddy.modules.WaypointFollower;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
@@ -59,6 +63,10 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(MovementStatusHud.INFO);
 
         // HunterBuddy modules
+        Modules.get().add(new AFKVanillaFly());
+        Modules.get().add(new AutoLogPlus());
+        Modules.get().add(new AutoEXPPlus());
+        Modules.get().add(new UnfocusedFpsLimiter());
         Modules.get().add(new ShulkerOverviewModule());
         Modules.get().add(new ElytraSwap());
         Modules.get().add(new GhostContainer());
