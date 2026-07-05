@@ -22,7 +22,6 @@ import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.NoHurtCam;
 import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.Pitch40;
-import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.SandMineAddon;
@@ -77,7 +76,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Replenish());
         Modules.get().add(new StashFinder());
         Modules.get().add(new Pitch40());
-        Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
         Modules.get().add(new SignRender());
         Modules.get().add(new FlowESP());

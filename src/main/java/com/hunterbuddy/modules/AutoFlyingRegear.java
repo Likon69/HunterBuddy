@@ -4,7 +4,7 @@ import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
 import com.hunterbuddy.modules.regear.util.PlacementUtils;

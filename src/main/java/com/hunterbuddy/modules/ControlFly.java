@@ -1,7 +1,7 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
+import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import meteordevelopment.meteorclient.events.world.ParticleEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Post;
