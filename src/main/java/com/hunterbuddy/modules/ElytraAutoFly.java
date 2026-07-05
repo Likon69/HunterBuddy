@@ -111,8 +111,8 @@ public class ElytraAutoFly extends Module {
 
     private void resetBounds() {
         double y = mc.player.getY();
-        pitch40Classic.lowerBound.set(y - 5);
-        pitch40Classic.upperBound.set(y - 5);
+        pitch40Classic.lowerBound.set(y - boundGap.get());
+        pitch40Classic.upperBound.set(y);
     }
 
     private void enterClimb() {

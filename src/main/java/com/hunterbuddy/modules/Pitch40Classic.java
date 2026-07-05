@@ -20,14 +20,18 @@ public class Pitch40Classic extends Module {
     public final Setting<Double> lowerBound = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("lower-bound")
         .description("Hauteur Y où on repart en pitch up.")
-        .defaultValue(180.0)
+        .defaultValue(80.0)
+        .min(-128.0)
+        .sliderMax(360.0)
         .build()
     );
 
     public final Setting<Double> upperBound = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("upper-bound")
-        .description("Hauteur Y où on repart en pitch down. Mettre 320 (build limit) pour toujours pitch up.")
-        .defaultValue(300.0)
+        .description("Hauteur Y où on repart en pitch down.")
+        .defaultValue(120.0)
+        .min(-128.0)
+        .sliderMax(360.0)
         .build()
     );
 
