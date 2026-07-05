@@ -86,7 +86,7 @@ public class AutoPortal extends Module {
    private int lightAttempts = 0;
 
    public AutoPortal() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "auto-portal-HB", "For the Base Hunter who has places to be. By Stash Hunt Addon (Jeff)");
+      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "hb-auto-portal", "For the Base Hunter who has places to be. By Stash Hunt Addon (Jeff)");
    }
 
    public void onActivate() {
