@@ -152,7 +152,7 @@ public class ElytraTakeoff {
     }
 
     private void tickJumping(MinecraftClient mc) {
-        if (mc.player.isFallFlying()) {
+        if (mc.player.isGliding()) {
             enterBoosting();
             return;
         }
@@ -175,7 +175,7 @@ public class ElytraTakeoff {
     }
 
     private void tickDeploying(MinecraftClient mc) {
-        if (mc.player.isFallFlying()) {
+        if (mc.player.isGliding()) {
             enterBoosting();
             return;
         }
@@ -201,7 +201,7 @@ public class ElytraTakeoff {
     }
 
     private void tickBoosting(MinecraftClient mc) {
-        if (!mc.player.isFallFlying()) {
+        if (!mc.player.isGliding()) {
             if (phaseTicks > 6) scheduleRetry("lost glide before boost completed");
             return;
         }
@@ -296,7 +296,7 @@ public class ElytraTakeoff {
     }
 
     private boolean useFirework(MinecraftClient mc) {
-        if (mc.interactionManager == null || !mc.player.isFallFlying()) return false;
+        if (mc.interactionManager == null || !mc.player.isGliding()) return false;
 
         if (rocketSlot >= 0 && rocketSlot < 9) {
             InvUtils.swap(rocketSlot, false);
