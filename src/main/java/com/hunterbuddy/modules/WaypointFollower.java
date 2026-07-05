@@ -1,10 +1,9 @@
 package com.hunterbuddy.modules;
 
-import com.hunterbuddy.HunterBuddyAddon;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalXZ;
-// Mlep class removed; use HunterBuddyAddon.HUNTER_BUDDY_CATEGORY directly
+import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
@@ -240,7 +239,7 @@ public class WaypointFollower extends Module {
         this.isPaused = false;
         this.waypointsCompletedThisSession = 0;
         this.totalDistanceTraveled = 0.0;
-        this.lastPlayerPos = mc.player.getPos();
+        this.lastPlayerPos = mc.player.getEntityPos();
         this.waypointsToFollow.clear();
         this.currentWaypointIndex = 0;
         this.startupDelayTicks = 0;
@@ -847,7 +846,7 @@ public class WaypointFollower extends Module {
         ClientPlayerEntity player = mc.player;
         if (player == null || this.waypointsToFollow.isEmpty()) return null;
 
-        Vec3d playerPos = player.getPos();
+        Vec3d playerPos = player.getEntityPos();
         BlockPos closest = null;
         double closestDistance = Double.MAX_VALUE;
 
@@ -923,7 +922,7 @@ public class WaypointFollower extends Module {
         ClientPlayerEntity player = mc.player;
         if (player == null) return;
 
-        Vec3d playerPos = player.getPos();
+        Vec3d playerPos = player.getEntityPos();
         double deltaX = targetPos.getX() - playerPos.getX();
         double deltaZ = targetPos.getZ() - playerPos.getZ();
         float targetYaw = (float) (Math.atan2(deltaZ, deltaX) * 180.0 / Math.PI) - 90.0F;
@@ -972,9 +971,9 @@ public class WaypointFollower extends Module {
         }
 
         // Main Inventory (slots 9-35)
-        for (int i = 9; i < 36; i++) {
+        for (int i = 9; i < inv.getMainStacks().size(); i++) {
             if (inv.getStack(i).isOf(Items.FIREWORK_ROCKET)) {
-                int selected = ((com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor) inv).getSelectedSlot();
+                int selected = inv.getSelectedSlot();
                 InvUtils.move().from(i).to(selected);
                 mc.interactionManager.interactItem(player, Hand.MAIN_HAND);
                 InvUtils.move().from(selected).to(i);
@@ -1061,7 +1060,7 @@ public class WaypointFollower extends Module {
         ClientPlayerEntity player = mc.player;
         if (player == null) return;
 
-        Vec3d playerPos = player.getPos();
+        Vec3d playerPos = player.getEntityPos();
         int checkX = this.toNetherCoord(nextWaypoint.getX());
         int checkZ = this.toNetherCoord(nextWaypoint.getZ());
         double horizontalDistance = Math.sqrt(Math.pow(checkX - playerPos.getX(), 2) + Math.pow(checkZ - playerPos.getZ(), 2));
@@ -1083,7 +1082,7 @@ public class WaypointFollower extends Module {
         Vec3d scaledTarget = new Vec3d(this.toNetherCoord(nextWaypoint.getX()), nextWaypoint.getY(), this.toNetherCoord(nextWaypoint.getZ()));
         this.rotateYawTowards(scaledTarget);
 
-        Vec3d playerPos = player.getPos();
+        Vec3d playerPos = player.getEntityPos();
         double horizontalDistance = this.getHorizontalDistance(playerPos, scaledTarget);
         double effectiveReach = this.reachDistance.get() * this.netherReachMultiplier.get();
 
@@ -1128,7 +1127,7 @@ public class WaypointFollower extends Module {
         ClientPlayerEntity player = mc.player;
         if (player == null) return;
 
-        double horizontalDistance = this.getHorizontalDistance(player.getPos(), targetPos);
+        double horizontalDistance = this.getHorizontalDistance(player.getEntityPos(), targetPos);
         if (horizontalDistance < this.reachDistance.get()) {
             this.removeCurrentWaypoint(nextWaypoint);
             if (this.waypointsToFollow.isEmpty()) {
@@ -1158,7 +1157,7 @@ public class WaypointFollower extends Module {
             this.useFireworkRocket();
         }
 
-        double horizontalDistance = this.getHorizontalDistance(player.getPos(), targetPos);
+        double horizontalDistance = this.getHorizontalDistance(player.getEntityPos(), targetPos);
         if (horizontalDistance < this.reachDistance.get()) {
             this.removeCurrentWaypoint(nextWaypoint);
             if (this.waypointsToFollow.isEmpty()) {
@@ -1176,7 +1175,7 @@ public class WaypointFollower extends Module {
         ClientPlayerEntity player = mc.player;
         if (player == null) return;
 
-        double horizontalDistance = this.getHorizontalDistance(player.getPos(), targetPos);
+        double horizontalDistance = this.getHorizontalDistance(player.getEntityPos(), targetPos);
         if (horizontalDistance < this.reachDistance.get()) {
             this.removeCurrentWaypoint(nextWaypoint);
             if (this.waypointsToFollow.isEmpty() && this.showChatMessages.get()) {
@@ -1209,7 +1208,7 @@ public class WaypointFollower extends Module {
             this.waypointsToFollow.clear();
             this.waypointLoadRetries = 0;
             this.waypointsFullyLoaded = false;
-            this.lastPlayerPos = player.getPos();
+            this.lastPlayerPos = player.getEntityPos();
             this.startAsyncWaypointLoad();
         }
 
@@ -1218,10 +1217,10 @@ public class WaypointFollower extends Module {
         if (mc.interactionManager == null || mc.interactionManager.getCurrentGameMode() == GameMode.SPECTATOR) return;
 
         if (this.lastPlayerPos != null) {
-            double distance = player.getPos().distanceTo(this.lastPlayerPos);
+            double distance = player.getEntityPos().distanceTo(this.lastPlayerPos);
             if (distance < 100.0) this.totalDistanceTraveled += distance;
         }
-        this.lastPlayerPos = player.getPos();
+        this.lastPlayerPos = player.getEntityPos();
 
         this.checkAndReloadWaypoints();
         this.pruneUntrackableWaypoints();
@@ -1243,7 +1242,7 @@ public class WaypointFollower extends Module {
         this.isInEnd = this.isInEnd(mc.world);
 
         if (this.autoStartFlight.get() && !this.startupRecastTriggered) {
-            if (!player.isFallFlying()) {
+            if (!player.isGliding()) {
                 this.startupDelayTicks++;
                 if (this.startupDelayTicks >= this.startupDelay.get()) {
                     if (this.hasElytraEquipped()) {
@@ -1260,7 +1259,7 @@ public class WaypointFollower extends Module {
         }
 
         if (this.startupRecastTriggered && !this.baritoneActivatedAfterStartup) {
-            if (player.isFallFlying()) {
+            if (player.isGliding()) {
                 this.glidingTicksAfterStartup++;
                 if (this.glidingTicksAfterStartup >= 2) {
                     this.baritoneActivatedAfterStartup = true;
@@ -1300,7 +1299,7 @@ public class WaypointFollower extends Module {
         BlockPos next = this.getNextWaypoint();
         ClientPlayerEntity player = mc.player;
         if (next != null && player != null) {
-            double dist = this.getHorizontalDistance(player.getPos(), this.getAdjustedWaypointPos(next));
+            double dist = this.getHorizontalDistance(player.getEntityPos(), this.getAdjustedWaypointPos(next));
             info.append(String.format(" - %.0fm", dist));
         }
 

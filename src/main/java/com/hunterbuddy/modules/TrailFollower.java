@@ -1,9 +1,8 @@
 package com.hunterbuddy.modules;
 
-import com.hunterbuddy.HunterBuddyAddon;
 import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalXZ;
-// Mlep class removed; use HunterBuddyAddon.HUNTER_BUDDY_CATEGORY directly
+import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -388,7 +387,7 @@ public class TrailFollower extends Module {
                )
                .normalize()
                .multiply((Double)this.pathDistance.get());
-            Vec3d targetPos = this.mc.player.getPos().add(offset);
+            Vec3d targetPos = this.mc.player.getEntityPos().add(offset);
 
             for (int i = 0; i < ((Integer)this.maxTrailLength.get()).intValue() * this.startDirectionWeighting.get(); i++) {
                this.trail.add(targetPos);
@@ -499,8 +498,8 @@ public class TrailFollower extends Module {
                            Vec3d baritoneTarget;
                            if (this.netherPathMode.get() == TrailFollower.NetherPathMode.AVERAGE) {
                               Vec3d averagePos = this.calculateForwardWeightedAverage(this.trail);
-                              Vec3d directionVec = averagePos.subtract(this.mc.player.getPos()).normalize();
-                              Vec3d predictedPos = this.mc.player.getPos().add(directionVec.multiply(10.0));
+                              Vec3d directionVec = averagePos.subtract(this.mc.player.getEntityPos()).normalize();
+                              Vec3d predictedPos = this.mc.player.getEntityPos().add(directionVec.multiply(10.0));
                               double calculatedYaw = RotationUtils.getYaw(predictedPos);
                               double decayedWeight = this.getDecayedInitialWeight();
                               if (decayedWeight > 0.01) {
@@ -509,7 +508,7 @@ public class TrailFollower extends Module {
                                  this.targetYaw = calculatedYaw;
                               }
 
-                              baritoneTarget = Utils.positionInDirection(this.mc.player.getPos(), this.targetYaw, this.pathDistanceActual);
+                              baritoneTarget = Utils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, this.pathDistanceActual);
                            } else {
                               Vec3d lastPos = this.trail.getLast();
                               baritoneTarget = lastPos;
@@ -521,7 +520,7 @@ public class TrailFollower extends Module {
                               .setGoalAndPath(new GoalXZ((int)baritoneTarget.x, (int)baritoneTarget.z));
                         }
                      } else {
-                        Vec3d targetPos = Utils.positionInDirection(this.mc.player.getPos(), this.targetYaw, this.pathDistanceActual);
+                        Vec3d targetPos = Utils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, this.pathDistanceActual);
                         BaritoneAPI.getProvider()
                            .getPrimaryBaritone()
                            .getCustomGoalProcess()
@@ -549,7 +548,7 @@ public class TrailFollower extends Module {
    @EventHandler
    private void onRender(Render3DEvent event) {
       if ((Boolean)this.debug.get()) {
-         Vec3d targetPos = Utils.positionInDirection(this.mc.player.getPos(), this.targetYaw, 10.0);
+         Vec3d targetPos = Utils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, 10.0);
          event.renderer
             .line(
                this.mc.player.getX(),
@@ -661,8 +660,8 @@ public class TrailFollower extends Module {
                      if (!this.trail.isEmpty()) {
                         if (this.followMode == TrailFollower.FollowMode.YAWLOCK) {
                            Vec3d averagePos = this.calculateForwardWeightedAverage(this.trail);
-                           Vec3d positionVec = averagePos.subtract(this.mc.player.getPos()).normalize();
-                           Vec3d targetPos = this.mc.player.getPos().add(positionVec.multiply(10.0));
+                           Vec3d positionVec = averagePos.subtract(this.mc.player.getEntityPos()).normalize();
+                           Vec3d targetPos = this.mc.player.getEntityPos().add(positionVec.multiply(10.0));
                            double calculatedYaw = RotationUtils.getYaw(targetPos);
                            double decayedWeight = this.getDecayedInitialWeight();
                            if (decayedWeight > 0.01) {
@@ -710,7 +709,7 @@ public class TrailFollower extends Module {
 
    private Vec3d calculateForwardWeightedAverage(ArrayDeque<Vec3d> positions) {
       if (positions.isEmpty()) {
-         return this.mc.player.getPos();
+         return this.mc.player.getEntityPos();
       }
 
       if ((Double)this.forwardWeightStrength.get() <= 0.01) {
@@ -720,7 +719,7 @@ public class TrailFollower extends Module {
       double sumX = 0.0;
       double sumZ = 0.0;
       double totalWeight = 0.0;
-      Vec3d playerPos = this.mc.player.getPos();
+      Vec3d playerPos = this.mc.player.getEntityPos();
 
       for (Vec3d pos : positions) {
          double chunkYaw = RotationUtils.getYaw(pos);
@@ -771,7 +770,7 @@ public class TrailFollower extends Module {
    private void log(String message) {
       this.info(message, new Object[0]);
       if (!((String)this.webhookLink.get()).isEmpty()) {
-         Utils.sendWebhook((String)this.webhookLink.get(), "TrailFollower", message, null, this.mc.player.getGameProfile().getName());
+         Utils.sendWebhook((String)this.webhookLink.get(), "TrailFollower", message, null, this.mc.player.getGameProfile().name());
       }
    }
 

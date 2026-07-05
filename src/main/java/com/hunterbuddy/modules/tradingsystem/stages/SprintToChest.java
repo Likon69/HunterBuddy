@@ -33,7 +33,7 @@ public class SprintToChest extends Stage {
 
         //NOTE: "+ 1" because block not fluid, can't go to "< 1" distance
         boolean isAlreadyWithin = this.chest.getChestPosition(super.mainModule).isWithinDistance(
-            getPlayer().getPos(),
+            getPlayer().getEntityPos(),
             super.mainModule.baritoneStopDistance.get() + 1
         );
 

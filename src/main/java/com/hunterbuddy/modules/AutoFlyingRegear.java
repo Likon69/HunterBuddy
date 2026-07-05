@@ -1,10 +1,9 @@
 package com.hunterbuddy.modules;
 
-import com.hunterbuddy.HunterBuddyAddon;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalBlock;
-// Mlep class removed; use HunterBuddyAddon.HUNTER_BUDDY_CATEGORY directly
+import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.mixin.accessor.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
@@ -782,7 +781,7 @@ public class AutoFlyingRegear extends Module {
          return;
       }
 
-      if (this.mc.player.isFallFlying()) {
+      if (this.mc.player.isGliding()) {
          Utils.setPressed(this.mc.options.sneakKey, true);
       }
 
@@ -939,11 +938,11 @@ public class AutoFlyingRegear extends Module {
       }
 
       Vec3d centerTarget = Vec3d.ofCenter(this.platformCenter);
-      Vec3d playerPos = this.mc.player.getPos();
+      Vec3d playerPos = this.mc.player.getEntityPos();
       double deltaX = centerTarget.x - playerPos.x;
       double deltaZ = centerTarget.z - playerPos.z;
       double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
-      boolean inAir = !this.mc.player.isOnGround() && !this.mc.player.isFallFlying();
+      boolean inAir = !this.mc.player.isOnGround() && !this.mc.player.isGliding();
       if (distance < 0.2) {
          IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null) {
@@ -1169,7 +1168,7 @@ public class AutoFlyingRegear extends Module {
                this.pendingBlocks.clear();
                this.currentBlockIndex = 0;
                Vec3d centerTarget = Vec3d.ofCenter(this.platformCenter);
-               Vec3d playerPos = this.mc.player.getPos();
+               Vec3d playerPos = this.mc.player.getEntityPos();
                double distance = Math.sqrt(
                   Math.pow(centerTarget.x - playerPos.x, 2.0) + Math.pow(centerTarget.z - playerPos.z, 2.0)
                );
@@ -1200,7 +1199,7 @@ public class AutoFlyingRegear extends Module {
    private void handleCreatingWalls() {
       if (this.stateTickCounter == 1) {
          Vec3d centerTarget = Vec3d.ofCenter(this.platformCenter);
-         Vec3d playerPos = this.mc.player.getPos();
+         Vec3d playerPos = this.mc.player.getEntityPos();
          double distance = Math.sqrt(
             Math.pow(centerTarget.x - playerPos.x, 2.0) + Math.pow(centerTarget.z - playerPos.z, 2.0)
          );
@@ -1505,7 +1504,7 @@ public class AutoFlyingRegear extends Module {
       } else {
          if (this.stateTickCounter == 1) {
             Vec3d targetCenter = Vec3d.ofCenter(this.platformCenter);
-            Vec3d playerPos = this.mc.player.getPos();
+            Vec3d playerPos = this.mc.player.getEntityPos();
             double distance = Math.sqrt(
                Math.pow(targetCenter.x - playerPos.x, 2.0) + Math.pow(targetCenter.z - playerPos.z, 2.0)
             );
@@ -1630,7 +1629,7 @@ public class AutoFlyingRegear extends Module {
    private void handleOpeningEchest() {
       BlockPos standPos = this.echestPos.add(-1, -1, 0);
       Vec3d targetCenter = Vec3d.ofCenter(standPos.up());
-      Vec3d playerPos = this.mc.player.getPos();
+      Vec3d playerPos = this.mc.player.getEntityPos();
       double distance = playerPos.distanceTo(targetCenter);
       if (distance > 0.3) {
          if (this.stateTickCounter == 1) {
@@ -1819,7 +1818,7 @@ public class AutoFlyingRegear extends Module {
       }
 
       Vec3d targetCenter = Vec3d.ofCenter(this.platformCenter);
-      Vec3d playerPos = this.mc.player.getPos();
+      Vec3d playerPos = this.mc.player.getEntityPos();
       double deltaX = targetCenter.x - playerPos.x;
       double deltaZ = targetCenter.z - playerPos.z;
       double horizontalDistance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
@@ -2452,7 +2451,7 @@ public class AutoFlyingRegear extends Module {
    private void handleOpeningEchestReturn() {
       BlockPos standPos = this.echestPos.add(-1, -1, 0);
       Vec3d targetCenter = Vec3d.ofCenter(standPos.up());
-      Vec3d playerPos = this.mc.player.getPos();
+      Vec3d playerPos = this.mc.player.getEntityPos();
       double distance = playerPos.distanceTo(targetCenter);
       if (distance > 0.3) {
          if (this.stateTickCounter == 1) {
@@ -2806,7 +2805,7 @@ public class AutoFlyingRegear extends Module {
                ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(pickaxe.slot());
             }
 
-            Vec3d playerPos = this.mc.player.getPos();
+            Vec3d playerPos = this.mc.player.getEntityPos();
             Vec3d blockCenter = Vec3d.ofCenter(pos);
             double dx = playerPos.x - blockCenter.x;
             double dy = playerPos.y + this.mc.player.getEyeHeight(this.mc.player.getPose()) - blockCenter.y;

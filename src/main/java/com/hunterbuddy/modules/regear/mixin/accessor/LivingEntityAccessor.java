@@ -6,6 +6,6 @@ import net.minecraft.entity.LivingEntity;
 
 @Mixin(LivingEntity.class)
 public interface LivingEntityAccessor {
-    @Invoker("getJumpVelocity")
-    float invokeGetJumpVelocity();
+   @Invoker("getJumpVelocity")
+   float invokeGetJumpVelocity();
 }

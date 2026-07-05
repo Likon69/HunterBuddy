@@ -252,11 +252,11 @@ public class ElytraBounce extends Module {
          this.paused = false;
          this.waitingForChunksToLoad = false;
          this.elytraToggled = false;
-         this.lastPos = this.mc.player.getPos();
-         this.lastUnstuckPos = this.mc.player.getPos();
+         this.lastPos = this.mc.player.getEntityPos();
+         this.lastUnstuckPos = this.mc.player.getEntityPos();
          this.stuckTimer = 0;
          this.cameraPitch = this.mc.player.getPitch();
-         if ((Boolean)this.bounce.get() && this.mc.player.getPos().multiply(1.0, 0.0, 1.0).length() >= 100.0) {
+         if ((Boolean)this.bounce.get() && this.mc.player.getEntityPos().multiply(1.0, 0.0, 1.0).length() >= 100.0) {
             if (!BaritoneHelper.hasElytraProcess() || BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().currentDestination() == null) {
                BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoal(null);
             }
@@ -295,7 +295,7 @@ public class ElytraBounce extends Module {
          if (!(Boolean)this.onlyWhileColliding.get() || this.mc.player.horizontalCollision) {
             if (!(Boolean)this.onlyOnDiagonal.get() || (Boolean)this.tunnelBounce.get() || this.isDiagonalHeading()) {
                if (this.lastPos != null) {
-                  double speedBps = this.mc.player.getPos().subtract(this.lastPos).multiply(20.0, 0.0, 20.0).length();
+                  double speedBps = this.mc.player.getEntityPos().subtract(this.lastPos).multiply(20.0, 0.0, 20.0).length();
                   Timer timer = (Timer)Modules.get().get(Timer.class);
                   if (timer.isActive()) {
                      speedBps *= timer.getMultiplier();
@@ -310,7 +310,7 @@ public class ElytraBounce extends Module {
                   }
                }
 
-               this.lastPos = this.mc.player.getPos();
+               this.lastPos = this.mc.player.getEntityPos();
             }
          }
       }
@@ -368,11 +368,11 @@ public class ElytraBounce extends Module {
                this.stuckTimer++;
             } else {
                this.stuckTimer = 0;
-               this.lastUnstuckPos = this.mc.player.getPos();
+               this.lastUnstuckPos = this.mc.player.getEntityPos();
             }
 
             if ((Boolean)this.highwayObstaclePasser.get()
-               && this.mc.player.getPos().length() > 100.0
+               && this.mc.player.getEntityPos().length() > 100.0
                && (
                   this.mc.player.getY() < this.targetY
                      || this.mc.player.getY() > this.targetY + 2
@@ -388,7 +388,7 @@ public class ElytraBounce extends Module {
                BlockPos goal = this.mc.player.getBlockPos();
                double currDistance = (Double)this.distance.get();
                if (this.portalTrap != null) {
-                  currDistance += this.mc.player.getPos().distanceTo(this.portalTrap.toCenterPos());
+                  currDistance += this.mc.player.getEntityPos().distanceTo(this.portalTrap.toCenterPos());
                   this.portalTrap = null;
                   this.info("Pathing around portal.", new Object[0]);
                }
@@ -401,7 +401,7 @@ public class ElytraBounce extends Module {
                   }
 
                   Vec3d unitYawVec = Utils.yawToDirection((Double)this.yaw.get());
-                  Vec3d travelVec = this.mc.player.getPos().subtract(this.startPos.toCenterPos());
+                  Vec3d travelVec = this.mc.player.getEntityPos().subtract(this.startPos.toCenterPos());
                   double parallelCurrPosDot = travelVec.multiply(new Vec3d(1.0, 0.0, 1.0)).dotProduct(unitYawVec);
                   Vec3d parallelCurrPosComponent = unitYawVec.multiply(parallelCurrPosDot);
                   Vec3d pos = this.startPos.toCenterPos().add(parallelCurrPosComponent);
@@ -484,7 +484,7 @@ public class ElytraBounce extends Module {
          int slot = this.getInventoryItemSlot(Items.ELYTRA);
          boolean elytraEquipped = this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA);
          if (elytraEquipped || slot != -1) {
-            if (!this.mc.player.isFallFlying()) {
+            if (!this.mc.player.isGliding()) {
                boolean swapBack = false;
                if (!elytraEquipped) {
                   this.swapArmor(2, slot);
@@ -492,7 +492,7 @@ public class ElytraBounce extends Module {
                }
 
                this.sendStartFlyingPacket();
-               try { this.mc.player.getClass().getMethod("startGliding").invoke(this.mc.player); } catch (ReflectiveOperationException e) { /* Yarn 1.21.1 has no startGliding(); the server flag set via the C2S packet already triggers elytra deploy */ }
+               this.mc.player.startGliding();
                if (swapBack) {
                   this.swapArmor(2, slot);
                }
@@ -596,14 +596,14 @@ public class ElytraBounce extends Module {
          ChunkPos pos = event.chunk().getPos();
          BlockPos centerPos = pos.getCenterAtY(this.targetY);
          Vec3d moveDir = Utils.yawToDirection((Double)this.yaw.get());
-         double distanceToHighway = Utils.distancePointToDirection(Vec3d.of(centerPos), moveDir, this.mc.player.getPos());
+         double distanceToHighway = Utils.distancePointToDirection(Vec3d.of(centerPos), moveDir, this.mc.player.getEntityPos());
          if (!(distanceToHighway > 21.0)) {
             for (int x = 0; x < 16; x++) {
                for (int z = 0; z < 16; z++) {
                   for (int y = this.targetY; y < this.targetY + 3; y++) {
                      BlockPos position = new BlockPos(pos.x * 16 + x, y, pos.z * 16 + z);
                      if (!(
-                           Utils.distancePointToDirection(Vec3d.of(position), moveDir, this.mc.player.getPos())
+                           Utils.distancePointToDirection(Vec3d.of(position), moveDir, this.mc.player.getEntityPos())
                               > ((Integer)this.portalScanWidth.get()).intValue()
                         )
                         && this.mc.world.getBlockState(position).getBlock().equals(Blocks.NETHER_PORTAL)) {
