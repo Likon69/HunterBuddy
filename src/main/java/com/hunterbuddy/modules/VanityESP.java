@@ -343,7 +343,7 @@ public class VanityESP extends Module {
     private final Set<BlockPos> notifiedStackedEntities = new HashSet<>();
 
     public VanityESP() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "VanityESP", "Unified ESP for decorative items and special blocks.");
+        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "VanityESP-HB", "Unified ESP for decorative items and special blocks. (HunterBuddy version — renamed to avoid conflict with JEFF mod.)");
 
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             if (mc.world != null && mc.player != null) {
