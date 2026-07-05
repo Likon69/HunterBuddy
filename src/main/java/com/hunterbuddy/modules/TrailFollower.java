@@ -299,7 +299,7 @@ public class TrailFollower extends Module {
    Vec3d posDebug;
 
    public TrailFollower() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "TrailFollower-HB", "Automatically follows trails in all dimensions.");
+      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "hb-trail-follower", "Automatically follows trails in all dimensions.");
    }
 
    void resetTrail() {
@@ -770,7 +770,7 @@ public class TrailFollower extends Module {
    private void log(String message) {
       this.info(message, new Object[0]);
       if (!((String)this.webhookLink.get()).isEmpty()) {
-         Utils.sendWebhook((String)this.webhookLink.get(), "TrailFollower-HB", message, null, this.mc.player.getGameProfile().name());
+         Utils.sendWebhook((String)this.webhookLink.get(), "hb-trail-follower", message, null, this.mc.player.getGameProfile().name());
       }
    }
 
