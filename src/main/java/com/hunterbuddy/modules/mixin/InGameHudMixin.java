@@ -21,9 +21,6 @@ import net.minecraft.util.Identifier;
 
 @Mixin(InGameHud.class)
 public class InGameHudMixin {
-   @Shadow
-   private ItemStack currentStack;
-
    @Inject(method = "renderHotbar", at = @At("TAIL"))
    private void onRenderHotbar(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
       ShulkerOverviewModule module = (ShulkerOverviewModule)Modules.get().get(ShulkerOverviewModule.class);
