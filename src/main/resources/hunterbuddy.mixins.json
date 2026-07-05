@@ -1,12 +1,12 @@
 {
   "required": true,
-  "package": "com.hunterbuddy.modules.mixin",
+  "package": "com.hunterbuddy.modules",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "MlepScaffoldMixin",
-    "InGameHudMixin",
-    "MixinGuiMapWaypointFollower",
-    "LivingEntityMixin",
+    "mixin.MlepScaffoldMixin",
+    "mixin.InGameHudMixin",
+    "mixin.MixinGuiMapWaypointFollower",
+    "mixin.LivingEntityMixin",
     "regear.mixin.accessor.LivingEntityAccessor",
     "regear.mixin.accessor.PlayerInventoryAccessor",
     "regear.mixin.accessor.UpdateSelectedSlotS2CPacketAccessor",
