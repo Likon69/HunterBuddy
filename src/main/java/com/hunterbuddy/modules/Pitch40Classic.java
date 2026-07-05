@@ -16,21 +16,21 @@ import net.minecraft.util.Hand;
 public class Pitch40Classic extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
-    private final Setting<Double> lowerBound = this.sgGeneral.add(new DoubleSetting.Builder()
+    public final Setting<Double> lowerBound = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("lower-bound")
         .description("Hauteur Y où on repart en pitch up.")
         .defaultValue(180.0)
         .build()
     );
 
-    private final Setting<Double> upperBound = this.sgGeneral.add(new DoubleSetting.Builder()
+    public final Setting<Double> upperBound = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("upper-bound")
         .description("Hauteur Y où on repart en pitch down. Mettre 320 (build limit) pour toujours pitch up.")
         .defaultValue(300.0)
         .build()
     );
 
-    private final Setting<Double> pitchRate = this.sgGeneral.add(new DoubleSetting.Builder()
+    public final Setting<Double> pitchRate = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("pitch-rate")
         .description("Degrés par tick pour ajuster le pitch.")
         .defaultValue(2.0)
@@ -39,14 +39,14 @@ public class Pitch40Classic extends Module {
         .build()
     );
 
-    private final Setting<Boolean> autoFirework = this.sgGeneral.add(new BoolSetting.Builder()
+    public final Setting<Boolean> autoFirework = this.sgGeneral.add(new BoolSetting.Builder()
         .name("auto-firework")
         .description("Pop un feu d'artifice automatique quand la vitesse verticale est trop basse ou que la hauteur drop sous les bounds.")
         .defaultValue(true)
         .build()
     );
 
-    private final Setting<Double> minVerticalSpeed = this.sgGeneral.add(new DoubleSetting.Builder()
+    public final Setting<Double> minVerticalSpeed = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("min-vertical-speed")
         .description("Vitesse verticale minimum avant de pop un feu (blocks/sec).")
         .defaultValue(1.0)

@@ -9,37 +9,28 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
-import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFlightModes;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
 
 /**
- * Custom 2-phase elytra cycle driving Meteor's built-in {@link ElytraFly}.
+ * Custom 2-phase elytra cycle driving our {@link Pitch40Classic} module.
  *
  * <p>Pattern based on meteor-stashhunting-addon's {@code Pitch40Util} for the
  * climb phase, extended with a custom cycle on top:
  * <ol>
- *   <li><b>CLIMB</b>: Meteor's {@link ElytraFlightModes#Pitch40} + auto-bound-adjust +
- *       auto-firework. Player Y rises toward {@code max-altitude}.</li>
- *   <li><b>DESCEND</b>: Meteor's {@link ElytraFlightModes#Vanilla} + manual pitch
- *       ({@code descend-pitch}). Player Y drops toward {@code min-altitude}.</li>
+ *   <li><b>CLIMB</b>: {@link Pitch40Classic} handles pitch oscillation + auto-firework.
+ *       Bounds are set so the player rises toward {@code max-altitude}.</li>
+ *   <li><b>DESCEND</b>: {@link Pitch40Classic} is deactivated, player glides with
+ *       manual pitch ({@code descend-pitch}). Player Y drops toward {@code min-altitude}.</li>
  *   <li>Loop back to CLIMB with fresh bounds reset.</li>
  * </ol>
  *
- * <p>Settings mirror Rusherhack's EflyModule ({@code MaxHeight}, {@code MinHeight},
- * {@code DownPitch}) plus Jeff's Pitch40Util ({@code auto-adjust-bounds},
- * {@code bound-gap}, {@code auto-firework}, {@code velocity-threshold},
- * {@code cooldown-ticks}).
+ * <p>Fully independent of Meteor's ElytraFly — immune to future Meteor API changes.
  */
 public class ElytraAutoFly extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgCycle = settings.createGroup("Cycle");
 
-    // ---- Pitch40Util-style climb settings ----
+    // ---- Pitch40Classic-driven climb settings ----
 
     public final Setting<Boolean> autoBoundAdjust = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-adjust-bounds")
@@ -56,28 +47,19 @@ public class ElytraAutoFly extends Module {
         .build()
     );
 
-    public final Setting<Boolean> autoFirework = sgGeneral.add(new BoolSetting.Builder()
-        .name("auto-firework")
-        .description("Uses a firework automatically if your velocity is too low.")
+    public final Setting<Boolean> usePitch40Firework = sgGeneral.add(new BoolSetting.Builder()
+        .name("use-pitch40-firework")
+        .description("Let Pitch40Classic pop fireworks automatically during climb (its own auto-firework setting).")
         .defaultValue(true)
         .build()
     );
 
     public final Setting<Double> velocityThreshold = sgGeneral.add(new DoubleSetting.Builder()
         .name("velocity-threshold")
-        .description("Velocity must be below this value when going up for firework to activate.")
-        .defaultValue(-0.05)
-        .sliderRange(-0.5, 1.0)
-        .visible(autoFirework::get)
-        .build()
-    );
-
-    public final Setting<Integer> fireworkCooldownTicks = sgGeneral.add(new IntSetting.Builder()
-        .name("cooldown-ticks")
-        .description("Cooldown after using a firework in ticks.")
-        .defaultValue(10)
-        .sliderRange(0, 100)
-        .visible(autoFirework::get)
+        .description("Velocity must be below this value when going up for Pitch40Classic firework to activate.")
+        .defaultValue(0.05)
+        .sliderRange(0.0, 1.0)
+        .visible(usePitch40Firework::get)
         .build()
     );
 
@@ -117,136 +99,98 @@ public class ElytraAutoFly extends Module {
 
     private enum Phase { CLIMB, DESCEND }
 
-    private final Module elytraFly = Modules.get().get(ElytraFly.class);
+    private final Pitch40Classic pitch40Classic = Modules.get().get(Pitch40Classic.class);
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private final Setting<ElytraFlightModes> elytraFlyMode =
-        (Setting<ElytraFlightModes>) elytraFly.settings.get("mode");
-
-    private ElytraFlightModes oldValue;
-    private int fireworkCooldown = 0;
-    private boolean goingUp = true;
-    private int elytraSwapSlot = -1;
     private Phase currentPhase = Phase.CLIMB;
+    private boolean pitch40WasActiveBefore = false;
 
     public ElytraAutoFly() {
         super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "elytra-auto-fly",
-            "Custom elytra cycle: Pitch40 + auto-bound + auto-firework up to max-altitude, then manual-pitch descend to min-altitude, loop.");
+            "Custom elytra cycle using Pitch40Classic (independent of Meteor ElytraFly). Climb via Pitch40Classic, descend via manual pitch, loop.");
     }
 
     @Override
     public void onActivate() {
-        oldValue = elytraFlyMode.get();
-        elytraFlyMode.set(ElytraFlightModes.Pitch40);
-        currentPhase = Phase.CLIMB;
-        goingUp = true;
-        fireworkCooldown = 0;
-        elytraSwapSlot = -1;
+        if (pitch40Classic == null) {
+            error("Pitch40Classic module not found — cannot activate.");
+            this.toggle();
+            return;
+        }
+        pitch40WasActiveBefore = pitch40Classic.isActive();
+        enterClimb();
     }
 
     @Override
     public void onDeactivate() {
-        if (elytraFly.isActive()) {
-            elytraFly.toggle();
-        }
-        elytraFlyMode.set(oldValue);
+        enterStandby();
+        // Don't force-restore Pitch40Classic — user might want it off.
     }
 
     private void resetBounds() {
-        Setting<Double> upperBounds = (Setting<Double>) elytraFly.settings.get("pitch40-upper-bounds");
-        upperBounds.set(mc.player.getY() - 5);
-        Setting<Double> lowerBounds = (Setting<Double>) elytraFly.settings.get("pitch40-lower-bounds");
-        lowerBounds.set(mc.player.getY() - 5 - boundGap.get());
-    }
-
-    private void enterDescend() {
-        currentPhase = Phase.DESCEND;
-        // Deactivate Meteor's ElytraFly entirely so the player glides with
-        // pure vanilla physics at the manual descend pitch. The mode setting
-        // (Pitch40) is preserved, so re-activation on enterClimb() resumes
-        // straight back into the climb.
-        if (elytraFly.isActive()) {
-            elytraFly.toggle();
-        }
+        double y = mc.player.getY();
+        pitch40Classic.lowerBound.set(y - 5 - boundGap.get());
+        pitch40Classic.upperBound.set(y - 5);
     }
 
     private void enterClimb() {
         currentPhase = Phase.CLIMB;
-        // Ensure Pitch40 mode (in case the user changed it via the GUI), then
-        // re-enable ElytraFly for a fresh climb.
-        elytraFlyMode.set(ElytraFlightModes.Pitch40);
-        if (!elytraFly.isActive()) {
-            elytraFly.toggle();
+        if (mc.player != null) {
+            resetBounds();
         }
-        goingUp = true;
-        resetBounds();
+        // Let Pitch40Classic handle pitch + auto-firework
+        pitch40Classic.pitchRate.set(2.0);
+        pitch40Classic.autoFirework.set(usePitch40Firework.get());
+        pitch40Classic.minVerticalSpeed.set(velocityThreshold.get());
+        if (!pitch40Classic.isActive()) {
+            pitch40Classic.toggle();
+        }
+    }
+
+    private void enterDescend() {
+        currentPhase = Phase.DESCEND;
+        // Deactivate Pitch40Classic so the player glides with pure vanilla physics
+        if (pitch40Classic.isActive()) {
+            pitch40Classic.toggle();
+        }
+    }
+
+    private void enterStandby() {
+        // Restore Pitch40Classic to whatever state it was in before we activated.
+        if (pitch40Classic != null && pitch40Classic.isActive() && !pitch40WasActiveBefore) {
+            pitch40Classic.toggle();
+        }
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        // Dispatch on currentPhase FIRST, not on elytraFly.isActive(). During
-        // DESCEND ElytraFly is intentionally OFF (player glides pure-vanilla at
-        // the manual pitch), so checking isActive() here would fall into the
-        // reconnect branch and re-enable ElytraFly -> oscillation spam at the
-        // boundary altitude.
+        if (mc.player == null) return;
+
         if (currentPhase == Phase.CLIMB) {
-            // Reconnect: if ElytraFly was turned off (2b2t queue exit, manual
+            // Reconnect: if Pitch40Classic was turned off (2b2t queue exit, manual
             // toggle), re-enable when the player can fly again.
-            if (!elytraFly.isActive()) {
-                if (!mc.player.getAbilities().allowFlying) {
-                    elytraFly.toggle();
+            if (!pitch40Classic.isActive()) {
+                if (mc.player.getAbilities().allowFlying) {
                     enterClimb();
                 }
                 return;
             }
             tickClimb();
         } else {
-            // DESCEND phase: ElytraFly is intentionally OFF. Don't touch it.
             tickDescend();
         }
     }
 
     private void tickClimb() {
-        if (fireworkCooldown > 0) {
-            fireworkCooldown--;
-        }
-
-        if (elytraSwapSlot != -1) {
-            InvUtils.swap(elytraSwapSlot, true);
-            mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-            InvUtils.swapBack();
-            elytraSwapSlot = -1;
-        }
-
-        // Fell below the lower bound: reset. Mainly fires when the player isn't
-        // using fireworks and the climb stalls out.
-        if (autoBoundAdjust.get()
-            && mc.player.getY() <= (double) elytraFly.settings.get("pitch40-lower-bounds").get() - 10) {
+        // Fell well below the lower bound: reset. Mainly fires when the player
+        // isn't using fireworks and the climb stalls out.
+        if (autoBoundAdjust.get() && mc.player.getY() <= pitch40Classic.lowerBound.get() - 10) {
             resetBounds();
             return;
         }
 
-        // -40 pitch = facing up (Pitch40 mode convention).
-        if (mc.player.getPitch() == -40) {
-            goingUp = true;
-            if (autoFirework.get()
-                && mc.player.getVelocity().y < velocityThreshold.get()
-                && mc.player.getY() < (double) elytraFly.settings.get("pitch40-upper-bounds").get()) {
-                if (fireworkCooldown == 0) {
-                    FindItemResult result = InvUtils.findInHotbar(Items.FIREWORK_ROCKET);
-                    if (result.found() && result.isHotbar()) {
-                        InvUtils.swap(result.slot(), true);
-                        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                        InvUtils.swapBack();
-                        fireworkCooldown = fireworkCooldownTicks.get();
-                    }
-                }
-            }
-        }
         // Apex: vertical velocity dropped to <= 0 while still climbing.
         // Set the new upper/lower bounds based on current Y.
-        else if (autoBoundAdjust.get() && goingUp && mc.player.getVelocity().y <= 0) {
-            goingUp = false;
+        if (autoBoundAdjust.get() && mc.player.getVelocity().y <= 0) {
             resetBounds();
         }
 
@@ -257,7 +201,7 @@ public class ElytraAutoFly extends Module {
     }
 
     private void tickDescend() {
-        // Vanilla mode lets the player control pitch directly — set our descend pitch.
+        // Vanilla glide — set our descend pitch directly.
         mc.player.setPitch(descendPitch.get().floatValue());
 
         // Cycle: switch back to climb phase when min altitude reached.
