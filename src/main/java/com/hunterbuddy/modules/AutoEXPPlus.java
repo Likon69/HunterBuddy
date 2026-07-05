@@ -86,9 +86,11 @@ public class AutoEXPPlus extends Module {
     private void onTick(TickEvent.Pre event) {
         if (repairingI == -1) {
             if (mode.get() != Mode.Hands) {
-                for (int i = 0; i < ((com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor)mc.player.getInventory()).getArmor().size(); i++) {
-                    if (ignoreElytra.get() && ((com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor)mc.player.getInventory()).getArmor().get(i).getItem() == Items.ELYTRA) continue;
-                    if (needsRepair(((com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor)mc.player.getInventory()).getArmor().get(i), minThreshold.get())) {
+                EquipmentSlot[] armorSlots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
+                for (int i = 0; i < armorSlots.length; i++) {
+                    ItemStack stack = mc.player.getEquippedStack(armorSlots[i]);
+                    if (ignoreElytra.get() && stack.getItem() == Items.ELYTRA) continue;
+                    if (needsRepair(stack, minThreshold.get())) {
                         repairingI = SlotUtils.ARMOR_START + i;
                         break;
                     }

@@ -16,7 +16,4 @@ public interface PlayerInventoryAccessor {
 
    @Accessor("main")
    DefaultedList<ItemStack> getMain();
-
-   @Accessor("armor")
-   DefaultedList<ItemStack> getArmor();
 }
