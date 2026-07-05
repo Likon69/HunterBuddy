@@ -1,4 +1,5 @@
 package com.hunterbuddy.modules;
+import com.hunterbuddy.modules.Pitch40;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
