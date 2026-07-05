@@ -7,6 +7,7 @@
     "InGameHudMixin",
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",
+    "HandledScreenMixin",
     "accessors.LivingEntityAccessor",
     "accessors.PlayerInventoryAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
