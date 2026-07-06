@@ -229,10 +229,11 @@ public class BetterStashFinder extends Module
             if (!storageBlocks.get().contains(blockEntity.getType())) continue;
 
             Block blockUnder = mc.world.getBlockState(blockEntity.getPos().down()).getBlock();
-            if (ignoreTrialChambers.get() && blockUnder.equals(Blocks.WAXED_OXIDIZED_CUT_COPPER) ||
-                blockUnder.equals(Blocks.TUFF_BRICKS) || blockUnder.equals(Blocks.WAXED_COPPER_BLOCK) ||
-                blockUnder.equals(Blocks.WAXED_OXIDIZED_COPPER))
-            {
+            boolean trialChamberBlock = blockUnder.equals(Blocks.WAXED_OXIDIZED_CUT_COPPER)
+                || blockUnder.equals(Blocks.TUFF_BRICKS)
+                || blockUnder.equals(Blocks.WAXED_COPPER_BLOCK)
+                || blockUnder.equals(Blocks.WAXED_OXIDIZED_COPPER);
+            if (ignoreTrialChambers.get() && trialChamberBlock) {
                 continue;
             }
 
@@ -257,12 +258,10 @@ public class BetterStashFinder extends Module
             saveCsv();
 
             if (!chunk.equals(prevChunk) || !chunk.countsEqual(prevChunk)) {
-                if (sendNotifications.get())
-                {
-                    switch (notificationMode.get())
-                    {
-                        case Chat -> info("Found stash at (highlight)%s(default), (highlight)%s(default).", chunk.x, chunk.z);
-                    }
+                if (sendNotifications.get()) sendNotification(chunk);
+
+                if (sendWebhook.get() && !webhookLink.get().isEmpty()) {
+                    sendWebhookNotification(chunk, is119NewChunk, is112OldChunk);
                 }
 
 
@@ -294,6 +293,8 @@ public class BetterStashFinder extends Module
             removeAllStashWaypoints(chunks);
             chunks.clear();
             table.clear();
+            saveJson();
+            saveCsv();
         };
 
         // Chunks
@@ -344,10 +345,9 @@ public class BetterStashFinder extends Module
         // Try to load json
         File file = getJsonFile();
         if (file.exists()) {
-            try {
-                FileReader reader = new FileReader(file);
+            try (FileReader reader = new FileReader(file)) {
                 chunks = GSON.fromJson(reader, new TypeToken<List<Chunk>>() {}.getType());
-                reader.close();
+                if (chunks == null) chunks = new ArrayList<>();
 
                 for (Chunk chunk : chunks) chunk.calculatePos();
 
@@ -360,26 +360,31 @@ public class BetterStashFinder extends Module
         // Try to load csv
         file = getCsvFile();
         if (!loaded && file.exists()) {
-            try {
-                BufferedReader reader = new BufferedReader(new FileReader(file));
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                 reader.readLine();
 
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    String[] values = line.split(" ");
-                    Chunk chunk = new Chunk(new ChunkPos(Integer.parseInt(values[0]), Integer.parseInt(values[1])));
+                    if (line.isBlank()) continue;
 
-                    chunk.chests = Integer.parseInt(values[2]);
-                    chunk.shulkers = Integer.parseInt(values[3]);
-                    chunk.enderChests = Integer.parseInt(values[4]);
-                    chunk.furnaces = Integer.parseInt(values[5]);
-                    chunk.dispensersDroppers = Integer.parseInt(values[6]);
-                    chunk.hoppers = Integer.parseInt(values[7]);
+                    String[] values = line.split(",");
+                    if (values.length < 9) continue;
+
+                    int x = Integer.parseInt(values[0].trim());
+                    int z = Integer.parseInt(values[1].trim());
+                    Chunk chunk = new Chunk(new ChunkPos(Math.floorDiv(x, 16), Math.floorDiv(z, 16)));
+
+                    chunk.chests = Integer.parseInt(values[2].trim());
+                    chunk.barrels = Integer.parseInt(values[3].trim());
+                    chunk.shulkers = Integer.parseInt(values[4].trim());
+                    chunk.enderChests = Integer.parseInt(values[5].trim());
+                    chunk.furnaces = Integer.parseInt(values[6].trim());
+                    chunk.dispensersDroppers = Integer.parseInt(values[7].trim());
+                    chunk.hoppers = Integer.parseInt(values[8].trim());
+                    if (values.length > 9) chunk.crafters = Integer.parseInt(values[9].trim());
 
                     chunks.add(chunk);
                 }
-
-                reader.close();
             } catch (Exception ignored) {
                 if (chunks == null) chunks = new ArrayList<>();
             }
@@ -391,12 +396,10 @@ public class BetterStashFinder extends Module
         try {
             File file = getCsvFile();
             file.getParentFile().mkdirs();
-            Writer writer = new FileWriter(file);
-
-            writer.write("X,Z,Chests,Barrels,Shulkers,EnderChests,Furnaces,DispensersDroppers,Hoppers\n");
-            for (Chunk chunk : chunks) chunk.write(writer);
-
-            writer.close();
+            try (Writer writer = new FileWriter(file)) {
+                writer.write("X,Z,Chests,Barrels,Shulkers,EnderChests,Furnaces,DispensersDroppers,Hoppers,Crafters\n");
+                for (Chunk chunk : chunks) chunk.write(writer);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -406,9 +409,9 @@ public class BetterStashFinder extends Module
         try {
             File file = getJsonFile();
             file.getParentFile().mkdirs();
-            Writer writer = new FileWriter(file);
-            GSON.toJson(chunks, writer);
-            writer.close();
+            try (Writer writer = new FileWriter(file)) {
+                GSON.toJson(chunks, writer);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -425,6 +428,63 @@ public class BetterStashFinder extends Module
     @Override
     public String getInfoString() {
         return String.valueOf(chunks.size());
+    }
+
+    private void sendNotification(Chunk chunk) {
+        switch (notificationMode.get()) {
+            case Chat -> info("Found stash at (highlight)%s(default), (highlight)%s(default).", chunk.x, chunk.z);
+            case Toast -> addToast();
+            case Both -> {
+                info("Found stash at (highlight)%s(default), (highlight)%s(default).", chunk.x, chunk.z);
+                addToast();
+            }
+        }
+    }
+
+    private void addToast() {
+        MeteorToast toast = new MeteorToast.Builder(title)
+            .icon(Items.CHEST)
+            .text("Found Stash!")
+            .build();
+        mc.getToastManager().add(toast);
+    }
+
+    private void sendWebhookNotification(Chunk chunk, boolean is119NewChunk, boolean is112OldChunk) {
+        String pingId = ping.get() && !discordId.get().isEmpty() ? discordId.get() : null;
+
+        if (advancedLogging.get()) {
+            String json = "{\"embeds\":[{"
+                + "\"title\":\"Stash Found!\","
+                + "\"color\":2154012,"
+                + "\"description\":\"Coordinates: || X: " + chunk.x + " Z: " + chunk.z + " || in " + getChunkType(is119NewChunk, is112OldChunk) + " chunks\","
+                + "\"fields\":["
+                + webhookField("Chests", chunk.chests) + ","
+                + webhookField("Barrels", chunk.barrels) + ","
+                + webhookField("Shulkers", chunk.shulkers) + ","
+                + webhookField("Ender Chests", chunk.enderChests) + ","
+                + webhookField("Hoppers", chunk.hoppers) + ","
+                + webhookField("Dispensers/Droppers", chunk.dispensersDroppers) + ","
+                + webhookField("Furnaces", chunk.furnaces) + ","
+                + webhookField("Crafters", chunk.crafters)
+                + "]}]}";
+
+            new Thread(() -> com.hunterbuddy.modules.regear.util.Utils.sendWebhook(webhookLink.get(), json, pingId), "BetterStashFinder-Webhook").start();
+        } else {
+            String playerName = mc.player != null ? mc.player.getGameProfile().name() : "unknown";
+            String message = "Found stash at " + chunk.x + ", " + chunk.z + ".";
+            new Thread(() -> com.hunterbuddy.modules.regear.util.Utils.sendWebhook(webhookLink.get(), title, message, pingId, playerName), "BetterStashFinder-Webhook").start();
+        }
+    }
+
+    private static String webhookField(String name, int value) {
+        return "{\"name\":\"" + name + "\",\"value\":\"" + value + "\",\"inline\":true}";
+    }
+
+    private static String getChunkType(boolean is119NewChunk, boolean is112OldChunk) {
+        if (is119NewChunk && !is112OldChunk) return "new";
+        if (is119NewChunk) return "unfollowed 1.12";
+        if (is112OldChunk) return "followed 1.12";
+        return "1.19";
     }
 
     private Waypoint getWaypointByCoordinate(int x, int z)
@@ -560,7 +620,7 @@ public class BetterStashFinder extends Module
 
         public boolean countsEqual(Chunk c) {
             if (c == null) return false;
-            return chests != c.chests || barrels != c.barrels || shulkers != c.shulkers || enderChests != c.enderChests || furnaces != c.furnaces || dispensersDroppers != c.dispensersDroppers || hoppers != c.hoppers || crafters != c.crafters;
+            return chests == c.chests && barrels == c.barrels && shulkers == c.shulkers && enderChests == c.enderChests && furnaces == c.furnaces && dispensersDroppers == c.dispensersDroppers && hoppers == c.hoppers && crafters == c.crafters;
         }
 
         @Override
