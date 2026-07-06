@@ -47,7 +47,8 @@ import org.slf4j.Logger;
 
 public class HunterBuddyAddon extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
-    public static final Category HUNTER_BUDDY_CATEGORY = new Category("HunterBuddy", Items.NETHER_STAR.getDefaultStack());
+    public static final Category HUNT_CATEGORY = new Category("Hunt", Items.ENDER_CHEST.getDefaultStack());
+    public static final Category UTILITY_CATEGORY = new Category("Utility", Items.NETHER_STAR.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("HunterBuddy");
 
     @Override
@@ -101,7 +102,8 @@ public class HunterBuddyAddon extends MeteorAddon {
 
     @Override
     public void onRegisterCategories() {
-        Modules.registerCategory(HUNTER_BUDDY_CATEGORY);
+        Modules.registerCategory(HUNT_CATEGORY);
+        Modules.registerCategory(UTILITY_CATEGORY);
     }
 
     @Override

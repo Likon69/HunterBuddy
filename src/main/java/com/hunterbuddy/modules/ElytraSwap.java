@@ -123,7 +123,7 @@ public class ElytraSwap extends Module {
    private ItemStack storedElytra = ItemStack.EMPTY;
 
    public ElytraSwap() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "ElytraSwap", "Automatically swaps elytras when they reach low durability.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "ElytraSwap", "Automatically swaps elytras when they reach low durability.");
    }
 
    public void onActivate() {

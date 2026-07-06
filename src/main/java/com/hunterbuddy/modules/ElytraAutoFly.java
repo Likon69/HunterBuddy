@@ -90,7 +90,7 @@ public class ElytraAutoFly extends Module {
     private boolean goingUp = true;
 
     public ElytraAutoFly() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "elytra-auto-fly",
+        super(HunterBuddyAddon.HUNT_CATEGORY, "elytra-auto-fly",
             "Custom elytra cycle driving Pitch40Classic: climb (Pitch40Classic) + auto-bound, then manual-pitch descend, loop.");
     }
 

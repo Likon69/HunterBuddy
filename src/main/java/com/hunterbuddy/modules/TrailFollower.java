@@ -299,7 +299,7 @@ public class TrailFollower extends Module {
    Vec3d posDebug;
 
    public TrailFollower() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "TrailFollower", "Automatically follows trails in all dimensions.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "TrailFollower", "Automatically follows trails in all dimensions.");
    }
 
    void resetTrail() {

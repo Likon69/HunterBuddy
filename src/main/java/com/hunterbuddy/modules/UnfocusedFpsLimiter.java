@@ -24,7 +24,7 @@ public class UnfocusedFpsLimiter extends Module {
    private boolean hasStoredOriginal = false;
 
    public UnfocusedFpsLimiter() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "unfocused-fps", "Limits the FPS when the game is unfocused.");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "unfocused-fps", "Limits the FPS when the game is unfocused.");
    }
 
    public void onActivate() {

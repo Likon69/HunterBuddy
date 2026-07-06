@@ -105,7 +105,7 @@ public class ControlFly extends Module {
    private double prevSmoothZ;
 
    public ControlFly() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "control-fly", "GrimAC-compatible elytra flight control using WASD keys.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "control-fly", "GrimAC-compatible elytra flight control using WASD keys.");
       INSTANCE = this;
    }
 

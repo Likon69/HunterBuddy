@@ -22,7 +22,7 @@ public class NoHurtCam extends Module {
       );
 
    public NoHurtCam() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "NoHurtCam", "Removes the hurt camera tilt and shake effect when taking damage.");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "NoHurtCam", "Removes the hurt camera tilt and shake effect when taking damage.");
    }
 
    public boolean shouldDisableHurtCam() {

@@ -77,7 +77,7 @@ public class AutoEXPPlus extends Module {
     private int repairingI;
 
     public AutoEXPPlus() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "auto-exp-plus", "Automatically repairs your armor and tools in pvp.");
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-exp-plus", "Automatically repairs your armor and tools in pvp.");
     }
 
     @Override

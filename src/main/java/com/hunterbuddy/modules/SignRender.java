@@ -225,7 +225,7 @@ public class SignRender extends Module {
    private long lastGlobalCycleTime = 0L;
 
    public SignRender() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "sign-render", "Renders sign text through walls with advanced clustering.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "sign-render", "Renders sign text through walls with advanced clustering.");
    }
 
    @EventHandler

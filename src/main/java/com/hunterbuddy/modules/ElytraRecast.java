@@ -129,7 +129,7 @@ public class ElytraRecast extends Module {
    private static final int MONITORING_RECOVERY_PAUSE = 80;
 
    public ElytraRecast() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "ElytraRecast", "Flight recovery fallback. Monitors and recovers when you stop flying or drop too low.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "ElytraRecast", "Flight recovery fallback. Monitors and recovers when you stop flying or drop too low.");
    }
 
    public boolean isAscending() {

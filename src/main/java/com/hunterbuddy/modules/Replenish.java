@@ -208,7 +208,7 @@ public class Replenish extends Module {
    private final Map<Integer, String> hotbarItemNames = new HashMap<>();
 
    public Replenish() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "replenish", "Advanced auto replenish using shift-click packets.");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "replenish", "Advanced auto replenish using shift-click packets.");
    }
 
    public void onActivate() {

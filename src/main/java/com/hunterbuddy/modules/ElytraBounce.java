@@ -234,7 +234,7 @@ public class ElytraBounce extends Module {
    private boolean waitingForChunksToLoad;
 
    public ElytraBounce() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "ElytraBounce", "Elytra fly with some more features.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "ElytraBounce", "Elytra fly with some more features.");
    }
 
    @EventHandler

@@ -357,7 +357,7 @@ public class SearchArea extends Module {
     private boolean goingToStart = true;
 
     public SearchArea() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "hb-search-area",
+        super(HunterBuddyAddon.HUNT_CATEGORY, "hb-search-area",
             "Walks the player in a chunk-loading pattern (Rectangle / Spiral / PolarSpiral). Useful with stash finder / map mods.");
     }
 

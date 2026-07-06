@@ -326,7 +326,7 @@ public class FlowESP extends Module {
    private Color waterAged;
 
    public FlowESP() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "flow-esp", "Chunk activity detector via fluid spread analysis");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "flow-esp", "Chunk activity detector via fluid spread analysis");
    }
 
    public void onActivate() {
