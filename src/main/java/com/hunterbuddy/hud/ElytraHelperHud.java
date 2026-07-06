@@ -84,6 +84,32 @@ public class ElytraHelperHud extends HudElement {
                .defaultValue(true)
             .build()
       );
+   private final Setting<Boolean> showAverageSpeed = this.sgSections
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                     .name("show-average-speed")
+                  .description("Show average flight speed (total distance / total flying time).")
+               .defaultValue(true)
+               .visible(this.showSession::get)
+            .build()
+      );
+   private final Setting<Boolean> showPeakSpeed = this.sgSections
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                     .name("show-peak-speed")
+                  .description("Show peak (max) flight speed achieved in the session.")
+               .defaultValue(true)
+               .visible(this.showSession::get)
+            .build()
+      );
+   private final Setting<Boolean> showSpeedKmh = this.sgSections
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                     .name("show-speed-kmh")
+                  .description("Append km/h in parentheses next to b/s values (1 b/s = 1 m/s = 3.6 km/h).")
+               .defaultValue(true)
+            .build()
+      );
    private final Setting<Boolean> showSpeed = this.sgSections
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -156,6 +182,7 @@ public class ElytraHelperHud extends HudElement {
    private Vec3d sessionStartPos = null;
    private Vec3d lastRenderPos = null;
    private double sessionDistance = 0.0;
+   private double peakSpeedBps = 0.0;
 
    public ElytraHelperHud() {
       super(INFO);
@@ -170,6 +197,7 @@ public class ElytraHelperHud extends HudElement {
                this.sessionStartTime = now;
                this.sessionStartPos = MeteorClient.mc.player.getEntityPos();
                this.sessionDistance = 0.0;
+               this.peakSpeedBps = 0.0;
             }
 
             this.lastRenderPos = MeteorClient.mc.player.getEntityPos();
@@ -184,6 +212,12 @@ public class ElytraHelperHud extends HudElement {
             }
 
             this.lastRenderPos = currentPos;
+            // Track peak speed (3D, same formula as showSpeed in render)
+            Vec3d vel = MeteorClient.mc.player.getVelocity();
+            double currentSpeedBps = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) * 20.0;
+            if (currentSpeedBps > this.peakSpeedBps) {
+               this.peakSpeedBps = currentSpeedBps;
+            }
          } else {
             this.lastRenderPos = null;
          }
@@ -280,6 +314,23 @@ public class ElytraHelperHud extends HudElement {
                maxW, this.drawLabelValue(renderer, distLabel, this.formatDistance(this.sessionDistance), curX, curY, (SettingColor)this.valueColor.get())
             );
             curY += lineH + spacing;
+            if ((Boolean)this.showAverageSpeed.get()) {
+               double avgSpeed = this.sessionFlyingMs > 0L
+                  ? this.sessionDistance / (this.sessionFlyingMs / 1000.0)
+                  : 0.0;
+               String avgLabel = this.compactMode.get() ? "Avg: " : "Average: ";
+               maxW = Math.max(
+                  maxW, this.drawLabelValue(renderer, avgLabel, this.formatSpeed(avgSpeed), curX, curY, (SettingColor)this.valueColor.get())
+               );
+               curY += lineH + spacing;
+            }
+            if ((Boolean)this.showPeakSpeed.get()) {
+               String peakLabel = this.compactMode.get() ? "Peak: " : "Peak: ";
+               maxW = Math.max(
+                  maxW, this.drawLabelValue(renderer, peakLabel, this.formatSpeed(this.peakSpeedBps), curX, curY, (SettingColor)this.valueColor.get())
+               );
+               curY += lineH + spacing;
+            }
             if (this.sessionStartPos != null) {
                double distFromStart = MeteorClient.mc.player.getEntityPos().distanceTo(this.sessionStartPos);
                String startLabel = this.compactMode.get() ? "From start: " : "From Start: ";
@@ -296,7 +347,7 @@ public class ElytraHelperHud extends HudElement {
             double velY = MeteorClient.mc.player.getVelocity().y;
             double speed = Math.sqrt(velX * velX + velZ * velZ + velY * velY) * 20.0;
             String speedLabel = this.compactMode.get() ? "Spd: " : "Speed: ";
-            maxW = Math.max(maxW, this.drawLabelValue(renderer, speedLabel, String.format("%.1f b/s", speed), curX, curY, (SettingColor)this.valueColor.get()));
+            maxW = Math.max(maxW, this.drawLabelValue(renderer, speedLabel, this.formatSpeed(speed), curX, curY, (SettingColor)this.valueColor.get()));
             curY += lineH + spacing;
          }
 
@@ -382,6 +433,19 @@ public class ElytraHelperHud extends HudElement {
 
    private String formatDistance(double blocks) {
       return blocks >= 1000.0 ? String.format("%.1fk", blocks / 1000.0) : String.format("%.0f", blocks);
+   }
+
+   /**
+    * Format speed in b/s, optionally appending km/h.
+    * 1 b/s = 1 m/s = 3.6 km/h in Minecraft.
+    */
+   private String formatSpeed(double bps) {
+      String base = String.format("%.1f b/s", bps);
+      if ((Boolean)this.showSpeedKmh.get()) {
+         double kmh = bps * 3.6;
+         return String.format("%s (%.0f km/h)", base, kmh);
+      }
+      return base;
    }
 
    private SettingColor getDurabilityColor(int current, int max) {

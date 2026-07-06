@@ -129,9 +129,9 @@ public class Pitch40Classic extends Module {
             : Math.max(current - rate, upClamp);
         this.mc.player.setPitch(updated);
 
-        // Auto-firework (logique exacte de JEFF Pitch40Util, adaptée au mode de pitch choisi)
-        if (current == upClamp) {
-            // upClamp pitch = facing up (apex de l'oscillation: -40° en CLASSIC, -54.77° en EFFICIENT)
+        // Auto-firework (logique exacte de JEFF Pitch40Util)
+        if (current == -40.0f) {
+            // -40 pitch = facing up
             this.goingUp = true;
             if (this.autoFirework.get()
                 && this.mc.player.getVelocity().y < this.velocityThreshold.get()
