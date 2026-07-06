@@ -107,11 +107,11 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Pitch40());
         Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
-        Modules.get().add(new BoostLab());
-        Modules.get().add(new RocketStateLab());
-        Modules.get().add(new BounceLab());
-        Modules.get().add(new StartFlyingSpamLab());
-        Modules.get().add(new SlotUseDesyncLab());
+        // Modules.get().add(new BoostLab());
+        // Modules.get().add(new RocketStateLab());
+        // Modules.get().add(new BounceLab());
+        // Modules.get().add(new StartFlyingSpamLab());
+        // Modules.get().add(new SlotUseDesyncLab());
         Modules.get().add(new SignRender());
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
