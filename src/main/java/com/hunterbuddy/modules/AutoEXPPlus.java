@@ -1,8 +1,11 @@
+/*
+ * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
+ * Copyright (c) Meteor Development.
+ */
 
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
@@ -86,12 +89,10 @@ public class AutoEXPPlus extends Module {
     private void onTick(TickEvent.Pre event) {
         if (repairingI == -1) {
             if (mode.get() != Mode.Hands) {
-                EquipmentSlot[] armorSlots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET};
-                for (int i = 0; i < armorSlots.length; i++) {
-                    ItemStack stack = mc.player.getEquippedStack(armorSlots[i]);
-                    if (ignoreElytra.get() && stack.getItem() == Items.ELYTRA) continue;
+                for (EquipmentSlot slot : AttributeModifierSlot.ARMOR) {
+                    ItemStack stack = mc.player.getEquippedStack(slot);
                     if (needsRepair(stack, minThreshold.get())) {
-                        repairingI = SlotUtils.ARMOR_START + i;
+                        repairingI = SlotUtils.ARMOR_START + slot.getEntitySlotId();
                         break;
                     }
                 }
@@ -100,7 +101,7 @@ public class AutoEXPPlus extends Module {
             if (mode.get() != Mode.Armor && repairingI == -1) {
                 for (Hand hand : Hand.values()) {
                     if (needsRepair(mc.player.getStackInHand(hand), minThreshold.get())) {
-                        repairingI = hand == Hand.MAIN_HAND ? ((com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor)mc.player.getInventory()).getSelectedSlot() : SlotUtils.OFFHAND;
+                        repairingI = hand == Hand.MAIN_HAND ? mc.player.getInventory().getSelectedSlot() : SlotUtils.OFFHAND;
                         break;
                     }
                 }

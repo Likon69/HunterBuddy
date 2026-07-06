@@ -51,7 +51,7 @@ import meteordevelopment.meteorclient.pathing.PathManagers;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.IntSetting.Builder;
-import meteordevelopment.meteorclient.systems.modules.Categories;
+import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
@@ -710,7 +710,7 @@ public class StashFinder extends Module {
    private static final String CATEGORY = "StashFinder";
 
    public StashFinder() {
-      super(Categories.World, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
+      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
    }
 
    public void onActivate() {
