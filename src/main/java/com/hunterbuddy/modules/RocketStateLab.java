@@ -18,6 +18,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.FireworksComponent;
@@ -26,6 +27,7 @@ import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 
 public class RocketStateLab extends Module {
@@ -120,7 +122,7 @@ public class RocketStateLab extends Module {
     private int suppressInteractSamples;
 
     public RocketStateLab() {
-        super(HunterBuddyAddon.HUNT_CATEGORY, "rocket-state-lab", "Logs rocket/start-flying timing, speed gains, and server corrections.");
+        super(HunterBuddyAddon.LAB_CATEGORY, "rocket-state-lab", "Logs rocket/start-flying timing, speed gains, and server corrections.");
     }
 
     @Override
@@ -188,11 +190,40 @@ public class RocketStateLab extends Module {
         switch (mode.get()) {
             case ObserveOnly -> {
             }
-            case NormalUse, SlotSwapUse -> {
+            case NormalUse -> {
                 Sample sample = startSample(mode.get().name());
                 suppressInteractSamples++;
                 int status = Utils.firework(mc, false);
                 if (status < 0) discardSample(sample);
+            }
+            case SlotSwapUse -> {
+                int rocketSlot = findRocketInHotbarSlot();
+                if (rocketSlot < 0) break;
+                Sample sample = startSample(mode.get().name());
+                suppressInteractSamples++;
+                InvUtils.swap(rocketSlot, true);
+                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+                mc.player.swingHand(Hand.MAIN_HAND);
+                InvUtils.swapBack();
+            }
+            case OffhandUse -> {
+                if (!mc.player.getOffHandStack().isOf(Items.FIREWORK_ROCKET)) break;
+                Sample sample = startSample(mode.get().name());
+                suppressInteractSamples++;
+                mc.interactionManager.interactItem(mc.player, Hand.OFF_HAND);
+                mc.player.swingHand(Hand.OFF_HAND);
+            }
+            case MoveFromInv -> {
+                if (hotbarHasRocket()) break;
+                int invSlot = findRocketInInventory();
+                if (invSlot < 0) break;
+                Sample sample = startSample(mode.get().name());
+                suppressInteractSamples++;
+                int selected = mc.player.getInventory().getSelectedSlot();
+                InvUtils.move().from(invSlot).to(selected);
+                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+                mc.player.swingHand(Hand.MAIN_HAND);
+                InvUtils.move().from(selected).to(invSlot);
             }
             case StartFlyBefore -> {
                 sendStartFlying();
@@ -320,6 +351,24 @@ public class RocketStateLab extends Module {
         return ItemStack.EMPTY;
     }
 
+    private int findRocketInHotbarSlot() {
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(Items.FIREWORK_ROCKET)) return i;
+        }
+        return -1;
+    }
+
+    private boolean hotbarHasRocket() {
+        return findRocketInHotbarSlot() >= 0;
+    }
+
+    private int findRocketInInventory() {
+        for (int i = 9; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(Items.FIREWORK_ROCKET)) return i;
+        }
+        return -1;
+    }
+
     private File createCsvFile() {
         try {
             File dir = new File(new File(MeteorClient.FOLDER, "hunterbuddy"), "rocket-state-lab");
@@ -334,7 +383,7 @@ public class RocketStateLab extends Module {
     private void writeHeader() {
         if (csvFile == null) return;
         try (Writer writer = new FileWriter(csvFile, false)) {
-            writer.write("id,trigger,start_tick,flight_duration,pitch,yaw,start_speed,speed_20,speed_60,speed_100,gain_20,gain_60,gain_100,start_y,end_y,rockets_before,rockets_after,corrections,total_corrections\n");
+            writer.write("id,trigger,start_tick,flight_duration,pitch,yaw,start_speed,speed_20,speed_60,speed_100,gain_20,gain_60,gain_100,start_y,end_y,rockets_before,rockets_after,corrections,total_corrections,main_hand_rocket,offhand_rocket,selected_slot,is_gliding_start\n");
         } catch (IOException e) {
             error("Failed to write RocketStateLab header: %s", e.getMessage());
         }
@@ -358,10 +407,12 @@ public class RocketStateLab extends Module {
     public enum TestMode {
         ObserveOnly,
         NormalUse,
+        SlotSwapUse,
+        OffhandUse,
+        MoveFromInv,
         StartFlyBefore,
         StartFlyAfter,
-        StartFlyPulse,
-        SlotSwapUse
+        StartFlyPulse
     }
 
     private class Sample {
@@ -374,6 +425,10 @@ public class RocketStateLab extends Module {
         final double startSpeed;
         final double startY;
         final int rocketsBefore;
+        final boolean mainHandRocket;
+        final boolean offhandRocket;
+        final int selectedSlot;
+        final boolean isGlidingStart;
         int rocketsAfter;
         int corrections;
         double speed20 = Double.NaN;
@@ -391,6 +446,10 @@ public class RocketStateLab extends Module {
             this.startSpeed = horizontalSpeedBps();
             this.startY = mc.player.getY();
             this.rocketsBefore = countRockets();
+            this.mainHandRocket = mc.player.getMainHandStack().isOf(Items.FIREWORK_ROCKET);
+            this.offhandRocket = mc.player.getOffHandStack().isOf(Items.FIREWORK_ROCKET);
+            this.selectedSlot = mc.player.getInventory().getSelectedSlot();
+            this.isGlidingStart = mc.player.isGliding();
             this.rocketsAfter = this.rocketsBefore;
             this.endY = this.startY;
         }
@@ -435,7 +494,11 @@ public class RocketStateLab extends Module {
                 + rocketsBefore + ","
                 + rocketsAfter + ","
                 + corrections + ","
-                + totalCorrections;
+                + totalCorrections + ","
+                + (mainHandRocket ? 1 : 0) + ","
+                + (offhandRocket ? 1 : 0) + ","
+                + selectedSlot + ","
+                + (isGlidingStart ? 1 : 0);
         }
 
         String fmt(double value) {
