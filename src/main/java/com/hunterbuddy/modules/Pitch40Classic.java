@@ -5,6 +5,7 @@ import com.hunterbuddy.modules.regear.util.Utils;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -39,6 +40,13 @@ public class Pitch40Classic extends Module {
         .defaultValue(2.0)
         .min(0.1)
         .sliderMax(10.0)
+        .build()
+    );
+
+    public final Setting<PitchMode> pitchMode = this.sgGeneral.add(new EnumSetting.Builder<PitchMode>()
+        .name("pitch-mode")
+        .description("Mode d'oscillation: CLASSIC (±40°, Meteor 0.5.8, prédictible) ou EFFICIENT (37.72°/-54.77°, Meteor 1.21.11, plus naturel avec drift up).")
+        .defaultValue(PitchMode.CLASSIC)
         .build()
     );
 
@@ -111,12 +119,14 @@ public class Pitch40Classic extends Module {
             this.pitchingDown = true;
         }
 
-        // Pitch control (fixed ±40°, no randomisation)
+        // Pitch control (mode choisi: CLASSIC ou EFFICIENT)
         float current = this.mc.player.getPitch();
         float rate = this.pitchRate.get().floatValue();
+        float downClamp = this.pitchMode.get() == PitchMode.EFFICIENT ? 37.72f : 40.0f;
+        float upClamp = this.pitchMode.get() == PitchMode.EFFICIENT ? -54.77f : -40.0f;
         float updated = this.pitchingDown
-            ? Math.min(current + rate, 40.0f)
-            : Math.max(current - rate, -40.0f);
+            ? Math.min(current + rate, downClamp)
+            : Math.max(current - rate, upClamp);
         this.mc.player.setPitch(updated);
 
         // Auto-firework (logique exacte de JEFF Pitch40Util)
@@ -133,6 +143,22 @@ public class Pitch40Classic extends Module {
                     }
                 }
             }
+        }
+    }
+
+    public enum PitchMode {
+        CLASSIC("Classic (±40°, Meteor 0.5.8, prédictible)"),
+        EFFICIENT("Efficient (37.72°/-54.77°, Meteor 1.21.11, drift up)");
+
+        private final String displayName;
+
+        PitchMode(String displayName) {
+            this.displayName = displayName;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
         }
     }
 }
