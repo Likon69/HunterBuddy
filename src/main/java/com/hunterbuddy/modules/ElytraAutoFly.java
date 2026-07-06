@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.regear.util.Utils;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -79,6 +80,24 @@ public class ElytraAutoFly extends Module {
         .build()
     );
 
+    private final Setting<Boolean> descendAutoFirework = sgCycle.add(new BoolSetting.Builder()
+        .name("descend-auto-firework")
+        .description("Fire fireworks automatically during the DESCEND phase to maintain speed, like the CLIMB phase does via Pitch40Classic.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> descendFireworkCooldownTicks = sgCycle.add(new IntSetting.Builder()
+        .name("descend-firework-cooldown")
+        .description("Ticks between automatic firework fires during the DESCEND phase.")
+        .defaultValue(20)
+        .min(1)
+        .max(200)
+        .sliderRange(5, 60)
+        .visible(descendAutoFirework::get)
+        .build()
+    );
+
     // ---- Runtime state ----
 
     private enum Phase { CLIMB, DESCEND }
@@ -88,6 +107,7 @@ public class ElytraAutoFly extends Module {
     private Phase currentPhase = Phase.CLIMB;
     private boolean pitch40WasActiveBefore = false;
     private boolean goingUp = true;
+    private int descendFireworkCooldown;
 
     public ElytraAutoFly() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "elytra-auto-fly",
@@ -102,6 +122,7 @@ public class ElytraAutoFly extends Module {
             return;
         }
         pitch40WasActiveBefore = pitch40Classic.isActive();
+        descendFireworkCooldown = 0;
         enterClimb();
     }
 
@@ -182,6 +203,16 @@ public class ElytraAutoFly extends Module {
     }
 
     private void tickDescend() {
+        // Auto-firework to maintain speed during descent (like CLIMB does via Pitch40Classic).
+        if (descendAutoFirework.get()) {
+            if (descendFireworkCooldown > 0) {
+                descendFireworkCooldown--;
+            } else {
+                Utils.firework(mc, false);
+                descendFireworkCooldown = descendFireworkCooldownTicks.get();
+            }
+        }
+
         // Vanilla glide — set our descend pitch directly.
         mc.player.setPitch(descendPitch.get().floatValue());
 
