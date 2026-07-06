@@ -9,35 +9,25 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.slot.Slot;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(HandledScreen.class)
 public abstract class HandledScreenMixin {
-    @Shadow
-    protected int x;
-
-    @Shadow
-    protected int y;
-
-    @Inject(method = "drawForeground", at = @At("TAIL"))
-    private void onDrawForeground(DrawContext context, int mouseX, int mouseY, CallbackInfo ci) {
+    // Inject into drawSlot which has signature (DrawContext, Slot, int, int) in 1.21.11
+    // The DrawContext is already translated to the GUI position, so slot.x/slot.y
+    // are GUI-relative and will be drawn at the right screen position.
+    @Inject(method = "drawSlot", at = @At("TAIL"))
+    private void onDrawSlot(DrawContext context, Slot slot, int mouseX, int mouseY, CallbackInfo ci) {
         ShulkerOverviewModule module = (ShulkerOverviewModule) Modules.get().get(ShulkerOverviewModule.class);
         if (module == null || !module.isActive()) return;
 
-        HandledScreen<?> screen = (HandledScreen<?>) (Object) this;
-        for (Slot slot : screen.getScreenHandler().slots) {
-            ItemStack stack = slot.getStack();
-            if (!stack.isEmpty() && stack.getItem() instanceof BlockItem blockItem
-                && blockItem.getBlock() instanceof ShulkerBoxBlock) {
-                // slot.x and slot.y are relative to the screen's top-left
-                // We draw at absolute screen coordinates
-                int slotX = this.x + slot.x;
-                int slotY = this.y + slot.y;
-                module.renderShulkerOverlay(context, slotX, slotY, stack);
-            }
-        }
+        ItemStack stack = slot.getStack();
+        if (stack.isEmpty()) return;
+        if (!(stack.getItem() instanceof BlockItem blockItem)) return;
+        if (!(blockItem.getBlock() instanceof ShulkerBoxBlock)) return;
+
+        module.renderShulkerOverlay(context, slot.x, slot.y, stack);
     }
 }
