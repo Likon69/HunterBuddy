@@ -162,14 +162,12 @@ public class ElytraAutoFly extends Module {
         if (mc.player == null) return;
 
         if (currentPhase == Phase.CLIMB) {
-            // Reconnect: if Pitch40Classic was turned off, re-enable when can fly
-            if (!pitch40Classic.isActive()) {
-                if (mc.player.getAbilities().allowFlying) {
-                    enterClimb();
-                }
-                return;
+            // Respect user choice: if Pitch40Classic is disabled, do nothing.
+            // Don't auto re-activate every tick (that was overzealous).
+            // User can re-enable Pitch40Classic manually to resume the climb cycle.
+            if (pitch40Classic.isActive()) {
+                tickClimb();
             }
-            tickClimb();
         } else {
             tickDescend();
         }
@@ -186,8 +184,10 @@ public class ElytraAutoFly extends Module {
             return;
         }
 
-        // 2. -40 pitch = facing up (goingUp phase)
-        if (mc.player.getPitch() == -40.0f) {
+        // 2. upClamp pitch = facing up (goingUp phase). Mode-dependent:
+        //    -40.0 in CLASSIC, -54.77 in EFFICIENT (drift). Read via getter
+        //    to stay in sync with Pitch40Classic mode changes.
+        if (mc.player.getPitch() == pitch40Classic.getUpClamp()) {
             goingUp = true;
         }
         // 3. Apex: going up but vertical velocity <= 0 -> grab new bounds
