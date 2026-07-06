@@ -20,6 +20,7 @@ import com.hunterbuddy.modules.GhostContainer;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.NoHurtCam;
+import com.hunterbuddy.modules.OldChunkNotifier;
 import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Pitch40Classic;
@@ -68,6 +69,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new GhostContainer());
         Modules.get().add(new NoHurtCam());
         Modules.get().add(new NoJumpDelay());
+        Modules.get().add(new OldChunkNotifier());
         Modules.get().add(new ElytraBounce());
         Modules.get().add(new ElytraRecast());
         Modules.get().add(new ControlFly());

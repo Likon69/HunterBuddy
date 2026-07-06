@@ -87,6 +87,7 @@ public class ElytraAutoFly extends Module {
 
     private Phase currentPhase = Phase.CLIMB;
     private boolean pitch40WasActiveBefore = false;
+    private boolean goingUp = true;
 
     public ElytraAutoFly() {
         super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "elytra-auto-fly",
@@ -114,8 +115,8 @@ public class ElytraAutoFly extends Module {
     private void resetBounds() {
         if (mc.player == null) return;
         double y = mc.player.getY();
-        pitch40Classic.upperBound.set(y - 5);
-        pitch40Classic.lowerBound.set(y - 5 - boundGap.get());
+        pitch40Classic.upperBound.set(y);
+        pitch40Classic.lowerBound.set(y - boundGap.get());
     }
 
     private void enterClimb() {
@@ -154,14 +155,28 @@ public class ElytraAutoFly extends Module {
     }
 
     private void tickClimb() {
-        // Player fell below lower bound - 10: reset (from JEFF Pitch40Util)
-        if (autoBoundAdjust.get() && mc.player.getY() <= pitch40Classic.lowerBound.get() - 10) {
+        double y = mc.player.getY();
+        double velocityY = mc.player.getVelocity().y;
+
+        // JEFF Pitch40Util logic (exact copy):
+        // 1. Player fell below lower bound - 10: reset bounds, skip rest
+        if (autoBoundAdjust.get() && y <= pitch40Classic.lowerBound.get() - 10) {
             resetBounds();
             return;
         }
 
+        // 2. -40 pitch = facing up (goingUp phase)
+        if (mc.player.getPitch() == -40.0f) {
+            goingUp = true;
+        }
+        // 3. Apex: going up but vertical velocity <= 0 -> grab new bounds
+        else if (autoBoundAdjust.get() && goingUp && velocityY <= 0) {
+            goingUp = false;
+            resetBounds();
+        }
+
         // Cycle: switch to descend phase when max altitude reached.
-        if (mc.player.getY() >= maxAltitude.get()) {
+        if (y >= maxAltitude.get()) {
             enterDescend();
         }
     }
