@@ -85,6 +85,16 @@ public class Pitch40Classic extends Module {
         super(HunterBuddyAddon.HUNT_CATEGORY, "pitch40-classic", "Oscillation elytra fixe +40/-40, standalone (n'utilise PAS ElytraFly de Meteor). Firework logique JEFF Pitch40Util.");
     }
 
+    /**
+     * Returns the upper pitch clamp for the current mode.
+     * -40.0 in CLASSIC mode, -54.77 in EFFICIENT (drift) mode.
+     * Exposed so other modules (ElytraAutoFly) can detect the "going up" apex
+     * without hardcoding the value.
+     */
+    public float getUpClamp() {
+        return this.pitchMode.get() == PitchMode.EFFICIENT ? -54.77f : -40.0f;
+    }
+
     @Override
     public void onActivate() {
         if (this.mc.player != null) {
@@ -129,9 +139,9 @@ public class Pitch40Classic extends Module {
             : Math.max(current - rate, upClamp);
         this.mc.player.setPitch(updated);
 
-        // Auto-firework (logique exacte de JEFF Pitch40Util)
-        if (current == -40.0f) {
-            // -40 pitch = facing up
+        // Auto-firework (logique exacte de JEFF Pitch40Util, adaptée au mode)
+        if (current == upClamp) {
+            // upClamp pitch = facing up (-40° CLASSIC, -54.77° EFFICIENT)
             this.goingUp = true;
             if (this.autoFirework.get()
                 && this.mc.player.getVelocity().y < this.velocityThreshold.get()
