@@ -27,7 +27,7 @@ public class MsgUtil {
    }
 
    public static void initModulePrefixes() {
-      for (Module module : Modules.get().getGroup(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY)) {
+      for (Module module : Modules.get().getGroup(HunterBuddyAddon.HUNT_CATEGORY)) {
          String name = module.name;
          String color = Utils.rCC();
          modulePrefixes.put(name, color);

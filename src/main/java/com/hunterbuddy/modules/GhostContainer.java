@@ -67,7 +67,7 @@ public class GhostContainer extends Module {
 
    public GhostContainer() {
       super(
-         HunterBuddyAddon.HUNTER_BUDDY_CATEGORY,
+         HunterBuddyAddon.UTILITY_CATEGORY,
          "ghost-container",
          "Adds a button to container GUIs that exits without sending the close packet, leaving the container open server-side (Paper/Folia desync)."
       );

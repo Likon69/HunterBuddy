@@ -44,7 +44,7 @@ public class RocketFly extends Module {
       );
 
    public RocketFly() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "RocketFly", "Maintains a level Y-flight with fireworks and smooth pitch control.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "RocketFly", "Maintains a level Y-flight with fireworks and smooth pitch control.");
    }
 
    public void onActivate() {

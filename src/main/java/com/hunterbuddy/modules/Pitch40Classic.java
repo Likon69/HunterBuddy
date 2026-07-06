@@ -74,7 +74,7 @@ public class Pitch40Classic extends Module {
     private int fireworkCooldown = 0;
 
     public Pitch40Classic() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "pitch40-classic", "Oscillation elytra fixe +40/-40, standalone (n'utilise PAS ElytraFly de Meteor). Firework logique JEFF Pitch40Util.");
+        super(HunterBuddyAddon.HUNT_CATEGORY, "pitch40-classic", "Oscillation elytra fixe +40/-40, standalone (n'utilise PAS ElytraFly de Meteor). Firework logique JEFF Pitch40Util.");
     }
 
     @Override

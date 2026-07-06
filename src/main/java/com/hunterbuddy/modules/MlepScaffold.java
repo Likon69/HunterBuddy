@@ -223,7 +223,7 @@ public class MlepScaffold extends Module {
    private int regearHotbarSlot = -1;
 
    public MlepScaffold() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "mlep-scaffold", "Places blocks under you using GrimAC bypass.");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "mlep-scaffold", "Places blocks under you using GrimAC bypass.");
    }
 
    public void onActivate() {

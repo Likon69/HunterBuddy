@@ -710,7 +710,7 @@ public class StashFinder extends Module {
    private static final String CATEGORY = "StashFinder";
 
    public StashFinder() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
    }
 
    public void onActivate() {

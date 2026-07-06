@@ -193,7 +193,7 @@ public class AreaLoader extends Module {
 
    public AreaLoader() {
       super(
-         HunterBuddyAddon.HUNTER_BUDDY_CATEGORY,
+         HunterBuddyAddon.UTILITY_CATEGORY,
          "arealoader",
          "Either loads chunks in a rectangle to a certain point from you, or spirals endlessly from you. Useful with Stash Finder or other map saving mods."
       );

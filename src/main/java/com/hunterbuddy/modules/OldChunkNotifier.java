@@ -22,6 +22,8 @@ import xaeroplus.module.impl.PaletteNewChunks;
 import xaero.common.minimap.waypoints.Waypoint;
 
 import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.Set;
 
 
 
@@ -97,6 +99,15 @@ public class OldChunkNotifier extends Module {
         .build()
     );
 
+    private final Setting<Integer> minClusterSize = sgGeneral.add(new IntSetting.Builder()
+        .name("min-cluster-size")
+        .description("Nombre minimum de chunks adjacents avant de notifier (filtre les faux positifs isolés).")
+        .defaultValue(2)
+        .min(1)
+        .sliderMax(6)
+        .build()
+    );
+
     private final Setting<LogType> logType = sgGeneral.add(new EnumSetting.Builder<LogType>()
         .name("log-type")
         .description("What to do when an old chunk is detected.")
@@ -135,8 +146,13 @@ public class OldChunkNotifier extends Module {
         .build()
     );
 
+    // Cluster detection state
+    private final Set<ChunkPos> pendingOldChunks = new HashSet<>();
+    private final Set<ChunkPos> notifiedChunks = new HashSet<>();
+    private static final int[][] NEIGHBOR_OFFSETS = {{1,0},{-1,0},{0,1},{0,-1}};
+
     public OldChunkNotifier() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "old-chunk-notifier", "Sends a webhook message and optionally pings you when an old chunk is detected.");
+        super(HunterBuddyAddon.HUNT_CATEGORY, "old-chunk-notifier", "Sends a webhook message and optionally pings you when an old chunk is detected.");
     }
 
     @Override
@@ -144,6 +160,8 @@ public class OldChunkNotifier extends Module {
     {
         XaeroPlus.EVENT_BUS.register(this);
         oldChunks.clear();
+        pendingOldChunks.clear();
+        notifiedChunks.clear();
     }
 
     @Override
@@ -209,24 +227,8 @@ public class OldChunkNotifier extends Module {
 
         if (notifyAnyChunks.get())
         {
-            if (logType.get() == LogType.Both || logType.get() == LogType.Marker)
-            {
-                createMapMarker(event.chunk().getPos().x, event.chunk().getPos().z);
-            }
-            if (logType.get() == LogType.Both || logType.get() == LogType.Webhook)
-            {
-                String message = "";
-                if (is112OldChunk && !is119NewChunk) {
-                    message = "1.12 Followed in 1.19+ Old Chunk Detected";
-                } else if (is112OldChunk && is119NewChunk) {
-                    message = "1.12 Unfollowed in 1.19+ Old Chunk Detected";
-                } else {
-                    message = "1.19+ Old Chunk Detected";
-                }
-                String finalMessage = message; // must be final for thread operations
-                // use threads so if a ton of chunks come at once it doesnt lag the game
-                String discordID = !ping.get() || discordId.get().isBlank() ? null : discordId.get();
-            }
+            pendingOldChunks.add(event.chunk().getPos());
+            tryNotifyCluster(event.chunk().getPos());
         }
 
         if (notifyOffHighway.get())
@@ -237,16 +239,41 @@ public class OldChunkNotifier extends Module {
             double distance = distancePointToDirection(new Vec3d(chunkPos.x, 0, chunkPos.z), direction, new Vec3d(playerChunkPos.x, 0, playerChunkPos.z));
             if (distance > distanceOffAxis.get())
             {
-                if (logType.get() == LogType.Both || logType.get() == LogType.Marker)
-                {
-                    createMapMarker(chunkPos.x, chunkPos.z);
-                }
-                if (logType.get() == LogType.Both || logType.get() == LogType.Webhook)
-                {
-                    String discordID = !ping.get() || discordId.get().isBlank() ? null : discordId.get();
+                pendingOldChunks.add(chunkPos);
+                tryNotifyCluster(chunkPos);
+            }
+        }
+    }
+
+    private int countOldNeighbors(ChunkPos pos) {
+        int count = 0;
+        for (int[] o : NEIGHBOR_OFFSETS) {
+            ChunkPos n = new ChunkPos(pos.x + o[0], pos.z + o[1]);
+            if (pendingOldChunks.contains(n) || notifiedChunks.contains(n)) count++;
+        }
+        return count;
+    }
+
+    private void tryNotifyCluster(ChunkPos pos) {
+        if (countOldNeighbors(pos) + 1 >= minClusterSize.get()) {
+            if (notifiedChunks.add(pos)) {
+                pendingOldChunks.remove(pos);
+                fireNotification(pos);
+            }
+            for (int[] o : NEIGHBOR_OFFSETS) {
+                ChunkPos n = new ChunkPos(pos.x + o[0], pos.z + o[1]);
+                if (pendingOldChunks.remove(n) && notifiedChunks.add(n)) {
+                    fireNotification(n);
                 }
             }
         }
+    }
+
+    private void fireNotification(ChunkPos pos) {
+        if (logType.get() == LogType.Both || logType.get() == LogType.Marker) {
+            createMapMarker(pos.x, pos.z);
+        }
+        // Webhook code removed (not ported)
     }
 
     private void createMapMarker(int x, int z)

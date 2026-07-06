@@ -144,7 +144,7 @@ public class AutoLogPlus extends Module
 
     public AutoLogPlus()
     {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "auto-log-plus", "Provides some additional triggers to log out.");
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-log-plus", "Provides some additional triggers to log out.");
     }
 
     @Override

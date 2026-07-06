@@ -177,7 +177,7 @@ public class BetterStashFinder extends Module
 
     public BetterStashFinder()
     {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "better-stash-finder", "Meteors StashFinder but with more features.");
+        super(HunterBuddyAddon.HUNT_CATEGORY, "better-stash-finder", "Meteors StashFinder but with more features.");
     }
 
     private Vec3d lastPosition = null;

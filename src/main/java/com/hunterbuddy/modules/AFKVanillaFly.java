@@ -21,7 +21,7 @@ public class AFKVanillaFly extends Module {
     private float targetPitch = 0;
 
     public AFKVanillaFly() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "AFKVanillaFly", "Maintains a level Y-flight with fireworks and smooth pitch control.");
+        super(HunterBuddyAddon.HUNT_CATEGORY, "AFKVanillaFly", "Maintains a level Y-flight with fireworks and smooth pitch control.");
     }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();

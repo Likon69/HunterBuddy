@@ -95,7 +95,7 @@ public class Pitch40 extends Module {
    private static final int ELYTRA_FLY_RETRY_DELAY_TICKS = 20;
 
    public Pitch40() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "Pitch40", "Utility for Pitch40 elytra flying. Syncs bounds with ElytraFly and auto-enables on reconnect.");
+      super(HunterBuddyAddon.HUNT_CATEGORY, "Pitch40", "Utility for Pitch40 elytra flying. Syncs bounds with ElytraFly and auto-enables on reconnect.");
    }
 
    private Module getElytraFly() {

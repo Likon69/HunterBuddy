@@ -309,7 +309,7 @@ public class MlepMine extends Module {
    private InventoryManager inventoryManager;
 
    public MlepMine() {
-      super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "mlep-mine", "Mines blocks faster");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "mlep-mine", "Mines blocks faster");
    }
 
    public Setting<Double> getSpeedConfig() {

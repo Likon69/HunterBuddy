@@ -105,7 +105,7 @@ public class AutoPortal extends Module {
     private int waitTicksRemaining = 0;
 
     public AutoPortal() {
-        super(HunterBuddyAddon.HUNTER_BUDDY_CATEGORY, "auto-portal",
+        super(HunterBuddyAddon.HUNT_CATEGORY, "auto-portal",
             "Builds a nether portal frame, lights it, and (optionally) paths the player into it via Baritone.");
     }
 
