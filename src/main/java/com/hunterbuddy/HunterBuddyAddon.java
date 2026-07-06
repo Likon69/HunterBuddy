@@ -10,6 +10,7 @@ import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.BoostLab;
+import com.hunterbuddy.modules.BounceLab;
 import com.hunterbuddy.modules.CaveAirESP;
 import com.hunterbuddy.modules.ControlFly;
 import com.hunterbuddy.modules.ElytraAutoFly;
@@ -31,6 +32,8 @@ import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.SearchArea;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
+import com.hunterbuddy.modules.SlotUseDesyncLab;
+import com.hunterbuddy.modules.StartFlyingSpamLab;
 import com.hunterbuddy.modules.StashFinder;
 import com.hunterbuddy.modules.TrailFollower;
 import com.hunterbuddy.modules.UnfocusedFpsLimiter;
@@ -51,6 +54,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category HUNT_CATEGORY = new Category("Hunt", Items.ENDER_CHEST.getDefaultStack());
     public static final Category UTILITY_CATEGORY = new Category("Utility", Items.NETHER_STAR.getDefaultStack());
+    public static final Category LAB_CATEGORY = new Category("Lab", Items.COMPARATOR.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("HunterBuddy");
 
     @Override
@@ -89,6 +93,9 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new RocketFly());
         Modules.get().add(new BoostLab());
         Modules.get().add(new RocketStateLab());
+        Modules.get().add(new BounceLab());
+        Modules.get().add(new StartFlyingSpamLab());
+        Modules.get().add(new SlotUseDesyncLab());
         Modules.get().add(new SignRender());
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
@@ -108,6 +115,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     public void onRegisterCategories() {
         Modules.registerCategory(HUNT_CATEGORY);
         Modules.registerCategory(UTILITY_CATEGORY);
+        Modules.registerCategory(LAB_CATEGORY);
     }
 
     @Override

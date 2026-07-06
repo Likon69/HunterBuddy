@@ -164,7 +164,7 @@ public class BoostLab extends Module {
     private boolean warnedUnsafeBlocked;
 
     public BoostLab() {
-        super(HunterBuddyAddon.HUNT_CATEGORY, "boost-lab", "Controlled elytra boost experiments with correction detection.");
+        super(HunterBuddyAddon.LAB_CATEGORY, "boost-lab", "Controlled elytra boost experiments with correction detection.");
     }
 
     @Override
