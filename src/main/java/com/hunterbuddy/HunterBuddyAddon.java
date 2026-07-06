@@ -92,9 +92,11 @@ public class HunterBuddyAddon extends MeteorAddon {
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new SearchArea());
-        ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
-        Modules.get().add(module);
-        Modules.get().add(new ExperienceTraderStarterModule(HUNTER_BUDDY_CATEGORY, module));
+        // ExperienceTraderModule and ExperienceTraderStarterModule are hidden for now
+        // (files kept, but not registered in module list).
+        // ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
+        // Modules.get().add(module);
+        // Modules.get().add(new ExperienceTraderStarterModule(HUNTER_BUDDY_CATEGORY, module));
     }
 
     @Override
