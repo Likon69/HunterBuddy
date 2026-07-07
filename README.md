@@ -57,7 +57,7 @@ Experimental modules — bypass research, anti-cheat probing, server-tolerance t
 | `slot-use-desync-lab` | `SlotUseDesyncLab` | Tests slot-swap / use-item orderings for server-side desync. Modes: ObserveOnly, GhostSwap, SwapUseSwap, RapidSwapUse, UseThenSwap. (HunterBuddy original.) |
 | `start-flying-spam-lab` | `StartFlyingSpamLab` | Spam-tests `START_FALL_FLYING` timings to probe server tolerance. Modes: ObserveOnly, PulseTick, OnlyIfNotGliding, PulseWhileGliding, WithRocket. (HunterBuddy original.) |
 
-### Utility (12)
+### Utility (13)
 
 | Meteor name | Java class | Description |
 |---|---|---|
@@ -73,6 +73,7 @@ Experimental modules — bypass research, anti-cheat probing, server-tolerance t
 | `unfocused-fps` | `UnfocusedFpsLimiter` | Limits the FPS when the game is unfocused. (JEFF port.) |
 | `yaw-lock` | `YawLock` | Locks yaw to nearest 45° increment. Optional 2b2t anticheat jitter. (mlep port.) |
 | `mlep-air-place` | `MlepAirPlace` | Manual scaffold: right-click with block in hand → places block in air where crosshair points. (mlep port — uses `PlacementUtils.grimPlace`.) |
+| `rotation-detector` | `RotationDetector` | Scans chunks for horizontal blocks that only generate vertical naturally (logs, basalt, purpur pillars, hay bales, deepslate). Player-placed = potential stash. (mlep port.) |
 
 ---
 
