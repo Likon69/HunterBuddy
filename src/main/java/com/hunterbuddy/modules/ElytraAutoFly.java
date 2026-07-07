@@ -128,7 +128,7 @@ public class ElytraAutoFly extends Module {
 
     @Override
     public void onDeactivate() {
-        if (pitch40Classic != null && pitch40Classic.isActive()) {
+        if (pitch40Classic != null && pitch40Classic.isActive() && !pitch40WasActiveBefore) {
             pitch40Classic.toggle();
         }
     }
