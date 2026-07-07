@@ -40,6 +40,7 @@ import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketStateLab;
 import com.hunterbuddy.modules.RocketFly;
+import com.hunterbuddy.modules.RotationDetector;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.SlotUseDesyncLab;
@@ -114,6 +115,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new AreaLoader());
         Modules.get().add(new MlepAirPlace());
         Modules.get().add(new AngleCalculator());
+        Modules.get().add(new RotationDetector());
         // Modules.get().add(new BoostLab());
         // Modules.get().add(new RocketStateLab());
         // Modules.get().add(new BounceLab());
