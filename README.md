@@ -17,13 +17,12 @@ Current target: **Minecraft 1.21.11** (Yarn 1.21.11+build.3, Fabric Loader 0.18.
 
 ## Modules
 
-### Hunt (24)
+### Hunt (21)
 
 Core stash-hunting and elytra-flight toolkit.
 
 | Meteor name | Java class | Description |
 |---|---|---|
-| `AFKVanillaFly` | `AFKVanillaFly` | Maintains a level Y-flight with fireworks and smooth pitch control. (JEFF port.) |
 | `AutoFlyingRegear` | `AutoFlyingRegear` | Automatically creates a platform and restocks rockets/elytras from ender chest. (mlep port.) |
 | `auto-portal` | `AutoPortal` | For the base hunter who has places to be. (mlep port, rewritten in HunterBuddy.) |
 | `better-stash-finder` | `BetterStashFinder` | Meteor's StashFinder with more features (storage block list, Discord webhook, JSON+CSV persistence). (HunterBuddy original.) |
@@ -39,9 +38,7 @@ Core stash-hunting and elytra-flight toolkit.
 | `pitch40-classic` | `Pitch40Classic` | Standalone classic +40/-40 oscillation (0.5.4/0.5.8 behavior). Does NOT activate Meteor ElytraFly. Auto-firework optional. (HunterBuddy original.) |
 | `RocketFly` | `RocketFly` | Maintains a level Y-flight with fireworks and smooth pitch control. (mlep port.) |
 | `area-loader` | `AreaLoader` | Walks the player in a chunk-loading pattern (Rectangle / Spiral / ZigZag). Integrated with AutoFlyingRegear (paused during regear, JSON save/load). (mlep port.) |
-| `yaw-lock` | `YawLock` | Locks yaw to nearest 45° increment. Optional 2b2t anticheat jitter. (mlep port.) |
 | `angle-calculator` | `AngleCalculator` | Continuously locks yaw toward a target coordinate (highway trails). (mlep port.) |
-| `mlep-air-place` | `MlepAirPlace` | Manual scaffold: right-click with block in hand → places block in air where crosshair points. (mlep port — uses `PlacementUtils.grimPlace`.) |
 | `sign-render` | `SignRender` | Renders sign text through walls with advanced clustering. (mlep port.) |
 | `stash-finder` | `StashFinder` | Enhanced stash detection with privacy-focused coordinate management. (mlep port.) |
 | `TrailFollower` | `TrailFollower` | Automatically follows trails in all dimensions. (mlep port — 805 lines, advanced settings `forwardConeAngle` + `forwardWeightStrength` only present in mlep version.) |
@@ -60,7 +57,7 @@ Experimental modules — bypass research, anti-cheat probing, server-tolerance t
 | `slot-use-desync-lab` | `SlotUseDesyncLab` | Tests slot-swap / use-item orderings for server-side desync. Modes: ObserveOnly, GhostSwap, SwapUseSwap, RapidSwapUse, UseThenSwap. (HunterBuddy original.) |
 | `start-flying-spam-lab` | `StartFlyingSpamLab` | Spam-tests `START_FALL_FLYING` timings to probe server tolerance. Modes: ObserveOnly, PulseTick, OnlyIfNotGliding, PulseWhileGliding, WithRocket. (HunterBuddy original.) |
 
-### Utility (10)
+### Utility (12)
 
 | Meteor name | Java class | Description |
 |---|---|---|
@@ -74,6 +71,8 @@ Experimental modules — bypass research, anti-cheat probing, server-tolerance t
 | `replenish` | `Replenish` | Advanced auto-replenish using shift-click packets. (mlep port.) |
 | `shulker-overview` | `ShulkerOverviewModule` | Overlays most common item icon on shulker boxes in hotbar/inventory AND in any container screen (chests, ender chests, player E screen). (JEFF port.) |
 | `unfocused-fps` | `UnfocusedFpsLimiter` | Limits the FPS when the game is unfocused. (JEFF port.) |
+| `yaw-lock` | `YawLock` | Locks yaw to nearest 45° increment. Optional 2b2t anticheat jitter. (mlep port.) |
+| `mlep-air-place` | `MlepAirPlace` | Manual scaffold: right-click with block in hand → places block in air where crosshair points. (mlep port — uses `PlacementUtils.grimPlace`.) |
 
 ---
 
