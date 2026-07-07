@@ -13,6 +13,7 @@ import com.hunterbuddy.hud.SpeedKMH;
 import com.hunterbuddy.hud.SystemStatsHud;
 import com.hunterbuddy.hud.TimerSpeedHud;
 import com.hunterbuddy.modules.AFKVanillaFly;
+import com.hunterbuddy.modules.AngleCalculator;
 import com.hunterbuddy.modules.AutoEXPPlus;
 import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
@@ -27,6 +28,7 @@ import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
+import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.NoHurtCam;
@@ -34,10 +36,10 @@ import com.hunterbuddy.modules.OldChunkNotifier;
 import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Pitch40Classic;
+import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketStateLab;
 import com.hunterbuddy.modules.RocketFly;
-import com.hunterbuddy.modules.SearchArea;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.SlotUseDesyncLab;
@@ -47,6 +49,7 @@ import com.hunterbuddy.modules.TrailFollower;
 import com.hunterbuddy.modules.UnfocusedFpsLimiter;
 import com.hunterbuddy.modules.VanityESP;
 import com.hunterbuddy.modules.WaypointFollower;
+import com.hunterbuddy.modules.YawLock;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
 import com.mojang.logging.LogUtils;
@@ -107,6 +110,10 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Pitch40());
         Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
+        Modules.get().add(new YawLock());
+        Modules.get().add(new AreaLoader());
+        Modules.get().add(new MlepAirPlace());
+        Modules.get().add(new AngleCalculator());
         // Modules.get().add(new BoostLab());
         // Modules.get().add(new RocketStateLab());
         // Modules.get().add(new BounceLab());
@@ -119,7 +126,6 @@ public class HunterBuddyAddon extends MeteorAddon {
 
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
-        Modules.get().add(new SearchArea());
         // ExperienceTraderModule and ExperienceTraderStarterModule are hidden for now
         // (files kept, but not registered in module list).
         // ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);

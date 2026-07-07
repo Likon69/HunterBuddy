@@ -113,6 +113,7 @@ public class Pitch40Classic extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        if (!this.isActive()) return;
         if (this.mc.player == null || !this.mc.player.isGliding()) return;
 
         double y = this.mc.player.getY();

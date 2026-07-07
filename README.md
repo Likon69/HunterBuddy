@@ -17,7 +17,7 @@ Current target: **Minecraft 1.21.11** (Yarn 1.21.11+build.3, Fabric Loader 0.18.
 
 ## Modules
 
-### Hunt (21)
+### Hunt (24)
 
 Core stash-hunting and elytra-flight toolkit.
 
@@ -38,7 +38,10 @@ Core stash-hunting and elytra-flight toolkit.
 | `Pitch40` | `Pitch40` | Legacy Pitch40 utility. Syncs bounds with Meteor ElytraFly and auto-enables on reconnect. (mlep port — activates Meteor's broken Pitch40 mode.) |
 | `pitch40-classic` | `Pitch40Classic` | Standalone classic +40/-40 oscillation (0.5.4/0.5.8 behavior). Does NOT activate Meteor ElytraFly. Auto-firework optional. (HunterBuddy original.) |
 | `RocketFly` | `RocketFly` | Maintains a level Y-flight with fireworks and smooth pitch control. (mlep port.) |
-| `hb-search-area` | `SearchArea` | Walks the player in a chunk-loading pattern (Rectangle / Spiral / ZigZag). Useful with stash finder / map mods. (mlep port — AreaLoader.) |
+| `area-loader` | `AreaLoader` | Walks the player in a chunk-loading pattern (Rectangle / Spiral / ZigZag). Integrated with AutoFlyingRegear (paused during regear, JSON save/load). (mlep port.) |
+| `yaw-lock` | `YawLock` | Locks yaw to nearest 45° increment. Optional 2b2t anticheat jitter. (mlep port.) |
+| `angle-calculator` | `AngleCalculator` | Continuously locks yaw toward a target coordinate (highway trails). (mlep port.) |
+| `mlep-air-place` | `MlepAirPlace` | Manual scaffold: right-click with block in hand → places block in air where crosshair points. (mlep port — uses `PlacementUtils.grimPlace`.) |
 | `sign-render` | `SignRender` | Renders sign text through walls with advanced clustering. (mlep port.) |
 | `stash-finder` | `StashFinder` | Enhanced stash detection with privacy-focused coordinate management. (mlep port.) |
 | `TrailFollower` | `TrailFollower` | Automatically follows trails in all dimensions. (mlep port — 805 lines, advanced settings `forwardConeAngle` + `forwardWeightStrength` only present in mlep version.) |
@@ -71,6 +74,40 @@ Experimental modules — bypass research, anti-cheat probing, server-tolerance t
 | `replenish` | `Replenish` | Advanced auto-replenish using shift-click packets. (mlep port.) |
 | `shulker-overview` | `ShulkerOverviewModule` | Overlays most common item icon on shulker boxes in hotbar/inventory AND in any container screen (chests, ender chests, player E screen). (JEFF port.) |
 | `unfocused-fps` | `UnfocusedFpsLimiter` | Limits the FPS when the game is unfocused. (JEFF port.) |
+
+---
+
+## Quick Start — Hunt Scenarios
+
+### Scenario 1: Follow a trail (auto-detection)
+
+Modules to enable manually (only these, the rest cascades):
+1. `TrailFollower` — detects the trail + steers yaw
+2. `AutoFlyingRegear` — monitors rockets/elytras + auto-replenishes from ender chest
+3. `Replenish` — refills hotbar from inventory
+4. `ElytraSwap` — swaps damaged elytra automatically
+
+Cascade (auto-activated): `TrailFollower` → `Pitch40` → `ElytraRecast`.
+
+Inventory required: equipped elytra, ≥64 fireworks, ender chest + shulker(s) of rockets in ender chest, optional 2–6 spare elytras.
+
+### Scenario 2: Follow Xaero waypoints
+
+Modules to enable manually (only these, the rest cascades):
+1. `WaypointFollower` — follows waypoints prefixed `Hunt_` + triggers takeoff
+2. `AutoFlyingRegear` — monitors rockets/elytras + auto-replenishes from ender chest
+3. `Replenish` — refills hotbar from inventory
+4. `ElytraSwap` — swaps damaged elytra automatically
+
+Cascade (auto-activated): `WaypointFollower` → `ElytraRecast` (1× for takeoff) → `Pitch40` (sustained flight). `ElytraRecast` stays in MONITORING after that.
+
+Inventory required: same as Scenario 1, plus waypoints `Hunt_*` defined in Xaero World Map.
+
+### Cascade summary
+
+`TrailFollower` / `WaypointFollower` → `Pitch40` (Meteor ElytraFly Pitch40 mode) → `ElytraRecast` (recovery, auto).
+
+`AutoFlyingRegear` / `Replenish` / `ElytraSwap` are **NOT** auto-activated (same as original mlep). Enable them manually.
 
 ---
 
