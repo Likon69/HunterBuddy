@@ -86,7 +86,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(ElytraStatusHud.INFO);
 
         // HunterBuddy modules
-        Modules.get().add(new AFKVanillaFly());
+        // Modules.get().add(new AFKVanillaFly());
         Modules.get().add(new AutoLogPlus());
         Modules.get().add(new AutoEXPPlus());
         Modules.get().add(new UnfocusedFpsLimiter());
