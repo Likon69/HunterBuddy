@@ -20,6 +20,7 @@ import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.BoatFlyLab;
 import com.hunterbuddy.modules.CaveAirESP;
+import com.hunterbuddy.modules.ClientSideTime;
 import com.hunterbuddy.modules.ControlFly;
 import com.hunterbuddy.modules.ElytraAutoFly;
 import com.hunterbuddy.modules.ElytraBounce;
@@ -86,6 +87,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         // Modules.get().add(new AFKVanillaFly());
         Modules.get().add(new AutoLogPlus());
         Modules.get().add(new AutoEXPPlus());
+        Modules.get().add(new ClientSideTime());
         Modules.get().add(new UnfocusedFpsLimiter());
         Modules.get().add(new ShulkerOverviewModule());
         Modules.get().add(new ElytraSwap());
