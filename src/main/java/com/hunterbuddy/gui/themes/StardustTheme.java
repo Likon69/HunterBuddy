@@ -108,7 +108,6 @@ public class StardustTheme extends MeteorGuiTheme implements RecolorGuiTheme {
         return new SettingColor(49, 37, 55, 200);
     }
 
-    // Starscript
     @Override
     public SettingColor getStarscriptText() {
         return new SettingColor(147, 129, 255);
