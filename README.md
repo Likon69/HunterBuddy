@@ -17,7 +17,7 @@ Current target: **Minecraft 1.21.11** (Yarn 1.21.11+build.3, Fabric Loader 0.18.
 
 ## Modules
 
-### Hunt (21)
+### Hunt (26)
 
 Core stash-hunting and elytra-flight toolkit.
 
@@ -27,42 +27,45 @@ Core stash-hunting and elytra-flight toolkit.
 | `auto-portal` | `AutoPortal` | For the base hunter who has places to be. (mlep port, rewritten in HunterBuddy.) |
 | `better-stash-finder` | `BetterStashFinder` | Meteor's StashFinder with more features (storage block list, Discord webhook, JSON+CSV persistence). (HunterBuddy original.) |
 | `cave-air` | `CaveAirESP` | Detects portal-shaped disturbances in cave air. (mlep port.) |
+| `chest-tracker` | `chesttracker/ChestTrackerModule` | Tracks contents of scanned containers (chests, barrels, shulkers, etc.) with browser GUI + Discord webhook + JSON persistence. (mlep port.) |
+| `container-tooltips` | `ContainerTooltips` | Shows container contents when looking at tracked containers or shulkers in item frames. Combines with ChestTracker. (mlep port.) |
 | `control-fly` | `ControlFly` | GrimAC-compatible elytra flight control using WASD keys. (mlep port.) |
 | `elytra-auto-fly` | `ElytraAutoFly` | 2-phase elytra cycle: Pitch40Classic climb + auto-bound, then manual-pitch descend. Loop. (HunterBuddy original, uses standalone `Pitch40Classic` instead of Meteor ElytraFly.) |
 | `ElytraBounce` | `ElytraBounce` | Elytra fly with some more features. (mlep port.) |
 | `ElytraRecast` | `ElytraRecast` | Flight recovery fallback. Monitors and recovers when you stop flying or drop too low. (mlep port.) |
 | `ElytraSwap` | `ElytraSwap` | Automatically swaps elytras when they reach low durability. (mlep port.) |
 | `flow-esp` | `FlowESP` | Chunk activity detector via fluid spread analysis. (mlep port.) |
+| `ItemSearchBar` | `ItemSearchBar` | Search and highlight items in inventory and containers. (mlep port.) |
 | `old-chunk-notifier` | `OldChunkNotifier` | Sends a Discord webhook (optional ping) when an old chunk is detected. Cluster-based (only fires when chunk + neighbors >= min cluster size). (JEFF port.) |
+| `phase` | `Phase` | Allows player to phase through solid blocks. (mlep port.) |
 | `Pitch40` | `Pitch40` | Legacy Pitch40 utility. Syncs bounds with Meteor ElytraFly and auto-enables on reconnect. (mlep port — activates Meteor's broken Pitch40 mode.) |
 | `pitch40-classic` | `Pitch40Classic` | Standalone classic +40/-40 oscillation (0.5.4/0.5.8 behavior). Does NOT activate Meteor ElytraFly. Auto-firework optional. (HunterBuddy original.) |
 | `RocketFly` | `RocketFly` | Maintains a level Y-flight with fireworks and smooth pitch control. (mlep port.) |
-| `area-loader` | `AreaLoader` | Walks the player in a chunk-loading pattern (Rectangle / Spiral / ZigZag). Integrated with AutoFlyingRegear (paused during regear, JSON save/load). (mlep port.) |
+| `area-loader` | `area-loader/regear/AreaLoader` | Walks the player in a chunk-loading pattern (Rectangle / Spiral / ZigZag). Integrated with AutoFlyingRegear (paused during regear, JSON save/load). (mlep port.) |
 | `angle-calculator` | `AngleCalculator` | Continuously locks yaw toward a target coordinate (highway trails). (mlep port.) |
 | `sign-render` | `SignRender` | Renders sign text through walls with advanced clustering. (mlep port.) |
 | `stash-finder` | `StashFinder` | Enhanced stash detection with privacy-focused coordinate management. (mlep port.) |
 | `TrailFollower` | `TrailFollower` | Automatically follows trails in all dimensions. (mlep port — 805 lines, advanced settings `forwardConeAngle` + `forwardWeightStrength` only present in mlep version.) |
 | `VanityESP` | `VanityESP` | Unified ESP for decorative items and special blocks. (mlep port, renamed to avoid conflict with JEFF mod.) |
+| `visual-range-notifier` | `VisualRangeNotifier` | Notifies when players enter visual range or selected items appear on the ground. Optional Discord webhook alerts. (mlep port.) |
 | `waypoint-follower` | `WaypointFollower` | Advanced waypoint following system with multi-dimensional flight support. (mlep port.) |
+| `yaw-lock` | `YawLock` | Locks yaw to nearest 45° increment. Optional 2b2t anticheat jitter. (mlep port.) |
 
-### Lab (5)
+### Lab (1)
 
 Experimental modules — bypass research, anti-cheat probing, server-tolerance tests. Use at your own risk. Each module logs to a CSV in `.minecraft/meteor-client/hunterbuddy/<name>-lab/`.
 
 | Meteor name | Java class | Description |
 |---|---|---|
-| `boost-lab` | `BoostLab` | Controlled elytra boost experiments with correction detection. (HunterBuddy original.) |
-| `bounce-lab` | `BounceLab` | Logs elytra bounce/collision events (Floor / Ceiling / Wall) for timing and Y-momentum analysis. (HunterBuddy original.) |
-| `rocket-state-lab` | `RocketStateLab` | Logs rocket/start-flying timing, speed gains, and server corrections. Modes: ObserveOnly, NormalUse, SlotSwapUse, OffhandUse, MoveFromInv, StartFlyBefore/After/Pulse. (HunterBuddy original.) |
-| `slot-use-desync-lab` | `SlotUseDesyncLab` | Tests slot-swap / use-item orderings for server-side desync. Modes: ObserveOnly, GhostSwap, SwapUseSwap, RapidSwapUse, UseThenSwap. (HunterBuddy original.) |
-| `start-flying-spam-lab` | `StartFlyingSpamLab` | Spam-tests `START_FALL_FLYING` timings to probe server tolerance. Modes: ObserveOnly, PulseTick, OnlyIfNotGliding, PulseWhileGliding, WithRocket. (HunterBuddy original.) |
+| `boat-fly-lab` | `BoatFlyLab` | Tests boat-fly elytra exploit (boat + elytra interaction). Modes: ObserveOnly, WithRocket, ManualFly. (HunterBuddy original.) |
 
-### Utility (13)
+### Utility (14)
 
 | Meteor name | Java class | Description |
 |---|---|---|
 | `auto-exp-plus` | `AutoEXPPlus` | Automatically repairs your armor and tools in pvp. (JEFF port.) |
 | `auto-log-plus` | `AutoLogPlus` | Provides some additional triggers to log out. (JEFF port.) |
+| `client-side-time` | `ClientSideTime` | Sets the client-side time of day. Server time and mob spawning are unaffected. (HunterBuddy original.) |
 | `ghost-container` | `GhostContainer` | Adds a button to container GUIs that exits without sending the close packet, leaving the container open server-side (Paper/Folia desync). (JEFF port.) |
 | `mlep-mine` | `MlepMine` | Mines blocks faster. (mlep port.) |
 | `mlep-scaffold` | `MlepScaffold` | Places blocks under you using GrimAC bypass. (mlep port.) |
