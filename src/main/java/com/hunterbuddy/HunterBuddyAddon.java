@@ -27,7 +27,9 @@ import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.BoatFlyLab;
 import com.hunterbuddy.modules.CaveAirESP;
+import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
 import com.hunterbuddy.modules.ClientSideTime;
+import com.hunterbuddy.modules.ContainerTooltips;
 import com.hunterbuddy.modules.ControlFly;
 import com.hunterbuddy.modules.ElytraAutoFly;
 import com.hunterbuddy.modules.ElytraBounce;
@@ -41,11 +43,13 @@ import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.NoHurtCam;
 import com.hunterbuddy.modules.OldChunkNotifier;
 import com.hunterbuddy.modules.NoJumpDelay;
+import com.hunterbuddy.modules.Phase;
 import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketFly;
+import com.hunterbuddy.modules.ItemSearchBar;
 import com.hunterbuddy.modules.RotationDetector;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
@@ -53,6 +57,7 @@ import com.hunterbuddy.modules.StashFinder;
 import com.hunterbuddy.modules.TrailFollower;
 import com.hunterbuddy.modules.UnfocusedFpsLimiter;
 import com.hunterbuddy.modules.VanityESP;
+import com.hunterbuddy.modules.VisualRangeNotifier;
 import com.hunterbuddy.modules.WaypointFollower;
 import com.hunterbuddy.modules.YawLock;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
@@ -139,6 +144,11 @@ public class HunterBuddyAddon extends MeteorAddon {
 
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
+        Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
+        Modules.get().add(new ItemSearchBar());
+        Modules.get().add(new ContainerTooltips());
+        Modules.get().add(new Phase());
+        Modules.get().add(new VisualRangeNotifier());
         // ExperienceTraderModule and ExperienceTraderStarterModule are hidden for now
         // (files kept, but not registered in module list).
         // ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
