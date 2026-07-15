@@ -10,6 +10,7 @@
     "HandledScreenMixin",
     "accessors.LivingEntityAccessor",
     "accessors.PlayerInventoryAccessor",
+    "accessors.EntityVelocityUpdateS2CPacketAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
     "accessors.DisconnectS2CPacketAccessor",
   ],
