@@ -183,12 +183,12 @@ public class ChestTrackerModule extends Module {
    private final Setting<Double> labelScale = this.sgLabels
       .add(
          new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                     .name("icon-scale")
-                  .description("Item icon scale.")
-               .defaultValue(1.0)
-               .min(0.5)
-               .max(3.0)
-               .sliderRange(0.5, 3.0)
+                  .name("icon-scale")
+               .description("Item icon scale.")
+            .defaultValue(1.0)
+            .min(0.5)
+            .max(3.0)
+            .sliderRange(0.5, 3.0)
             .build()
       );
    private final Setting<Integer> labelMaxDistance = this.sgLabels
