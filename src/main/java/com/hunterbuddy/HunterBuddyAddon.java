@@ -92,6 +92,8 @@ public class HunterBuddyAddon extends MeteorAddon {
         GuiThemes.add(PhosphorTheme.INSTANCE);
         GuiThemes.add(MonochromeTheme.INSTANCE);
 
+        GuiThemes.select("Dark");
+
         // HUDs
         Hud.get().register(ElytraHelperHud.INFO);
         Hud.get().register(SpeedKMH.INFO);
