@@ -41,7 +41,7 @@ public class Phase extends Module {
    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
    private final SettingGroup sgPearl = this.settings.createGroup("Pearl");
    private final SettingGroup sgClipping = this.settings.createGroup("Clipping");
-   private final Setting<Phase.PhaseMode> mode = this.sgGeneral
+   private final Setting<Phase.PhaseMode> mode = sgGeneral
       .add(
          new Builder<Phase.PhaseMode>().name("mode").description("The phase mode for clipping into blocks.").defaultValue(Phase.PhaseMode.Pearl)
             .build()
