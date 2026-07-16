@@ -2,13 +2,6 @@ package com.hunterbuddy;
 
 
 import com.hunterbuddy.hud.DimensionCoords;
-import com.hunterbuddy.gui.themes.DarkTheme;
-import com.hunterbuddy.gui.themes.LambdaTheme;
-import com.hunterbuddy.gui.themes.MidnightTheme;
-import com.hunterbuddy.gui.themes.MonochromeTheme;
-import com.hunterbuddy.gui.themes.PhosphorTheme;
-import com.hunterbuddy.gui.themes.SnowyTheme;
-import com.hunterbuddy.gui.themes.StardustTheme;
 import com.hunterbuddy.hud.DubCounterHud;
 import com.hunterbuddy.hud.ElytraHelperHud;
 import com.hunterbuddy.hud.ElytraStatusHud;
@@ -37,7 +30,6 @@ import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
-import com.hunterbuddy.modules.GuiTheme;
 import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
@@ -65,7 +57,6 @@ import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
-import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
@@ -83,17 +74,6 @@ public class HunterBuddyAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         LOG.info("Initializing HunterBuddy Addon");
-
-        // Themes (ported from stardust-main)
-        GuiThemes.add(DarkTheme.INSTANCE);
-        GuiThemes.add(SnowyTheme.INSTANCE);
-        GuiThemes.add(LambdaTheme.INSTANCE);
-        GuiThemes.add(StardustTheme.INSTANCE);
-        GuiThemes.add(MidnightTheme.INSTANCE);
-        GuiThemes.add(PhosphorTheme.INSTANCE);
-        GuiThemes.add(MonochromeTheme.INSTANCE);
-
-        GuiThemes.select("Dark");
 
         // HUDs
         Hud.get().register(ElytraHelperHud.INFO);
@@ -135,7 +115,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
         Modules.get().add(new YawLock());
-        Modules.get().add(new GuiTheme());
         Modules.get().add(new AreaLoader());
         Modules.get().add(new MlepAirPlace());
         Modules.get().add(new AngleCalculator());
