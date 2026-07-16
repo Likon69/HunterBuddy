@@ -37,6 +37,7 @@ import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
+import com.hunterbuddy.modules.GuiTheme;
 import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
@@ -134,6 +135,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
         Modules.get().add(new YawLock());
+        Modules.get().add(new GuiTheme());
         Modules.get().add(new AreaLoader());
         Modules.get().add(new MlepAirPlace());
         Modules.get().add(new AngleCalculator());
