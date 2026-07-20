@@ -5,6 +5,7 @@
   "client": [
     "MlepScaffoldMixin",
     "InGameHudMixin",
+    "InputMixin",
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",
     "HandledScreenMixin",

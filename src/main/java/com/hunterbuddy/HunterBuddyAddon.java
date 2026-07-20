@@ -12,6 +12,10 @@ import com.hunterbuddy.hud.MovementStatusHud;
 import com.hunterbuddy.hud.SpeedKMH;
 import com.hunterbuddy.hud.SystemStatsHud;
 import com.hunterbuddy.hud.TimerSpeedHud;
+import com.hunterbuddy.commands.logistics.SetClear;
+import com.hunterbuddy.commands.logistics.SetInput;
+import com.hunterbuddy.commands.logistics.SetOutput;
+import com.hunterbuddy.commands.logistics.StashStatus;
 import com.hunterbuddy.modules.AFKVanillaFly;
 import com.hunterbuddy.modules.AngleCalculator;
 import com.hunterbuddy.modules.AutoEXPPlus;
@@ -33,6 +37,9 @@ import com.hunterbuddy.modules.GhostContainer;
 import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
+import com.hunterbuddy.modules.logistics.PearlLoader;
+import com.hunterbuddy.modules.logistics.StashMover;
+import com.hunterbuddy.modules.logistics.StashMoverSelectionHandler;
 import com.hunterbuddy.modules.NoHurtCam;
 import com.hunterbuddy.modules.OldChunkNotifier;
 import com.hunterbuddy.modules.NoJumpDelay;
@@ -57,6 +64,7 @@ import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
+import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
@@ -67,6 +75,7 @@ import org.slf4j.Logger;
 public class HunterBuddyAddon extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category HUNT_CATEGORY = new Category("Hunt", Items.ENDER_CHEST.getDefaultStack());
+    public static final Category LOGISTICS_CATEGORY = new Category("Logistics", Items.SHULKER_BOX.getDefaultStack());
     public static final Category UTILITY_CATEGORY = new Category("Utility", Items.NETHER_STAR.getDefaultStack());
     public static final Category LAB_CATEGORY = new Category("Lab", Items.COMPARATOR.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("HunterBuddy");
@@ -74,6 +83,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         LOG.info("Initializing HunterBuddy Addon");
+        StashMoverSelectionHandler.init();
 
         // HUDs
         Hud.get().register(ElytraHelperHud.INFO);
@@ -105,6 +115,8 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ControlFly());
         Modules.get().add(new AutoPortal());
         Modules.get().add(new AutoFlyingRegear());
+        Modules.get().add(new PearlLoader());
+        Modules.get().add(new StashMover());
         Modules.get().add(new WaypointFollower());
         Modules.get().add(new TrailFollower());
         Modules.get().add(new MlepMine());
@@ -132,6 +144,10 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ContainerTooltips());
         Modules.get().add(new Phase());
         Modules.get().add(new VisualRangeNotifier());
+        Commands.add(new SetInput());
+        Commands.add(new SetOutput());
+        Commands.add(new StashStatus());
+        Commands.add(new SetClear());
         // ExperienceTraderModule and ExperienceTraderStarterModule are hidden for now
         // (files kept, but not registered in module list).
         // ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
@@ -142,6 +158,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     @Override
     public void onRegisterCategories() {
         Modules.registerCategory(HUNT_CATEGORY);
+        Modules.registerCategory(LOGISTICS_CATEGORY);
         Modules.registerCategory(UTILITY_CATEGORY);
         Modules.registerCategory(LAB_CATEGORY);
     }
