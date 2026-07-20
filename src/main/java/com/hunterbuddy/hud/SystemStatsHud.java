@@ -96,6 +96,14 @@ public class SystemStatsHud extends HudElement {
       .name("show-threshold-lines").description("Draw horizontal lines at warn/danger thresholds.")
       .defaultValue(true).build());
 
+   private final Setting<Double> ramSmoothing = sgGraph.add(
+      new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+         .name("ram-smoothing")
+         .description("Smooths the RAM graph to hide normal JVM garbage-collection sawtooths. 0 = raw samples.")
+         .defaultValue(0.75).min(0.0).max(0.95).sliderRange(0.0, 0.9)
+         .build()
+   );
+
    private final Setting<SettingColor> titleColor = sgColors.add(
       new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
          .name("title-color").description("Title text color.")
@@ -184,6 +192,7 @@ public class SystemStatsHud extends HudElement {
    private final Deque<Double> cpuHistory = new ArrayDeque<>();
 
    private double currentRamPct = 0.0;
+   private double smoothedRamPct = 0.0;
    private long currentRamUsedBytes = 0;
    private long maxRamBytes = 0;
    private double currentCpuPct = 0.0;
@@ -191,6 +200,7 @@ public class SystemStatsHud extends HudElement {
    private double peakCpuPct = 0.0;
    private int tickCounter = 0;
    private boolean cpuSupported = true;
+   private boolean ramGraphInitialized = false;
 
    public SystemStatsHud() {
       super(INFO);
@@ -212,6 +222,7 @@ public class SystemStatsHud extends HudElement {
       this.currentRamUsedBytes = rt.totalMemory() - rt.freeMemory();
       this.maxRamBytes = rt.maxMemory();
       this.currentRamPct = this.maxRamBytes > 0 ? (this.currentRamUsedBytes * 100.0 / this.maxRamBytes) : 0.0;
+      this.updateSmoothedRam();
 
       double cpu = this.sampleCpu();
       if (cpu < 0) {
@@ -225,8 +236,21 @@ public class SystemStatsHud extends HudElement {
          this.currentCpuPct = cpu;
       }
 
-      if (this.currentRamPct > this.peakRamPct) this.peakRamPct = this.currentRamPct;
+      if (this.smoothedRamPct > this.peakRamPct) this.peakRamPct = this.smoothedRamPct;
       if (this.currentCpuPct > this.peakCpuPct) this.peakCpuPct = this.currentCpuPct;
+   }
+
+   private void updateSmoothedRam() {
+      if (!this.ramGraphInitialized) {
+         this.smoothedRamPct = this.currentRamPct;
+         this.ramGraphInitialized = true;
+         return;
+      }
+
+      double smoothing = this.ramSmoothing.get();
+      this.smoothedRamPct = smoothing == 0.0
+         ? this.currentRamPct
+         : this.smoothedRamPct * smoothing + this.currentRamPct * (1.0 - smoothing);
    }
 
    private double sampleCpu() {
@@ -243,7 +267,7 @@ public class SystemStatsHud extends HudElement {
 
    private void pushSample() {
       int max = this.graphPoints.get();
-      if (this.currentRamPct >= 0) this.ramHistory.addLast(this.currentRamPct);
+      if (this.currentRamPct >= 0) this.ramHistory.addLast(this.smoothedRamPct);
       if (this.currentCpuPct >= 0) this.cpuHistory.addLast(this.currentCpuPct);
       while (this.ramHistory.size() > max) this.ramHistory.pollFirst();
       while (this.cpuHistory.size() > max) this.cpuHistory.pollFirst();
@@ -311,7 +335,7 @@ public class SystemStatsHud extends HudElement {
          this.showPeakOnGraph.get(), this.showAverageOnGraph.get(),
          this.showThresholdLines.get(), this.warnRamPct.get(), this.dangerRamPct.get(),
          this.peakRamPct, this.computeAverage(this.ramHistory),
-         this.currentRamPct >= 0 ? String.format("%.0f%%", this.currentRamPct) : "--", shadow, scale);
+         this.currentRamPct >= 0 ? String.format("%.0f%%", this.smoothedRamPct) : "--", shadow, scale);
       curY += spacing;
       maxWidth = Math.max(maxWidth, gw);
 

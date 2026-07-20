@@ -524,10 +524,9 @@ public class MlepMine extends Module {
                         && miningData2.hasAttemptedBreak()
                         && miningData2.passedAttemptedBreakTime(500L)) {
                         this.abortMining(miningData2);
+                        this.fadeList.remove(miningData2);
                         this.miningQueue.remove(miningData2);
-                     }
-
-                     if (miningData2.getBlockDamage() >= (Double)this.speedConfig.get()) {
+                     } else if (miningData2.getBlockDamage() >= (Double)this.speedConfig.get()) {
                         if (this.mc.player.isUsingItem() && !(Boolean)this.multitaskConfig.get()) {
                            return;
                         }
@@ -596,12 +595,28 @@ public class MlepMine extends Module {
    }
 
    private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
-      if (packet.getState().isAir()) {
-         for (MlepMine.MiningData data : this.miningQueue) {
-            if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
-               data.setAttemptedBreak(false);
-            }
+      List<MlepMine.MiningData> completed = new ArrayList<>();
+      List<MlepMine.MiningData> rejected = new ArrayList<>();
+
+      for (MlepMine.MiningData data : this.miningQueue) {
+         if (!data.hasAttemptedBreak() || !data.getPos().equals(packet.getPos())) continue;
+
+         if (packet.getState().isAir()) {
+            data.setServerConfirmedBreak();
+            completed.add(data);
+         } else {
+            rejected.add(data);
          }
+      }
+
+      for (MlepMine.MiningData data : completed) {
+         this.miningQueue.remove(data);
+      }
+
+      for (MlepMine.MiningData data : rejected) {
+         this.abortMining(data);
+         this.miningQueue.remove(data);
+         this.fadeList.remove(data);
       }
    }
 
@@ -624,12 +639,12 @@ public class MlepMine extends Module {
             MlepMine.MiningData data = set.getKey();
             int boxAlpha = (int)(40.0F * set.getValue().getFactor());
             int lineAlpha = (int)(100.0F * set.getValue().getFactor());
-            int boxColor = !(data.getBlockDamage() >= 0.95F) && !data.getState().isAir()
-               ? ((SettingColor)this.colorConfig.get()).getPacked()
-               : ((SettingColor)this.colorDoneConfig.get()).getPacked();
-            int lineColor = !(data.getBlockDamage() >= 0.95F) && !data.getState().isAir()
-               ? ((SettingColor)this.colorConfig.get()).getPacked()
-               : ((SettingColor)this.colorDoneConfig.get()).getPacked();
+            int boxColor = data.isServerConfirmedBreak()
+               ? ((SettingColor)this.colorDoneConfig.get()).getPacked()
+               : ((SettingColor)this.colorConfig.get()).getPacked();
+            int lineColor = data.isServerConfirmedBreak()
+               ? ((SettingColor)this.colorDoneConfig.get()).getPacked()
+               : ((SettingColor)this.colorConfig.get()).getPacked();
             boxColor = boxColor & 16777215 | boxAlpha << 24;
             lineColor = lineColor & 16777215 | lineAlpha << 24;
             BlockPos mining = data.getPos();
@@ -1181,6 +1196,7 @@ public class MlepMine extends Module {
       private float lastDamage;
       private float blockDamage;
       private boolean started;
+      private boolean serverConfirmedBreak;
 
       public MiningData(BlockPos pos, Direction direction) {
          this.pos = pos;
@@ -1251,6 +1267,14 @@ public class MlepMine extends Module {
 
       public void setStarted() {
          this.started = true;
+      }
+
+      public void setServerConfirmedBreak() {
+         this.serverConfirmedBreak = true;
+      }
+
+      public boolean isServerConfirmedBreak() {
+         return this.serverConfirmedBreak;
       }
 
       private int getBestToolNoFallback(BlockState state) {

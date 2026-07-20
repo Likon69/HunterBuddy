@@ -94,6 +94,7 @@ import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.world.gen.structure.StructureType;
 
 public class StashFinder extends Module {
    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -734,6 +735,10 @@ public class StashFinder extends Module {
    @EventHandler
    private void onChunkData(ChunkDataEvent event) {
       if (this.mc.player != null && this.mc.world != null) {
+         if (this.isInWoodlandMansion(event.chunk())) {
+            return;
+         }
+
          double chunkXAbs = Math.abs(event.chunk().getPos().x * 16);
          double chunkZAbs = Math.abs(event.chunk().getPos().z * 16);
          if (!(Math.sqrt(chunkXAbs * chunkXAbs + chunkZAbs * chunkZAbs) < ((Integer)this.minimumDistance.get()).intValue())) {
@@ -819,6 +824,10 @@ public class StashFinder extends Module {
             }
          }
       }
+   }
+
+   private boolean isInWoodlandMansion(WorldChunk chunk) {
+      return chunk.getStructureReferences().keySet().stream().anyMatch(structure -> structure.getType() == StructureType.WOODLAND_MANSION);
    }
 
    @EventHandler

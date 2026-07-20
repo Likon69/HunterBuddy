@@ -53,10 +53,10 @@ public class ElytraAutoFly extends Module {
     private final Setting<Integer> maxAltitude = sgCycle.add(new IntSetting.Builder()
         .name("max-altitude")
         .description("Switch from Pitch40 climb to manual-pitch descend when player Y reaches this. Rusherhack's 'Max Height'.")
-        .defaultValue(10000)
+        .defaultValue(220)
         .min(100)
-        .max(32000)
-        .sliderRange(100, 32000)
+        .max(500000)
+        .sliderRange(100, 500000)
         .build()
     );
 
@@ -142,7 +142,7 @@ public class ElytraAutoFly extends Module {
 
     private void enterClimb() {
         currentPhase = Phase.CLIMB;
-        if (mc.player != null) {
+        if (mc.player != null && autoBoundAdjust.get()) {
             resetBounds();
         }
         if (!pitch40Classic.isActive()) {
