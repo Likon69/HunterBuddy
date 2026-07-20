@@ -63,7 +63,7 @@ public class ShulkerOverviewModule extends Module {
       );
 
    public ShulkerOverviewModule() {
-      super(HunterBuddyAddon.UTILITY_CATEGORY, "shulker-overview", "Overlays most common item icon on shulker boxes in inventory.");
+      super(HunterBuddyAddon.LOGISTICS_CATEGORY, "shulker-overview", "Overlays most common item icon on shulker boxes in inventory.");
    }
 
    public void renderShulkerOverlay(DrawContext context, int x, int y, ItemStack stack) {

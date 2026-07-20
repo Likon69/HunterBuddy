@@ -286,7 +286,7 @@ public class AutoFlyingRegear extends Module {
    private static final int TAKEOFF_TIMEOUT_TICKS = 280;
 
    public AutoFlyingRegear() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "AutoFlyingRegear", "Automatically creates a platform and restocks rockets/elytras from ender chest");
+      super(HunterBuddyAddon.LOGISTICS_CATEGORY, "AutoFlyingRegear", "Automatically creates a platform and restocks rockets/elytras from ender chest");
    }
 
    public void onActivate() {
