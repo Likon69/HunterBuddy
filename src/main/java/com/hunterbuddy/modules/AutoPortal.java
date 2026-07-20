@@ -15,8 +15,8 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.BlockItem;
 import net.minecraft.item.Items;
+import net.minecraft.block.Blocks;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.util.Hand;
@@ -206,6 +206,14 @@ public class AutoPortal extends Module {
         if (phase == Phase.WAITING) {
             waitTicksRemaining--;
             if (waitTicksRemaining <= 0) {
+                if (!isPortalLit()) {
+                    info("Portal activation was not confirmed. Checking the frame and retrying.");
+                    phase = Phase.BUILDING;
+                    index = 0;
+                    delay = 0;
+                    return;
+                }
+
                 if (baritonePath.get() && portalBlocks.size() >= 10) {
                     BlockPos portalCenter = portalBlocks.get(0).up();
                     try {
@@ -226,27 +234,36 @@ public class AutoPortal extends Module {
 
         if (phase == Phase.DONE) return;
 
-        if (!(mc.player.getMainHandStack().getItem() instanceof BlockItem blockItem)) return;
-        if (blockItem.getBlock().asItem() != Items.OBSIDIAN) return;
-
         if (index >= portalBlocks.size()) {
-            toggle();
-            return;
+            if (!isFrameComplete()) {
+                index = 0;
+                delay = 0;
+            } else {
+                lightPortal();
+                return;
+            }
         }
+
+        if (!selectHotbarItem(Items.OBSIDIAN)) return;
 
         delay++;
         if (delay < placeDelay.get()) return;
-        for (int i = 0; i < blocksPerTick.get() && index < portalBlocks.size(); i++, index++) {
+        for (int i = 0; i < blocksPerTick.get() && index < portalBlocks.size(); i++) {
             BlockPos pos = portalBlocks.get(index);
+            if (mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) {
+                waitingForBreak.remove(pos);
+                index++;
+                continue;
+            }
+
             if (!mc.world.getBlockState(pos).isReplaceable()) {
-                if (!waitingForBreak.contains(pos) && mc.world.getBlockState(pos).getBlock().asItem() != Items.OBSIDIAN) {
+                if (!waitingForBreak.contains(pos)) {
                     if (mc.interactionManager != null) {
                         mc.interactionManager.attackBlock(pos, Direction.UP);
                         mc.player.swingHand(Hand.MAIN_HAND);
                         waitingForBreak.add(pos);
                     }
                 }
-                index--;
                 return;
             }
 
@@ -261,31 +278,70 @@ public class AutoPortal extends Module {
             mc.player.networkHandler.sendPacket(new PlayerActionC2SPacket(
                 PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND, BlockPos.ORIGIN, Direction.DOWN));
             mc.player.swingHand(Hand.MAIN_HAND);
+            index++;
         }
         delay = 0;
 
         if (index >= portalBlocks.size()) {
-            // Auto-light
-            for (int i = 0; i < 9; i++) {
-                if (mc.player.getInventory().getStack(i).getItem() == Items.FLINT_AND_STEEL) {
-                    ((com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor)mc.player.getInventory()).setSelectedSlot(i);
-
-                    BlockPos firePos = portalBlocks.get(0).up();
-                    BlockHitResult fireHit = new BlockHitResult(Vec3d.ofCenter(firePos), Direction.UP, firePos, false);
-
-                    mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, fireHit);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                    break;
-                }
+            if (!isFrameComplete()) {
+                index = 0;
+                delay = 0;
+                return;
             }
 
-            // Switch to WAITING phase. The server needs a few ticks to
-            // activate the portal block after the fire packet, so we
-            // don't immediately hand control to Baritone.
-            phase = Phase.WAITING;
-            waitTicksRemaining = 10;
-            delay = 0;
+            lightPortal();
         }
+    }
+
+    private boolean isFrameComplete() {
+        return portalBlocks.size() == 10
+            && portalBlocks.stream().allMatch(pos -> mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN));
+    }
+
+    private boolean isPortalLit() {
+        if (portalBlocks.size() != 10) return false;
+
+        BlockPos leftInterior = portalBlocks.get(0).up();
+        BlockPos rightInterior = portalBlocks.get(1).up();
+        for (int y = 0; y < 3; y++) {
+            if (!mc.world.getBlockState(leftInterior.up(y)).isOf(Blocks.NETHER_PORTAL)
+                || !mc.world.getBlockState(rightInterior.up(y)).isOf(Blocks.NETHER_PORTAL)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void lightPortal() {
+        if (!selectHotbarItem(Items.FLINT_AND_STEEL)) {
+            error("No flint and steel in hotbar.");
+            toggle();
+            return;
+        }
+
+        BlockPos firePos = portalBlocks.get(0).up();
+        BlockHitResult fireHit = new BlockHitResult(Vec3d.ofCenter(firePos), Direction.UP, firePos, false);
+
+        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, fireHit);
+        mc.player.swingHand(Hand.MAIN_HAND);
+
+        // The server needs a few ticks to activate the portal block after the
+        // fire interaction, so do not hand control to Baritone immediately.
+        phase = Phase.WAITING;
+        waitTicksRemaining = 10;
+        delay = 0;
+    }
+
+    private boolean selectHotbarItem(net.minecraft.item.Item item) {
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(item)) {
+                ((com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(i);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     @EventHandler
