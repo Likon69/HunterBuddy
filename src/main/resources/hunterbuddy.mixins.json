@@ -9,6 +9,8 @@
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",
     "HandledScreenMixin",
+    "EntityGlowMixin",
+    "EntityTeamColorMixin",
     "accessors.LivingEntityAccessor",
     "accessors.PlayerInventoryAccessor",
     "accessors.EntityVelocityUpdateS2CPacketAccessor",
