@@ -78,6 +78,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     public static final Category LOGISTICS_CATEGORY = new Category("Logistics", Items.SHULKER_BOX.getDefaultStack());
     public static final Category UTILITY_CATEGORY = new Category("Utility", Items.NETHER_STAR.getDefaultStack());
     public static final Category LAB_CATEGORY = new Category("Lab", Items.COMPARATOR.getDefaultStack());
+    public static final Category FUTURE_CATEGORY = new Category("Future", Items.ENDER_PEARL.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("HunterBuddy");
 
     @Override
@@ -139,6 +140,7 @@ public class HunterBuddyAddon extends MeteorAddon {
 
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
+        Modules.get().add(new com.hunterbuddy.modules.Shader());
         Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
         Modules.get().add(new ItemSearchBar());
         Modules.get().add(new ContainerTooltips());
@@ -161,6 +163,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.registerCategory(LOGISTICS_CATEGORY);
         Modules.registerCategory(UTILITY_CATEGORY);
         Modules.registerCategory(LAB_CATEGORY);
+        Modules.registerCategory(FUTURE_CATEGORY);
     }
 
     @Override
