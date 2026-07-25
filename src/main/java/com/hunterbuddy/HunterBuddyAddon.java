@@ -141,6 +141,8 @@ public class HunterBuddyAddon extends MeteorAddon {
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new com.hunterbuddy.modules.Shader());
+        Modules.get().add(new com.hunterbuddy.modules.FuturePacketMine());
+        Modules.get().add(new com.hunterbuddy.modules.FutureNuker());
         Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
         Modules.get().add(new ItemSearchBar());
         Modules.get().add(new ContainerTooltips());
