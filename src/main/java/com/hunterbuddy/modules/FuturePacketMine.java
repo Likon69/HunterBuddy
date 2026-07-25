@@ -184,6 +184,45 @@ public class FuturePacketMine extends Module {
         .build()
     );
 
+    // Lambda places `async` inside the "Rebreak Renders" group via @Group
+    private final Setting<Boolean> async = sgBreakRenders.add(new BoolSetting.Builder()
+        .name("async")
+        .description("Allows the simulation 50ms between ticks where nothing changes. This causes a 1 tick wait between starting the module, and it performing actions.")
+        .defaultValue(true)
+        .build()
+    );
+
+    // ============ Config blocks (lambda's AutomationConfig equivalent) ============
+
+    private final com.hunterbuddy.lambda.BuildConfig buildConfig = new com.hunterbuddy.lambda.BuildConfig();
+    private final com.hunterbuddy.lambda.BreakConfig breakConfig = new com.hunterbuddy.lambda.BreakConfig();
+
+    /** pathing — initialized to false in lambda init */
+    private final Setting<Boolean> pathing = sgGeneral.add(new BoolSetting.Builder()
+        .name("pathing")
+        .description("Pathfind to blocks before breaking.")
+        .defaultValue(false)
+        .build()
+    );
+
+    /** fillFluids — controls whether Nuker targets air or empty when fluid. */
+    private final Setting<Boolean> fillFluids = sgGeneral.add(new BoolSetting.Builder()
+        .name("fill-fluids")
+        .description("Also break blocks that are fluids (when fillable).")
+        .defaultValue(false)
+        .build()
+    );
+
+    // Lambda has rebreakMode.disabled { !breakConfig.rebreak }.
+    // Java Meteor Settings don't expose a setVisible(boolean) equivalent;
+    // this is the closest behavior — the setting is conditionally effective
+    // via the breakConfig.rebreak gate below.
+    private void applyRebreakModeDisabled() {
+        // Placeholder: in lambda, .disabled prevents the user from changing
+        // the setting UI. Here we leave the setting visible but its effect
+        // (the rebreak path) is gated by breakConfig.rebreak.
+    }
+
     // ============ State ============
 
     /** Primary slots — index 0 is being actively broken, index 1 is queued. */
