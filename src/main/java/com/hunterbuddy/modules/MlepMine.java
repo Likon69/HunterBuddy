@@ -293,6 +293,12 @@ public class MlepMine extends Module {
       );
    private final Map<MlepMine.MiningData, MlepMine.Animation> fadeList = new HashMap<>();
    private MlepMine.FirstOutQueue<MlepMine.MiningData> miningQueue;
+   /** Independent double-break slots — matches lambda's BreakManager.breakInfos[].
+    *  [0] is the primary block being actively broken; [1] is the secondary
+    *  block waiting in queue. Each has its own lifecycle. When [0] is
+    *  removed (block broken), [1] is promoted to [0] and startMining is
+    *  called on it to resume the break. */
+   private final MlepMine.MiningData[] breakPositions = new MlepMine.MiningData[2];
    private long lastBreak;
    private boolean instantTogglePressed = false;
    private boolean autoMineTogglePressed = false;
@@ -545,6 +551,11 @@ public class MlepMine extends Module {
                }
             }
          }
+
+         // Double-break array flow (Sonnet). Runs in parallel with the
+         // miningQueue tick above; for doubleBreak=ON, manual clicks are
+         // routed here instead of miningQueue.
+         this.processManualBreaks();
       }
    }
 
@@ -597,9 +608,24 @@ public class MlepMine extends Module {
 
    private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
       if (packet.getState().isAir()) {
+         // miningQueue (legacy path)
          for (MlepMine.MiningData data : this.miningQueue) {
             if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
                data.setAttemptedBreak(false);
+            }
+         }
+         // breakPositions[] (Sonnet array path): when the server confirms
+         // a block we broke, remove it from the array. If [0] was removed,
+         // resume the break on the promoted [1].
+         for (int i = 0; i < 2; i++) {
+            MlepMine.MiningData data = this.breakPositions[i];
+            if (data != null && data.getPos().equals(packet.getPos())) {
+               this.removeManualBreak(data);
+               if (i == 0 && this.breakPositions[0] != null) {
+                  this.breakPositions[0].resetDamage();
+                  this.startMining(this.breakPositions[0]);
+               }
+               break;
             }
          }
       }
@@ -608,7 +634,16 @@ public class MlepMine extends Module {
    @EventHandler
    public void onRenderWorld(Render3DEvent event) {
       if (!this.mc.player.isCreative() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET && (Boolean)this.render.get()) {
+         // Seed fade list from miningQueue (legacy path)
          for (MlepMine.MiningData data : this.miningQueue) {
+            if (!data.getState().isAir() && !this.fadeList.containsKey(data)) {
+               this.fadeList.put(data, new MlepMine.Animation(true, ((Integer)this.fadeTimeConfig.get()).intValue()));
+            }
+         }
+         // Seed from breakPositions[] (Sonnet array path)
+         for (int i = 0; i < 2; i++) {
+            MlepMine.MiningData data = this.breakPositions[i];
+            if (data == null) continue;
             if (!data.getState().isAir() && !this.fadeList.containsKey(data)) {
                this.fadeList.put(data, new MlepMine.Animation(true, ((Integer)this.fadeTimeConfig.get()).intValue()));
             }
@@ -616,7 +651,9 @@ public class MlepMine extends Module {
 
          for (Entry<MlepMine.MiningData, MlepMine.Animation> entry : this.fadeList.entrySet()) {
             MlepMine.MiningData data = entry.getKey();
-            boolean isActive = this.miningQueue.contains(data) && !data.getState().isAir();
+            boolean isActive = (this.miningQueue.contains(data)
+               || data == this.breakPositions[0] || data == this.breakPositions[1])
+               && !data.getState().isAir();
             entry.getValue().setState(isActive);
          }
 
@@ -693,6 +730,15 @@ public class MlepMine extends Module {
 
    public void queueMiningData(MlepMine.MiningData data) {
       if (!data.getState().isAir()) {
+         // Dedup against the array slots
+         if (this.breakPositions[0] != null && this.breakPositions[0].getPos().equals(data.getPos())) return;
+         if (this.breakPositions[1] != null && this.breakPositions[1].getPos().equals(data.getPos())) return;
+
+         if ((Boolean) this.doubleBreakConfig.get()) {
+            this.addManualBreak(data);
+            return;
+         }
+
          MlepMine.FirstOutQueue<MlepMine.MiningData> queue = this.ensureMiningQueue();
          if (queue.stream().anyMatch(p1 -> data.getPos().equals(p1.getPos()))) {
             return;
@@ -717,11 +763,12 @@ public class MlepMine extends Module {
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.START_DESTROY_BLOCK, data.getPos(), data.getDirection()));
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.ABORT_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+            this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
          } else {
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.START_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+            this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
          }
 
-         this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
          this.mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
          if (!isInstantBreak) {
             this.mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
@@ -809,16 +856,116 @@ public class MlepMine extends Module {
    }
 
    private void stopMiningInternal(MlepMine.MiningData data) {
-      this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
       this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.ABORT_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+      this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+   }
+
+   /** Tick-side processing of the independent breakPositions[] slots.
+    *  First pass drops slots whose state is now air; when [0] is removed
+    *  and [1] is promoted to [0], resetDamage + startMining resumes the
+    *  break on the new primary (Sonnet fix). Second pass damages both.
+    *  Third block breaks the primary via stopMining. */
+   private void processManualBreaks() {
+      // First pass: drop slots whose state is now air.
+      for (int pass = 0; pass < 2; pass++) {
+         MlepMine.MiningData data = this.breakPositions[pass];
+         if (data == null) continue;
+         if (data.getState().isAir()) {
+            data.resetBreakTime();
+            this.removeManualBreak(data);
+            if (pass == 0) {
+               MlepMine.MiningData promoted = this.breakPositions[0];
+               if (promoted != null) {
+                  promoted.resetDamage();
+                  this.startMining(promoted);
+               }
+               pass = -1;
+            }
+         }
+      }
+
+      // Second pass: damage both slots.
+      for (int i = 0; i < 2; i++) {
+         MlepMine.MiningData data = this.breakPositions[i];
+         if (data == null) continue;
+         float damageDelta = this.calcBlockBreakingDelta(data.getState(), this.mc.world, data.getPos());
+         data.damage(damageDelta);
+         if (this.isDataPacketMine(data) && data.getBlockDamage() >= 1.0F && data.getSlot() != -1) {
+            if (!data.hasAttemptedBreak()) {
+               data.setAttemptedBreak(true);
+            }
+         }
+      }
+
+      // Break the primary slot.
+      MlepMine.MiningData primary = this.breakPositions[0];
+      if (primary == null) return;
+
+      double distance = this.mc.player.getEyePos().squaredDistanceTo(primary.getPos().toCenterPos());
+      if (distance > (Double) this.rangeConfig.get() * (Double) this.rangeConfig.get()) {
+         this.abortMining(primary);
+         this.removeManualBreak(primary);
+         MlepMine.MiningData promoted = this.breakPositions[0];
+         if (promoted != null) {
+            promoted.resetDamage();
+            this.startMining(promoted);
+         }
+         return;
+      }
+      if (primary.getState().isAir()) return;
+      if (primary.getBlockDamage() >= (Double) this.speedConfig.get()) {
+         if (this.mc.player.isUsingItem() && !(Boolean) this.multitaskConfig.get()) return;
+         this.stopMining(primary);
+         if (!primary.hasAttemptedBreak()) {
+            primary.setAttemptedBreak(true);
+         }
+         // Do NOT optimistically removeManualBreak here: wait for the server
+         // confirmation via BlockUpdateS2CPacket, which fires
+         // handleBlockUpdatePacket → removeManualBreak + resume [1]→[0].
+      }
    }
 
    public boolean isBlockDelayGrim() {
       return System.currentTimeMillis() - this.lastBreak <= 280L && (Boolean)this.grimConfig.get();
    }
 
-   private boolean isDataPacketMine(MlepMine.MiningData data) {
-      return this.miningQueue.size() == 2 && data == this.miningQueue.getLast();
+   private boolean isDataPacketMine(MiningData data) {
+      return data == this.breakPositions[1] && this.breakPositions[0] != null;
+   }
+
+   /** Populates breakPositions[] for manual click flow. Sonnet's order:
+    *  new block goes to [1] (does NOT roll the primary [0]); the third+ click
+    *  is ignored. The primary [0] is broken first via the tick handler. */
+   private boolean addManualBreak(MiningData data) {
+      if (data.getState().isAir()) return false;
+      if (this.breakPositions[0] == null) {
+         if (this.startMining(data)) {
+            this.breakPositions[0] = data;
+            return true;
+         }
+         return false;
+      }
+      if (this.breakPositions[1] == null) {
+         // Do not touch the primary [0]. Just store the new block in [1].
+         // startMining for [1] happens in processManualBreaks when [0] is
+         // broken and [1] is promoted to [0].
+         this.breakPositions[1] = data;
+         return true;
+      }
+      // Both slots full: ignore the new click. The user can wait for [0]
+      // and [1] to be processed before queuing another.
+      return false;
+   }
+
+   /** Removes a break and shifts. Called when the block becomes air or
+    *  completes its break sequence. */
+   private void removeManualBreak(MiningData data) {
+      if (this.breakPositions[0] == data) {
+         this.breakPositions[0] = this.breakPositions[1];
+         this.breakPositions[1] = null;
+      } else if (this.breakPositions[1] == data) {
+         this.breakPositions[1] = null;
+      }
    }
 
    public float calcBlockBreakingDelta(BlockState state, BlockView world, BlockPos pos) {
