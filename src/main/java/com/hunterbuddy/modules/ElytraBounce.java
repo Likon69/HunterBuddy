@@ -239,7 +239,7 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onReceivePacket(Receive event) {
-      if (!(event.packet instanceof PlayerPositionLookS2CPacket packet) && event.packet instanceof CloseScreenS2CPacket) {
+      if (event.packet instanceof PlayerPositionLookS2CPacket || event.packet instanceof CloseScreenS2CPacket) {
          event.cancel();
       }
    }
