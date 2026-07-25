@@ -105,6 +105,23 @@ public class FutureNuker extends Module {
         .build()
     );
 
+    private final Setting<Boolean> async = sgGeneral.add(new BoolSetting.Builder()
+        .name("async")
+        .description("Allows the simulation 50ms between ticks where nothing changes. This causes a 1 tick wait between starting the module, and it performing actions.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> fillFluids = sgGeneral.add(new BoolSetting.Builder()
+        .name("fill-fluids")
+        .description("Also break blocks that are fluids (when fillable).")
+        .defaultValue(false)
+        .build()
+    );
+
+    /** Per-Nuker BreakConfig instance (gives access to fillFluids for target selection). */
+    private final com.hunterbuddy.lambda.BreakConfig breakConfig = new com.hunterbuddy.lambda.BreakConfig();
+
     /** Block positions that have been submitted to the server for breaking
      *  (via START_DESTROY_BLOCK). Cleared when the server confirms break
      *  via BlockUpdateS2CPacket(air). Prevents re-submitting the same
@@ -136,11 +153,15 @@ public class FutureNuker extends Module {
         int h = this.height.get();
 
         // Iterate the region like lambda's tickingBlueprint.
+        // Apply breakConfig.fillFluids to filter air targets — when fillFluids
+        // is false (lambda default), air blocks are skipped entirely.
+        // When fillFluids is true, air blocks are kept (the original
+        // TargetState.Air in lambda's associateWith).
         Set<BlockPos> toBreak = new HashSet<>();
         Iterator<BlockPos> it = BlockPos.iterateOutwards(playerPos, w, h, w).iterator();
         while (it.hasNext()) {
             BlockPos pos = it.next();
-            if (mc.world.getBlockState(pos).isAir()) continue;
+            if (mc.world.getBlockState(pos).isAir() && !breakConfig.isFillFluids()) continue;
             if (Boolean.TRUE.equals(this.baritoneSelection.get())
                 && this.isInBaritoneSelection(pos) == Boolean.TRUE.equals(this.inverseSelection.get())) continue;
             if (!this.isInFlatten(pos, this.flattenMode.get(), Boolean.TRUE.equals(this.sneakLowersFlatten.get()))) continue;
