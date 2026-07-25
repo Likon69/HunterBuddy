@@ -85,6 +85,16 @@ Experimental modules. Their behavior is not guaranteed across servers or anti-ch
 |---|---|
 | `BoatFlyLab` | Experimental boat-flight behavior; the module declares singleplayer-only use. |
 
+### Future (3)
+
+Ports from external references. Experimental and not guaranteed across servers or anti-cheat versions.
+
+| Meteor name | Description |
+|---|---|
+| `shader` | Applies an entity outline shader. |
+| `lambda-packet-mine` | Port of lambda's PacketMine: targeted block-mining with rebreak mode, queue, double-break, break radius, flatten, and render settings. |
+| `lambda-nuker` | Port of lambda's Nuker: configurable flatten modes, dimensions, on-ground requirement, floor fill, fluid fill, and Baritone selection. |
+
 ## HUD elements (11)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
