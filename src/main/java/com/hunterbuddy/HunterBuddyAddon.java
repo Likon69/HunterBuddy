@@ -57,6 +57,7 @@ import com.hunterbuddy.modules.StashFinder;
 import com.hunterbuddy.modules.TrailFollower;
 import com.hunterbuddy.modules.UnfocusedFpsLimiter;
 import com.hunterbuddy.modules.VanityESP;
+import com.hunterbuddy.modules.LoreLocator;
 import com.hunterbuddy.modules.VisualRangeNotifier;
 import com.hunterbuddy.modules.WaypointFollower;
 import com.hunterbuddy.modules.YawLock;
@@ -147,6 +148,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ItemSearchBar());
         Modules.get().add(new ContainerTooltips());
         Modules.get().add(new Phase());
+        Modules.get().add(new LoreLocator());
         Modules.get().add(new VisualRangeNotifier());
         Commands.add(new SetInput());
         Commands.add(new SetOutput());
