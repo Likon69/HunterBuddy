@@ -89,14 +89,11 @@ import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.item.Items;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.math.BlockBox;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
-import net.minecraft.structure.StructureStart;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.gen.structure.Structure;
 import net.minecraft.world.gen.structure.StructureType;
 
 public class StashFinder extends Module {
@@ -705,7 +702,6 @@ public class StashFinder extends Module {
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
    private final Map<ChunkPos, Vec3d> tracerPositions = new HashMap<>();
    private final Set<ChunkPos> notifiedChunks = new HashSet<>();
-   private final Set<BlockBox> knownMansionBoxes = new HashSet<>();
    private final Map<String, StashFinder.StashChunk> clusterWaypoints = new HashMap<>();
    private final ExecutorService discordExecutor = Executors.newSingleThreadExecutor();
    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10L)).build();
@@ -723,7 +719,6 @@ public class StashFinder extends Module {
       this.loaded = false;
       this.notifiedChunks.clear();
       this.clusterWaypoints.clear();
-      this.knownMansionBoxes.clear();
    }
 
    @EventHandler
@@ -832,52 +827,12 @@ public class StashFinder extends Module {
    }
 
    private boolean isInWoodlandMansion(WorldChunk chunk) {
-      ChunkPos currentPos = chunk.getPos();
-      int cx = currentPos.getCenterX();
-      int cz = currentPos.getCenterZ();
-
-      for (Structure structure : chunk.getStructureReferences().keySet()) {
-         if (structure.getType() == StructureType.WOODLAND_MANSION) return true;
-      }
-
-      for (BlockBox box : this.knownMansionBoxes) {
-         if (cx >= box.getMinX() && cx <= box.getMaxX() && cz >= box.getMinZ() && cz <= box.getMaxZ()) {
-            return true;
-         }
-      }
-
-      int radius = this.mc.options.getViewDistance().getValue() + 4;
-      for (int dx = -radius; dx <= radius; dx++) {
-         for (int dz = -radius; dz <= radius; dz++) {
-            ChunkPos checkPos = new ChunkPos(currentPos.x + dx, currentPos.z + dz);
-            if (this.mc.world.getChunk(checkPos.x, checkPos.z) instanceof WorldChunk wc) {
-               for (Structure structure : wc.getStructureReferences().keySet()) {
-                  if (structure.getType() != StructureType.WOODLAND_MANSION) continue;
-                  StructureStart start = wc.getStructureStart(structure);
-                  if (start != null) {
-                     BlockBox box = start.getBoundingBox();
-                     this.knownMansionBoxes.add(box);
-                     if (cx >= box.getMinX() && cx <= box.getMaxX() && cz >= box.getMinZ() && cz <= box.getMaxZ()) {
-                        return true;
-                     }
-                  }
-               }
-            }
-         }
-      }
-
-      return false;
+      return chunk.getStructureReferences().keySet().stream().anyMatch(structure -> structure.getType() == StructureType.WOODLAND_MANSION);
    }
 
    @EventHandler
    private void onEntityAdded(EntityAddedEvent event) {
       if (this.mc.player != null && this.mc.world != null) {
-         ChunkPos entityChunk = new ChunkPos(event.entity.getBlockPos());
-         if (this.mc.world.getChunk(entityChunk.x, entityChunk.z) instanceof WorldChunk entityChunkData
-            && this.isInWoodlandMansion(entityChunkData)) {
-            return;
-         }
-
          Entity entity = event.entity;
          boolean detected = false;
          String detectionType = null;
@@ -1356,7 +1311,7 @@ public class StashFinder extends Module {
 
    private void sendNotification(StashFinder.StashChunk chunk) {
       boolean hideCoords = (Boolean)this.noCoordChat.get() || (Boolean)this.streamerMode.get();
-      String message = hideCoords ? "Found stash! (" + this.chunks.size() + " chunks)" : "Found stash at [" + chunk.x + ", " + chunk.z + "]";
+      String message = hideCoords ? "Found stash! (" + chunk.getTotal() + " containers)" : "Found stash at [" + chunk.x + ", " + chunk.z + "]";
       switch ((StashFinder.NotificationMode)this.notificationMode.get()) {
          case Chat:
             if (!hideCoords) {
