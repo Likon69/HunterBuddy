@@ -497,7 +497,7 @@ public class OldChunkNotifier extends Module {
         long blockZ = (long) anchor.z * 16;
         return "**Chunk types:** " + String.join(", ", typeNames) +
             "\n**Dimension:** " + dimensionName(anchor.dimension) +
-            "\n**Cluster size:** " + cluster.size() +
+            "\n**Chunks marked:** " + cluster.size() +
             "\n**Chunk coordinates:** `" + anchor.x + ", " + anchor.z + "`" +
             "\n**Block coordinates:** `" + blockX + ", " + blockZ + "`" +
             "\n**Contains off-highway chunks:** " + (containsOffHighwayChunk ? "Yes" : "No");
