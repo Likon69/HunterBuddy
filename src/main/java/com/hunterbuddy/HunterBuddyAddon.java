@@ -48,6 +48,7 @@ import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.Replenish;
+import com.hunterbuddy.modules.RocketBoost;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.ItemSearchBar;
 import com.hunterbuddy.modules.RotationDetector;
@@ -142,6 +143,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new com.hunterbuddy.modules.Shader());
+        Modules.get().add(new RocketBoost());
         Modules.get().add(new com.hunterbuddy.modules.FuturePacketMine());
         Modules.get().add(new com.hunterbuddy.modules.FutureNuker());
         Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());

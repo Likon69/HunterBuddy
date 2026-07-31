@@ -16,6 +16,7 @@
     "accessors.EntityVelocityUpdateS2CPacketAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
     "accessors.DisconnectS2CPacketAccessor",
+    "fireworkboost.FireworkRocketEntityMixin"
   ],
   "injectors": {
     "defaultRequire": 1
