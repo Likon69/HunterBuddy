@@ -76,6 +76,7 @@ public class RocketBoost extends Module {
    );
 
    public int setbackCount = 0;
+   public long lastEventTime = Long.MAX_VALUE;
 
    public double getSpeed() {
       return speedMultiplier.get();
@@ -109,6 +110,7 @@ public class RocketBoost extends Module {
       trackedRocketId = entityId;
       boosting = true;
       trackStartMs = System.currentTimeMillis();
+      lastEventTime = System.currentTimeMillis();
    }
 
    public boolean isBoosting() {
@@ -135,6 +137,8 @@ public class RocketBoost extends Module {
       if (mc.world != null && idToRemove != -1) {
          mc.world.removeEntity(idToRemove, net.minecraft.entity.Entity.RemovalReason.KILLED);
       }
+
+      lastEventTime = System.currentTimeMillis();
    }
 
    @EventHandler(priority = EventPriority.HIGHEST)
@@ -183,6 +187,10 @@ public class RocketBoost extends Module {
    @EventHandler
    private void onTickDebug(meteordevelopment.meteorclient.events.world.TickEvent.Post event) {
       if (!debug.get() || mc.player == null) return;
+
+      if (System.currentTimeMillis() - lastEventTime > 5000) {
+         return;
+      }
 
       if (boosting && boostStartMs == -1 && trackStartMs != -1) {
          long waiting = System.currentTimeMillis() - trackStartMs;
