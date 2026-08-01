@@ -195,8 +195,20 @@ public class RocketBoost extends Module {
       String msg;
       if (!boosting) {
          if (lastGainedMs >= 0) {
+            String cooldInfo;
+            if (cooldownAfterFlush.get() > 0) {
+               if (lastFlushMs == -1) {
+                  cooldInfo = "coold 0s / " + (cooldownAfterFlush.get() / 1000) + "s";
+               } else {
+                  long elapsed = Math.min(System.currentTimeMillis() - lastFlushMs, cooldownAfterFlush.get());
+                  cooldInfo = "coold " + (elapsed / 1000) + "s / " + (cooldownAfterFlush.get() / 1000) + "s"
+                     + (elapsed >= cooldownAfterFlush.get() ? " §aREADY" : "");
+               }
+            } else {
+               cooldInfo = "coold off";
+            }
             msg = "§a§l[RB] §r§a+ " + lastGainedMs + "ms §7last gain"
-               + "\n§7ready for next rocket | coold " + (cooldownAfterFlush.get() > 0 && lastFlushMs != -1 ? ((System.currentTimeMillis() - lastFlushMs) / 1000) + "s / " + (cooldownAfterFlush.get() / 1000) + "s" : "off");
+               + "\n§7ready for next rocket | " + cooldInfo;
          } else {
             msg = "§7§l[RB] §r§7idle — fire a rocket to start"
                + "\n§7cooldown: " + (cooldownAfterFlush.get() > 0 ? (cooldownAfterFlush.get() / 1000) + "s" : "off");
