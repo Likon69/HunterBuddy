@@ -40,7 +40,7 @@ public class RocketBoost extends Module {
 
    public final Setting<Double> speedMultiplier = sgGeneral.add(new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
       .name("speed-multiplier")
-      .description("Desired firework speed (vanilla 1.5). Adaptive: auto-capped per-tick so fireworksBox (1.7/axis) is never exceeded. Looking straight: capped ~1.6. With Pitch40: up to ~2.0+. In a dive: up to ~3.0+.")
+      .description("Firework speed multiplier (vanilla 1.5). Applied directly — higher values give more speed but may trigger Grim setback depending on look angle.")
       .defaultValue(2.0)
       .min(1.0)
       .max(5.0)
