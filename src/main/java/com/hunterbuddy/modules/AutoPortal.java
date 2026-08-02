@@ -194,12 +194,24 @@ public class AutoPortal extends Module {
             base.offset(right, 1).up(4), base.offset(right, 2).up(4)
         );
 
-        boolean obstructed = checkPositions.stream().anyMatch(pos -> !mc.world.getBlockState(pos).isReplaceable());
+        // Interior air blocks (2 wide x 3 tall) that the portal fills and the player walks through.
+        // These must be clear too, otherwise the frame ends up buried in a wall and the portal can't light.
+        List<BlockPos> interiorPositions = List.of(
+            base.offset(right, 1).up(1), base.offset(right, 1).up(2), base.offset(right, 1).up(3),
+            base.offset(right, 2).up(1), base.offset(right, 2).up(2), base.offset(right, 2).up(3)
+        );
+
+        // Refuse to build (and refuse to render) when anything blocks the frame or the interior.
+        // A frame slot that is already obsidian is NOT an obstruction (building skips it / lets us
+        // resume a partial frame); a non-obsidian solid block is. The interior must be fully clear.
+        // Previously this only pre-filled portalBlocks and set index = size, but onTick's
+        // "retry if frame incomplete" branch reset index to 0 and force-built through the wall.
+        boolean obstructed = checkPositions.stream().anyMatch(pos ->
+                !mc.world.getBlockState(pos).isReplaceable() && !mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN))
+            || interiorPositions.stream().anyMatch(pos -> !mc.world.getBlockState(pos).isReplaceable());
         if (obstructed) {
             error("Portal area obstructed. Move and try again.");
-            portalBlocks.clear();
-            portalBlocks.addAll(checkPositions);
-            index = checkPositions.size();
+            toggle();
             return;
         }
 
