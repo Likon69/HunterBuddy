@@ -52,14 +52,7 @@ public abstract class FireworkRocketEntityMixin {
       if (this.rb != null && this.rb.isActive()
          && this.shooter != null && MeteorClient.mc.player != null
          && this.shooter.getUuid().equals(MeteorClient.mc.player.getUuid())) {
-         double desired = this.rb.getSpeed();
-         net.minecraft.util.math.Vec3d look = this.shooter.getRotationVector();
-         double maxComponent = Math.max(Math.abs(look.x), Math.max(Math.abs(look.y), Math.abs(look.z)));
-         if (maxComponent < 0.001) return original;
-         // Grim fireworksBox caps at 1.7/axis. Convergence target = S * lookComponent.
-         // Use 1.6 margin to stay safely under.
-         double safeCap = 1.6 / maxComponent;
-         return Math.min(desired, safeCap);
+         return this.rb.getSpeed();
       }
       return original;
    }
