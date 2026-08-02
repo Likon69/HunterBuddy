@@ -26,7 +26,7 @@ public class EntityTeamColorMixin {
         if (shader == null || !shader.isActive()) return;
         Entity self = (Entity) (Object) this;
         if (shader.shouldGlow(self)) {
-            cir.setReturnValue(shader.outlineRgb());
+            cir.setReturnValue(shader.outlineRgb(self));
         }
     }
 }

@@ -64,7 +64,9 @@ import com.hunterbuddy.modules.WaypointFollower;
 import com.hunterbuddy.modules.YawLock;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
+import com.hunterbuddy.render.HbGlowShader;
 import com.mojang.logging.LogUtils;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.systems.hud.Hud;
@@ -87,6 +89,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing HunterBuddy Addon");
         StashMoverSelectionHandler.init();
+        MeteorClient.EVENT_BUS.subscribe(HbGlowShader.class);
 
         // HUDs
         Hud.get().register(ElytraHelperHud.INFO);
