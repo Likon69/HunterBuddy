@@ -227,7 +227,7 @@ public abstract class AreaLoaderMode {
                         }
 
                         Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>) pitch40Module.settings.get("auto-bound-adjust");
-                        if (autoBoundAdjustSetting != null) {
+                        if (autoBoundAdjustSetting != null && (Boolean)this.searchArea.pitch40DisableAutoBoundAdjust.get()) {
                            this.oldAutoBoundAdjustValue = (Boolean)autoBoundAdjustSetting.get();
                            autoBoundAdjustSetting.set(false);
                            this.pitch40SettingsModified = true;
@@ -454,7 +454,9 @@ public abstract class AreaLoaderMode {
    protected void steerYaw(float yaw) {
       if (this.mc.player != null) {
          this.mc.player.setYaw(yaw);
-         RotationUtils.getInstance().sustainRotation(yaw, this.mc.player.getPitch());
+         if (this.enabledOverworldMode != AreaLoader.OverworldFlightMode.PITCH40) {
+            RotationUtils.getInstance().sustainRotation(yaw, this.mc.player.getPitch());
+         }
       }
    }
 

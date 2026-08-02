@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules.regear.arealoader;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.regear.arealoader.modes.Circle;
 import com.hunterbuddy.modules.regear.arealoader.modes.Rectangle;
 import com.hunterbuddy.modules.regear.arealoader.modes.Spiral;
 import com.hunterbuddy.modules.regear.arealoader.modes.ZigZag;
@@ -77,12 +78,63 @@ public class AreaLoader extends Module {
                .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.ZigZag)
             .build()
       );
+   public final Setting<BlockPos> circleCenter = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BlockPosSetting.Builder()
+                        .name("circle-center")
+                     .description("Center of the polar spiral. Y Pos is ignored.")
+                  .defaultValue(new BlockPos(0, 0, 0))
+               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
+            .build()
+      );
+   public final Setting<Double> circleLayerRadius = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                        .name("circle-layer-radius")
+                     .description("Radius between layers of the spiral, in chunks (scale = this * 16 blocks).")
+                  .defaultValue(1.0)
+               .min(1.0)
+               .sliderRange(1.0, 34.0)
+               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
+            .build()
+      );
+   public final Setting<Double> circleSteps = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                        .name("circle-steps")
+                     .description("How many small turns to make per full orbit. Larger = smoother spiral, more chunks loaded.")
+                  .defaultValue(64.0)
+               .min(6.0)
+               .sliderRange(6.0, 100.0)
+               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
+            .build()
+      );
+   public final Setting<Circle.SpiralDirection> circleDirection = this.sgGeneral
+      .add(
+         new Builder<Circle.SpiralDirection>().name("circle-direction")
+                     .description("Direction of the polar spiral (CLOCKWISE or COUNTERCLOCKWISE).")
+                  .defaultValue(Circle.SpiralDirection.CLOCKWISE)
+               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
+            .build()
+      );
    public final Setting<String> saveLocation = this.sgGeneral
       .add(
          new meteordevelopment.meteorclient.settings.StringSetting.Builder()
                      .name("save-name")
                   .description("The name to use for the folder that saves data. Leave blank to use 'default'.")
                .defaultValue("default")
+            .build()
+      );
+   public final Setting<Boolean> pitch40DisableAutoBoundAdjust = this.sgFlight
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("pitch40-disable-auto-bound-adjust")
+                     .description(
+                        "If ON: AreaLoader disables ElytraFly's autoBoundAdjust when using PITCH40 mode. "
+                     + "Default OFF — leave ElytraFly bound adjustment enabled to avoid pitch/desync rollback."
+                     )
+                  .defaultValue(false)
+               .visible(() -> this.overworldFlightMode.get() == AreaLoader.OverworldFlightMode.PITCH40)
             .build()
       );
    public final Setting<Boolean> disconnectOnCompletion = this.sgGeneral
@@ -265,6 +317,9 @@ public class AreaLoader extends Module {
             break;
          case ZigZag:
             this.currentMode = new ZigZag();
+            break;
+         case Circle:
+            this.currentMode = new Circle();
       }
    }
 

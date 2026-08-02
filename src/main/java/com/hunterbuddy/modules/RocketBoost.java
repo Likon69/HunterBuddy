@@ -11,6 +11,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.common.CommonPongC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket;
@@ -31,6 +32,33 @@ public class RocketBoost extends Module {
       .build()
    );
 
+   public final Setting<Boolean> useLookBypass = sgGeneral.add(new BoolSetting.Builder()
+      .name("use-look-bypass")
+      .description("Modify outgoing PlayerMoveC2SPacket yaw/pitch during the boost window so the fireworksBox (±1.7/tick/axis) wraps the actual movement. Required to push speed-multiplier above 1.5 without Grim setback.")
+      .defaultValue(true)
+      .build()
+   );
+
+   public final Setting<Integer> lookOffsetYaw = sgGeneral.add(new IntSetting.Builder()
+      .name("look-offset-yaw")
+      .description("Yaw offset in tenths of degrees. 450 = 45.0 = max 2.30x speed multiplier.")
+      .defaultValue(450)
+      .min(0)
+      .max(900)
+      .sliderRange(0, 900)
+      .build()
+   );
+
+   public final Setting<Integer> lookOffsetPitch = sgGeneral.add(new IntSetting.Builder()
+      .name("look-offset-pitch")
+      .description("Absolute pitch in tenths of degrees. -250 = -25.0 = max 2.42x speed multiplier.")
+      .defaultValue(-250)
+      .min(-450)
+      .max(0)
+      .sliderRange(-450, 0)
+      .build()
+   );
+
    public final Setting<Boolean> debug = sgGeneral.add(new BoolSetting.Builder()
       .name("debug")
       .description("Show boost state in the action bar.")
@@ -40,11 +68,11 @@ public class RocketBoost extends Module {
 
    public final Setting<Double> speedMultiplier = sgGeneral.add(new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
       .name("speed-multiplier")
-      .description("Firework target speed multiplier (vanilla 1.5). Stay under 2.0 to stay inside Grim's ±1.7 block/tick uncertainty box.")
+      .description("Firework target speed multiplier (vanilla 1.5). Above 1.7 will likely trigger Grim setback.")
       .defaultValue(1.5)
       .min(1.0)
-      .max(2.0)
-      .sliderRange(1.5, 2.0)
+      .max(10.0)
+      .sliderRange(1.5, 10.0)
       .build()
    );
 
@@ -102,11 +130,11 @@ public class RocketBoost extends Module {
 
    public void setTrackedRocket(int entityId) {
       if (trackedRocketId == entityId) return;
-      if (trackedRocketId != -1) flushAndStop();
       if (cooldownAfterFlush.get() > 0 && lastFlushMs != -1
          && System.currentTimeMillis() - lastFlushMs < cooldownAfterFlush.get()) {
          return;
       }
+      if (trackedRocketId != -1) flushAndStop();
       trackedRocketId = entityId;
       boosting = true;
       trackStartMs = System.currentTimeMillis();
@@ -115,6 +143,23 @@ public class RocketBoost extends Module {
 
    public boolean isBoosting() {
       return boosting;
+   }
+
+   public static boolean lookBypassActive() {
+      Module m = Modules.get().get(RocketBoost.class);
+      if (m == null || !m.isActive() || !((RocketBoost) m).useLookBypass.get()) return false;
+      if (((RocketBoost) m).boostStartMs == -1) return false;
+      return System.currentTimeMillis() - ((RocketBoost) m).boostStartMs < ((RocketBoost) m).boostDuration.get();
+   }
+
+   public static float getLookOffsetYaw() {
+      Module m = Modules.get().get(RocketBoost.class);
+      return m == null ? 0.0f : ((RocketBoost) m).lookOffsetYaw.get() / 10.0f;
+   }
+
+   public static float getLookOffsetPitch() {
+      Module m = Modules.get().get(RocketBoost.class);
+      return m == null ? 0.0f : ((RocketBoost) m).lookOffsetPitch.get() / 10.0f;
    }
 
    public void flushAndStop() {

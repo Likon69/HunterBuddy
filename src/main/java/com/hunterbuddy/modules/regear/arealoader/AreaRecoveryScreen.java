@@ -262,6 +262,10 @@ public class AreaRecoveryScreen extends WindowScreen {
          case Spiral -> this.applySpiralRecovery(originX, originZ, currentX, currentZ, blockGap);
          case Rectangle -> this.applyRectangleRecovery(originX, originZ, currentX, currentZ, blockGap);
          case ZigZag -> this.applyZigZagRecovery(originX, originZ, currentX, currentZ);
+         case Circle -> {
+            ChatUtils.error("Circle mode does not support recovery (it loops infinitely). Disable manually.", new Object[0]);
+            yield false;
+         }
       };
       if (success) {
          this.searchArea.rowGap.set(gap);
