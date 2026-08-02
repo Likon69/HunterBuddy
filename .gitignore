@@ -42,3 +42,7 @@ bin/
 # fabric
 
 run/
+
+# decompile-only jars — too big to track, not needed to build
+
+libs/server 1.21.4.jar
