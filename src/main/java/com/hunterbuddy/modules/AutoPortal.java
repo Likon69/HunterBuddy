@@ -26,7 +26,10 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Auto-portal builder: places the 10 obsidian frame blocks in front of the
@@ -83,6 +86,37 @@ public class AutoPortal extends Module {
         .build()
     );
 
+    private final Setting<Boolean> highlightLitPortal = sgGeneral.add(new BoolSetting.Builder()
+        .name("highlight-lit-portal")
+        .description("Highlights the portal you lit (only yours) for render-duration seconds.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> renderDuration = sgGeneral.add(new IntSetting.Builder()
+        .name("render-duration")
+        .description("Seconds the lit-portal highlight stays visible after activation.")
+        .defaultValue(20)
+        .min(5)
+        .max(60)
+        .sliderRange(5, 60)
+        .build()
+    );
+
+    private final Setting<SettingColor> portalSideColor = sgGeneral.add(new ColorSetting.Builder()
+        .name("portal-side-color")
+        .description("Fill color of the lit-portal highlight.")
+        .defaultValue(new SettingColor(170, 0, 255, 80))
+        .build()
+    );
+
+    private final Setting<SettingColor> portalLineColor = sgGeneral.add(new ColorSetting.Builder()
+        .name("portal-line-color")
+        .description("Outline color of the lit-portal highlight.")
+        .defaultValue(new SettingColor(170, 0, 255, 255))
+        .build()
+    );
+
     private final Setting<Boolean> baritonePath = sgGeneral.add(new BoolSetting.Builder()
         .name("baritone-path-to-portal")
         .description("After lighting, use Baritone to pathfind the player into the portal center.")
@@ -93,6 +127,17 @@ public class AutoPortal extends Module {
     private final List<BlockPos> portalBlocks = new ArrayList<>();
     private int delay = 0;
     private int index = 0;
+
+    // Direction perpendicular to the player's facing at onActivate.
+    // Stored so the lit-portal highlight renders the interior in the correct orientation
+    // (interior width is along `right`, interior height is always +Y).
+    private Direction portalRight;
+
+    // Tracks the portals I lit: anchor (interior lower-left corner BlockPos) -> LitPortal.
+    // Stores the right-direction so render works regardless of the player's facing at activation.
+    // Only portals activated by THIS AutoPortal instance are stored, so no scan-all-portals logic.
+    private record LitPortal(Direction right, long expiresAtMs) {}
+    private final LinkedHashMap<BlockPos, LitPortal> litPortalAnchors = new LinkedHashMap<>();
 
     // Phase machine: BUILDING places blocks, WAITING lets the server activate
     // the portal (server needs ~2-3 ticks after the fire packet before the
@@ -140,6 +185,7 @@ public class AutoPortal extends Module {
         BlockPos base = standingPos
             .offset(forward, 2)
             .offset(right, -1);
+        this.portalRight = right;
 
         List<BlockPos> checkPositions = List.of(
             base.offset(right, 1), base.offset(right, 2),
@@ -197,6 +243,7 @@ public class AutoPortal extends Module {
         portalBlocks.clear();
         index = 0;
         delay = 0;
+        litPortalAnchors.clear();
     }
 
     @EventHandler
@@ -214,6 +261,15 @@ public class AutoPortal extends Module {
                     return;
                 }
 
+                // Register this portal as "lit by me" so onRender can highlight it.
+                // NOTE: only toggle() if there is nothing to keep alive onRender for.
+                // Otherwise onDeactivate() would clear litPortalAnchors immediately.
+                if (highlightLitPortal.get() && portalBlocks.size() >= 10 && portalRight != null) {
+                    BlockPos anchor = portalBlocks.get(0).up();
+                    long expiry = System.currentTimeMillis() + renderDuration.get() * 1000L;
+                    litPortalAnchors.put(anchor, new LitPortal(portalRight, expiry));
+                }
+
                 if (baritonePath.get() && portalBlocks.size() >= 10) {
                     BlockPos portalCenter = portalBlocks.get(0).up();
                     try {
@@ -227,12 +283,25 @@ public class AutoPortal extends Module {
                     info("Portal activated. AutoPortal disabled.");
                 }
                 phase = Phase.DONE;
-                toggle();
+                if (!highlightLitPortal.get() || litPortalAnchors.isEmpty()) {
+                    toggle();
+                }
             }
             return;
         }
 
-        if (phase == Phase.DONE) return;
+        if (phase == Phase.DONE) {
+            // Keep cleaning expired entries; auto-disable once all highlights have expired.
+            long now = System.currentTimeMillis();
+            Iterator<Map.Entry<BlockPos, LitPortal>> it = litPortalAnchors.entrySet().iterator();
+            while (it.hasNext()) {
+                if (it.next().getValue().expiresAtMs() <= now) it.remove();
+            }
+            if (litPortalAnchors.isEmpty()) {
+                toggle();
+            }
+            return;
+        }
 
         if (index >= portalBlocks.size()) {
             if (!isFrameComplete()) {
@@ -346,10 +415,36 @@ public class AutoPortal extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (!render.get()) return;
-        for (int i = index; i < portalBlocks.size(); i++) {
-            BlockPos pos = portalBlocks.get(i);
-            event.renderer.box(pos, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
+        // Existing obsidian-frame render (unchanged).
+        if (render.get()) {
+            for (int i = index; i < portalBlocks.size(); i++) {
+                BlockPos pos = portalBlocks.get(i);
+                event.renderer.box(pos, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
+            }
+        }
+
+        // Lit-portal highlight: only portals I activated, only for render-duration seconds.
+        if (highlightLitPortal.get() && !litPortalAnchors.isEmpty()) {
+            long now = System.currentTimeMillis();
+            Iterator<Map.Entry<BlockPos, LitPortal>> it = litPortalAnchors.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<BlockPos, LitPortal> e = it.next();
+                if (e.getValue().expiresAtMs() <= now) {
+                    it.remove();
+                    continue;
+                }
+                BlockPos anchor = e.getKey();
+                Direction right = e.getValue().right();
+                // Interior is 2 wide (along `right`) x 3 tall (along +Y), starting at the anchor.
+                for (int x = 0; x < 2; x++) {
+                    for (int y = 0; y < 3; y++) {
+                        BlockPos interiorPos = anchor.offset(right, x).up(y);
+                        event.renderer.box(interiorPos,
+                            portalSideColor.get(), portalLineColor.get(),
+                            ShapeMode.Both, 0);
+                    }
+                }
+            }
         }
     }
 }

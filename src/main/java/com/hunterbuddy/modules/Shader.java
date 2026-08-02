@@ -2,9 +2,6 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -12,7 +9,6 @@ import meteordevelopment.meteorclient.events.world.TickEvent.Post;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.settings.ColorSetting;
-import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -20,6 +16,7 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
@@ -37,7 +34,10 @@ import net.minecraft.entity.vehicle.BoatEntity;
 import net.minecraft.entity.vehicle.MinecartEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.client.world.ClientChunkManager;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.WorldChunk;
 
 /**
  * HunterBuddy Shader — entity glow/outline driven by Mixins on
@@ -83,6 +83,8 @@ public class Shader extends Module {
         .name("storages").description("Outline storage entities (chest minecarts, etc.).").defaultValue(false).build());
     private final Setting<Boolean> armor = sgTargets.add(new Builder()
         .name("armor").description("Outline worn armor stands.").defaultValue(false).build());
+    private final Setting<Boolean> portals = sgTargets.add(new Builder()
+        .name("portals").description("Highlight all loaded nether portals.").defaultValue(true).build());
 
     // Render
     private final Setting<Boolean> outline = sgRender.add(new Builder()
@@ -90,6 +92,9 @@ public class Shader extends Module {
     private final Setting<SettingColor> outlineColor = sgRender.add(new ColorSetting.Builder()
         .name("outline-color").description("Color of the outline.")
         .defaultValue(new SettingColor(255, 80, 80, 220)).build());
+    private final Setting<SettingColor> portalColor = sgRender.add(new ColorSetting.Builder()
+        .name("portal-color").description("Fill/outline color of the highlighted nether portals.")
+        .defaultValue(new SettingColor(170, 0, 255, 80)).build());
 
     /** Targets updated on each tick; read by the EntityGlowMixin /
      *  EntityTeamColorMixin to decide whether the vanilla outline path should
@@ -100,6 +105,11 @@ public class Shader extends Module {
      *  outline via Render3DEvent in ShapeMode.Lines (cube silhouette through
      *  walls, default depthTest=false on Meteor's renderer3D mesh). */
     private final Set<BlockPos> storageTargets = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
+    /** Loaded nether-portal BlockPos refreshed on each tick from
+     *  ChunkSection.hasAny() guards. Drawn via Render3DEvent in
+     *  ShapeMode.Both (filled box + outline through walls). */
+    private final Set<BlockPos> portalPositions = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public Shader() {
         super(HunterBuddyAddon.FUTURE_CATEGORY, "shader",
@@ -161,18 +171,43 @@ public class Shader extends Module {
     private void onTick(Post event) {
         glowTargets.clear();
         storageTargets.clear();
+        portalPositions.clear();
         if (mc.world == null || mc.player == null) return;
-        if (!outline.get()) return;
-        for (Entity e : mc.world.getEntities()) {
-            if (!isTarget(e)) continue;
-            glowTargets.add(e);
-        }
-        if (storages.get()) {
-            for (BlockEntity be : Utils.blockEntities()) {
-                if (!isStorageBlock(be)) continue;
-                storageTargets.add(be.getPos());
+        if (!outline.get() && !portals.get()) return;
+        if (outline.get()) {
+            for (Entity e : mc.world.getEntities()) {
+                if (!isTarget(e)) continue;
+                glowTargets.add(e);
+            }
+            if (storages.get()) {
+                for (BlockEntity be : Utils.blockEntities()) {
+                    if (!isStorageBlock(be)) continue;
+                    storageTargets.add(be.getPos());
+                }
             }
         }
+        if (portals.get()) {
+            ClientChunkManager cm = mc.world.getChunkManager();
+            int viewDistance = mc.options.getViewDistance().getValue();
+            ChunkPos center = mc.player.getChunkPos();
+            for (int dx = -viewDistance; dx <= viewDistance; dx++) {
+                for (int dz = -viewDistance; dz <= viewDistance; dz++) {
+                    WorldChunk chunk = cm.getWorldChunk(center.x + dx, center.z + dz);
+                    if (chunk == null) continue;
+                    chunk.forEachBlockMatchingPredicate(
+                        state -> state.isOf(Blocks.NETHER_PORTAL),
+                        (pos, state) -> portalPositions.add(pos.toImmutable())
+                    );
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onDeactivate() {
+        glowTargets.clear();
+        storageTargets.clear();
+        portalPositions.clear();
     }
 
     private boolean isStorageBlock(BlockEntity be) {
@@ -183,16 +218,24 @@ public class Shader extends Module {
     }
 
     /** Renders the 12 edges of the cube silhouette around each storage
-     *  BlockEntity. Meteor's renderer3D mesh defaults to depthTest=false
+     *  BlockEntity, and a filled box + outline around each loaded nether
+     *  portal block. Meteor's renderer3D mesh defaults to depthTest=false
      *  (Mesh.java:42) so the outlines are visible through walls — same
      *  through-wall principle as the vanilla entity outline shader. */
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (storageTargets.isEmpty()) return;
-        SettingColor sc = outlineColor.get();
-        Color color = toColor(sc);
-        for (BlockPos pos : storageTargets) {
-            event.renderer.box(pos, color, color, ShapeMode.Lines, 0);
+        if (!storageTargets.isEmpty()) {
+            SettingColor sc = outlineColor.get();
+            Color color = toColor(sc);
+            for (BlockPos pos : storageTargets) {
+                event.renderer.box(pos, color, color, ShapeMode.Lines, 0);
+            }
+        }
+        if (portals.get() && !portalPositions.isEmpty()) {
+            Color pc = toColor(portalColor.get());
+            for (BlockPos pos : portalPositions) {
+                event.renderer.box(pos, pc, pc, ShapeMode.Both, 0);
+            }
         }
     }
 

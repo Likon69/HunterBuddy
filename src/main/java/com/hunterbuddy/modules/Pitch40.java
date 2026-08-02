@@ -78,6 +78,31 @@ public class Pitch40 extends Module {
                .defaultValue(true)
             .build()
       );
+   public final Setting<Double> rotationSpeedUp = this.sgRecast
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                        .name("rotation-speed-up")
+                     .description(
+                        "How fast the pitch rotates upward (deg/tick) when ascending. Synced to ElytraFly.pitch40rotationSpeedUp. "
+                     + "Lower this if the server rolls you back when pitching up."
+                     )
+                  .defaultValue(5.45)
+               .min(0.1)
+            .sliderRange(0.1, 20.0)
+            .onChanged(this::syncRotationSpeedUp).build()
+      );
+   public final Setting<Double> rotationSpeedDown = this.sgRecast
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                        .name("rotation-speed-down")
+                     .description(
+                        "How fast the pitch rotates downward (deg/tick) when descending. Synced to ElytraFly.pitch40rotationSpeedDown."
+                     )
+                  .defaultValue(0.90)
+               .min(0.1)
+            .sliderRange(0.1, 20.0)
+            .onChanged(this::syncRotationSpeedDown).build()
+      );
    private Module elytraFly;
    private ElytraFlightModes oldValue;
    private Setting<ElytraFlightModes> elytraFlyMode;
@@ -132,6 +157,24 @@ public class Pitch40 extends Module {
       }
    }
 
+   private void syncRotationSpeedUp(Double value) {
+      if (value != null && this.getElytraFly() != null) {
+         Setting<Double> elytraRotationUp = (Setting<Double>) this.getElytraFly().settings.get("pitch40-rotation-speed-up");
+         if (elytraRotationUp != null && !((Double)elytraRotationUp.get()).equals(value)) {
+            elytraRotationUp.set(value);
+         }
+      }
+   }
+
+   private void syncRotationSpeedDown(Double value) {
+      if (value != null && this.getElytraFly() != null) {
+         Setting<Double> elytraRotationDown = (Setting<Double>) this.getElytraFly().settings.get("pitch40-rotation-speed-down");
+         if (elytraRotationDown != null && !((Double)elytraRotationDown.get()).equals(value)) {
+            elytraRotationDown.set(value);
+         }
+      }
+   }
+
    public void onActivate() {
       this.oldValue = (ElytraFlightModes)this.getElytraFlyMode().get();
       this.getElytraFlyMode().set(ElytraFlightModes.Pitch40);
@@ -146,6 +189,8 @@ public class Pitch40 extends Module {
       this.wasElytraFlyActive = this.getElytraFly().isActive();
       this.syncLowerBoundsToElytraFly((Double)this.pitch40LowerBounds.get());
       this.syncUpperBoundsToElytraFly((Double)this.pitch40UpperBounds.get());
+      this.syncRotationSpeedUp((Double)this.rotationSpeedUp.get());
+      this.syncRotationSpeedDown((Double)this.rotationSpeedDown.get());
       if ((Boolean)this.autoRecast.get() && this.elytraRecast != null && !this.elytraRecast.isActive()) {
          this.elytraRecast.toggle();
       }
