@@ -20,7 +20,13 @@
     "accessors.EntityVelocityUpdateS2CPacketAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
     "accessors.DisconnectS2CPacketAccessor",
-    "fireworkboost.FireworkRocketEntityMixin"
+    "fireworkboost.FireworkRocketEntityMixin",
+    "DisconnectedScreenMixin",
+    "Fix2b2tBundlesMixin",
+    "Fix2b2tGhostItemsMixin",
+    "KeyBindingMixin",
+    "ElytraBounceEntityMixin",
+    "ElytraBounceCameraMixin"
   ],
   "injectors": {
     "defaultRequire": 1
