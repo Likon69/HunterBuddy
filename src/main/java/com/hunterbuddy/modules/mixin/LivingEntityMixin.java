@@ -61,16 +61,20 @@ public abstract class LivingEntityMixin {
       }
    }
 
-   @Inject(at = @At("HEAD"), method = "isGliding", cancellable = true)
+   @Inject(at = @At("RETURN"), method = "isGliding", cancellable = true)
    private void isGliding(CallbackInfoReturnable<Boolean> cir) {
       ElytraBounce eflyModule = this.getEfly();
       if (MeteorClient.mc.player != null
          && MeteorClient.mc.player.getBrain().equals(this.getBrain())
          && eflyModule != null
          && eflyModule.enabled()
-         && !eflyModule.isFakeFlyEnabled()
-         && !MeteorClient.mc.player.isOnGround()) {
-         cir.setReturnValue(true);
+         && !eflyModule.isFakeFlyEnabled()) {
+         // Injecting at RETURN gives us the real flag value; the module latches it
+         // (Lambda-style) instead of blindly forcing true.
+         boolean modified = eflyModule.modifyIsGliding(cir.getReturnValueZ());
+         if (modified != cir.getReturnValueZ()) {
+            cir.setReturnValue(modified);
+         }
       }
    }
 
