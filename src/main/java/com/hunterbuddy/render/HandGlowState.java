@@ -3,9 +3,12 @@ package com.hunterbuddy.render;
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 import com.hunterbuddy.modules.Shader;
+import com.mojang.blaze3d.systems.RenderSystem;
 import meteordevelopment.meteorclient.mixininterface.IWorldRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.gl.Framebuffer;
+import org.joml.Matrix4f;
+import org.joml.Matrix4fStack;
 
 /**
  * Makes the first-person hand (held item + arm) participate in the vanilla
@@ -31,6 +34,20 @@ public final class HandGlowState {
     private static boolean pending;
     private static int color;
 
+    /**
+     * The model-view matrix in effect while the hand is submitted.
+     *
+     * <p>{@code renderHand} pushes the camera rotation onto the model-view stack
+     * and bakes its inverse into the hand's own MatrixStack; the two cancel at
+     * draw time. But it pops the stack before the command queue is dispatched,
+     * so a flush issued later sees an identity model-view and only the baked
+     * inverse survives — the silhouette then counter-rotates with the camera
+     * (correct at yaw 0, drifting off screen as you turn). Snapshotting it here
+     * and restoring it in {@link #flush()} puts the draw back in the state the
+     * geometry was built for.
+     */
+    private static final Matrix4f modelView = new Matrix4f();
+
     private HandGlowState() {}
 
     public static void begin() {
@@ -39,6 +56,7 @@ public final class HandGlowState {
 
         submitting = true;
         color = shader.handGlowColor();
+        modelView.set(RenderSystem.getModelViewStack());
     }
 
     public static void end() {
@@ -74,12 +92,17 @@ public final class HandGlowState {
         if (target == null) return;
 
         IWorldRenderer worldRenderer = (IWorldRenderer) mc.worldRenderer;
+        Matrix4fStack stack = RenderSystem.getModelViewStack();
+
+        stack.pushMatrix();
+        stack.set(modelView);
         worldRenderer.meteor$pushEntityOutlineFramebuffer(target);
 
         try {
             mc.getBufferBuilders().getOutlineVertexConsumers().draw();
         } finally {
             worldRenderer.meteor$popEntityOutlineFramebuffer();
+            stack.popMatrix();
         }
     }
 }
