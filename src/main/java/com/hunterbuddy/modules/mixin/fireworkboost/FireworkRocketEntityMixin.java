@@ -30,6 +30,10 @@ public abstract class FireworkRocketEntityMixin {
       if (!this.shooter.getUuid().equals(MeteorClient.mc.player.getUuid())) return;
       if (!MeteorClient.mc.player.isGliding()) return;
 
+      // One of our rockets is boosting us right now; FireworkVector uses this to know
+      // when the boost vector is worth steering.
+      com.hunterbuddy.modules.elytraboost.FireworkBoostTracker.mark();
+
       FireworkRocketEntity self = (FireworkRocketEntity)(Object) this;
       if (this.rb == null) this.rb = Modules.get().get(RocketBoost.class);
       if (this.rb != null && this.rb.isActive()) {

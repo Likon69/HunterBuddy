@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules.mixin;
 
 import com.hunterbuddy.modules.ElytraBounce;
+import com.hunterbuddy.modules.FireworkVector;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
@@ -24,6 +25,15 @@ public abstract class ElytraBounceEntityMixin {
         if (elytraBounce != null && elytraBounce.isFreePitchEnabled()) {
             elytraBounce.cameraPitch += (float) (cursorDeltaY * 0.15);
             elytraBounce.cameraPitch = MathHelper.clamp(elytraBounce.cameraPitch, -90.0F, 90.0F);
+            MeteorClient.mc.player.setYaw(MeteorClient.mc.player.getYaw() + (float) (cursorDeltaX * 0.15));
+            ci.cancel();
+            return;
+        }
+
+        FireworkVector fireworkVector = Modules.get().get(FireworkVector.class);
+        if (fireworkVector != null && fireworkVector.isFreeCameraActive()) {
+            fireworkVector.cameraPitch += (float) (cursorDeltaY * 0.15);
+            fireworkVector.cameraPitch = MathHelper.clamp(fireworkVector.cameraPitch, -90.0F, 90.0F);
             MeteorClient.mc.player.setYaw(MeteorClient.mc.player.getYaw() + (float) (cursorDeltaX * 0.15));
             ci.cancel();
         }

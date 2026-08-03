@@ -66,6 +66,33 @@ public class ElytraBounce extends Module {
                .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get())
                .build()
       );
+   private final Setting<Boolean> fakeLag = this.sgGeneral
+      .add(
+         new Builder().name("fake-lag")
+                     .description(
+                        "Emulates lag by holding packets while skimming the tunnel floor, then releasing them in bursts (Lambda-style). Required for 1x2 tunnel bounce."
+                     ).defaultValue(true)
+               .onChanged(v -> {
+                  if (!v) {
+                     this.flushPackets();
+                  }
+               })
+               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get() && (Boolean)this.tunnelBounce.get())
+               .build()
+      );
+   private final Setting<Integer> fakeLagFlushTicks = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
+                        .name("fake-lag-flush-ticks")
+                     .description("How many ticks to hold packets before releasing them in a burst.")
+                  .defaultValue(10)
+               .min(2)
+               .sliderRange(2, 40)
+               .visible(
+                  () -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get() && (Boolean)this.tunnelBounce.get() && (Boolean)this.fakeLag.get()
+               )
+               .build()
+      );
    private final Setting<Double> speed = this.sgGeneral
       .add(
          new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
@@ -223,6 +250,21 @@ public class ElytraBounce extends Module {
    private BlockPos portalTrap = null;
    private boolean paused = false;
    private int rubberBandCooldown = 0;
+   // Lambda-style smart gliding: only force isGliding() once the real gliding flag
+   // has actually been set (server accepted the glide), then latch it through ground
+   // touches so gliding physics (low friction) is kept between bounces.
+   private boolean prevGliding = false;
+   // Mirror of the real (unforced) gliding flag, updated by modifyIsGliding().
+   private boolean realGliding = false;
+   // Lambda-style fake lag for 1x2 tunnel bounce: outgoing packets and incoming pings
+   // are held while skimming the tunnel floor, then released in bursts so the server
+   // treats the movement like a lag spike instead of flagging it.
+   private final java.util.Queue<net.minecraft.network.packet.Packet<?>> sendQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+   private final java.util.Queue<net.minecraft.network.packet.s2c.common.CommonPingS2CPacket> pingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+   // Read/written from both the client and netty threads.
+   private volatile boolean flushingPackets = false;
+   private int fakeLagTicks = 0;
+   private double lastGroundY;
    private boolean elytraToggled = false;
    private Vec3d lastUnstuckPos;
    private int stuckTimer = 0;
@@ -241,9 +283,95 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onReceivePacket(Receive event) {
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
+         // Rubberband (Meteor-style): stop gliding client side, release the latch and
+         // pause for a few ticks before restarting the takeoff cycle cleanly.
          this.rubberBandCooldown = 5;
+         this.prevGliding = false;
+         this.realGliding = false;
+         if (this.mc.player != null) {
+            this.mc.player.stopGliding();
+         }
+      } else if (event.packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping && this.shouldQueuePackets()) {
+         // Grim brackets movement with transaction pings; holding them (and answering
+         // in the flush burst) is what makes the "lag" believable.
+         this.pingQueue.add(ping);
+         event.cancel();
       } else if (event.packet instanceof CloseScreenS2CPacket) {
          event.cancel();
+      }
+   }
+
+   @EventHandler
+   private void onSendPacket(meteordevelopment.meteorclient.events.packets.PacketEvent.Send event) {
+      if (this.flushingPackets) {
+         return;
+      }
+
+      if (this.shouldQueuePackets()) {
+         this.sendQueue.add(event.packet);
+         event.cancel();
+      } else {
+         // Flushing here (before this packet goes out) keeps the packet order intact
+         // when the queue condition just turned false mid-tick.
+         this.flushPackets();
+      }
+   }
+
+   private boolean shouldQueuePackets() {
+      return (Boolean)this.bounce.get()
+         && (Boolean)this.motionYBoost.get()
+         && (Boolean)this.tunnelBounce.get()
+         && (Boolean)this.fakeLag.get()
+         && !(Boolean)this.fakeFly.get()
+         && this.enabled()
+         && this.mc.player != null
+         && this.mc.player.isGliding()
+         && this.mc.player.getY() - this.lastGroundY < 0.163;
+   }
+
+   private void tickFakeLag() {
+      if (this.mc.player != null && this.mc.player.isOnGround()) {
+         this.lastGroundY = this.mc.player.getY();
+      }
+
+      if (!this.shouldQueuePackets()) {
+         this.fakeLagTicks = 0;
+         this.flushPackets();
+      } else if (++this.fakeLagTicks >= (Integer)this.fakeLagFlushTicks.get()) {
+         this.fakeLagTicks = 0;
+         this.flushPackets();
+      }
+   }
+
+   private void flushPackets() {
+      if (!this.sendQueue.isEmpty() || !this.pingQueue.isEmpty()) {
+         if (this.mc.getNetworkHandler() == null) {
+            this.sendQueue.clear();
+            this.pingQueue.clear();
+            return;
+         }
+
+         this.flushingPackets = true;
+
+         try {
+            net.minecraft.network.ClientConnection connection = this.mc.getNetworkHandler().getConnection();
+            net.minecraft.network.packet.Packet<?> packet;
+            while ((packet = this.sendQueue.poll()) != null) {
+               connection.send(packet, null, true);
+            }
+
+            net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping;
+            while ((ping = this.pingQueue.poll()) != null) {
+               net.minecraft.network.packet.s2c.common.CommonPingS2CPacket finalPing = ping;
+               if (this.mc.isOnThread()) {
+                  finalPing.apply(this.mc.getNetworkHandler());
+               } else {
+                  this.mc.execute(() -> finalPing.apply(this.mc.getNetworkHandler()));
+               }
+            }
+         } finally {
+            this.flushingPackets = false;
+         }
       }
    }
 
@@ -254,6 +382,12 @@ public class ElytraBounce extends Module {
          this.portalTrap = null;
          this.paused = false;
          this.rubberBandCooldown = 0;
+         this.prevGliding = false;
+         this.realGliding = false;
+         this.sendQueue.clear();
+         this.pingQueue.clear();
+         this.fakeLagTicks = 0;
+         this.lastGroundY = this.mc.player.getY();
          this.waitingForChunksToLoad = false;
          this.elytraToggled = false;
          this.lastPos = this.mc.player.getEntityPos();
@@ -321,6 +455,10 @@ public class ElytraBounce extends Module {
    }
 
    public void onDeactivate() {
+      this.prevGliding = false;
+      this.realGliding = false;
+      this.fakeLagTicks = 0;
+      this.flushPackets();
       if (this.mc.player != null) {
          if ((Boolean)this.freePitch.get() && (Boolean)this.lockPitch.get() && (Boolean)this.bounce.get()) {
             this.mc.player.setPitch(this.cameraPitch);
@@ -342,6 +480,7 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onTick(Pre event) {
+      this.tickFakeLag();
       if (this.rubberBandCooldown > 0) {
          this.rubberBandCooldown--;
          return;
@@ -356,7 +495,14 @@ public class ElytraBounce extends Module {
          }
 
          if (this.enabled()) {
-            this.mc.player.setSprinting(true);
+            // Sprinting all the time while gliding makes some anticheats rubberband
+            // (Meteor Bounce does the same): sprint only on ground while gliding so
+            // the jump keeps its sprint boost, sprint normally otherwise.
+            if (this.mc.player.isGliding()) {
+               this.mc.player.setSprinting(this.mc.player.isOnGround());
+            } else {
+               this.mc.player.setSprinting(true);
+            }
          }
 
          if ((Boolean)this.bounce.get()) {
@@ -393,6 +539,7 @@ public class ElytraBounce extends Module {
                )) {
                this.waitingForChunksToLoad = false;
                this.paused = true;
+               this.prevGliding = false;
                BlockPos goal = this.mc.player.getBlockPos();
                double currDistance = (Double)this.distance.get();
                if (this.portalTrap != null) {
@@ -453,10 +600,26 @@ public class ElytraBounce extends Module {
          }
 
          if (this.enabled()) {
+            if (this.mc.player.isOnGround()) {
+               // The server force-stops gliding on ground contact (canGlide() returns
+               // false on ground), so mark the real flag off to re-deploy right after
+               // the next jump instead of relying on the flag sync through ViaVersion.
+               this.realGliding = false;
+            }
+
             if ((Boolean)this.fakeFly.get()) {
                this.doGrimEflyStuff();
-            } else {
+            } else if (!this.realGliding
+               && !this.mc.player.isOnGround()
+               && !this.mc.player.isTouchingWater()
+               && !this.mc.player.hasVehicle()
+               && net.minecraft.entity.LivingEntity.canGlideWith(this.mc.player.getEquippedStack(EquipmentSlot.CHEST), EquipmentSlot.CHEST)) {
+               // Vanilla 1.21.2+ takeoff: the client predicts the glide locally AND
+               // sends the packet (see Meteor Bounce.recastElytra). Only sent while the
+               // real gliding flag is off (Lambda's minimize-packets behaviour).
                this.sendStartFlyingPacket();
+               this.mc.player.startGliding();
+               this.realGliding = true;
             }
          }
       }
@@ -474,6 +637,23 @@ public class ElytraBounce extends Module {
          && this.rubberBandCooldown <= 0
          && this.mc.player != null
          && ((Boolean)this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
+   }
+
+   /**
+    * Called by LivingEntityMixin#isGliding at RETURN with the real (unforced) flag.
+    * Lambda-style latch: once the gliding flag has genuinely been set, keep returning
+    * true through ground touches so gliding physics carry the momentum between
+    * bounces. Never forces gliding before an actual takeoff, which would desync the
+    * client from the server and get flagged by Grim.
+    */
+   public boolean modifyIsGliding(boolean original) {
+      this.realGliding = original;
+      if (this.prevGliding) {
+         return true;
+      }
+
+      this.prevGliding = original;
+      return original;
    }
 
    public boolean isFreePitchEnabled() {
