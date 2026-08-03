@@ -28,6 +28,8 @@ import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
 import com.hunterbuddy.modules.ClientSideTime;
 import com.hunterbuddy.modules.ContainerTooltips;
 import com.hunterbuddy.modules.ControlFly;
+import com.hunterbuddy.modules.DisconnectSound;
+import com.hunterbuddy.modules.InvFix2b2t;
 import com.hunterbuddy.modules.ElytraAutoFly;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
@@ -153,6 +155,8 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ItemSearchBar());
         Modules.get().add(new ContainerTooltips());
         Modules.get().add(new Phase());
+        Modules.get().add(new DisconnectSound());
+        Modules.get().add(new InvFix2b2t());
         Modules.get().add(new LoreLocator());
         Modules.get().add(new VisualRangeNotifier());
         Commands.add(new SetInput());
