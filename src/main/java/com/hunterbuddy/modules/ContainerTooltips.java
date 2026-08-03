@@ -725,7 +725,7 @@ public class ContainerTooltips extends Module {
 
       TooltipData(String name, List<ItemStack> items, String position, String lastUpdated) {
          this.name = name;
-         this.items = items != null ? new ArrayList<>() : items;
+         this.items = items != null ? items : new ArrayList<>();
          this.position = position;
          this.lastUpdated = lastUpdated;
       }

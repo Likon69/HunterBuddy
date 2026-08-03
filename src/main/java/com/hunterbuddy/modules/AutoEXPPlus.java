@@ -91,6 +91,7 @@ public class AutoEXPPlus extends Module {
             if (mode.get() != Mode.Hands) {
                 for (EquipmentSlot slot : AttributeModifierSlot.ARMOR) {
                     ItemStack stack = mc.player.getEquippedStack(slot);
+                    if (ignoreElytra.get() && stack.getItem() == net.minecraft.item.Items.ELYTRA) continue;
                     if (needsRepair(stack, minThreshold.get())) {
                         repairingI = SlotUtils.ARMOR_START + slot.getEntitySlotId();
                         break;

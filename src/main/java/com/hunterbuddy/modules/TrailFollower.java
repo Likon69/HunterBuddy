@@ -252,6 +252,7 @@ public class TrailFollower extends Module
     );
 
     private boolean oldAutoFireworkValue;
+    private boolean pitch40FireworkModified;
 
     private FollowMode followMode;
 
@@ -347,6 +348,7 @@ public class TrailFollower extends Module
                                 Setting<Boolean> setting = ((Setting<Boolean>) pitch40ModuleInstance.settings.get("auto-firework"));
                                 info("Auto Firework enabled on Pitch40 module. Adjust settings under the Pitch40 module.");
                                 oldAutoFireworkValue = setting.get();
+                                pitch40FireworkModified = true;
                                 setting.set(true);
                             }
                         }
@@ -404,12 +406,16 @@ public class TrailFollower extends Module
                     if (pitch40ModuleInstance.isActive()) {
                         pitch40ModuleInstance.toggle();
                     }
-                    ((Setting<Boolean>) pitch40ModuleInstance.settings.get("auto-firework")).set(oldAutoFireworkValue);
+                    if (pitch40FireworkModified) {
+                        Setting<Boolean> autoFireworkSetting = (Setting<Boolean>) pitch40ModuleInstance.settings.get("auto-firework");
+                        if (autoFireworkSetting != null) autoFireworkSetting.set(oldAutoFireworkValue);
+                        pitch40FireworkModified = false;
+                    }
                 } else if (overworldFlightMode.get() == OverworldFlightMode.VANILLA) {
-                    Class<? extends Module> rocketFlyModule = RocketFly.class;
-                    Module rocketFlyInstance = Modules.get().get(rocketFlyModule);
-                    if (rocketFlyInstance != null && rocketFlyInstance.isActive()) {
-                        rocketFlyInstance.toggle();
+                    RocketFly rocketFlyInstance = Modules.get().get(RocketFly.class);
+                    if (rocketFlyInstance != null) {
+                        rocketFlyInstance.resetYLock();
+                        if (rocketFlyInstance.isActive()) rocketFlyInstance.toggle();
                     }
                 }
                 break;
