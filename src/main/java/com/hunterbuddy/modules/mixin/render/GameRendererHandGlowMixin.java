@@ -36,17 +36,12 @@ public abstract class GameRendererHandGlowMixin {
     )
     private void hb$endHandOutline(CallbackInfo ci) {
         HandGlowState.end();
-    }
 
-    @Inject(
-        method = "renderWorld",
-        at = @At(
-            value = "INVOKE",
-            target = "Lnet/minecraft/client/render/command/RenderDispatcher;render()V",
-            shift = At.Shift.AFTER
-        )
-    )
-    private void hb$flushHandOutline(CallbackInfo ci) {
+        // Flushed here, still inside renderHand's model-view push. HeldItemRenderer
+        // .renderItem dispatches and flushes the hand itself before returning, so
+        // the outline consumers are already filled and the matrix state is the one
+        // the geometry was built against. This mirrors the main world pass, which
+        // also does dispatch -> immediate.draw() -> outlineVertexConsumers.draw().
         HandGlowState.flush();
     }
 }

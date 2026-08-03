@@ -133,6 +133,14 @@ public class OldChunkNotifier extends Module {
         .build()
     );
 
+    private final Setting<Boolean> temporaryWaypoints = sgGeneral.add(new BoolSetting.Builder()
+        .name("temporary-waypoints")
+        .description("Waypoints are removed when you disconnect.")
+        .defaultValue(true)
+        .visible(() -> logType.get() == LogType.Marker || logType.get() == LogType.Both)
+        .build()
+    );
+
     private final Setting<String> webhookLink = sgGeneral.add(new StringSetting.Builder()
         .name("webhook-link")
         .description("A discord webhook link. Looks like this: https://discord.com/api/webhooks/webhookUserId/webHookTokenOrSomething")
@@ -497,7 +505,7 @@ public class OldChunkNotifier extends Module {
         long blockZ = (long) anchor.z * 16;
         return "**Chunk types:** " + String.join(", ", typeNames) +
             "\n**Dimension:** " + dimensionName(anchor.dimension) +
-            "\n**Chunks marked:** " + trackedChunks.size() +
+            "\n**Chunks marked:** " + cluster.size() +
             "\n**Chunk coordinates:** `" + anchor.x + ", " + anchor.z + "`" +
             "\n**Block coordinates:** `" + blockX + ", " + blockZ + "`" +
             "\n**Contains off-highway chunks:** " + (containsOffHighwayChunk ? "Yes" : "No");
@@ -609,7 +617,7 @@ public class OldChunkNotifier extends Module {
             "O",
             5,
             0,
-            false);
+            temporaryWaypoints.get());
         waypointSet.add(waypoint);
         SupportMods.xaeroMinimap.requestWaypointsRefresh();
     }
