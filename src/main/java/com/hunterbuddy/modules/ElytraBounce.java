@@ -222,6 +222,7 @@ public class ElytraBounce extends Module {
    private boolean startSprinting;
    private BlockPos portalTrap = null;
    private boolean paused = false;
+   private int rubberBandCooldown = 0;
    private boolean elytraToggled = false;
    private Vec3d lastUnstuckPos;
    private int stuckTimer = 0;
@@ -239,7 +240,9 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onReceivePacket(Receive event) {
-      if (event.packet instanceof PlayerPositionLookS2CPacket || event.packet instanceof CloseScreenS2CPacket) {
+      if (event.packet instanceof PlayerPositionLookS2CPacket) {
+         this.rubberBandCooldown = 5;
+      } else if (event.packet instanceof CloseScreenS2CPacket) {
          event.cancel();
       }
    }
@@ -250,6 +253,7 @@ public class ElytraBounce extends Module {
          this.tempPath = null;
          this.portalTrap = null;
          this.paused = false;
+         this.rubberBandCooldown = 0;
          this.waitingForChunksToLoad = false;
          this.elytraToggled = false;
          this.lastPos = this.mc.player.getEntityPos();
@@ -338,6 +342,10 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onTick(Pre event) {
+      if (this.rubberBandCooldown > 0) {
+         this.rubberBandCooldown--;
+         return;
+      }
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
          if ((Boolean)this.toggleElytra.get() && !(Boolean)this.fakeFly.get() && !this.elytraToggled) {
             if (!this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA)) {
@@ -463,6 +471,7 @@ public class ElytraBounce extends Module {
    public boolean enabled() {
       return this.isActive()
          && !this.paused
+         && this.rubberBandCooldown <= 0
          && this.mc.player != null
          && ((Boolean)this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
    }
