@@ -68,7 +68,8 @@ public abstract class LivingEntityMixin {
          && MeteorClient.mc.player.getBrain().equals(this.getBrain())
          && eflyModule != null
          && eflyModule.enabled()
-         && !eflyModule.isFakeFlyEnabled()) {
+         && !eflyModule.isFakeFlyEnabled()
+         && !MeteorClient.mc.player.isOnGround()) {
          cir.setReturnValue(true);
       }
    }
