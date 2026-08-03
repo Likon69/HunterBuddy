@@ -45,7 +45,7 @@ public class YawLock extends Module {
     private int tickCounter = 0;
 
     public YawLock() {
-        super(HunterBuddyAddon.UTILITY_CATEGORY, "yaw-lock", "Locks your yaw to the closest 45-degree increment.");
+        super(HunterBuddyAddon.HUNT_CATEGORY, "yaw-lock", "Locks your yaw to the closest 45-degree increment.");
     }
 
     @Override
