@@ -22,6 +22,7 @@ classes/
 agent.md
 AGENTS.md
 CLAUDE.md
+.claude/
 
 # Research notes (sessions de recherche)
 RESEARCH_BOATFLY_2B2T.md
