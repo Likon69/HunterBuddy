@@ -172,12 +172,20 @@ public class OldChunkNotifier extends Module {
         .build()
     );
 
+    private final Setting<Boolean> debug = sgGeneral.add(new BoolSetting.Builder()
+        .name("debug")
+        .description("Écrit dans le chat le détail de la détection, des clusters et des envois webhook.")
+        .defaultValue(false)
+        .build()
+    );
+
     // Cluster detection and Discord delivery state
     private static final int MAX_PROCESSED_CHUNKS = 1000;
     private static final int MAX_TRACKED_CHUNKS = 10000;
     private static final int MAX_WEBHOOK_ATTEMPTS = 3;
     private static final int WEBHOOK_RETRY_DELAY_TICKS = 20 * 30;
     private static final int WEBHOOK_EDIT_DELAY_TICKS = 20 * 10;
+    private static final int DEBUG_CENSUS_TICKS = 20 * 10;
     private static final int[][] NEIGHBOR_OFFSETS = {{1,0},{-1,0},{0,1},{0,-1}};
     private static final Gson GSON = new Gson();
 
@@ -191,6 +199,7 @@ public class OldChunkNotifier extends Module {
     private ExecutorService discordExecutor;
     private long nextWebhookDeliveryId = 1;
     private int webhookRetryCooldown;
+    private int debugCensusCooldown;
 
     public OldChunkNotifier() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "old-chunk-notifier", "Sends a webhook message and optionally pings you when an old chunk is detected.");
@@ -204,6 +213,7 @@ public class OldChunkNotifier extends Module {
         webhookDeliveries.clear();
         webhookDeliveryReferences.clear();
         webhookRetryCooldown = 0;
+        debugCensusCooldown = 0;
         if (discordExecutor == null || discordExecutor.isShutdown()) {
             discordExecutor = Executors.newSingleThreadExecutor(r -> {
                 Thread thread = new Thread(r, "OldChunkNotifier-Discord");
@@ -278,7 +288,13 @@ public class OldChunkNotifier extends Module {
         }
 
         ChunkState state = trackChunk(key, detectedType, offHighway);
+        dbg("detect " + key.x + "," + key.z + " type=" + detectedType.label
+            + (offHighway ? " off-highway" : "") + (state.confirmed ? " (deja confirme)" : ""));
         if (!state.confirmed) tryNotifyCluster(key);
+    }
+
+    private void dbg(String message) {
+        if (debug.get()) info(message, new Object[0]);
     }
 
     private boolean markProcessed(ChunkKey key) {
@@ -368,7 +384,10 @@ public class OldChunkNotifier extends Module {
             if (joinsConfirmedCluster) break;
         }
 
-        if (!joinsConfirmedCluster && pendingCluster.size() < minClusterSize.get()) return;
+        if (!joinsConfirmedCluster && pendingCluster.size() < minClusterSize.get()) {
+            dbg("  en attente: " + pendingCluster.size() + " chunk(s) < min " + minClusterSize.get());
+            return;
+        }
 
         boolean markerAdded = false;
         for (ChunkKey chunk : pendingCluster) {
@@ -382,6 +401,8 @@ public class OldChunkNotifier extends Module {
         if (markerAdded && !temporaryWaypoints.get()) saveWaypoints();
 
         Set<ChunkKey> confirmedCluster = collectCluster(pos, true);
+        dbg("  confirme +" + pendingCluster.size() + " -> cluster de " + confirmedCluster.size()
+            + " (ancre " + pos.x + "," + pos.z + ")");
         long existingDeliveryId = findExistingDelivery(confirmedCluster);
         if (existingDeliveryId != 0) {
             for (ChunkKey chunk : confirmedCluster) {
@@ -391,7 +412,11 @@ public class OldChunkNotifier extends Module {
             // The cluster keeps growing after the first message went out, so remember the
             // new size and let the tick handler edit the message with the real count.
             Delivery delivery = webhookDeliveries.get(existingDeliveryId);
-            if (delivery != null) delivery.clusterSize = confirmedCluster.size();
+            if (delivery != null) {
+                delivery.clusterSize = confirmedCluster.size();
+                dbg("  rattache a la livraison #" + existingDeliveryId + ", annonce "
+                    + delivery.reportedSize + " -> reel " + delivery.clusterSize);
+            }
         } else {
             scheduleClusterWebhook(pos, confirmedCluster);
         }
@@ -462,6 +487,8 @@ public class OldChunkNotifier extends Module {
         // need to edit the chunk count later.
         URI createUri = URI.create(webhookUri.toString() + "?wait=true");
 
+        dbg("  POST livraison #" + deliveryId + " avec " + cluster.size() + " chunk(s)");
+
         try {
             executor.submit(() -> {
                 WebhookResult result = sendWebhookRequest("POST", createUri, json);
@@ -508,6 +535,8 @@ public class OldChunkNotifier extends Module {
         URI editUri = URI.create(webhookUri.toString() + "/messages/" + delivery.messageId);
         int size = cluster.size();
 
+        dbg("  PATCH #" + deliveryId + " : " + delivery.reportedSize + " -> " + size + " chunk(s)");
+
         delivery.editInFlight = true;
         try {
             executor.submit(() -> {
@@ -528,10 +557,52 @@ public class OldChunkNotifier extends Module {
 
         if (result.success) {
             delivery.reportedSize = Math.max(delivery.reportedSize, size);
+            dbg("  PATCH #" + deliveryId + " ok, annonce " + delivery.reportedSize);
         } else if (result.messageGone) {
+            dbg("  PATCH #" + deliveryId + " : message supprime, renvoi prevu");
             // Someone deleted the message; drop the delivery so the retry pass posts a
             // fresh one with the full count.
             clearDelivery(deliveryId);
+        } else {
+            dbg("  PATCH #" + deliveryId + " echoue: " + result.error);
+        }
+    }
+
+    /**
+     * Counts every confirmed cluster currently tracked. This is the number to compare
+     * against what Discord reported: if one cluster holds far more chunks than the
+     * message says, the growth is not reaching the delivery.
+     */
+    private void logClusterCensus() {
+        Set<ChunkKey> visited = new HashSet<>();
+        List<Integer> sizes = new ArrayList<>();
+        int confirmed = 0;
+
+        for (Map.Entry<ChunkKey, ChunkState> entry : trackedChunks.entrySet()) {
+            if (!entry.getValue().confirmed) continue;
+            confirmed++;
+            if (visited.contains(entry.getKey())) continue;
+            Set<ChunkKey> cluster = collectCluster(entry.getKey(), true);
+            visited.addAll(cluster);
+            sizes.add(cluster.size());
+        }
+
+        sizes.sort((a, b) -> b - a);
+        StringBuilder biggest = new StringBuilder();
+        for (int i = 0; i < Math.min(5, sizes.size()); i++) {
+            if (i > 0) biggest.append(", ");
+            biggest.append(sizes.get(i));
+        }
+
+        dbg("bilan: " + trackedChunks.size() + " chunk(s) suivis, " + confirmed + " confirme(s), "
+            + sizes.size() + " cluster(s), plus gros: [" + biggest + "], "
+            + webhookDeliveries.size() + " livraison(s)");
+
+        for (Map.Entry<Long, Delivery> entry : webhookDeliveries.entrySet()) {
+            Delivery delivery = entry.getValue();
+            dbg("  livraison #" + entry.getKey() + " " + delivery.status
+                + " annonce=" + delivery.reportedSize + " reel=" + delivery.clusterSize
+                + (delivery.messageId == null ? " SANS message id" : ""));
         }
     }
 
@@ -655,6 +726,8 @@ public class OldChunkNotifier extends Module {
             delivery.status = DeliveryStatus.Sent;
             delivery.messageId = result.messageId;
             delivery.editCooldown = WEBHOOK_EDIT_DELAY_TICKS;
+            dbg("  POST #" + deliveryId + " ok, message id="
+                + (result.messageId == null ? "INTROUVABLE (edition impossible)" : result.messageId));
         } else {
             clearDelivery(deliveryId);
             error("Discord webhook failed: " + result.error, new Object[0]);
@@ -671,7 +744,17 @@ public class OldChunkNotifier extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || (logType.get() != LogType.Both && logType.get() != LogType.Webhook)) return;
+        if (mc.player == null) return;
+
+        if (debug.get()) {
+            if (debugCensusCooldown > 0) debugCensusCooldown--;
+            else {
+                debugCensusCooldown = DEBUG_CENSUS_TICKS;
+                logClusterCensus();
+            }
+        }
+
+        if (logType.get() != LogType.Both && logType.get() != LogType.Webhook) return;
 
         processDeliveryEdits();
 
