@@ -26,7 +26,8 @@
     "Fix2b2tGhostItemsMixin",
     "KeyBindingMixin",
     "ElytraBounceEntityMixin",
-    "ElytraBounceCameraMixin"
+    "ElytraBounceCameraMixin",
+    "ChunkBatchSizeCalculatorMixin"
   ],
   "injectors": {
     "defaultRequire": 1

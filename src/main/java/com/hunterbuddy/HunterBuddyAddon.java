@@ -26,6 +26,7 @@ import com.hunterbuddy.modules.BoatFlyLab;
 import com.hunterbuddy.modules.BoatFlyLab2;
 import com.hunterbuddy.modules.CaveAirESP;
 import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
+import com.hunterbuddy.modules.ChunkBatchRate;
 import com.hunterbuddy.modules.ClientSideTime;
 import com.hunterbuddy.modules.ContainerTooltips;
 import com.hunterbuddy.modules.ControlFly;
@@ -112,6 +113,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         // Modules.get().add(new AFKVanillaFly());
         Modules.get().add(new AutoLogPlus());
         Modules.get().add(new AutoEXPPlus());
+        Modules.get().add(new ChunkBatchRate());
         Modules.get().add(new ClientSideTime());
         Modules.get().add(new UnfocusedFpsLimiter());
         Modules.get().add(new ShulkerOverviewModule());
