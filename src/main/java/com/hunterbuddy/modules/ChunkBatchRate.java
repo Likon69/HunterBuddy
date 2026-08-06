@@ -11,13 +11,23 @@ import meteordevelopment.orbit.EventHandler;
 
 /**
  * The server paces chunk delivery from a rate the client itself reports, in
- * ServerboundChunkBatchReceivedPacket. Vanilla derives that number from how long the
- * client took to process the last batch (ChunkBatchSizeCalculator), starts at 9 and the
- * server clamps it to [0.01, 64] in PlayerChunkSender#onChunkBatchReceivedByClient.
- * Reporting a higher figure makes the server send chunks faster.
+ * ServerboundChunkBatchReceivedPacket. The server clamps it to [0.01, 64] in
+ * PlayerChunkSender#onChunkBatchReceivedByClient and uses it verbatim.
+ *
+ * Vanilla computes it as {@code 7000000 / averageNanosPerChunk}, where the timer runs from
+ * the batch-start packet to the batch-finished packet. That window covers the network and
+ * the server, not just our own decoding, so a slow server drags the reported rate down and
+ * the server then sends even slower — a feedback loop this module exists to break. The
+ * client's starting value is 2ms per chunk, i.e. 3.5 chunks per tick.
+ *
+ * Raising it costs something: chunk packets are decoded synchronously on the main thread,
+ * and the server keeps up to maxUnacknowledgedBatches (10) batches of this many chunks in
+ * flight on the single TCP connection. Overshooting trades rubberbanding for stutter and
+ * for bursts that delay every other packet.
  *
  * This is a throughput packet, not a movement packet, so it never reaches the anticheat's
- * prediction engine.
+ * prediction engine — verified: the only server-side effect is on batchQuota,
+ * unacknowledgedBatches, desiredChunksPerTick and maxUnacknowledgedBatches.
  */
 public class ChunkBatchRate extends Module {
     private static final int LOG_INTERVAL_TICKS = 20 * 5;
@@ -26,7 +36,7 @@ public class ChunkBatchRate extends Module {
 
     public final Setting<Double> chunksPerTick = this.sgGeneral.add(new DoubleSetting.Builder()
         .name("chunks-per-tick")
-        .description("Débit annoncé au serveur. Le vanilla démarre à 9, le serveur plafonne à 64.")
+        .description("Débit annoncé au serveur. Le client vanilla annonce 3.5 au départ, le serveur plafonne à 64. Trop haut = stutter, car les chunks sont décodés sur le thread principal.")
         .defaultValue(32.0)
         .min(1.0)
         .sliderRange(1.0, 64.0)
@@ -35,7 +45,7 @@ public class ChunkBatchRate extends Module {
 
     public final Setting<Boolean> onlyWhenGliding = this.sgGeneral.add(new BoolSetting.Builder()
         .name("only-when-gliding")
-        .description("Ne forcer le débit qu'en vol elytra. Au sol, le client annonce sa vraie mesure.")
+        .description("Ne forcer le débit qu'en vol elytra. Au sol, le client annonce sa vraie mesure. La bascule prend effet au lot suivant, pas instantanément.")
         .defaultValue(false)
         .build()
     );
