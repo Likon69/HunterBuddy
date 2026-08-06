@@ -50,6 +50,16 @@ public class Pitch40Classic extends Module {
         .build()
     );
 
+    public final Setting<Double> classicUpAngle = this.sgGeneral.add(new DoubleSetting.Builder()
+        .name("classic-up-angle")
+        .description("Angle de montée en mode CLASSIC, en degrés au-dessus de l'horizontale. 40 = comportement d'origine. La descente reste à 40.")
+        .defaultValue(40.0)
+        .min(0.0)
+        .sliderMax(90.0)
+        .visible(() -> this.pitchMode.get() == PitchMode.CLASSIC)
+        .build()
+    );
+
     // ---- Auto Firework (porté de JEFF Pitch40Util) ----
 
     public final Setting<Boolean> autoFirework = this.sgFirework.add(new BoolSetting.Builder()
@@ -92,7 +102,7 @@ public class Pitch40Classic extends Module {
      * without hardcoding the value.
      */
     public float getUpClamp() {
-        return this.pitchMode.get() == PitchMode.EFFICIENT ? -54.77f : -40.0f;
+        return this.pitchMode.get() == PitchMode.EFFICIENT ? -54.77f : -this.classicUpAngle.get().floatValue();
     }
 
     @Override
@@ -134,7 +144,7 @@ public class Pitch40Classic extends Module {
         float current = this.mc.player.getPitch();
         float rate = this.pitchRate.get().floatValue();
         float downClamp = this.pitchMode.get() == PitchMode.EFFICIENT ? 37.72f : 40.0f;
-        float upClamp = this.pitchMode.get() == PitchMode.EFFICIENT ? -54.77f : -40.0f;
+        float upClamp = getUpClamp();
         float updated = this.pitchingDown
             ? Math.min(current + rate, downClamp)
             : Math.max(current - rate, upClamp);
