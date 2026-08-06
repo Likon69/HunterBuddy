@@ -177,12 +177,13 @@ public class OldChunkNotifier extends Module {
     private static final int MAX_TRACKED_CHUNKS = 10000;
     private static final int MAX_WEBHOOK_ATTEMPTS = 3;
     private static final int WEBHOOK_RETRY_DELAY_TICKS = 20 * 30;
+    private static final int WEBHOOK_EDIT_DELAY_TICKS = 20 * 10;
     private static final int[][] NEIGHBOR_OFFSETS = {{1,0},{-1,0},{0,1},{0,-1}};
     private static final Gson GSON = new Gson();
 
     private final LinkedHashMap<ChunkKey, Boolean> processedChunks = new LinkedHashMap<>();
     private final LinkedHashMap<ChunkKey, ChunkState> trackedChunks = new LinkedHashMap<>();
-    private final Map<Long, DeliveryStatus> webhookDeliveries = new HashMap<>();
+    private final Map<Long, Delivery> webhookDeliveries = new HashMap<>();
     private final Map<Long, Integer> webhookDeliveryReferences = new HashMap<>();
     private final HttpClient discordHttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -369,11 +370,16 @@ public class OldChunkNotifier extends Module {
 
         if (!joinsConfirmedCluster && pendingCluster.size() < minClusterSize.get()) return;
 
+        boolean markerAdded = false;
         for (ChunkKey chunk : pendingCluster) {
             ChunkState state = trackedChunks.get(chunk);
             state.confirmed = true;
-            createMarkerNotification(chunk);
+            markerAdded |= createMarkerNotification(chunk);
         }
+
+        // Permanent waypoints only survive a disconnect if the world is written to disk.
+        // Save once for the whole cluster instead of once per chunk.
+        if (markerAdded && !temporaryWaypoints.get()) saveWaypoints();
 
         Set<ChunkKey> confirmedCluster = collectCluster(pos, true);
         long existingDeliveryId = findExistingDelivery(confirmedCluster);
@@ -382,6 +388,10 @@ public class OldChunkNotifier extends Module {
                 ChunkState state = trackedChunks.get(chunk);
                 if (state.webhookDeliveryId == 0) assignDelivery(state, existingDeliveryId);
             }
+            // The cluster keeps growing after the first message went out, so remember the
+            // new size and let the tick handler edit the message with the real count.
+            Delivery delivery = webhookDeliveries.get(existingDeliveryId);
+            if (delivery != null) delivery.clusterSize = confirmedCluster.size();
         } else {
             scheduleClusterWebhook(pos, confirmedCluster);
         }
@@ -394,7 +404,8 @@ public class OldChunkNotifier extends Module {
             ChunkState state = trackedChunks.get(chunk);
             if (state.webhookDeliveryId == 0) continue;
 
-            DeliveryStatus status = webhookDeliveries.get(state.webhookDeliveryId);
+            Delivery delivery = webhookDeliveries.get(state.webhookDeliveryId);
+            DeliveryStatus status = delivery == null ? null : delivery.status;
             if (status == DeliveryStatus.Sent) return state.webhookDeliveryId;
             if (status == DeliveryStatus.Pending) pendingDeliveryId = state.webhookDeliveryId;
             else assignDelivery(state, 0);
@@ -403,10 +414,9 @@ public class OldChunkNotifier extends Module {
         return pendingDeliveryId;
     }
 
-    private void createMarkerNotification(ChunkKey pos) {
-        if (logType.get() == LogType.Both || logType.get() == LogType.Marker) {
-            createMapMarker(pos.x, pos.z);
-        }
+    private boolean createMarkerNotification(ChunkKey pos) {
+        if (logType.get() != LogType.Both && logType.get() != LogType.Marker) return false;
+        return createMapMarker(pos.x, pos.z);
     }
 
     private void scheduleClusterWebhook(ChunkKey anchor, Set<ChunkKey> cluster) {
@@ -442,19 +452,86 @@ public class OldChunkNotifier extends Module {
         String playerName = mc.player != null ? mc.player.getGameProfile().name() : "Unknown";
         String json = buildWebhookJson(anchor, cluster, playerName, pingId);
         long deliveryId = nextWebhookDeliveryId++;
-        webhookDeliveries.put(deliveryId, DeliveryStatus.Pending);
+        Delivery delivery = new Delivery(anchor, cluster.size());
+        webhookDeliveries.put(deliveryId, delivery);
         for (ChunkKey chunk : cluster) {
             assignDelivery(trackedChunks.get(chunk), deliveryId);
         }
 
+        // wait=true makes Discord return the created message, which gives us the id we
+        // need to edit the chunk count later.
+        URI createUri = URI.create(webhookUri.toString() + "?wait=true");
+
         try {
             executor.submit(() -> {
-                WebhookResult result = sendWebhookRequest(webhookUri, json);
+                WebhookResult result = sendWebhookRequest("POST", createUri, json);
                 mc.execute(() -> completeWebhookDelivery(deliveryId, result));
             });
         } catch (RejectedExecutionException e) {
             clearDelivery(deliveryId);
             error("Discord webhook could not be queued.", new Object[0]);
+        }
+    }
+
+    private void processDeliveryEdits() {
+        for (Map.Entry<Long, Delivery> entry : webhookDeliveries.entrySet()) {
+            Delivery delivery = entry.getValue();
+            if (delivery.editCooldown > 0) {
+                delivery.editCooldown--;
+                continue;
+            }
+            if (delivery.status != DeliveryStatus.Sent || delivery.messageId == null) continue;
+            if (delivery.editInFlight || delivery.clusterSize <= delivery.reportedSize) continue;
+            scheduleClusterEdit(entry.getKey(), delivery);
+        }
+    }
+
+    private void scheduleClusterEdit(long deliveryId, Delivery delivery) {
+        Set<ChunkKey> cluster = collectCluster(delivery.anchor, true);
+        if (cluster.isEmpty()) {
+            // The anchor was trimmed out of the tracker; nothing left to report.
+            delivery.reportedSize = delivery.clusterSize;
+            return;
+        }
+
+        URI webhookUri = parseDiscordWebhookUrl(webhookLink.get().trim());
+        if (webhookUri == null) return;
+
+        ExecutorService executor = discordExecutor;
+        if (executor == null || executor.isShutdown()) return;
+
+        String pingId = null;
+        if (ping.get() && discordId.get().trim().matches("\\d+")) pingId = discordId.get().trim();
+
+        String playerName = mc.player != null ? mc.player.getGameProfile().name() : "Unknown";
+        String json = buildWebhookJson(delivery.anchor, cluster, playerName, pingId);
+        URI editUri = URI.create(webhookUri.toString() + "/messages/" + delivery.messageId);
+        int size = cluster.size();
+
+        delivery.editInFlight = true;
+        try {
+            executor.submit(() -> {
+                WebhookResult result = sendWebhookRequest("PATCH", editUri, json);
+                mc.execute(() -> completeWebhookEdit(deliveryId, size, result));
+            });
+        } catch (RejectedExecutionException e) {
+            delivery.editInFlight = false;
+        }
+    }
+
+    private void completeWebhookEdit(long deliveryId, int size, WebhookResult result) {
+        Delivery delivery = webhookDeliveries.get(deliveryId);
+        if (delivery == null) return;
+
+        delivery.editInFlight = false;
+        delivery.editCooldown = WEBHOOK_EDIT_DELAY_TICKS;
+
+        if (result.success) {
+            delivery.reportedSize = Math.max(delivery.reportedSize, size);
+        } else if (result.messageGone) {
+            // Someone deleted the message; drop the delivery so the retry pass posts a
+            // fresh one with the full count.
+            clearDelivery(deliveryId);
         }
     }
 
@@ -465,7 +542,10 @@ public class OldChunkNotifier extends Module {
             String path = uri.getPath();
             boolean validHost = host != null && host.matches("(?i)(.+\\.)?discord(app)?\\.com");
             if (!"https".equalsIgnoreCase(uri.getScheme()) || !validHost || path == null || !path.startsWith("/api/webhooks/")) return null;
-            return uri;
+            // Drop any query, fragment or trailing slash so "?wait=true" and "/messages/<id>"
+            // can be appended safely.
+            while (path.endsWith("/")) path = path.substring(0, path.length() - 1);
+            return URI.create("https://" + host + path);
         } catch (IllegalArgumentException ignored) {
             return null;
         }
@@ -518,26 +598,27 @@ public class OldChunkNotifier extends Module {
         return dimension.getValue().toString();
     }
 
-    private WebhookResult sendWebhookRequest(URI webhookUri, String json) {
+    private WebhookResult sendWebhookRequest(String method, URI webhookUri, String json) {
         HttpRequest request = HttpRequest.newBuilder()
             .uri(webhookUri)
             .timeout(Duration.ofSeconds(15))
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(json))
+            .method(method, HttpRequest.BodyPublishers.ofString(json))
             .build();
         String lastError = "Unknown error";
 
         for (int attempt = 1; attempt <= MAX_WEBHOOK_ATTEMPTS; attempt++) {
             try {
-                HttpResponse<Void> response = discordHttpClient.send(request, HttpResponse.BodyHandlers.discarding());
+                HttpResponse<String> response = discordHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 int status = response.statusCode();
-                if (status >= 200 && status < 300) return new WebhookResult(true, null);
+                if (status >= 200 && status < 300) return new WebhookResult(true, null, readMessageId(response.body()), false);
 
                 lastError = "Discord returned HTTP " + status;
+                if (status == 404 || status == 410) return new WebhookResult(false, lastError, null, true);
                 if (status != 429 && status < 500) break;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return new WebhookResult(false, "Webhook delivery was interrupted");
+                return new WebhookResult(false, "Webhook delivery was interrupted", null, false);
             } catch (Exception e) {
                 lastError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             }
@@ -547,19 +628,33 @@ public class OldChunkNotifier extends Module {
                     Thread.sleep(attempt * 1000L);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    return new WebhookResult(false, "Webhook retry was interrupted");
+                    return new WebhookResult(false, "Webhook retry was interrupted", null, false);
                 }
             }
         }
 
-        return new WebhookResult(false, lastError);
+        return new WebhookResult(false, lastError, null, false);
+    }
+
+    private static String readMessageId(String body) {
+        if (body == null || body.isBlank()) return null;
+        try {
+            Map<?, ?> parsed = GSON.fromJson(body, Map.class);
+            Object id = parsed == null ? null : parsed.get("id");
+            return id == null ? null : id.toString();
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private void completeWebhookDelivery(long deliveryId, WebhookResult result) {
-        if (webhookDeliveries.get(deliveryId) != DeliveryStatus.Pending) return;
+        Delivery delivery = webhookDeliveries.get(deliveryId);
+        if (delivery == null || delivery.status != DeliveryStatus.Pending) return;
 
         if (result.success) {
-            webhookDeliveries.put(deliveryId, DeliveryStatus.Sent);
+            delivery.status = DeliveryStatus.Sent;
+            delivery.messageId = result.messageId;
+            delivery.editCooldown = WEBHOOK_EDIT_DELAY_TICKS;
         } else {
             clearDelivery(deliveryId);
             error("Discord webhook failed: " + result.error, new Object[0]);
@@ -577,6 +672,9 @@ public class OldChunkNotifier extends Module {
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || (logType.get() != LogType.Both && logType.get() != LogType.Webhook)) return;
+
+        processDeliveryEdits();
+
         if (webhookRetryCooldown > 0) {
             webhookRetryCooldown--;
             return;
@@ -601,18 +699,24 @@ public class OldChunkNotifier extends Module {
         }
     }
 
-    private void createMapMarker(int x, int z)
+    private boolean createMapMarker(int x, int z)
     {
-        MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
-        if (minimapSession == null) return;
-        MinimapWorld currentWorld = minimapSession.getWorldManager().getCurrentWorld();
-        if (currentWorld == null) return;
-        WaypointSet waypointSet = currentWorld.getCurrentWaypointSet();
-        if (waypointSet == null) return;
+        WaypointSet waypointSet = getWaypointSet();
+        if (waypointSet == null) return false;
+
+        int blockX = x * 16;
+        int blockZ = z * 16;
+
+        // Permanent waypoints are reloaded from disk on the next session, so a second
+        // pass over the same area would stack duplicates without this check.
+        for (Waypoint existing : waypointSet.getWaypoints()) {
+            if (existing.getX() == blockX && existing.getZ() == blockZ) return false;
+        }
+
         Waypoint waypoint = new Waypoint(
-            x * 16,
+            blockX,
             70,
-            z * 16,
+            blockZ,
             "Old Chunk",
             "O",
             5,
@@ -620,6 +724,29 @@ public class OldChunkNotifier extends Module {
             temporaryWaypoints.get());
         waypointSet.add(waypoint);
         SupportMods.xaeroMinimap.requestWaypointsRefresh();
+        return true;
+    }
+
+    private WaypointSet getWaypointSet()
+    {
+        MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (minimapSession == null) return null;
+        MinimapWorld currentWorld = minimapSession.getWorldManager().getCurrentWorld();
+        if (currentWorld == null) return null;
+        return currentWorld.getCurrentWaypointSet();
+    }
+
+    private void saveWaypoints()
+    {
+        try {
+            MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
+            if (minimapSession == null) return;
+            MinimapWorld currentWorld = minimapSession.getWorldManager().getCurrentWorld();
+            if (currentWorld == null) return;
+            minimapSession.getWorldManagerIO().saveWorld(currentWorld);
+        } catch (Exception e) {
+            error("Failed to save waypoints: " + e.getMessage(), new Object[0]);
+        }
     }
 
     private enum DetectedChunkType {
@@ -645,7 +772,23 @@ public class OldChunkNotifier extends Module {
         }
     }
 
-    private record WebhookResult(boolean success, String error) {}
+    private record WebhookResult(boolean success, String error, String messageId, boolean messageGone) {}
+
+    private static class Delivery {
+        private final ChunkKey anchor;
+        private DeliveryStatus status = DeliveryStatus.Pending;
+        private String messageId;
+        private int reportedSize;
+        private int clusterSize;
+        private int editCooldown;
+        private boolean editInFlight;
+
+        private Delivery(ChunkKey anchor, int size) {
+            this.anchor = anchor;
+            this.reportedSize = size;
+            this.clusterSize = size;
+        }
+    }
 
     private static class ChunkState {
         private DetectedChunkType type;
