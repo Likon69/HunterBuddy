@@ -20,9 +20,16 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.ChunkSectionPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.ChunkStatus;
+import xaero.common.minimap.waypoints.Waypoint;
+import xaero.hud.minimap.BuiltInHudModules;
+import xaero.hud.minimap.module.MinimapSession;
+import xaero.hud.minimap.waypoint.set.WaypointSet;
+import xaero.hud.minimap.world.MinimapWorld;
 import xaeroplus.event.ChunkDataEvent;
 
 import java.util.Collections;
@@ -71,6 +78,27 @@ public class RotationDetector extends Module {
         .name("deepslate")
         .description("Regular deepslate only generates vertical in natural terrain.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> detectPaletteGhosts = sgBlocks.add(new BoolSetting.Builder()
+        .name("palette-ghosts")
+        .description("Flags sections whose palette holds never-generated blocks (nether portal, beacon...) - proof of player activity even if the blocks were removed years ago.")
+        .defaultValue(false)
+        .onChanged(v -> {
+            if (!v) {
+                this.ghostCache.clear();
+                this.ghostWaypointed.clear();
+            }
+        })
+        .build()
+    );
+
+    private final Setting<Boolean> ghostWaypoints = sgBlocks.add(new BoolSetting.Builder()
+        .name("ghost-waypoints")
+        .description("Creates a Xaeros waypoint on chunks with palette ghosts.")
+        .defaultValue(true)
+        .visible(detectPaletteGhosts::get)
         .build()
     );
 
@@ -128,6 +156,22 @@ public class RotationDetector extends Module {
         .build()
     );
 
+    private final Setting<SettingColor> ghostSideColor = sgRender.add(new ColorSetting.Builder()
+        .name("ghost-side-color")
+        .description("Side color for palette ghost sections.")
+        .defaultValue(new SettingColor(170, 0, 255, 30))
+        .visible(detectPaletteGhosts::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> ghostLineColor = sgRender.add(new ColorSetting.Builder()
+        .name("ghost-line-color")
+        .description("Line color for palette ghost sections.")
+        .defaultValue(new SettingColor(170, 0, 255, 200))
+        .visible(detectPaletteGhosts::get)
+        .build()
+    );
+
     private final Setting<Integer> renderDistance = sgRender.add(new IntSetting.Builder()
         .name("render-distance")
         .description("Maximum render distance.")
@@ -155,7 +199,20 @@ public class RotationDetector extends Module {
         .build()
     );
 
+    // Blocks that appear in none of the 1202 structure templates and nowhere in the
+    // levelgen/worldgen code (verified against the decompiled 1.21.11 server jar).
+    // Their id in a section palette can only have been put there by a player.
+    private static final Set<Block> GHOST_BLOCKS = Set.of(
+        Blocks.NETHER_PORTAL, Blocks.BEACON, Blocks.ANVIL, Blocks.ENCHANTING_TABLE,
+        Blocks.SHULKER_BOX, Blocks.RESPAWN_ANCHOR, Blocks.JUKEBOX, Blocks.PISTON,
+        Blocks.OBSERVER, Blocks.DROPPER, Blocks.NETHERITE_BLOCK, Blocks.IRON_BLOCK,
+        Blocks.SPONGE
+    );
+
     private final Map<Long, Set<BlockPos>> chunkCache = new ConcurrentHashMap<>();
+    // Section origins whose palette carries a ghost block, keyed by chunk.
+    private final Map<Long, Set<BlockPos>> ghostCache = new ConcurrentHashMap<>();
+    private final Set<Long> ghostWaypointed = Collections.synchronizedSet(new HashSet<>());
     private final Set<Long> pendingChunks = Collections.synchronizedSet(new LinkedHashSet<>());
     private int totalDetected = 0;
 
@@ -166,6 +223,8 @@ public class RotationDetector extends Module {
     @Override
     public void onActivate() {
         chunkCache.clear();
+        ghostCache.clear();
+        ghostWaypointed.clear();
         pendingChunks.clear();
         totalDetected = 0;
         if (mc.world != null && mc.player != null) {
@@ -187,6 +246,8 @@ public class RotationDetector extends Module {
     @Override
     public void onDeactivate() {
         chunkCache.clear();
+        ghostCache.clear();
+        ghostWaypointed.clear();
         pendingChunks.clear();
         totalDetected = 0;
     }
@@ -214,6 +275,15 @@ public class RotationDetector extends Module {
                         chunkCache.put(key, detected);
                     } else {
                         chunkCache.remove(key);
+                    }
+                    if (detectPaletteGhosts.get()) {
+                        Set<BlockPos> ghosts = scanSectionPalettes(chunk);
+                        if (!ghosts.isEmpty()) {
+                            ghostCache.put(key, ghosts);
+                            if (ghostWaypoints.get()) addGhostWaypoint(chunk.getPos(), ghosts);
+                        } else {
+                            ghostCache.remove(key);
+                        }
                     }
                     processed++;
                 }
@@ -246,6 +316,63 @@ public class RotationDetector extends Module {
             }
         }
         return detected;
+    }
+
+    /**
+     * Checks section palettes for ghost entries instead of walking block positions.
+     *
+     * <p>Palette entries are never pruned: once a block state enters a section palette it
+     * survives being broken, saved, reloaded and sent over the network — and ViaVersion
+     * remaps palettes in place without dropping unused entries. So a nether portal that was
+     * built and fully dismantled still leaves {@code nether_portal} in the palette, and
+     * {@code ChunkSection.hasAny} reads the palette, not the block data.
+     *
+     * <p>Empty sections are deliberately not skipped: a fully mined-out section is exactly
+     * where dead entries live.
+     */
+    private Set<BlockPos> scanSectionPalettes(Chunk chunk) {
+        Set<BlockPos> ghosts = new HashSet<>();
+        ChunkPos chunkPos = chunk.getPos();
+        ChunkSection[] sections = chunk.getSectionArray();
+
+        for (int i = 0; i < sections.length; i++) {
+            ChunkSection section = sections[i];
+            if (section == null) continue;
+
+            int bottomY = ChunkSectionPos.getBlockCoord(chunk.sectionIndexToCoord(i));
+            if (bottomY + 15 < minY.get() || bottomY > maxY.get()) continue;
+
+            if (section.hasAny(state -> GHOST_BLOCKS.contains(state.getBlock()))) {
+                ghosts.add(new BlockPos(chunkPos.getStartX(), bottomY, chunkPos.getStartZ()));
+            }
+        }
+        return ghosts;
+    }
+
+    private void addGhostWaypoint(ChunkPos chunkPos, Set<BlockPos> ghosts) {
+        if (!ghostWaypointed.add(chunkPos.toLong())) return;
+
+        WaypointSet waypointSet = getWaypointSet();
+        if (waypointSet == null) return;
+
+        BlockPos first = ghosts.iterator().next();
+        waypointSet.add(new Waypoint(
+            chunkPos.getStartX() + 8,
+            first.getY() + 8,
+            chunkPos.getStartZ() + 8,
+            "Ghost " + chunkPos.x + ", " + chunkPos.z,
+            "G",
+            13,
+            0,
+            false));
+    }
+
+    private WaypointSet getWaypointSet() {
+        MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (minimapSession == null) return null;
+        MinimapWorld currentWorld = minimapSession.getWorldManager().getCurrentWorld();
+        if (currentWorld == null) return null;
+        return currentWorld.getCurrentWaypointSet();
     }
 
     private boolean isHorizontalUnnatural(BlockState state) {
@@ -292,12 +419,22 @@ public class RotationDetector extends Module {
                 iter.remove();
             }
         }
+        while (ghostCache.size() > maxCacheSize.get()) {
+            Iterator<Long> iter = ghostCache.keySet().iterator();
+            if (iter.hasNext()) {
+                iter.next();
+                iter.remove();
+            }
+        }
     }
 
     private void updateCount() {
         totalDetected = 0;
         for (Set<BlockPos> blocks : chunkCache.values()) {
             totalDetected += blocks.size();
+        }
+        for (Set<BlockPos> sections : ghostCache.values()) {
+            totalDetected += sections.size();
         }
     }
 
@@ -318,6 +455,22 @@ public class RotationDetector extends Module {
                     double dz = pos.getZ() + 0.5 - pz;
                     if (!(dx * dx + dy * dy + dz * dz > maxDistSq)) {
                         event.renderer.box(pos, side, line, shapeMode.get(), 0);
+                    }
+                }
+            }
+
+            if (!ghostCache.isEmpty()) {
+                Color ghostSide = new Color(ghostSideColor.get());
+                Color ghostLine = new Color(ghostLineColor.get());
+
+                for (Set<BlockPos> sections : ghostCache.values()) {
+                    for (BlockPos pos : sections) {
+                        double dx = pos.getX() + 8 - px;
+                        double dy = pos.getY() + 8 - py;
+                        double dz = pos.getZ() + 8 - pz;
+                        if (!(dx * dx + dy * dy + dz * dz > maxDistSq)) {
+                            event.renderer.box(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 16, pos.getY() + 16, pos.getZ() + 16, ghostSide, ghostLine, shapeMode.get(), 0);
+                        }
                     }
                 }
             }
