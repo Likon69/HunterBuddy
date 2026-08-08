@@ -92,9 +92,10 @@ import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.World;
+import net.minecraft.world.biome.BiomeKeys;
+import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.ChunkStatus;
 import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.gen.structure.StructureType;
 
 public class StashFinder extends Module {
    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -826,8 +827,49 @@ public class StashFinder extends Module {
       }
    }
 
+   /**
+    * Whether this chunk carries a woodland mansion.
+    *
+    * <p>This used to ask {@code chunk.getStructureReferences()}, which cannot work on a
+    * client: the chunk packet carries heightmaps, the block buffer and the block entities,
+    * and nothing else. References are filled in during world generation, so the map is
+    * always empty here and the check never fired once.
+    *
+    * <p>The block under a mansion chest is no help either — reading the 73 room templates
+    * out of the jar gives plain oak planks or oak slabs under 68 of the 73 containers. What
+    * is distinctive is the shell: the rooms are built from birch planks (6444 of them,
+    * present in 62 of the 73 templates) framed with dark oak, and mansions only generate in
+    * dark forest. Only the section palettes are consulted, so this stays a handful of
+    * lookups per chunk rather than a walk over every block position.
+    */
    private boolean isInWoodlandMansion(WorldChunk chunk) {
-      return chunk.getStructureReferences().keySet().stream().anyMatch(structure -> structure.getType() == StructureType.WOODLAND_MANSION);
+      BlockPos center = chunk.getPos().getStartPos().add(8, 0, 8);
+      if (!this.mc.world.getBiome(center).matchesKey(BiomeKeys.DARK_FOREST)) {
+         return false;
+      }
+
+      boolean birch = false;
+      boolean darkOak = false;
+
+      for (ChunkSection section : chunk.getSectionArray()) {
+         if (section == null || section.isEmpty()) {
+            continue;
+         }
+
+         if (!birch) {
+            birch = section.hasAny(state -> state.isOf(Blocks.BIRCH_PLANKS));
+         }
+
+         if (!darkOak) {
+            darkOak = section.hasAny(state -> state.isOf(Blocks.DARK_OAK_PLANKS) || state.isOf(Blocks.DARK_OAK_LOG));
+         }
+
+         if (birch && darkOak) {
+            return true;
+         }
+      }
+
+      return false;
    }
 
    @EventHandler

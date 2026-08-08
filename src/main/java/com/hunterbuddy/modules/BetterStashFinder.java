@@ -31,6 +31,9 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.World;
+import net.minecraft.world.biome.BiomeKeys;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.WorldChunk;
 import xaero.hud.minimap.BuiltInHudModules;
 import xaero.hud.minimap.module.MinimapSession;
 import xaero.hud.minimap.waypoint.set.WaypointSet;
@@ -94,6 +97,13 @@ public class BetterStashFinder extends Module
     private final Setting<Boolean> ignoreTrialChambers = sgGeneral.add(new BoolSetting.Builder()
         .name("ignore-trial-chambers")
         .description("Attempts to ignore trial chambers, but may cause false negatives if someone made their base to look like a trial chamber.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> ignoreMansions = sgGeneral.add(new BoolSetting.Builder()
+        .name("ignore-woodland-mansions")
+        .description("Skips chunks that look like a woodland mansion, whose loot chests otherwise register as a stash. Matched on the mansion's own palette rather than on what sits under the chests, which is plain oak.")
         .defaultValue(true)
         .build()
     );
@@ -225,6 +235,8 @@ public class BetterStashFinder extends Module
         // Check that the chunk is in old chunks
         if (onlyOldchunks.get() && (is119NewChunk && !is112OldChunk)) return;
 
+        if (ignoreMansions.get() && isWoodlandMansion(event.chunk())) return;
+
         for (BlockEntity blockEntity : event.chunk().getBlockEntities().values()) {
             if (!storageBlocks.get().contains(blockEntity.getType())) continue;
 
@@ -274,6 +286,36 @@ public class BetterStashFinder extends Module
                 }
             }
         }
+    }
+
+    /**
+     * Whether this chunk carries a woodland mansion.
+     *
+     * <p>The block under a mansion chest is no help — reading the 73 room templates out of
+     * the jar gives plain oak planks or oak slabs under 68 of the 73 containers, which is
+     * also what half the player bases on the server use. What is distinctive is the shell:
+     * the rooms are built from birch planks (6444 of them, present in 62 of the 73
+     * templates) framed with dark oak, and the whole thing only generates in dark forest.
+     *
+     * <p>Only the section palettes are consulted, so this stays a handful of lookups per
+     * chunk instead of a walk over 98k block positions.
+     */
+    private boolean isWoodlandMansion(WorldChunk chunk) {
+        BlockPos center = chunk.getPos().getStartPos().add(8, 0, 8);
+        if (!mc.world.getBiome(center).matchesKey(BiomeKeys.DARK_FOREST)) return false;
+
+        boolean birch = false;
+        boolean darkOak = false;
+
+        for (ChunkSection section : chunk.getSectionArray()) {
+            if (section == null || section.isEmpty()) continue;
+
+            if (!birch) birch = section.hasAny(state -> state.isOf(Blocks.BIRCH_PLANKS));
+            if (!darkOak) darkOak = section.hasAny(state -> state.isOf(Blocks.DARK_OAK_PLANKS) || state.isOf(Blocks.DARK_OAK_LOG));
+            if (birch && darkOak) return true;
+        }
+
+        return false;
     }
 
     @Override
