@@ -100,8 +100,8 @@ public class RocketBoost extends Module {
 
    public final Setting<Double> autoAxisLimit = sgAuto.add(new DoubleSetting.Builder()
       .name("auto-axis-limit")
-      .description("Per-axis velocity ceiling Grim tolerates during a firework boost, in blocks/tick. Lower it if you get set back, raise it to push harder.")
-      .defaultValue(1.65)
+      .description("Per-axis velocity ceiling Grim tolerates during a firework boost, in blocks/tick. 1.7 is the constant Grim uses in UncertaintyHandler#tickFireworksBox. Lower it if you get set back.")
+      .defaultValue(1.7)
       .min(0.5)
       .max(4.0)
       .sliderRange(1.0, 2.5)
@@ -111,11 +111,11 @@ public class RocketBoost extends Module {
 
    public final Setting<Double> autoYMargin = sgAuto.add(new DoubleSetting.Builder()
       .name("auto-y-margin")
-      .description("Safety margin taken off the vertical box, since gravity lands on Y after the boost is applied. Raise it if you only get set back while climbing.")
-      .defaultValue(0.08)
+      .description("Safety margin kept on every axis. Grim's Simulation check flags at an offset of 0.001 and its accumulator decays at 0.999 per tick, so it barely forgets — the margin only has to cover our own rounding, not buy slack. Anything above ~0.01 costs top speed for nothing, since the vertical axis is the one that binds in a dive.")
+      .defaultValue(0.005)
       .min(0.0)
       .max(0.5)
-      .sliderRange(0.0, 0.25)
+      .sliderRange(0.0, 0.05)
       .visible(autoSpeed::get)
       .build()
    );
@@ -133,6 +133,9 @@ public class RocketBoost extends Module {
    /** Grim's per-axis slack for a skipped tick, mirrored from its firework box. */
    private static final double ANTI_TICK_SKIPPING = 0.05;
 
+   /** Ticks spent climbing back from vanilla speed to the solved one after a setback. */
+   private static final int AUTO_RECOVERY_TICKS = 60;
+
    public int setbackCount = 0;
    public long lastEventTime = Long.MAX_VALUE;
 
@@ -141,6 +144,7 @@ public class RocketBoost extends Module {
    private boolean hasLastRotation = false;
    private boolean jitterUp = false;
    private double lastAutoSpeed = Double.NaN;
+   private double autoRecovery = 1.0;
 
    public double getSpeed() {
       if (!autoSpeed.get()) return speedMultiplier.get();
@@ -156,30 +160,26 @@ public class RocketBoost extends Module {
     * Highest firework multiplier that keeps every axis inside Grim's tolerance box.
     *
     * <p>Grim does not check a speed scalar, it checks each axis against a box built by
-    * unioning this tick's look vector with the previous one. The vanilla firework tick
-    * leaves velocity at {@code 0.5 * v + look * (0.1 + 0.5 * multiplier)} on every axis,
-    * which is affine in the multiplier — so the largest legal value has a closed form
-    * instead of needing a search.
+    * unioning this tick's look vector with the previous one — see its
+    * {@code UncertaintyHandler#tickFireworksBox}, which this mirrors down to the 0.05
+    * slack and the flat 1.7 cap. The vanilla firework tick leaves velocity at
+    * {@code 0.5 * v + look * (0.1 + 0.5 * multiplier)} on every axis, which is affine in
+    * the multiplier — so the largest legal value has a closed form instead of a search.
     */
    private double computeAutoSpeed() {
       if (mc.player == null) return Double.NaN;
 
       Vec3d look = mc.player.getRotationVector();
       Vec3d lastLook = hasLastRotation ? Vec3d.fromPolar(lastPitch, lastYaw) : look;
-      Vec3d velocity = mc.player.getVelocity();
-      double ceiling = speedMultiplier.get();
-      double result = ceiling;
+      double solved = solveMaxMultiplier(mc.player.getVelocity(), look, lastLook, autoAxisLimit.get());
+      if (Double.isNaN(solved)) return Double.NaN;
 
-      // The box scales with the resulting speed, which itself depends on the multiplier.
-      // A few passes settle that instead of solving the fixed point analytically.
-      for (int pass = 0; pass < 3; pass++) {
-         double threshold = Math.min(autoAxisLimit.get(), boosted(velocity, look, result).length());
-         double solved = solveMaxMultiplier(velocity, look, lastLook, threshold);
-         if (Double.isNaN(solved)) return Double.NaN;
-         result = MathHelper.clamp(solved, VANILLA_SPEED, ceiling);
-      }
+      solved = MathHelper.clamp(solved, VANILLA_SPEED, speedMultiplier.get());
 
-      return result;
+      // Grim's offset accumulator decays at 0.999, so a flag is close to permanent and the
+      // next one arrives that much sooner. After a setback, fall back to vanilla and walk
+      // the multiplier up again rather than immediately asking for the same speed.
+      return VANILLA_SPEED + (solved - VANILLA_SPEED) * autoRecovery;
    }
 
    private double solveMaxMultiplier(Vec3d velocity, Vec3d look, Vec3d lastLook, double threshold) {
@@ -194,10 +194,8 @@ public class RocketBoost extends Module {
          double min = Math.max(-threshold, (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, last)) * threshold);
          double max = Math.min(threshold, (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, last)) * threshold);
 
-         if (axis == 1) {
-            min += margin;
-            max -= margin;
-         }
+         min += margin;
+         max -= margin;
 
          double bound = dir > 0.0 ? max : min;
          bestK = Math.min(bestK, (bound - 0.5 * axisOf(velocity, axis)) / dir);
@@ -207,15 +205,6 @@ public class RocketBoost extends Module {
 
       // bestK is (0.1 + 0.5 * multiplier).
       return 2.0 * (bestK - 0.1);
-   }
-
-   private static Vec3d boosted(Vec3d velocity, Vec3d look, double multiplier) {
-      double k = 0.1 + 0.5 * multiplier;
-      return new Vec3d(
-         0.5 * velocity.x + look.x * k,
-         0.5 * velocity.y + look.y * k,
-         0.5 * velocity.z + look.z * k
-      );
    }
 
    private static double axisOf(Vec3d vec, int axis) {
@@ -240,6 +229,7 @@ public class RocketBoost extends Module {
       lastGainedMs = -1;
       hasLastRotation = false;
       lastAutoSpeed = Double.NaN;
+      autoRecovery = 1.0;
    }
 
    public void setTrackedRocket(int entityId) {
@@ -305,6 +295,10 @@ public class RocketBoost extends Module {
          return;
       }
 
+      if (autoRecovery < 1.0) {
+         autoRecovery = Math.min(1.0, autoRecovery + 1.0 / AUTO_RECOVERY_TICKS);
+      }
+
       // Recorded at the end of the tick, so during the next one this holds the rotation
       // the server actually saw — which is the one Grim widens its box with.
       lastYaw = mc.player.getYaw();
@@ -337,6 +331,12 @@ public class RocketBoost extends Module {
                return;
             }
          }
+      }
+
+      // A setback can land outside a boost window too, and it means the same thing either
+      // way: Grim rejected our last movement, so stop asking for the solved multiplier.
+      if (autoSpeed.get() && event.packet instanceof net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket) {
+         autoRecovery = 0.0;
       }
 
       if (!boosting) return;
