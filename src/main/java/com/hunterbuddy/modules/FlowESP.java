@@ -305,6 +305,58 @@ public class FlowESP extends Module {
                .visible(this.fadeLoad::get)
             .build()
       );
+   private final Setting<Boolean> pulseTips = this.sgAnim
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                     .name("pulse-flow-tips")
+                  .description("Pulse the columns where the liquid ran out and stopped spreading, so the end of a trail reads at a glance.")
+               .defaultValue(true)
+            .build()
+      );
+   private final Setting<Integer> tipLevel = this.sgAnim
+      .add(
+         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
+                     .name("tip-fluid-level")
+                  .description("A column counts as a tip when its thinnest fluid block is at or below this level. Water and Nether lava thin out to 1, Overworld lava only to 2.")
+               .defaultValue(2)
+               .min(1)
+               .sliderRange(1, 4)
+               .visible(this.pulseTips::get)
+            .build()
+      );
+   private final Setting<Double> pulseSpeed = this.sgAnim
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                     .name("pulse-speed")
+                  .description("Full pulse cycles per second.")
+               .defaultValue(1.0)
+               .min(0.1)
+               .sliderRange(0.1, 4.0)
+               .visible(this.pulseTips::get)
+            .build()
+      );
+   private final Setting<Double> pulseAlpha = this.sgAnim
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                     .name("pulse-alpha")
+                  .description("How far the opacity dips at the bottom of the cycle. 0 disables the blink.")
+               .defaultValue(0.55)
+               .min(0.0)
+               .sliderRange(0.0, 1.0)
+               .visible(this.pulseTips::get)
+            .build()
+      );
+   private final Setting<Double> pulseSize = this.sgAnim
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                     .name("pulse-size")
+                  .description("How far the box swells outward at the top of the cycle, in blocks. 0 disables the size change.")
+               .defaultValue(0.12)
+               .min(0.0)
+               .sliderRange(0.0, 0.5)
+               .visible(this.pulseTips::get)
+            .build()
+      );
    private FlowESP.LRUCache<Long, FlowESP.ChunkData> overworldCache;
    private FlowESP.LRUCache<Long, FlowESP.ChunkData> netherCache;
    private Set<Long> processing;
@@ -340,6 +392,10 @@ public class FlowESP extends Module {
    private int frameMaxAgeMillis;
    private boolean frameGradientMode;
    private FlowESP.GradientSource frameGradientSource;
+   /** Pulse phase for this frame, 0 at the dimmest point and 1 at the brightest. */
+   private float framePulse;
+   private float framePulseAlpha;
+   private double framePulseSize;
    private final LongOpenHashSet inRangeKeys = new LongOpenHashSet();
 
    public FlowESP() {
@@ -580,6 +636,7 @@ public class FlowESP extends Module {
       }
 
       int roofLevel = (Integer)this.roofY.get();
+      int tipThreshold = (Integer)this.tipLevel.get();
       List<FlowESP.FlowColumn> columns = new ArrayList<>();
       int srcTotal = 0;
       int flowTotal = 0;
@@ -595,6 +652,7 @@ public class FlowESP extends Module {
             boolean colRoof = false;
             int colSrc = 0;
             int colFlow = 0;
+            int colMinLevel = Integer.MAX_VALUE;
 
             for (int y = minY; y <= maxY; y++) {
                BlockPos pos = new BlockPos(wx, y, wz);
@@ -603,7 +661,7 @@ public class FlowESP extends Module {
                boolean isWater = state.getBlock() == Blocks.WATER;
                if (!isLava && !isWater) {
                   if (colBottom != -1 && colFlow > 0 && (!colRoof || colFlow > 0)) {
-                     columns.add(new FlowESP.FlowColumn(lx, lz, colBottom, colTop, colFlow, colLava, colHasSource, colRoof));
+                     columns.add(new FlowESP.FlowColumn(lx, lz, colBottom, colTop, colFlow, colLava, colHasSource, colRoof, colMinLevel <= tipThreshold));
                      srcTotal += colSrc;
                      flowTotal += colFlow;
                   }
@@ -614,6 +672,7 @@ public class FlowESP extends Module {
                   colFlow = 0;
                   colHasSource = false;
                   colRoof = false;
+                  colMinLevel = Integer.MAX_VALUE;
                } else if ((!nether || !isWater)
                   && (nether || !isWater || (Boolean)this.overworldEnabled.get())
                   && (nether || !isLava || (Boolean)this.detectLavaOverworld.get())) {
@@ -638,6 +697,9 @@ public class FlowESP extends Module {
                      colHasSource = true;
                   } else {
                      colFlow++;
+                     // Flowing fluid thins out as it spreads; the lowest level in a
+                     // column is how far this trail got before it ran dry.
+                     colMinLevel = Math.min(colMinLevel, fs.getLevel());
                   }
 
                   if (isRoofLevel) {
@@ -647,7 +709,7 @@ public class FlowESP extends Module {
             }
 
             if (colBottom != -1 && colFlow > 0 && (!colRoof || colFlow > 0)) {
-               columns.add(new FlowESP.FlowColumn(lx, lz, colBottom, colTop, colFlow, colLava, colHasSource, colRoof));
+               columns.add(new FlowESP.FlowColumn(lx, lz, colBottom, colTop, colFlow, colLava, colHasSource, colRoof, colMinLevel <= tipThreshold));
                srcTotal += colSrc;
                flowTotal += colFlow;
             }
@@ -762,6 +824,17 @@ public class FlowESP extends Module {
          this.frameGradientMode = (Boolean)this.gradientMode.get();
          this.frameGradientSource = (FlowESP.GradientSource)this.gradientSource.get();
 
+         if ((Boolean)this.pulseTips.get()) {
+            double phase = System.currentTimeMillis() / 1000.0 * (Double)this.pulseSpeed.get() * (Math.PI * 2.0);
+            this.framePulse = (float)((Math.sin(phase) + 1.0) * 0.5);
+            this.framePulseAlpha = ((Double)this.pulseAlpha.get()).floatValue();
+            this.framePulseSize = (Double)this.pulseSize.get();
+         } else {
+            this.framePulse = 1.0F;
+            this.framePulseAlpha = 0.0F;
+            this.framePulseSize = 0.0;
+         }
+
          boolean fade = (Boolean)this.fadeLoad.get();
          double dur = (Double)this.fadeDuration.get();
          long nowNanos = System.nanoTime();
@@ -829,8 +902,11 @@ public class FlowESP extends Module {
                float lengthFactor = Math.min(1.0F, (float)col.flowLen / this.frameMaxFlowLength);
                float alphaMul = 1.0F - lengthFactor * this.frameAlphaFade;
                float distMul = 1.0F - distRatio * this.frameDistanceFade;
-               Color color = this.withAlpha(this.pickColor(col, flowRatio), animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul), this.scratchFlat);
-               event.renderer.box(wx, col.bottomY, wz, wx + 1, col.topY + 1, wz + 1, color, color, ShapeMode.Both, 0);
+               float total = animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul) * this.pulseAlphaMul(col);
+               Color color = this.withAlpha(this.pickColor(col, flowRatio), total, this.scratchFlat);
+               double e = this.pulseExpand(col);
+               event.renderer
+                  .box(wx - e, col.bottomY - e, wz - e, wx + 1 + e, col.topY + 1 + e, wz + 1 + e, color, color, ShapeMode.Both, 0);
             }
          }
       }
@@ -849,18 +925,19 @@ public class FlowESP extends Module {
       SettingColor matureC = col.isLava() ? (SettingColor)this.lavaMatureColor.get() : (SettingColor)this.waterMatureColor.get();
       float alphaMul = 1.0F - maturity * this.frameAlphaFade;
       float distMul = 1.0F - distRatio * this.frameDistanceFade;
-      float totalAlpha = animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul);
+      float totalAlpha = animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul) * this.pulseAlphaMul(col);
       float gradientStrength = Math.min(0.15F, span * 0.005F);
       float topMaturity = Math.max(0.0F, maturity - gradientStrength);
       float bottomMaturity = Math.min(1.0F, maturity + gradientStrength);
       Color topColor = this.lerpInto(this.scratchTop, freshC, matureC, topMaturity, totalAlpha);
       Color bottomColor = this.lerpInto(this.scratchBottom, freshC, matureC, bottomMaturity, totalAlpha);
-      double x1 = wx;
-      double x2 = wx + 1;
-      double y1 = col.bottomY;
-      double y2 = col.topY + 1;
-      double z1 = wz;
-      double z2 = wz + 1;
+      double e = this.pulseExpand(col);
+      double x1 = wx - e;
+      double x2 = wx + 1 + e;
+      double y1 = col.bottomY - e;
+      double y2 = col.topY + 1 + e;
+      double z1 = wz - e;
+      double z2 = wz + 1 + e;
       event.renderer.gradientQuadVertical(x1, y1, z1, x2, y2, z1, topColor, bottomColor);
       event.renderer.gradientQuadVertical(x1, y1, z2, x2, y2, z2, topColor, bottomColor);
       event.renderer.gradientQuadVertical(x1, y1, z1, x1, y2, z2, topColor, bottomColor);
@@ -879,6 +956,20 @@ public class FlowESP extends Module {
       event.renderer.line(x2, y1, z1, x2, y1, z2, bottomColor, bottomColor);
       event.renderer.line(x1, y2, z1, x1, y2, z2, topColor, topColor);
       event.renderer.line(x2, y2, z1, x2, y2, z2, topColor, topColor);
+   }
+
+   /** Opacity multiplier for a column: 1 unless it is a pulsing flow tip. */
+   private float pulseAlphaMul(FlowESP.FlowColumn col) {
+      if (!col.isTip()) {
+         return 1.0F;
+      }
+
+      return 1.0F - this.framePulseAlpha * (1.0F - this.framePulse);
+   }
+
+   /** How far a column's box swells outward this frame, in blocks. */
+   private double pulseExpand(FlowESP.FlowColumn col) {
+      return col.isTip() ? this.framePulseSize * this.framePulse : 0.0;
    }
 
    private Color withAlpha(Color c, float mul, Color out) {
@@ -980,15 +1071,22 @@ public class FlowESP extends Module {
       final short bottomY;
       final short topY;
       final short flowLen;
+      /**
+       * Bit 8 (isTip) was added after the on-disk format existed. It rides in the
+       * existing flags byte rather than in a new field on purpose: the class shape
+       * is unchanged, so caches written by the previous version still deserialize.
+       * They simply come back with the bit clear and stop pulsing until the chunk
+       * is scanned again.
+       */
       final byte flags;
 
-      FlowColumn(int x, int z, int bottomY, int topY, int flowLen, boolean isLava, boolean hasSource, boolean isRoof) {
+      FlowColumn(int x, int z, int bottomY, int topY, int flowLen, boolean isLava, boolean hasSource, boolean isRoof, boolean isTip) {
          this.x = (short)x;
          this.z = (short)z;
          this.bottomY = (short)bottomY;
          this.topY = (short)topY;
          this.flowLen = (short)flowLen;
-         this.flags = (byte)((isLava ? 1 : 0) | (hasSource ? 2 : 0) | (isRoof ? 4 : 0));
+         this.flags = (byte)((isLava ? 1 : 0) | (hasSource ? 2 : 0) | (isRoof ? 4 : 0) | (isTip ? 8 : 0));
       }
 
       boolean isLava() {
@@ -1001,6 +1099,11 @@ public class FlowESP extends Module {
 
       boolean isRoof() {
          return (this.flags & 4) != 0;
+      }
+
+      /** The liquid thinned out to nothing here — this is where the flow stopped. */
+      boolean isTip() {
+         return (this.flags & 8) != 0;
       }
    }
 
