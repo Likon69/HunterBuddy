@@ -1,8 +1,7 @@
 package com.hunterbuddy.modules.mixin;
 
-import com.hunterbuddy.modules.EntityScale;
+import com.hunterbuddy.modules.EntityView;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.entity.LivingEntityRenderer;
 import net.minecraft.client.render.entity.state.LivingEntityRenderState;
 import net.minecraft.entity.LivingEntity;
@@ -14,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Applies {@link EntityScale} by multiplying {@code LivingEntityRenderState#baseScale}.
+ * Applies {@link EntityView}'s scale by multiplying {@code LivingEntityRenderState#baseScale}.
  *
  * <p>That field is the one vanilla feeds straight into {@code matrices.scale()}
  * at the top of {@code LivingEntityRenderer#render}, before the overridable
@@ -41,24 +40,19 @@ public class EntityScaleMixin {
         at = @At("RETURN")
     )
     private void hb$applyScale(LivingEntity entity, LivingEntityRenderState state, float tickProgress, CallbackInfo ci) {
-        EntityScale module = Modules.get().get(EntityScale.class);
+        EntityView module = Modules.get().get(EntityView.class);
         if (module == null || !module.isActive()) return;
 
-        float scale;
-        if (entity instanceof PlayerEntity) {
-            scale = module.getPlayerScale(entity == MinecraftClient.getInstance().player);
-        } else if (entity instanceof MobEntity) {
-            scale = module.getMobScale();
-        } else {
-            return; // armour stands and other non-mob living entities are left alone
-        }
+        // Armour stands and other non-mob living entities are left alone.
+        if (!(entity instanceof PlayerEntity) && !(entity instanceof MobEntity)) return;
 
+        float scale = module.getScaleFor(entity);
         if (scale <= 0.0f || scale == 1.0f) return;
 
         state.baseScale *= scale;
 
         // Keep the vanilla nametag sitting just above the head instead of inside it.
-        if (state.nameLabelPos != null) {
+        if (module.nametagsFollowScale() && state.nameLabelPos != null) {
             state.nameLabelPos = state.nameLabelPos.add(0.0, entity.getHeight() * (scale - 1.0f), 0.0);
         }
     }
