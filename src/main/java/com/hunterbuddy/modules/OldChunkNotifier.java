@@ -17,12 +17,13 @@ import xaero.hud.minimap.module.MinimapSession;
 import xaero.hud.minimap.waypoint.set.WaypointSet;
 import xaero.hud.minimap.world.MinimapWorld;
 import xaero.map.mods.SupportMods;
+import xaero.common.minimap.waypoints.Waypoint;
+import xaeroplus.feature.waypoint.WaypointAPI;
 import xaeroplus.XaeroPlus;
 import xaeroplus.event.ChunkDataEvent;
 import xaeroplus.module.ModuleManager;
 import xaeroplus.module.impl.OldChunks;
 import xaeroplus.module.impl.PaletteNewChunks;
-import xaero.common.minimap.waypoints.Waypoint;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -389,16 +390,14 @@ public class OldChunkNotifier extends Module {
             return;
         }
 
-        boolean markerAdded = false;
+        boolean wantsMarkers = logType.get() == LogType.Marker || logType.get() == LogType.Both;
+        if (!wantsMarkers) dbg("  marker[A]: ignore, log-type=" + logType.get() + " (aucun waypoint par construction)");
+
         for (ChunkKey chunk : pendingCluster) {
             ChunkState state = trackedChunks.get(chunk);
             state.confirmed = true;
-            markerAdded |= createMarkerNotification(chunk);
+            if (wantsMarkers) createMapMarker(chunk);
         }
-
-        // Permanent waypoints only survive a disconnect if the world is written to disk.
-        // Save once for the whole cluster instead of once per chunk.
-        if (markerAdded && !temporaryWaypoints.get()) saveWaypoints();
 
         Set<ChunkKey> confirmedCluster = collectCluster(pos, true);
         dbg("  confirme +" + pendingCluster.size() + " -> cluster de " + confirmedCluster.size()
@@ -439,9 +438,35 @@ public class OldChunkNotifier extends Module {
         return pendingDeliveryId;
     }
 
-    private boolean createMarkerNotification(ChunkKey pos) {
-        if (logType.get() != LogType.Both && logType.get() != LogType.Marker) return false;
-        return createMapMarker(pos.x, pos.z);
+    // Place the waypoint in the waypoint world of the dimension the chunk was DETECTED in, not the
+    // one currently displayed. Xaero shows one dimension at a time; adding to getCurrentWorld()
+    // (which the user can pin to the Overworld) dropped Nether chunks into the Overworld set where
+    // they either landed 8x off or mixed dimensions. WaypointAPI.getMinimapWorld resolves the
+    // right per-dimension world regardless of what is displayed, so a Nether chunk lands in the
+    // Nether waypoints at real coords and shows when you view the Nether. No explicit saveWorld —
+    // Xaero persists permanent waypoints itself; saving here is what froze the game.
+    private void createMapMarker(ChunkKey chunk) {
+        MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (minimapSession == null) return;
+
+        MinimapWorld targetWorld = WaypointAPI.getMinimapWorld(chunk.dimension);
+        if (targetWorld == null) targetWorld = minimapSession.getWorldManager().getCurrentWorld();
+        if (targetWorld == null) return;
+
+        WaypointSet waypointSet = targetWorld.getCurrentWaypointSet();
+        if (waypointSet == null) return;
+
+        int blockX = chunk.x * 16;
+        int blockZ = chunk.z * 16;
+
+        // Skip if a waypoint already sits here, so re-scanning an area (or a reconnect reloading
+        // permanent waypoints) does not stack duplicates.
+        for (Waypoint existing : waypointSet.getWaypoints()) {
+            if (existing.getX() == blockX && existing.getZ() == blockZ) return;
+        }
+
+        waypointSet.add(new Waypoint(blockX, 70, blockZ, "Old Chunk", "O", 5, 0, temporaryWaypoints.get()));
+        SupportMods.xaeroMinimap.requestWaypointsRefresh();
     }
 
     private void scheduleClusterWebhook(ChunkKey anchor, Set<ChunkKey> cluster) {
@@ -779,56 +804,6 @@ public class OldChunkNotifier extends Module {
             if (findExistingDelivery(cluster) == 0) {
                 scheduleClusterWebhook(key, cluster);
             }
-        }
-    }
-
-    private boolean createMapMarker(int x, int z)
-    {
-        WaypointSet waypointSet = getWaypointSet();
-        if (waypointSet == null) return false;
-
-        int blockX = x * 16;
-        int blockZ = z * 16;
-
-        // Permanent waypoints are reloaded from disk on the next session, so a second
-        // pass over the same area would stack duplicates without this check.
-        for (Waypoint existing : waypointSet.getWaypoints()) {
-            if (existing.getX() == blockX && existing.getZ() == blockZ) return false;
-        }
-
-        Waypoint waypoint = new Waypoint(
-            blockX,
-            70,
-            blockZ,
-            "Old Chunk",
-            "O",
-            5,
-            0,
-            temporaryWaypoints.get());
-        waypointSet.add(waypoint);
-        SupportMods.xaeroMinimap.requestWaypointsRefresh();
-        return true;
-    }
-
-    private WaypointSet getWaypointSet()
-    {
-        MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
-        if (minimapSession == null) return null;
-        MinimapWorld currentWorld = minimapSession.getWorldManager().getCurrentWorld();
-        if (currentWorld == null) return null;
-        return currentWorld.getCurrentWaypointSet();
-    }
-
-    private void saveWaypoints()
-    {
-        try {
-            MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
-            if (minimapSession == null) return;
-            MinimapWorld currentWorld = minimapSession.getWorldManager().getCurrentWorld();
-            if (currentWorld == null) return;
-            minimapSession.getWorldManagerIO().saveWorld(currentWorld);
-        } catch (Exception e) {
-            error("Failed to save waypoints: " + e.getMessage(), new Object[0]);
         }
     }
 
