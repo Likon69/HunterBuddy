@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -325,6 +326,22 @@ public class FlowESP extends Module {
    private Color waterFlow;
    private Color waterAged;
 
+   // The renderer copies a Color into the vertex buffer on the spot (MeshBuilder#color writes
+   // the four bytes with memPutByte and keeps no reference), so the render path can reuse a
+   // handful of instances instead of allocating six per column per frame.
+   private final Color scratchTop = new Color();
+   private final Color scratchBottom = new Color();
+   private final Color scratchFlat = new Color();
+
+   // Settings read once per frame rather than once per column.
+   private float frameAlphaFade;
+   private float frameDistanceFade;
+   private int frameMaxFlowLength;
+   private int frameMaxAgeMillis;
+   private boolean frameGradientMode;
+   private FlowESP.GradientSource frameGradientSource;
+   private final LongOpenHashSet inRangeKeys = new LongOpenHashSet();
+
    public FlowESP() {
       super(HunterBuddyAddon.HUNT_CATEGORY, "flow-esp", "Chunk activity detector via fluid spread analysis");
    }
@@ -425,11 +442,6 @@ public class FlowESP extends Module {
       return new Color(
          Math.min(255, (int)(c.r * factor)), Math.min(255, (int)(c.g * factor)), Math.min(255, (int)(c.b * factor)), Math.min(255, (int)(c.a * 1.2F))
       );
-   }
-
-   private Color lerpColor(Color a, Color b, float t) {
-      t = Math.max(0.0F, Math.min(1.0F, t));
-      return new Color((int)(a.r + (b.r - a.r) * t), (int)(a.g + (b.g - a.g) * t), (int)(a.b + (b.b - a.b) * t), (int)(a.a + (b.a - a.a) * t));
    }
 
    private Path cacheFile(boolean nether) {
@@ -743,6 +755,13 @@ public class FlowESP extends Module {
             snapshot = cache.values().toArray(new FlowESP.ChunkData[0]);
          }
 
+         this.frameAlphaFade = ((Double)this.alphaFade.get()).floatValue();
+         this.frameDistanceFade = ((Double)this.distanceFade.get()).floatValue();
+         this.frameMaxFlowLength = (Integer)this.maxFlowLength.get();
+         this.frameMaxAgeMillis = (Integer)this.maxAgeSeconds.get() * 1000;
+         this.frameGradientMode = (Boolean)this.gradientMode.get();
+         this.frameGradientSource = (FlowESP.GradientSource)this.gradientSource.get();
+
          boolean fade = (Boolean)this.fadeLoad.get();
          double dur = (Double)this.fadeDuration.get();
          long nowNanos = System.nanoTime();
@@ -750,7 +769,7 @@ public class FlowESP extends Module {
          this.lastRenderNanos = nowNanos;
          dt = Math.max(0.0F, Math.min(dt, 0.1F));
          float step = fade && !(dur <= 0.0) ? (float)(dt / dur) : 1.0F;
-         Set<Long> inRange = new HashSet<>();
+         this.inRangeKeys.clear();
 
          for (FlowESP.ChunkData data : snapshot) {
             double cx = data.chunkX * 16 + 8;
@@ -758,7 +777,7 @@ public class FlowESP extends Module {
             double dSq = (pp.x - cx) * (pp.x - cx) + (pp.z - cz) * (pp.z - cz);
             if (!(dSq > rdistSq)) {
                long key = data.key();
-               inRange.add(key);
+               this.inRangeKeys.add(key);
                FlowESP.RenderState st = this.renderStates.get(key);
                if (st == null) {
                   this.renderStates.put(key, new FlowESP.RenderState(data, fade ? 0.0F : 1.0F));
@@ -774,7 +793,7 @@ public class FlowESP extends Module {
          while (it.hasNext()) {
             Entry<Long, FlowESP.RenderState> e = it.next();
             FlowESP.RenderState st = e.getValue();
-            boolean active = inRange.contains(e.getKey());
+            boolean active = this.inRangeKeys.contains(e.getKey().longValue());
             float target = active ? 1.0F : 0.0F;
             if (st.alpha < target) {
                st.alpha = Math.min(target, st.alpha + step);
@@ -795,7 +814,8 @@ public class FlowESP extends Module {
       int baseX = data.chunkX * 16;
       int baseZ = data.chunkZ * 16;
       long age = data.firstSeen > 0L ? Math.max(0L, nowMs - data.firstSeen) : 0L;
-      float chunkAgeFactor = Math.min(1.0F, (float)age / (((Integer)this.maxAgeSeconds.get()).intValue() * 1000.0F));
+      float chunkAgeFactor = Math.min(1.0F, (float)age / this.frameMaxAgeMillis);
+      double flowRatio = data.flowRatio();
 
       for (FlowESP.FlowColumn col : data.columns) {
          int wx = baseX + col.x;
@@ -803,13 +823,13 @@ public class FlowESP extends Module {
          double bDistSq = pp.squaredDistanceTo(wx + 0.5, col.bottomY, wz + 0.5);
          if (!(bDistSq > rdistSq)) {
             float distRatio = (float)(bDistSq / rdistSq);
-            if ((Boolean)this.gradientMode.get()) {
+            if (this.frameGradientMode) {
                this.renderGradientColumn(event, col, wx, wz, chunkAgeFactor, animAlpha, distRatio);
             } else {
-               float lengthFactor = Math.min(1.0F, (float)col.flowLen / ((Integer)this.maxFlowLength.get()).intValue());
-               float alphaMul = 1.0F - lengthFactor * ((Double)this.alphaFade.get()).floatValue();
-               float distMul = 1.0F - distRatio * ((Double)this.distanceFade.get()).floatValue();
-               Color color = this.withAlpha(this.pickColor(col, data.flowRatio()), animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul));
+               float lengthFactor = Math.min(1.0F, (float)col.flowLen / this.frameMaxFlowLength);
+               float alphaMul = 1.0F - lengthFactor * this.frameAlphaFade;
+               float distMul = 1.0F - distRatio * this.frameDistanceFade;
+               Color color = this.withAlpha(this.pickColor(col, flowRatio), animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul), this.scratchFlat);
                event.renderer.box(wx, col.bottomY, wz, wx + 1, col.topY + 1, wz + 1, color, color, ShapeMode.Both, 0);
             }
          }
@@ -818,25 +838,23 @@ public class FlowESP extends Module {
 
    private void renderGradientColumn(Render3DEvent event, FlowESP.FlowColumn col, int wx, int wz, float chunkAgeFactor, float animAlpha, float distRatio) {
       int span = col.topY - col.bottomY + 1;
-      float lengthFactor = Math.min(1.0F, (float)col.flowLen / ((Integer)this.maxFlowLength.get()).intValue());
+      float lengthFactor = Math.min(1.0F, (float)col.flowLen / this.frameMaxFlowLength);
 
-      float maturity = switch ((FlowESP.GradientSource)this.gradientSource.get()) {
+      float maturity = switch (this.frameGradientSource) {
          case FlowLength -> lengthFactor;
          case ChunkAge -> chunkAgeFactor;
          case Both -> lengthFactor * 0.6F + chunkAgeFactor * 0.4F;
       };
       SettingColor freshC = col.isLava() ? (SettingColor)this.lavaFreshColor.get() : (SettingColor)this.waterFreshColor.get();
       SettingColor matureC = col.isLava() ? (SettingColor)this.lavaMatureColor.get() : (SettingColor)this.waterMatureColor.get();
-      Color freshColor = new Color(freshC.r, freshC.g, freshC.b, freshC.a);
-      Color matureColor = new Color(matureC.r, matureC.g, matureC.b, matureC.a);
-      float alphaMul = 1.0F - maturity * ((Double)this.alphaFade.get()).floatValue();
-      float distMul = 1.0F - distRatio * ((Double)this.distanceFade.get()).floatValue();
+      float alphaMul = 1.0F - maturity * this.frameAlphaFade;
+      float distMul = 1.0F - distRatio * this.frameDistanceFade;
       float totalAlpha = animAlpha * Math.max(0.02F, alphaMul) * Math.max(0.05F, distMul);
       float gradientStrength = Math.min(0.15F, span * 0.005F);
       float topMaturity = Math.max(0.0F, maturity - gradientStrength);
       float bottomMaturity = Math.min(1.0F, maturity + gradientStrength);
-      Color topColor = this.withAlpha(this.lerpColor(freshColor, matureColor, topMaturity), totalAlpha);
-      Color bottomColor = this.withAlpha(this.lerpColor(freshColor, matureColor, bottomMaturity), totalAlpha);
+      Color topColor = this.lerpInto(this.scratchTop, freshC, matureC, topMaturity, totalAlpha);
+      Color bottomColor = this.lerpInto(this.scratchBottom, freshC, matureC, bottomMaturity, totalAlpha);
       double x1 = wx;
       double x2 = wx + 1;
       double y1 = col.bottomY;
@@ -863,9 +881,21 @@ public class FlowESP extends Module {
       event.renderer.line(x2, y2, z1, x2, y2, z2, topColor, topColor);
    }
 
-   private Color withAlpha(Color c, float mul) {
+   private Color withAlpha(Color c, float mul, Color out) {
       int a = Math.max(0, Math.min(255, Math.round(c.a * mul)));
-      return new Color(c.r, c.g, c.b, a);
+      return out.set(c.r, c.g, c.b, a);
+   }
+
+   /** Fuses the old lerpColor + withAlpha pair into one write, with no intermediate object. */
+   private Color lerpInto(Color out, Color a, Color b, float t, float alphaMul) {
+      t = Math.max(0.0F, Math.min(1.0F, t));
+      int alpha = Math.round((a.a + (b.a - a.a) * t) * alphaMul);
+      return out.set(
+         (int)(a.r + (b.r - a.r) * t),
+         (int)(a.g + (b.g - a.g) * t),
+         (int)(a.b + (b.b - a.b) * t),
+         Math.max(0, Math.min(255, alpha))
+      );
    }
 
    private Color pickColor(FlowESP.FlowColumn col, double ratio) {
