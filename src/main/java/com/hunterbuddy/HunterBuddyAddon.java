@@ -35,7 +35,7 @@ import com.hunterbuddy.modules.ElytraAutoFly;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
-import com.hunterbuddy.modules.EntityScale;
+import com.hunterbuddy.modules.EntityView;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
 import com.hunterbuddy.modules.MlepAirPlace;
@@ -148,7 +148,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
         Modules.get().add(new VanityESP());
-        Modules.get().add(new EntityScale());
+        Modules.get().add(new EntityView());
 
         // HunterBuddy-original modules
         Modules.get().add(new ElytraAutoFly());
