@@ -27,7 +27,8 @@
     "KeyBindingMixin",
     "ElytraBounceEntityMixin",
     "ElytraBounceCameraMixin",
-    "EntityScaleMixin"
+    "EntityScaleMixin",
+    "MeteorNametagsHeightMixin"
   ],
   "injectors": {
     "defaultRequire": 1
