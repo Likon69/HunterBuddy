@@ -88,16 +88,16 @@ public class CaveAirESP extends Module {
    private final Setting<Boolean> strictPortalShape = this.sgDetection
       .add(
          new Builder().name("strict-portal-shape")
-                  .description("Require a frame-like disturbance instead of accepting any filled rectangle. Reduces false positives.")
-               .defaultValue(true)
+                  .description("Require every block of the rectangle to be air, corners included. Off, a rectangle missing its four corners also counts - which is what a portal built without corner obsidian leaves behind.")
+               .defaultValue(false)
             .build()
       );
    private final Setting<Integer> minCaveAirNeighbors = this.sgDetection
       .add(
          new meteordevelopment.meteorclient.settings.IntSetting.Builder()
                      .name("min-cave-air-neighbors")
-                  .description("Minimum adjacent CAVE_AIR blocks required for an AIR block to count as a disturbance.")
-               .defaultValue(2)
+                  .description("Minimum adjacent CAVE_AIR blocks required for an AIR block to count as a disturbance. Leave at 1: a broken portal is a solid slab of air, so the blocks in the middle of it touch cave air on one face at most, and often on none.")
+               .defaultValue(1)
             .min(1)
             .max(6)
             .sliderRange(1, 6)
@@ -642,7 +642,7 @@ public class CaveAirESP extends Module {
       int filledRect = W * H;
       int noCorners = filledRect - 4;
       if ((Boolean)this.strictPortalShape.get()) {
-         return blockCount == noCorners;
+         return blockCount == filledRect;
       }
 
       return blockCount == filledRect || blockCount == noCorners;
@@ -653,13 +653,11 @@ public class CaveAirESP extends Module {
       int noCorners = filledRect - 4;
       Set<Long> positions = new HashSet<>(cluster);
       if (blockCount == filledRect) {
-         if ((Boolean)this.strictPortalShape.get()) {
-            return false;
-         }
-
          return this.validateFilledRectangle(positions, minX, minY, minZ, W, H, facesX);
+      } else if ((Boolean)this.strictPortalShape.get()) {
+         return false;
       } else {
-         return blockCount == noCorners ? this.validateFrameWithoutCorners(positions, minX, minY, minZ, W, H, facesX) : false;
+         return blockCount == noCorners && this.validateFrameWithoutCorners(positions, minX, minY, minZ, W, H, facesX);
       }
    }
 
