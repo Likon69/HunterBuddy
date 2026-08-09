@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.hunterbuddy.HunterBuddyAddon;
 import static com.hunterbuddy.modules.regear.util.Utils.yawToDirection;
 import static com.hunterbuddy.modules.regear.util.Utils.distancePointToDirection;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -32,8 +33,10 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -202,6 +205,11 @@ public class OldChunkNotifier extends Module {
     private int webhookRetryCooldown;
     private int debugCensusCooldown;
 
+    /** Worlds that gained a permanent waypoint and still need writing to disk. */
+    private final Set<MinimapWorld> pendingWaypointSaves = Collections.newSetFromMap(new IdentityHashMap<>());
+    private long lastWaypointSaveMs;
+    private static final long WAYPOINT_SAVE_INTERVAL_MS = 4000L;
+
     public OldChunkNotifier() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "old-chunk-notifier", "Sends a webhook message and optionally pings you when an old chunk is detected.");
     }
@@ -228,6 +236,7 @@ public class OldChunkNotifier extends Module {
     @Override
     public void onDeactivate()
     {
+        flushWaypointSaves(true);
         XaeroPlus.EVENT_BUS.unregister(this);
         if (discordExecutor != null) {
             discordExecutor.shutdownNow();
@@ -467,6 +476,47 @@ public class OldChunkNotifier extends Module {
 
         waypointSet.add(new Waypoint(blockX, 70, blockZ, "Old Chunk", "O", 5, 0, temporaryWaypoints.get()));
         SupportMods.xaeroMinimap.requestWaypointsRefresh();
+
+        // A permanent waypoint only lives in memory until the world is written to
+        // disk, so without this it vanishes on disconnect exactly like a temporary
+        // one. Queued rather than written here: saveWorld rewrites the whole file,
+        // and doing that once per confirmed cluster is what used to freeze the game.
+        if (!temporaryWaypoints.get()) pendingWaypointSaves.add(targetWorld);
+    }
+
+    /**
+     * Writes the worlds that gained a permanent waypoint, at most once every
+     * {@link #WAYPOINT_SAVE_INTERVAL_MS}. Forced when the module stops or the
+     * server is left, so a marker placed seconds before quitting still lands.
+     */
+    private void flushWaypointSaves(boolean force) {
+        if (pendingWaypointSaves.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        if (!force && now - lastWaypointSaveMs < WAYPOINT_SAVE_INTERVAL_MS) return;
+        lastWaypointSaveMs = now;
+
+        MinimapSession session = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (session == null) {
+            pendingWaypointSaves.clear();
+            return;
+        }
+
+        for (MinimapWorld world : pendingWaypointSaves) {
+            try {
+                session.getWorldManagerIO().saveWorld(world);
+            } catch (Exception e) {
+                error("Failed to save waypoints: " + e.getMessage(), new Object[0]);
+            }
+        }
+
+        dbg("  waypoints ecrits pour " + pendingWaypointSaves.size() + " monde(s)");
+        pendingWaypointSaves.clear();
+    }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        flushWaypointSaves(true);
     }
 
     private void scheduleClusterWebhook(ChunkKey anchor, Set<ChunkKey> cluster) {
@@ -769,6 +819,8 @@ public class OldChunkNotifier extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        flushWaypointSaves(false);
+
         if (mc.player == null) return;
 
         if (debug.get()) {
