@@ -40,6 +40,30 @@ public class ElytraStatusHud extends HudElement {
       .name("show-durability").description("Show equipped elytra durability.")
       .defaultValue(true).build());
 
+   private final Setting<Boolean> showFlight = sgDisplay.add(new Builder()
+      .name("show-flight")
+      .description("Gliding time left on the worn elytra. Durability is seconds: one point is spent per second in the air, whether or not you boost.")
+      .defaultValue(true).build());
+
+   private final Setting<Boolean> showElytraCount = sgDisplay.add(new Builder()
+      .name("show-elytra-count").description("How many usable elytras you carry, the worn one included.")
+      .defaultValue(true).build());
+
+   private final Setting<Boolean> showTotalFlight = sgDisplay.add(new Builder()
+      .name("show-total-flight").description("Gliding time of every usable elytra added together.")
+      .defaultValue(true).build());
+
+   private final Setting<Boolean> showRange = sgDisplay.add(new Builder()
+      .name("show-range")
+      .description("How far that total carries you at your current speed. Reads as -- while you are not moving.")
+      .defaultValue(false).build());
+
+   private final Setting<Double> unusablePct = sgDisplay.add(
+      new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+         .name("unusable-pct")
+         .description("Durability kept in reserve on every elytra. Below it an elytra is not counted and its time is not added, so a planned leg never ends on a broken chestplate.")
+         .defaultValue(2.0).min(0.0).sliderRange(0.0, 20.0).build());
+
    private final Setting<Integer> lowRocketThreshold = sgDisplay.add(
       new meteordevelopment.meteorclient.settings.IntSetting.Builder()
          .name("low-rockets-threshold")
@@ -140,22 +164,35 @@ public class ElytraStatusHud extends HudElement {
       boolean shadow = this.textShadow.get();
       double scale = this.textScale.get();
       double textHeight = renderer.textHeight(shadow, scale);
-      double spacing = this.compactSpacing.get() ? 4.0 : 8.0;
+      // Padding on each side of the separator, scaled with the text so the line
+      // does not fall apart when the element is enlarged.
+      double pad = (this.compactSpacing.get() ? 2.0 : 5.0) * scale;
       double curX = this.x;
       double totalWidth = 0.0;
 
+      // Flipped by the first segment that actually draws, so the separator is
+      // never emitted before it. Which field comes first depends on the toggles,
+      // so it cannot be decided ahead of time.
+      boolean first = true;
+
       if (this.showSpeed.get()) {
-         curX = this.drawField(renderer, curX, this.y, "BPS: ", String.format("%.1f", bps), this.valueColor.get(),
-            shadow, scale, spacing);
+         // Whole numbers: the decimal is unreadable at flight speed and costs
+         // two glyphs on a line whose whole point is to be short.
+         curX = this.drawSegment(renderer, curX, this.y, null, String.format("%.0f", bps), " bps",
+            this.valueColor.get(), shadow, scale, first, pad);
          totalWidth = curX - this.x;
+         first = false;
       }
 
       if (this.showPitch.get()) {
          SettingColor pitchColor = pitch <= this.pitchDangerBelow.get() ? this.dangerColor.get()
             : (pitch >= this.pitchWarnAbove.get() ? this.warnColor.get() : this.valueColor.get());
-         curX = this.drawField(renderer, curX, this.y, "Pitch: ", String.format("%.1f°", pitch), pitchColor,
-            shadow, scale, spacing);
+         // The degree sign rides with the value rather than greying out: split off
+         // it reads as a separate token instead of part of the angle.
+         curX = this.drawSegment(renderer, curX, this.y, null, String.format("%.0f°", pitch), null,
+            pitchColor, shadow, scale, first, pad);
          totalWidth = curX - this.x;
+         first = false;
       }
 
       if (this.showRockets.get() && (!this.hideRocketsIfZero.get() || rockets > 0)) {
@@ -163,41 +200,199 @@ public class ElytraStatusHud extends HudElement {
             : (rockets == 0 ? this.dangerColor.get()
             : (rockets < this.lowRocketThreshold.get() ? this.warnColor.get() : this.valueColor.get()));
          String rocketsStr = rockets < 0 ? "--" : String.valueOf(rockets);
-         curX = this.drawField(renderer, curX, this.y, "Rockets: ", rocketsStr, rocketColor,
-            shadow, scale, spacing);
+         curX = this.drawSegment(renderer, curX, this.y, null, rocketsStr, rockets < 0 ? null : "r",
+            rocketColor, shadow, scale, first, pad);
          totalWidth = curX - this.x;
+         first = false;
       }
 
       if (this.showDurability.get()) {
          int pct = (durability > 0 && maxDurability > 0) ? (int) ((durability * 100.0) / maxDurability) : -1;
          SettingColor durColor;
          String durText;
+         String durUnit;
          if (!hasElytra) {
             durColor = new SettingColor(128, 128, 128, 255);
             durText = "None";
+            durUnit = null;
          } else if (pct <= 0) {
             durColor = this.dangerColor.get();
             durText = "BROKEN";
+            durUnit = null;
          } else {
             durColor = pct < this.lowDurabilityPct.get() ? this.warnColor.get() : this.valueColor.get();
-            durText = durability + "/" + maxDurability;
+            // A percentage instead of 342/432: same information, half the width,
+            // and it is the form the warning threshold is expressed in anyway.
+            durText = String.valueOf(pct);
+            durUnit = "%";
          }
-         curX = this.drawField(renderer, curX, this.y, "Dur: ", durText, durColor,
-            shadow, scale, spacing);
+         curX = this.drawSegment(renderer, curX, this.y, null, durText, durUnit,
+            durColor, shadow, scale, first, pad);
+         totalWidth = curX - this.x;
+         first = false;
+      }
+
+      if (this.showFlight.get()) {
+         int seconds = this.flightSecondsOf(chest);
+         SettingColor flightColor;
+
+         if (!hasElytra) {
+            flightColor = new SettingColor(128, 128, 128, 255);
+         } else if (seconds <= 0) {
+            flightColor = this.dangerColor.get();
+         } else {
+            // Reuses the durability warning threshold so both fields turn at once.
+            flightColor = (seconds * 100.0) / maxDurability < this.lowDurabilityPct.get()
+               ? this.warnColor.get() : this.valueColor.get();
+         }
+
+         // No unit: m:ss says what it is on its own.
+         curX = this.drawSegment(renderer, curX, this.y, null,
+            hasElytra ? formatTime(seconds) : "--", null, flightColor, shadow, scale, first, pad);
+         totalWidth = curX - this.x;
+         first = false;
+      }
+
+      int spares = (this.showElytraCount.get() || this.showRange.get()) ? this.countUsableElytras() : 0;
+      int totalSeconds = (this.showTotalFlight.get() || this.showRange.get()) ? this.totalFlightSeconds() : 0;
+
+      if (this.showElytraCount.get()) {
+         SettingColor countColor = spares == 0 ? this.dangerColor.get()
+            : (spares == 1 ? this.warnColor.get() : this.valueColor.get());
+         curX = this.drawSegment(renderer, curX, this.y, "x", String.valueOf(spares), null,
+            countColor, shadow, scale, first, pad);
+         totalWidth = curX - this.x;
+         first = false;
+      }
+
+      if (this.showTotalFlight.get()) {
+         // The one field that keeps a written prefix: two m:ss values on the same
+         // line are indistinguishable otherwise.
+         curX = this.drawSegment(renderer, curX, this.y, "tot ", formatTime(totalSeconds), null,
+            totalSeconds > 0 ? this.valueColor.get() : this.dangerColor.get(), shadow, scale, first, pad);
+         totalWidth = curX - this.x;
+         first = false;
+      }
+
+      if (this.showRange.get()) {
+         // Seconds of glide times current ground speed. Only honest while moving,
+         // which is also the only moment the number is worth reading.
+         double blocks = totalSeconds * bps;
+         String rangeText;
+         String rangeUnit;
+         if (bps < 1.0) {
+            rangeText = "--";
+            rangeUnit = null;
+         } else if (blocks >= 1000.0) {
+            rangeText = String.format("%.1f", blocks / 1000.0);
+            rangeUnit = "km";
+         } else {
+            rangeText = String.format("%.0f", blocks);
+            rangeUnit = "m";
+         }
+         curX = this.drawSegment(renderer, curX, this.y, null, rangeText, rangeUnit,
+            this.valueColor.get(), shadow, scale, first, pad);
          totalWidth = curX - this.x;
       }
 
       this.setSize(Math.max(totalWidth, 80.0), textHeight);
    }
 
-   private double drawField(HudRenderer renderer, double curX, double curY,
-                             String label, String value, SettingColor valueColor,
-                             boolean shadow, double scale, double spacing) {
-      double lw = renderer.textWidth(label, shadow, scale);
-      renderer.text(label, curX, curY, this.labelColor.get(), shadow, scale);
-      double vw = renderer.textWidth(value, shadow, scale);
-      renderer.text(value, curX + lw, curY, valueColor, shadow, scale);
-      return curX + lw + vw + spacing;
+   /**
+    * Draws one field as grey prefix, coloured value, grey unit.
+    *
+    * <p>The separator is written by the segment that <em>follows</em> it, never
+    * appended by the one before. Trailing it would leave a dot hanging off the
+    * end of the line whenever the last enabled field changed — and which field is
+    * last is a runtime question, since every one of them has its own toggle.
+    */
+   private double drawSegment(HudRenderer renderer, double curX, double curY,
+                              String prefix, String value, String unit, SettingColor valueColor,
+                              boolean shadow, double scale, boolean first, double pad) {
+      double x = curX;
+
+      if (!first) {
+         x += pad;
+         renderer.text("·", x, curY, this.labelColor.get(), shadow, scale);
+         x += renderer.textWidth("·", shadow, scale) + pad;
+      }
+
+      if (prefix != null) {
+         renderer.text(prefix, x, curY, this.labelColor.get(), shadow, scale);
+         x += renderer.textWidth(prefix, shadow, scale);
+      }
+
+      renderer.text(value, x, curY, valueColor, shadow, scale);
+      x += renderer.textWidth(value, shadow, scale);
+
+      if (unit != null) {
+         renderer.text(unit, x, curY, this.labelColor.get(), shadow, scale);
+         x += renderer.textWidth(unit, shadow, scale);
+      }
+
+      return x;
+   }
+
+   /**
+    * Seconds of gliding left in a stack, or 0 when it is at or under the reserve.
+    *
+    * <p>A gliding item takes one point of damage every twenty ticks — verified in
+    * {@code LivingEntity}: the wear fires when {@code fallFlyTicks % 10 == 0} and
+    * the resulting count is even. Remaining durability is therefore remaining
+    * seconds of flight, one for one. Nothing here depends on fireworks; boosting
+    * covers more ground in the same seconds, it does not spend the elytra faster.
+    */
+   private int flightSecondsOf(ItemStack stack) {
+      if (!stack.isOf(Items.ELYTRA)) return 0;
+
+      int max = stack.getMaxDamage();
+      if (max <= 0) return 0;
+
+      // The reserve is what stops you landing on a broken elytra at 20k blocks out.
+      int reserve = Math.max(1, (int) Math.ceil(max * this.unusablePct.get() / 100.0));
+      return Math.max(0, max - stack.getDamage() - reserve);
+   }
+
+   /** Wearable elytras in the inventory, the equipped one included. */
+   private int countUsableElytras() {
+      int count = 0;
+      // Bounded to the backpack, not to size(): PlayerInventory.size() is
+      // main.size() + EQUIPMENT_SLOTS.size(), so the loop would walk over the
+      // chest slot and the worn elytra would then be counted a second time by the
+      // explicit add below. That inflated the spare count by one — the "only one
+      // left" warning could never fire — and the total by a full elytra, several
+      // kilometres of range that do not exist.
+      var inventory = MeteorClient.mc.player.getInventory().getMainStacks();
+
+      for (int i = 0; i < inventory.size(); i++) {
+         if (this.flightSecondsOf(inventory.get(i)) > 0) count++;
+      }
+
+      if (this.flightSecondsOf(MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST)) > 0) count++;
+
+      return count;
+   }
+
+   /** Total gliding seconds across every usable elytra, equipped one included. */
+   private int totalFlightSeconds() {
+      int total = 0;
+      // Bounded to the backpack, not to size(): PlayerInventory.size() is
+      // main.size() + EQUIPMENT_SLOTS.size(), so the loop would walk over the
+      // chest slot and the worn elytra would then be counted a second time by the
+      // explicit add below. That inflated the spare count by one — the "only one
+      // left" warning could never fire — and the total by a full elytra, several
+      // kilometres of range that do not exist.
+      var inventory = MeteorClient.mc.player.getInventory().getMainStacks();
+
+      for (int i = 0; i < inventory.size(); i++) {
+         total += this.flightSecondsOf(inventory.get(i));
+      }
+
+      return total + this.flightSecondsOf(MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST));
+   }
+
+   private static String formatTime(int seconds) {
+      return String.format("%d:%02d", seconds / 60, seconds % 60);
    }
 
    private int countRockets() {
