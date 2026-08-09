@@ -99,6 +99,33 @@ public class AutoFlyingRegear extends Module {
             .max(99)
             .build()
       );
+   private final Setting<AutoFlyingRegear.ElytraMode> elytraMode = this.sgTriggers
+      .add(
+         new meteordevelopment.meteorclient.settings.EnumSetting.Builder<AutoFlyingRegear.ElytraMode>()
+                     .name("elytra-mode")
+                  .description("REPLACE swaps worn elytras for fresh ones out of the shulker. REPAIR keeps the ones you fly and mends them with experience bottles, which only works while they carry Mending.")
+               .defaultValue(AutoFlyingRegear.ElytraMode.REPAIR)
+            .build()
+      );
+   private final Setting<Integer> xpBottlesToTake = this.sgTriggers
+      .add(
+         new Builder().name("xp-bottles-to-take").description("How many experience bottles to pull from the shulker before mending.")
+                  .defaultValue(128)
+               .min(16)
+            .max(1024)
+            .visible(() -> this.elytraMode.get() == AutoFlyingRegear.ElytraMode.REPAIR)
+            .build()
+      );
+   private final Setting<Integer> repairStallSeconds = this.sgTriggers
+      .add(
+         new Builder().name("repair-stall-seconds")
+                  .description("Give up on an elytra after this many seconds without its durability rising and without a single bottle being spent. Both have to be still: bottles going down means AutoEXPPlus is working on something else first, usually armour, and that is worth waiting through.")
+                  .defaultValue(6)
+               .min(2)
+            .max(60)
+            .visible(() -> this.elytraMode.get() == AutoFlyingRegear.ElytraMode.REPAIR)
+            .build()
+      );
    private final Setting<Boolean> debugMessages = this.sgTriggers
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -245,6 +272,19 @@ public class AutoFlyingRegear extends Module {
    private BlockPos shulkerPlacePos = null;
    private BlockPos echestPos = null;
    private boolean processingElytras = true;
+
+   /**
+    * Whether AutoEXPPlus was already running before the repair phase turned it on.
+    *
+    * <p>Null while nothing has been touched. Some people leave that module on permanently;
+    * switching it off afterwards because the regear happened to use it would be taking away
+    * something the player never handed over. It is only put back if this module moved it.
+    */
+   private Boolean autoExpWasActive = null;
+   private int repairHotbarSlot = -1;
+   private int repairLastDurability = -1;
+   private int repairLastBottles = -1;
+   private int repairStallTicks = 0;
    private int transferSlotIndex = 0;
    private int transferStep = 0;
    private ItemStack savedChestplate = ItemStack.EMPTY;
@@ -365,6 +405,11 @@ public class AutoFlyingRegear extends Module {
          this.mlepScaffold.toggle();
       }
 
+      // Switched off mid-mending, AutoEXPPlus would otherwise stay on for good — this module
+      // borrowed it and has to give it back however the regear ends, not only when it ends
+      // well.
+      this.restoreAutoExp();
+
       this.takeoff.cancel();
       this.releaseMovementKeys();
       RotationUtils.getInstance().clearRotations();
@@ -430,6 +475,10 @@ public class AutoFlyingRegear extends Module {
                   case TAKING_SHULKER:
                   case OPENING_SHULKER:
                   case TRANSFERRING_ITEMS:
+                  // Mending an elytra from empty runs through dozens of bottles, one throw
+                  // at a time. It belongs with the other states that are slow by nature, not
+                  // under a thirty-second axe; its own stall detector ends it.
+                  case REPAIRING_ELYTRA:
                   case OPENING_ECHEST_RETURN:
                   case RETURNING_SHULKER:
                   case COMPLETE:
@@ -560,6 +609,9 @@ public class AutoFlyingRegear extends Module {
                      break;
                   case TRANSFERRING_ITEMS:
                      this.handleTransferringItems();
+                     break;
+                  case REPAIRING_ELYTRA:
+                     this.handleRepairingElytra();
                      break;
                   case BREAKING_SHULKER:
                      this.handleBreakingShulker();
@@ -2074,6 +2126,15 @@ public class AutoFlyingRegear extends Module {
       if (this.mc.currentScreen instanceof HandledScreen<?> screen) {
          int var13 = this.mc.player.currentScreenHandler.syncId;
          String itemType = this.processingElytras ? "elytras" : "rockets";
+
+         // REPAIR takes bottles where REPLACE takes elytras. The swap-in-place machinery
+         // below is left completely alone: it is still what REPLACE runs, and mending has no
+         // use for it since nothing is being exchanged.
+         if (this.processingElytras && this.elytraMode.get() == AutoFlyingRegear.ElytraMode.REPAIR) {
+            this.transferExperienceBottles(var13);
+            return;
+         }
+
          if (this.processingElytras) {
             int currentValidElytras = this.countValidElytras();
             if (currentValidElytras >= (Integer)this.goalElytras.get()) {
@@ -2579,6 +2640,19 @@ public class AutoFlyingRegear extends Module {
 
    private void handleCheckNextShulker() {
       if (this.processingElytras) {
+         // In REPAIR mode the bottles have just been pulled and the shulker is back in the
+         // ender chest; mending happens here, before the rocket pass reopens it. Everything
+         // downstream is untouched — the repair state hands back to this same rocket branch.
+         if (this.elytraMode.get() == AutoFlyingRegear.ElytraMode.REPAIR) {
+            this.state = AutoFlyingRegear.FlyingRegearState.REPAIRING_ELYTRA;
+            this.repairHotbarSlot = -1;
+            this.repairLastDurability = -1;
+            this.repairLastBottles = -1;
+            this.repairStallTicks = 0;
+            this.timer = 0;
+            return;
+         }
+
          this.processingElytras = false;
          if ((Boolean)this.debugMessages.get()) {
             this.info("Elytra restocking complete, now getting rockets", new Object[0]);
@@ -2611,6 +2685,251 @@ public class AutoFlyingRegear extends Module {
             this.timer = 0;
          }
       }
+   }
+
+   /**
+    * Pulls experience bottles out of the open shulker, one stack per pass.
+    *
+    * <p>Stops on whichever comes first: enough bottles carried, the shulker exhausted, or
+    * the inventory down to its last free slot — the same guard the rocket pass uses, so a
+    * regear can never end wedged with nowhere to put the rockets.
+    */
+   private void transferExperienceBottles(int syncId) {
+      if (this.countExperienceBottles() >= (Integer)this.xpBottlesToTake.get()) {
+         this.closeShulkerAfterTransfer("have " + this.countExperienceBottles() + " experience bottles");
+         return;
+      }
+
+      int emptySlots = 0;
+
+      for (int i = 0; i < 36; i++) {
+         if (this.mc.player.getInventory().getStack(i).isEmpty()) {
+            emptySlots++;
+         }
+      }
+
+      if (emptySlots <= 1) {
+         this.closeShulkerAfterTransfer("inventory nearly full");
+         return;
+      }
+
+      while (this.transferSlotIndex < 27) {
+         ItemStack stack = this.mc.player.currentScreenHandler.getSlot(this.transferSlotIndex).getStack();
+         if (!stack.isEmpty() && stack.getItem() == Items.EXPERIENCE_BOTTLE) {
+            this.mc.interactionManager.clickSlot(syncId, this.transferSlotIndex, 0, SlotActionType.QUICK_MOVE, this.mc.player);
+            if ((Boolean)this.debugMessages.get()) {
+               this.info("Took experience bottles from shulker slot " + this.transferSlotIndex, new Object[0]);
+            }
+
+            this.timer = (Integer)this.clickDelay.get();
+            this.transferStep = 0;
+            this.transferSlotIndex++;
+            return;
+         }
+
+         this.transferSlotIndex++;
+      }
+
+      this.closeShulkerAfterTransfer("shulker holds no more experience bottles");
+   }
+
+   private void closeShulkerAfterTransfer(String reason) {
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Stopping bottle transfer: " + reason, new Object[0]);
+      }
+
+      this.mc.player.closeHandledScreen();
+      this.state = AutoFlyingRegear.FlyingRegearState.BREAKING_SHULKER;
+      this.timer = (Integer)this.breakDelay.get();
+      this.transferStep = 0;
+   }
+
+   /**
+    * Mends worn elytras with experience bottles instead of swapping them out.
+    *
+    * <p>AutoEXPPlus does the actual work — it is where the throwing, the rotation and the
+    * bottle replenish already live, and duplicating that here would mean two implementations
+    * of one behaviour drifting apart. This module only holds the right elytra in hand and
+    * decides when to move on.
+    *
+    * <p>Its settings are never read. They are private, and reading them would tie this to
+    * thresholds the player is free to change; instead the elytra is watched directly. When
+    * its durability stops climbing the elytra is finished, whatever {@code max-threshold}
+    * happens to be.
+    *
+    * <p>Bottles are watched alongside it. AutoEXPPlus repairs armour before hands, so a
+    * still elytra while bottles are being spent means the queue is simply elsewhere — ending
+    * the wait there would abandon an elytra that was about to be mended. Only both being
+    * still counts as done, which is also what an empty bottle stack looks like.
+    */
+   private void handleRepairingElytra() {
+      if (this.mc.player == null) {
+         return;
+      }
+
+      if (this.countValidElytras() >= (Integer)this.goalElytras.get()) {
+         this.finishRepairing("goal of " + this.goalElytras.get() + " valid elytras reached");
+         return;
+      }
+
+      int target = this.findRepairableElytraSlot();
+      if (target == -1) {
+         this.finishRepairing("no elytra left to mend");
+         return;
+      }
+
+      // Bring it to the hand AutoEXPPlus looks at. It swaps to a bottle to throw and swaps
+      // straight back, so the elytra stays in this slot between throws.
+      if (this.repairHotbarSlot == -1) {
+         this.repairHotbarSlot = this.holdForRepair(target);
+         if (this.repairHotbarSlot == -1) {
+            this.finishRepairing("no free hotbar slot to hold an elytra");
+            return;
+         }
+
+         this.repairLastDurability = -1;
+         this.repairLastBottles = -1;
+         this.repairStallTicks = 0;
+      }
+
+      if (this.autoExpWasActive == null) {
+         Module autoExp = Modules.get().get(AutoEXPPlus.class);
+         if (autoExp == null) {
+            this.finishRepairing("AutoEXPPlus not found");
+            return;
+         }
+
+         this.autoExpWasActive = autoExp.isActive();
+         if (!autoExp.isActive()) {
+            autoExp.toggle();
+         }
+      }
+
+      ItemStack held = this.mc.player.getInventory().getStack(this.repairHotbarSlot);
+      if (held.getItem() != Items.ELYTRA) {
+         this.repairHotbarSlot = -1;
+         return;
+      }
+
+      int durability = held.getMaxDamage() - held.getDamage();
+      int bottles = this.countExperienceBottles();
+
+      if (durability > this.repairLastDurability || bottles < this.repairLastBottles) {
+         this.repairStallTicks = 0;
+      } else {
+         this.repairStallTicks++;
+      }
+
+      this.repairLastDurability = durability;
+      this.repairLastBottles = bottles;
+
+      if (this.repairStallTicks >= (Integer)this.repairStallSeconds.get() * 20) {
+         double percent = durability * 100.0 / held.getMaxDamage();
+         if ((Boolean)this.debugMessages.get()) {
+            this.info("Elytra stopped mending at " + (int)percent + "%, moving on", new Object[0]);
+         }
+
+         // Nothing is moving and this elytra is still short of the valid threshold, so no
+         // other elytra would fare better: out of bottles, no Mending, or AutoEXPPlus set to
+         // armour only. Carrying on would stall on each one in turn for the same reason.
+         if (percent < ((Integer)this.elytraDurabilityThreshold.get()).intValue()) {
+            this.finishRepairing(bottles == 0 ? "out of experience bottles" : "mending made no progress");
+            return;
+         }
+
+         this.repairHotbarSlot = -1;
+      }
+   }
+
+   /** Ends the repair phase, puts AutoEXPPlus back as it was, and resumes the rocket pass. */
+   private void finishRepairing(String reason) {
+      this.restoreAutoExp();
+      this.repairHotbarSlot = -1;
+      this.repairLastDurability = -1;
+      this.repairLastBottles = -1;
+      this.repairStallTicks = 0;
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Elytra mending done (" + reason + "), now getting rockets", new Object[0]);
+      }
+
+      this.processingElytras = false;
+      this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
+      this.timer = (Integer)this.containerOpenDelay.get();
+   }
+
+   /** Returns AutoEXPPlus to the state it was in, and only if this module changed it. */
+   private void restoreAutoExp() {
+      if (this.autoExpWasActive == null) {
+         return;
+      }
+
+      Module autoExp = Modules.get().get(AutoEXPPlus.class);
+      if (autoExp != null && autoExp.isActive() != this.autoExpWasActive) {
+         autoExp.toggle();
+      }
+
+      this.autoExpWasActive = null;
+   }
+
+   /**
+    * The worn elytra worth mending first, or -1.
+    *
+    * <p>The fullest one below the valid threshold, because it is the one closest to counting
+    * and therefore the cheapest way to move the tally up.
+    */
+   private int findRepairableElytraSlot() {
+      int best = -1;
+      int bestDurability = -1;
+      int threshold = (Integer)this.elytraDurabilityThreshold.get();
+
+      for (int i = 0; i < 36; i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (stack.getItem() != Items.ELYTRA) {
+            continue;
+         }
+
+         int durability = stack.getMaxDamage() - stack.getDamage();
+         if (durability * 100.0 / stack.getMaxDamage() >= threshold) {
+            continue;
+         }
+
+         if (durability > bestDurability) {
+            bestDurability = durability;
+            best = i;
+         }
+      }
+
+      return best;
+   }
+
+   /** Puts the stack in the selected hotbar slot and returns that slot, or -1. */
+   private int holdForRepair(int invSlot) {
+      int selected = ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot();
+      if (invSlot == selected) {
+         return selected;
+      }
+
+      if (invSlot < 9) {
+         ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(invSlot);
+         this.mc.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket(invSlot));
+         return invSlot;
+      }
+
+      InvUtils.move().from(invSlot).toHotbar(selected);
+      return selected;
+   }
+
+   private int countExperienceBottles() {
+      int count = 0;
+
+      for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (stack.getItem() == Items.EXPERIENCE_BOTTLE) {
+            count += stack.getCount();
+         }
+      }
+
+      return count;
    }
 
    private void handleBreakingEchest() {
@@ -3582,9 +3901,15 @@ public class AutoFlyingRegear extends Module {
       CHECK_NEXT_SHULKER,
       BREAKING_ECHEST,
       WAIT_ECHEST_BREAK,
+      REPAIRING_ELYTRA,
       RESTORING_ELYTRA,
       CLEANUP,
       TAKING_OFF,
       COMPLETE;
+   }
+
+   public enum ElytraMode {
+      REPLACE,
+      REPAIR;
    }
 }
