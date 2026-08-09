@@ -311,11 +311,30 @@ public class VisualRangeNotifier extends Module {
         }
     }
 
+    /**
+     * Whether this player is you, by identity rather than by object.
+     *
+     * <p>A reference test is not enough. Freecam leaves a stand-in body in the world so you
+     * can see yourself while the camera flies off, and that body is a different Java object
+     * carrying your name and uuid — so {@code player != mc.player} let it straight through
+     * and the module announced your own arrival, then your departure when you flew back.
+     *
+     * <p>The uuid is the real check. The name is a fallback for a freecam that clones the
+     * body without carrying the uuid over; it is safe here because a premium server cannot
+     * host two accounts under one name.
+     */
+    private boolean isSelf(PlayerEntity player) {
+        if (mc.player == null) return false;
+        if (player == mc.player) return true;
+        if (player.getUuid().equals(mc.player.getUuid())) return true;
+        return player.getGameProfile().name().equals(mc.player.getGameProfile().name());
+    }
+
     private void tickPlayers() {
         Set<UUID> currentPlayers = new HashSet<>();
 
         for (Entity entity : mc.world.getEntities()) {
-            if (entity instanceof PlayerEntity player && player != mc.player) {
+            if (entity instanceof PlayerEntity player && !isSelf(player)) {
                 UUID uuid = player.getUuid();
                 currentPlayers.add(uuid);
                 uuidNameCache.put(uuid, player.getGameProfile().name());
@@ -526,7 +545,7 @@ public class VisualRangeNotifier extends Module {
 
         for (Entity entity : mc.world.getEntities()) {
             if (!(entity instanceof PlayerEntity player)) continue;
-            if (pvpIgnoreSelf.get() && player == mc.player) continue;
+            if (pvpIgnoreSelf.get() && isSelf(player)) continue;
             if (ignoreFriends.get() && Friends.get().isFriend(player)) continue;
 
             double dist = player.getEntityPos().distanceTo(pos);
