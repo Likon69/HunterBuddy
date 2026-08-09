@@ -283,6 +283,9 @@ public class StashFinder extends Module {
                .defaultValue(true)
             .build()
       );
+   private static final int MINECART_SWEEP_TICKS = 20;
+   private int minecartSweepCooldown;
+
    private final Setting<Boolean> detectStackedMinecarts = this.sgDetection
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -749,6 +752,47 @@ public class StashFinder extends Module {
       if (((Keybind)this.openCoordListBind.get()).isPressed() && this.mc.currentScreen == null) {
          this.openCoordinateList();
       }
+
+      if (this.minecartSweepCooldown > 0) {
+         this.minecartSweepCooldown--;
+      } else {
+         this.minecartSweepCooldown = MINECART_SWEEP_TICKS;
+         this.sweepStackedMinecarts();
+      }
+   }
+
+   /**
+    * Walks every loaded storage minecart and reports the piles.
+    *
+    * <p>Reacting to spawns alone was the real blind spot, and it had nothing to do
+    * with how far the server sends entities: a pile already loaded when the module
+    * is switched on, or one you approach from a chunk that was streamed earlier,
+    * never produces a spawn event, so it stayed invisible for as long as you
+    * remained in the area. Sweeping what is loaded catches every pile in range
+    * whatever brought it there.
+    *
+    * <p>Piles are grouped by block, then each block is reported once with its
+    * depth — the entity list is walked a single time rather than once per cart.
+    */
+   private void sweepStackedMinecarts() {
+      if (!(Boolean)this.detectStackedMinecarts.get() || this.mc.world == null || this.mc.player == null) {
+         return;
+      }
+
+      int threshold = (Integer)this.minStackedMinecarts.get();
+      Map<BlockPos, Integer> piles = new HashMap<>();
+
+      for (Entity entity : this.mc.world.getEntities()) {
+         if (entity instanceof StorageMinecartEntity) {
+            piles.merge(entity.getBlockPos(), 1, Integer::sum);
+         }
+      }
+
+      for (Map.Entry<BlockPos, Integer> pile : piles.entrySet()) {
+         if (pile.getValue() >= threshold) {
+            this.recordEntityDetection(new ChunkPos(pile.getKey()), "stackedMinecart", pile.getValue());
+         }
+      }
    }
 
    @EventHandler
@@ -960,6 +1004,22 @@ public class StashFinder extends Module {
          }
 
          if (detected) {
+            this.recordEntityDetection(chunkPos, detectionType, minecartPileDepth);
+         }
+      }
+   }
+
+   /**
+    * Records one entity detection into its chunk and fires the waypoint and the
+    * notifications when a threshold is met.
+    *
+    * <p>Split out of the spawn handler so the periodic sweep can reuse it: a pile
+    * that was already loaded when the module came on never produces a spawn, and
+    * would otherwise stay invisible for as long as you stay in the area.
+    */
+   private void recordEntityDetection(ChunkPos chunkPos, String detectionType, int minecartPileDepth) {
+      {
+         {
             double chunkXAbs = Math.abs(chunkPos.x * 16);
             double chunkZAbs = Math.abs(chunkPos.z * 16);
             if (!(Math.sqrt(chunkXAbs * chunkXAbs + chunkZAbs * chunkZAbs) < ((Integer)this.minimumDistance.get()).intValue())) {
