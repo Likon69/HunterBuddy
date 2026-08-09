@@ -23,6 +23,25 @@ public class AreaLoader extends Module {
    private final SettingGroup sgFlight = this.settings.createGroup("Flight");
    private final SettingGroup sgNether = this.settings.createGroup("Nether");
    private final SettingGroup sgDebug = this.settings.createGroup("Debug");
+
+   public final Setting<Boolean> hideCoordinates = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("hide-coordinates")
+                     .description("Replace every coordinate this module prints in chat with a placeholder. For streaming or screenshots.")
+                  .defaultValue(false)
+            .build()
+      );
+
+   /** Formats a position for chat, honouring {@link #hideCoordinates}. */
+   public String coords(int x, int z) {
+      return this.hideCoordinates.get() ? "(hidden)" : "(" + x + ", " + z + ")";
+   }
+
+   public String coords(double x, double z) {
+      return this.hideCoordinates.get() ? "(hidden)" : String.format("(%.1f, %.1f)", x, z);
+   }
+
    public final Setting<AreaLoaderModes> chunkLoadMode = this.sgGeneral
       .add(
          new Builder<AreaLoaderModes>().name("mode").description("The mode chunks are loaded.")
@@ -35,7 +54,8 @@ public class AreaLoader extends Module {
          new meteordevelopment.meteorclient.settings.BlockPosSetting.Builder()
                         .name("start-position")
                      .description("The coordinates to start the rectangle at. Y Pos is ignored")
-                  .defaultValue(new BlockPos(0, 0, 0)).visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
+                  .defaultValue(new BlockPos(0, 0, 0))
+                  .visible(() -> !this.hideCoordinates.get() && this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
             .build()
       );
    public final Setting<BlockPos> targetPos = this.sgGeneral
@@ -43,7 +63,8 @@ public class AreaLoader extends Module {
          new meteordevelopment.meteorclient.settings.BlockPosSetting.Builder()
                         .name("end-position")
                      .description("The coordinates to end the rectangle at. Y Pos is ignored")
-                  .defaultValue(new BlockPos(0, 0, 0)).visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
+                  .defaultValue(new BlockPos(0, 0, 0))
+                  .visible(() -> !this.hideCoordinates.get() && this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
             .build()
       );
    public final Setting<Integer> rowGap = this.sgGeneral
@@ -84,7 +105,7 @@ public class AreaLoader extends Module {
                         .name("circle-center")
                      .description("Center of the polar spiral. Y Pos is ignored.")
                   .defaultValue(new BlockPos(0, 0, 0))
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
+               .visible(() -> !this.hideCoordinates.get() && this.chunkLoadMode.get() == AreaLoaderModes.Circle)
             .build()
       );
    public final Setting<Double> circleLayerRadius = this.sgGeneral
