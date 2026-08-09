@@ -41,81 +41,81 @@ public class AreaRecoveryScreen extends WindowScreen {
    private WDropdown<AreaRecoveryScreen.CardinalDirection> zigzagDirectionDropdown;
 
    public AreaRecoveryScreen(GuiTheme theme, AreaLoader searchArea) {
-      super(theme, "Area Recovery Configuration");
+      super(theme, "Configuration de la reprise de zone");
       this.searchArea = searchArea;
    }
 
    public void initWidgets() {
       WVerticalList list = (WVerticalList)this.add(this.theme.verticalList()).expandX().widget();
       WHorizontalList modeRow = (WHorizontalList)list.add(this.theme.horizontalList()).expandX().widget();
-      modeRow.add(this.theme.label("Mode: "));
+      modeRow.add(this.theme.label("Mode : "));
       this.modeDropdown = (WDropdown<AreaLoaderModes>)modeRow.add(this.theme.dropdown((AreaLoaderModes)this.searchArea.chunkLoadMode.get())).expandX().widget();
       this.modeDropdown.action = () -> this.rebuildModeSpecificSections();
       list.add(this.theme.horizontalSeparator()).expandX();
-      WSection commonSection = (WSection)list.add(this.theme.section("Position Configuration", true)).expandX().widget();
-      commonSection.add(this.theme.label("Enter coordinates where the pattern started and where to resume")).expandX();
+      WSection commonSection = (WSection)list.add(this.theme.section("Configuration de la position", true)).expandX().widget();
+      commonSection.add(this.theme.label("Entrez les coordonnées où le motif a commencé et où reprendre")).expandX();
       commonSection.add(this.theme.horizontalSeparator()).expandX();
       WHorizontalList originRow = (WHorizontalList)commonSection.add(this.theme.horizontalList()).expandX().widget();
-      originRow.add(this.theme.label("Origin X: "));
+      originRow.add(this.theme.label("Origine X : "));
       this.originXEdit = (WTextBox)originRow.add(this.theme.textBox("0", this::filterNumeric)).expandX().widget();
-      originRow.add(this.theme.label(" Z: "));
+      originRow.add(this.theme.label(" Z : "));
       this.originZEdit = (WTextBox)originRow.add(this.theme.textBox("0", this::filterNumeric)).expandX().widget();
       WHorizontalList gapRow = (WHorizontalList)commonSection.add(this.theme.horizontalList()).expandX().widget();
-      gapRow.add(this.theme.label("Path Gap (chunks): "));
+      gapRow.add(this.theme.label("Écart entre passages (chunks) : "));
       this.gapEdit = (WIntEdit)gapRow.add(this.theme.intEdit((Integer)this.searchArea.rowGap.get(), 1, 100, false)).expandX().widget();
       WHorizontalList currentRow = (WHorizontalList)commonSection.add(this.theme.horizontalList()).expandX().widget();
-      currentRow.add(this.theme.label("Resume X: "));
+      currentRow.add(this.theme.label("Reprise X : "));
       this.currentXEdit = (WTextBox)currentRow.add(this.theme.textBox("0", this::filterNumeric)).expandX().widget();
-      currentRow.add(this.theme.label(" Z: "));
+      currentRow.add(this.theme.label(" Z : "));
       this.currentZEdit = (WTextBox)currentRow.add(this.theme.textBox("0", this::filterNumeric)).expandX().widget();
-      WButton useCurrentPosBtn = (WButton)commonSection.add(this.theme.button("Use Current Player Position")).expandX().widget();
+      WButton useCurrentPosBtn = (WButton)commonSection.add(this.theme.button("Utiliser la position actuelle du joueur")).expandX().widget();
       useCurrentPosBtn.action = () -> {
          if (MeteorClient.mc.player != null) {
             this.currentXEdit.set(String.valueOf(MeteorClient.mc.player.getBlockX()));
             this.currentZEdit.set(String.valueOf(MeteorClient.mc.player.getBlockZ()));
             ChatUtils.info(
-               "Set resume position to player location: X=%d Z=%d",
+               "Position de reprise réglée sur celle du joueur : X=%d Z=%d",
                new Object[]{MeteorClient.mc.player.getBlockX(), MeteorClient.mc.player.getBlockZ()}
             );
          }
       };
       list.add(this.theme.horizontalSeparator()).expandX();
-      this.spiralSection = (WSection)list.add(this.theme.section("Spiral Recovery Instructions", true)).expandX().widget();
-      this.spiralSection.add(this.theme.label("Origin = where the spiral STARTED (first corner)")).expandX();
-      this.spiralSection.add(this.theme.label("Resume = your current position or where you want to continue")).expandX();
-      this.spiralSection.add(this.theme.label("Path Gap = chunks between each spiral arm (MUST match original)")).expandX();
+      this.spiralSection = (WSection)list.add(this.theme.section("Reprise en spirale - instructions", true)).expandX().widget();
+      this.spiralSection.add(this.theme.label("Origine = là où la spirale a COMMENCÉ (premier coin)")).expandX();
+      this.spiralSection.add(this.theme.label("Reprise = votre position actuelle ou l'endroit où continuer")).expandX();
+      this.spiralSection.add(this.theme.label("Écart = chunks entre chaque bras (DOIT être celui d'origine)")).expandX();
       this.spiralSection.add(this.theme.horizontalSeparator()).expandX();
-      this.spiralSection.add(this.theme.label("Quick Recovery:")).expandX();
-      this.spiralSection.add(this.theme.label("  1. Fill in Origin and Resume coords, set correct Gap")).expandX();
-      this.spiralSection.add(this.theme.label("  2. Click 'Snap to Next Corner' - updates Resume to nearest corner")).expandX();
-      this.spiralSection.add(this.theme.label("  3. Click 'Apply from Corner' - saves state and closes")).expandX();
-      this.spiralSection.add(this.theme.label("  4. Fly to the corner coords shown, then enable module")).expandX();
+      this.spiralSection.add(this.theme.label("Reprise rapide :")).expandX();
+      this.spiralSection.add(this.theme.label("  1. Remplissez Origine et Reprise, réglez le bon Écart")).expandX();
+      this.spiralSection.add(this.theme.label("  2. Cliquez « Aller au coin suivant » - place Reprise sur le coin")).expandX();
+      this.spiralSection.add(this.theme.label("  3. Cliquez « Appliquer depuis le coin » - enregistre et ferme")).expandX();
+      this.spiralSection.add(this.theme.label("  4. Volez jusqu'aux coordonnées affichées, puis activez le module")).expandX();
       this.spiralSection.add(this.theme.horizontalSeparator()).expandX();
-      this.spiralSection.add(this.theme.label("Note: If spiral was modified since original run, position may")).expandX();
-      this.spiralSection.add(this.theme.label("be slightly offset from your exact path - this is normal.")).expandX();
-      this.rectangleSection = (WSection)list.add(this.theme.section("Rectangle Recovery Instructions", true)).expandX().widget();
-      this.rectangleSection.add(this.theme.label("Origin = starting corner of the rectangle")).expandX();
-      this.rectangleSection.add(this.theme.label("End = opposite corner of the rectangle")).expandX();
-      this.rectangleSection.add(this.theme.label("Resume = your current position within the rectangle")).expandX();
+      this.spiralSection.add(this.theme.label("Note : si la spirale a changé depuis la course d'origine, la")).expandX();
+      this.spiralSection.add(this.theme.label("position peut être légèrement décalée - c'est normal.")).expandX();
+      this.rectangleSection = (WSection)list.add(this.theme.section("Reprise en rectangle - instructions", true)).expandX().widget();
+      this.rectangleSection.add(this.theme.label("Origine = coin de départ du rectangle")).expandX();
+      this.rectangleSection.add(this.theme.label("Fin = coin opposé du rectangle")).expandX();
+      this.rectangleSection.add(this.theme.label("Reprise = votre position actuelle dans le rectangle")).expandX();
       this.rectangleSection.add(this.theme.horizontalSeparator()).expandX();
       WHorizontalList rectEndRow = (WHorizontalList)this.rectangleSection.add(this.theme.horizontalList()).expandX().widget();
-      rectEndRow.add(this.theme.label("End X: "));
+      rectEndRow.add(this.theme.label("Fin X : "));
       this.rectEndXEdit = (WTextBox)rectEndRow.add(this.theme.textBox("0", this::filterNumeric)).expandX().widget();
-      rectEndRow.add(this.theme.label(" Z: "));
+      rectEndRow.add(this.theme.label(" Z : "));
       this.rectEndZEdit = (WTextBox)rectEndRow.add(this.theme.textBox("0", this::filterNumeric)).expandX().widget();
-      this.zigzagSection = (WSection)list.add(this.theme.section("ZigZag Recovery Instructions", true)).expandX().widget();
-      this.zigzagSection.add(this.theme.label("Origin = where zigzag started")).expandX();
-      this.zigzagSection.add(this.theme.label("Resume = your current position")).expandX();
+      this.zigzagSection = (WSection)list.add(this.theme.section("Reprise en zigzag - instructions", true)).expandX().widget();
+      this.zigzagSection.add(this.theme.label("Origine = là où le zigzag a commencé")).expandX();
+      this.zigzagSection.add(this.theme.label("Reprise = votre position actuelle")).expandX();
       this.zigzagSection.add(this.theme.horizontalSeparator()).expandX();
       WHorizontalList zigzagRow1 = (WHorizontalList)this.zigzagSection.add(this.theme.horizontalList()).expandX().widget();
-      zigzagRow1.add(this.theme.label("Leg Length: "));
+      zigzagRow1.add(this.theme.label("Longueur de branche : "));
       this.zigzagLegLengthEdit = (WIntEdit)zigzagRow1.add(this.theme.intEdit((Integer)this.searchArea.zigzagLegLength.get(), 100, 100000, false))
          .expandX()
          .widget();
-      zigzagRow1.add(this.theme.label(" Row Gap: "));
+      zigzagRow1.add(this.theme.label(" Écart entre rangées : "));
       this.zigzagRowGapEdit = (WIntEdit)zigzagRow1.add(this.theme.intEdit((Integer)this.searchArea.zigzagRowGap.get(), 16, 1000, false)).expandX().widget();
       WHorizontalList zigzagRow2 = (WHorizontalList)this.zigzagSection.add(this.theme.horizontalList()).expandX().widget();
-      zigzagRow2.add(this.theme.label("Main Direction: "));
+      zigzagRow2.add(this.theme.label("Direction principale : "));
       this.zigzagDirectionDropdown = (WDropdown<AreaRecoveryScreen.CardinalDirection>)zigzagRow2.add(
             this.theme.dropdown(AreaRecoveryScreen.CardinalDirection.SOUTH)
          )
@@ -123,26 +123,26 @@ public class AreaRecoveryScreen extends WindowScreen {
          .widget();
       list.add(this.theme.horizontalSeparator()).expandX();
       WSection actionSection = (WSection)list.add(this.theme.section("Actions", true)).expandX().widget();
-      actionSection.add(this.theme.label("Validate: Check if position is valid (shows info in chat)")).expandX();
-      actionSection.add(this.theme.label("Snap to Path: Adjust Resume coords to nearest path position")).expandX();
-      actionSection.add(this.theme.label("Snap to Next Corner: (Spiral) Find the next corner ahead")).expandX();
-      actionSection.add(this.theme.label("Apply from Corner: (Spiral) Save state to continue from corner")).expandX();
-      actionSection.add(this.theme.label("Apply & Save: Save recovery state for any mode")).expandX();
+      actionSection.add(this.theme.label("Valider : vérifie si la position est valable (résultat dans le chat)")).expandX();
+      actionSection.add(this.theme.label("Aligner sur le trajet : ramène Reprise sur le point le plus proche")).expandX();
+      actionSection.add(this.theme.label("Aller au coin suivant : (spirale) trouve le prochain coin devant")).expandX();
+      actionSection.add(this.theme.label("Appliquer depuis le coin : (spirale) enregistre pour reprendre là")).expandX();
+      actionSection.add(this.theme.label("Appliquer et enregistrer : enregistre la reprise, tous modes")).expandX();
       actionSection.add(this.theme.horizontalSeparator()).expandX();
       WHorizontalList buttonRow1 = (WHorizontalList)actionSection.add(this.theme.horizontalList()).expandX().widget();
-      WButton validateBtn = (WButton)buttonRow1.add(this.theme.button("Validate")).expandX().widget();
+      WButton validateBtn = (WButton)buttonRow1.add(this.theme.button("Valider")).expandX().widget();
       validateBtn.action = this::onValidate;
-      WButton snapBtn = (WButton)buttonRow1.add(this.theme.button("Snap to Path")).expandX().widget();
+      WButton snapBtn = (WButton)buttonRow1.add(this.theme.button("Aligner sur le trajet")).expandX().widget();
       snapBtn.action = this::onSnapToNearest;
       WHorizontalList buttonRow2 = (WHorizontalList)actionSection.add(this.theme.horizontalList()).expandX().widget();
-      WButton snapCornerBtn = (WButton)buttonRow2.add(this.theme.button("Snap to Next Corner")).expandX().widget();
+      WButton snapCornerBtn = (WButton)buttonRow2.add(this.theme.button("Aller au coin suivant")).expandX().widget();
       snapCornerBtn.action = this::onSnapToNextCorner;
-      WButton applyCornerBtn = (WButton)buttonRow2.add(this.theme.button("Apply from Corner")).expandX().widget();
+      WButton applyCornerBtn = (WButton)buttonRow2.add(this.theme.button("Appliquer depuis le coin")).expandX().widget();
       applyCornerBtn.action = this::onApplyFromCorner;
       WHorizontalList buttonRow3 = (WHorizontalList)actionSection.add(this.theme.horizontalList()).expandX().widget();
-      WButton applyBtn = (WButton)buttonRow3.add(this.theme.button("Apply & Save")).expandX().widget();
+      WButton applyBtn = (WButton)buttonRow3.add(this.theme.button("Appliquer et enregistrer")).expandX().widget();
       applyBtn.action = this::onApplyAndSave;
-      WButton cancelBtn = (WButton)buttonRow3.add(this.theme.button("Cancel")).expandX().widget();
+      WButton cancelBtn = (WButton)buttonRow3.add(this.theme.button("Annuler")).expandX().widget();
       cancelBtn.action = this::close;
       this.rebuildModeSpecificSections();
    }
@@ -210,7 +210,7 @@ public class AreaRecoveryScreen extends WindowScreen {
    private void onSnapToNextCorner() {
       AreaLoaderModes mode = (AreaLoaderModes)this.modeDropdown.get();
       if (mode != AreaLoaderModes.Spiral) {
-         ChatUtils.info("Snap to Next Corner is only available for Spiral mode.", new Object[0]);
+         ChatUtils.info("« Aller au coin suivant » n'existe qu'en mode spirale.", new Object[0]);
       } else {
          int originX = this.parseCoord(this.originXEdit, 0);
          int originZ = this.parseCoord(this.originZEdit, 0);
@@ -223,7 +223,7 @@ public class AreaRecoveryScreen extends WindowScreen {
          if (corner != null) {
             this.currentXEdit.set(String.valueOf(corner[0]));
             this.currentZEdit.set(String.valueOf(corner[1]));
-            ChatUtils.info("Resume coordinates set to next corner: %s", new Object[]{this.searchArea.coords(corner[0], corner[1])});
+            ChatUtils.info("Coordonnées de reprise placées sur le coin suivant : %s", new Object[]{this.searchArea.coords(corner[0], corner[1])});
          }
       }
    }
@@ -231,7 +231,7 @@ public class AreaRecoveryScreen extends WindowScreen {
    private void onApplyFromCorner() {
       AreaLoaderModes mode = (AreaLoaderModes)this.modeDropdown.get();
       if (mode != AreaLoaderModes.Spiral) {
-         ChatUtils.info("Apply from Corner is only available for Spiral mode.", new Object[0]);
+         ChatUtils.info("« Appliquer depuis le coin » n'existe qu'en mode spirale.", new Object[0]);
       } else {
          int originX = this.parseCoord(this.originXEdit, 0);
          int originZ = this.parseCoord(this.originZEdit, 0);
@@ -243,7 +243,7 @@ public class AreaRecoveryScreen extends WindowScreen {
          boolean success = spiral.applyFromNextCorner(originX, originZ, currentX, currentZ, blockGap);
          if (success) {
             this.searchArea.rowGap.set(gap);
-            ChatUtils.info("Recovery state saved. Go to the corner and enable the module.", new Object[0]);
+            ChatUtils.info("Reprise enregistrée. Rendez-vous au coin, puis activez le module.", new Object[0]);
             this.close();
          }
       }
@@ -263,7 +263,7 @@ public class AreaRecoveryScreen extends WindowScreen {
          case Rectangle -> this.applyRectangleRecovery(originX, originZ, currentX, currentZ, blockGap);
          case ZigZag -> this.applyZigZagRecovery(originX, originZ, currentX, currentZ);
          case Circle -> {
-            ChatUtils.error("Circle mode does not support recovery (it loops infinitely). Disable manually.", new Object[0]);
+            ChatUtils.error("Le mode cercle ne gère pas la reprise (il boucle sans fin). Désactivez-le à la main.", new Object[0]);
             yield false;
          }
       };
@@ -272,7 +272,7 @@ public class AreaRecoveryScreen extends WindowScreen {
          if (this.searchArea.chunkLoadMode.get() != mode) {
             this.searchArea.chunkLoadMode.set(mode);
          }
-         ChatUtils.info("Recovery state saved successfully. Enable the module to resume.", new Object[0]);
+         ChatUtils.info("Reprise enregistrée. Activez le module pour continuer.", new Object[0]);
          this.close();
       }
    }
@@ -291,7 +291,7 @@ public class AreaRecoveryScreen extends WindowScreen {
       if (snapped != null) {
          this.currentXEdit.set(String.valueOf(snapped[0]));
          this.currentZEdit.set(String.valueOf(snapped[1]));
-         ChatUtils.info("Resume coordinates updated to snapped position.", new Object[0]);
+         ChatUtils.info("Coordonnées de reprise alignées.", new Object[0]);
       }
    }
 
@@ -317,11 +317,11 @@ public class AreaRecoveryScreen extends WindowScreen {
          boolean startEast = originX < endX;
          boolean onEvenRow = rowIndex % 2 == 0;
          boolean headingEast = startEast == onEvenRow;
-         ChatUtils.info("VALID: Position X=%d Z=%d is within rectangle bounds.", new Object[]{currentX, currentZ});
-         ChatUtils.info("Row %d (Z=%d), heading %s, Z-progress: %d blocks", new Object[]{rowIndex, rowZ, headingEast ? "East (-90)" : "West (90)", zProgress});
+         ChatUtils.info("VALABLE : la position X=%d Z=%d est dans les limites du rectangle.", new Object[]{currentX, currentZ});
+         ChatUtils.info("Rangée %d (Z=%d), cap %s, progression en Z : %d blocs", new Object[]{rowIndex, rowZ, headingEast ? "est (-90)" : "ouest (90)", zProgress});
       } else {
-         ChatUtils.error("Position X=%d Z=%d is OUTSIDE rectangle bounds.", new Object[]{currentX, currentZ});
-         ChatUtils.info("Rectangle: X[%d to %d], Z[%d to %d]", new Object[]{minX, maxX, minZ, maxZ});
+         ChatUtils.error("La position X=%d Z=%d est HORS des limites du rectangle.", new Object[]{currentX, currentZ});
+         ChatUtils.info("Rectangle : X[%d à %d], Z[%d à %d]", new Object[]{minX, maxX, minZ, maxZ});
       }
    }
 
@@ -337,7 +337,7 @@ public class AreaRecoveryScreen extends WindowScreen {
       int snappedX = Math.max(minX, Math.min(maxX, currentX));
       this.currentXEdit.set(String.valueOf(snappedX));
       this.currentZEdit.set(String.valueOf(snappedZ));
-      ChatUtils.info("Snapped to row %d: X=%d Z=%d", new Object[]{rowIndex, snappedX, snappedZ});
+      ChatUtils.info("Aligné sur la rangée %d : X=%d Z=%d", new Object[]{rowIndex, snappedX, snappedZ});
    }
 
    private boolean applyRectangleRecovery(int originX, int originZ, int currentX, int currentZ, int blockGap) {
@@ -366,7 +366,7 @@ public class AreaRecoveryScreen extends WindowScreen {
       this.searchArea.targetPos.set(new BlockPos(endX, 64, endZ));
       Rectangle.PathingDataRectangle pd = new Rectangle.PathingDataRectangle(new BlockPos(originX, 64, originZ), new BlockPos(endX, 64, endZ), new BlockPos(currentX, 64, currentZ), yaw, mainPath, lastCompleteRowZ
       );
-      ChatUtils.info("Rectangle recovery: row=%d, yaw=%.0f, mainPath=%b, lastRowZ=%d", new Object[]{rowIndex, yaw, mainPath, lastCompleteRowZ});
+      ChatUtils.info("Reprise rectangle : rangée=%d, yaw=%.0f, trajet principal=%b, dernière rangée Z=%d", new Object[]{rowIndex, yaw, mainPath, lastCompleteRowZ});
       return this.saveRectangleData(pd);
    }
 
@@ -374,7 +374,7 @@ public class AreaRecoveryScreen extends WindowScreen {
       try {
          File file = this.getRectangleJsonFile();
          if (file == null) {
-            ChatUtils.error("Failed to get save file path.", new Object[0]);
+            ChatUtils.error("Impossible de déterminer le chemin du fichier de sauvegarde.", new Object[0]);
             return false;
          }
 
@@ -387,10 +387,10 @@ public class AreaRecoveryScreen extends WindowScreen {
          gson.toJson(pd, writer);
          writer.flush();
          writer.close();
-         ChatUtils.info("Saved Rectangle recovery to: " + file.getName(), new Object[0]);
+         ChatUtils.info("Reprise rectangle enregistrée dans : " + file.getName(), new Object[0]);
          return true;
       } catch (Exception e) {
-         ChatUtils.error("Failed to save: " + e.getMessage(), new Object[0]);
+         ChatUtils.error("Échec de l'enregistrement : " + e.getMessage(), new Object[0]);
          return false;
       }
    }
@@ -431,11 +431,11 @@ public class AreaRecoveryScreen extends WindowScreen {
       int legsCompleted = sideAxisProgress / rowGap;
       int positionInCurrentLeg = mainAxisProgress % legLength;
       boolean likelyOnMainLeg = positionInCurrentLeg > rowGap / 2;
-      ChatUtils.info("ZigZag validation:", new Object[0]);
-      ChatUtils.info("  Main direction: %s (yaw=%.0f)", new Object[]{dir.name(), mainYaw});
-      ChatUtils.info("  Progress: main=%d, side=%d blocks from origin", new Object[]{mainAxisProgress, sideAxisProgress});
-      ChatUtils.info("  ~%d legs completed, position in leg: %d/%d blocks", new Object[]{legsCompleted, positionInCurrentLeg, legLength});
-      ChatUtils.info("  Likely on %s leg", new Object[]{likelyOnMainLeg ? "main" : "side"});
+      ChatUtils.info("Vérification du zigzag :", new Object[0]);
+      ChatUtils.info("  Direction principale : %s (yaw=%.0f)", new Object[]{dir.name(), mainYaw});
+      ChatUtils.info("  Progression : principale=%d, latérale=%d blocs depuis l'origine", new Object[]{mainAxisProgress, sideAxisProgress});
+      ChatUtils.info("  ~%d branches terminées, position dans la branche : %d/%d blocs", new Object[]{legsCompleted, positionInCurrentLeg, legLength});
+      ChatUtils.info("  Probablement sur la branche %s", new Object[]{likelyOnMainLeg ? "principale" : "latérale"});
    }
 
    private void snapZigZagToNearest(int originX, int originZ, int currentX, int currentZ) {
@@ -460,7 +460,7 @@ public class AreaRecoveryScreen extends WindowScreen {
 
       this.currentXEdit.set(String.valueOf(snappedX));
       this.currentZEdit.set(String.valueOf(snappedZ));
-      ChatUtils.info("Snapped to: X=%d Z=%d", new Object[]{snappedX, snappedZ});
+      ChatUtils.info("Aligné sur : X=%d Z=%d", new Object[]{snappedX, snappedZ});
    }
 
    private boolean applyZigZagRecovery(int originX, int originZ, int currentX, int currentZ) {
@@ -498,7 +498,7 @@ public class AreaRecoveryScreen extends WindowScreen {
       );
       pd.legStartPos = new BlockPos(currentX, 64, currentZ);
       ChatUtils.info(
-         "ZigZag recovery: legs=%d, goingForward=%b, yaw=%.0f, mainYaw=%.0f, sideYaw=%.0f",
+         "Reprise zigzag : branches=%d, aller=%b, yaw=%.0f, yaw principal=%.0f, yaw latéral=%.0f",
          new Object[]{legsCompleted, goingForward, currentYaw, mainYaw, sideYaw}
       );
       return this.saveZigZagData(pd);
@@ -508,7 +508,7 @@ public class AreaRecoveryScreen extends WindowScreen {
       try {
          File file = this.getZigZagJsonFile();
          if (file == null) {
-            ChatUtils.error("Failed to get save file path.", new Object[0]);
+            ChatUtils.error("Impossible de déterminer le chemin du fichier de sauvegarde.", new Object[0]);
             return false;
          }
 
@@ -521,10 +521,10 @@ public class AreaRecoveryScreen extends WindowScreen {
          gson.toJson(pd, writer);
          writer.flush();
          writer.close();
-         ChatUtils.info("Saved ZigZag recovery to: " + file.getName(), new Object[0]);
+         ChatUtils.info("Reprise zigzag enregistrée dans : " + file.getName(), new Object[0]);
          return true;
       } catch (Exception e) {
-         ChatUtils.error("Failed to save: " + e.getMessage(), new Object[0]);
+         ChatUtils.error("Échec de l'enregistrement : " + e.getMessage(), new Object[0]);
          return false;
       }
    }
