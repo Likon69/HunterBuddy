@@ -92,6 +92,7 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.BiomeKeys;
 import net.minecraft.world.chunk.ChunkSection;
@@ -359,6 +360,34 @@ public class StashFinder extends Module {
                      .name("old-chunks-only")
                   .description("Only detect stashes in previously loaded chunks (using XaeroPlus chunk detection).")
                .defaultValue(true)
+            .build()
+      );
+   private final Setting<Boolean> ignoreStructures = this.sgDetection
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                     .name("ignore-scattered-containers")
+                  .description("Ignore a chunk whose containers are spread out instead of packed together. Generated structures scatter their chests one per room; players pile them against each other.")
+               .defaultValue(true)
+            .build()
+      );
+   private final Setting<Integer> packRadius = this.sgDetection
+      .add(
+         new Builder().name("pack-radius")
+                  .description("How far apart two containers can sit and still count as packed together, in blocks.")
+               .defaultValue(5)
+            .min(1)
+            .sliderRange(2, 16)
+            .visible(this.ignoreStructures::get)
+            .build()
+      );
+   private final Setting<Integer> minPackedContainers = this.sgDetection
+      .add(
+         new Builder().name("min-packed-containers")
+                  .description("How many containers must sit within pack-radius of one another for the chunk to read as a stash. Below this it is treated as a structure and dropped.")
+               .defaultValue(5)
+            .min(2)
+            .sliderRange(2, 20)
+            .visible(this.ignoreStructures::get)
             .build()
       );
    private final Setting<Integer> minChests = this.sgThresholds
@@ -821,6 +850,12 @@ public class StashFinder extends Module {
             chunk.dimension = this.getCurrentDimension();
             List<Block> blockBlacklist = (List<Block>)this.blacklistedBlocks.get();
 
+            // Positions of the things that actually hold items, gathered alongside the
+            // counts. Signs, banners, pots and frames stay out: they are decoration, and a
+            // mansion is full of them in places no chest ever sits, which would make a
+            // scattered chunk look packed.
+            List<BlockPos> containers = new ArrayList<>();
+
             for (BlockEntity blockEntity : event.chunk().getBlockEntities().values()) {
                if (!blockBlacklist.isEmpty()) {
                   boolean isWallMounted = blockEntity instanceof BannerBlockEntity || blockEntity instanceof SignBlockEntity;
@@ -831,24 +866,34 @@ public class StashFinder extends Module {
 
                if (blockEntity instanceof TrappedChestBlockEntity && (Boolean)this.detectTrappedChests.get()) {
                   chunk.trappedChests++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof ChestBlockEntity && (Boolean)this.detectChests.get()) {
                   chunk.chests++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof BarrelBlockEntity && (Boolean)this.detectBarrels.get()) {
                   chunk.barrels++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof ShulkerBoxBlockEntity && (Boolean)this.detectShulkers.get()) {
                   chunk.shulkers++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof EnderChestBlockEntity && (Boolean)this.detectEnderChests.get()) {
                   chunk.enderChests++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof AbstractFurnaceBlockEntity && (Boolean)this.detectFurnaces.get()) {
                   chunk.furnaces++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof DispenserBlockEntity && (Boolean)this.detectDispensers.get()) {
                   chunk.dispensersDroppers++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof HopperBlockEntity && (Boolean)this.detectHoppers.get()) {
                   chunk.hoppers++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof BrewingStandBlockEntity && (Boolean)this.detectBrewingStands.get()) {
                   chunk.brewingStands++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof CrafterBlockEntity && (Boolean)this.detectCrafters.get()) {
                   chunk.crafters++;
+                  containers.add(blockEntity.getPos());
                } else if (blockEntity instanceof DecoratedPotBlockEntity && (Boolean)this.detectDecoratedPots.get()) {
                   chunk.decoratedPots++;
                } else if (blockEntity instanceof BannerBlockEntity && (Boolean)this.detectBanners.get()) {
@@ -858,6 +903,10 @@ public class StashFinder extends Module {
                } else if (blockEntity instanceof SignBlockEntity && (Boolean)this.detectSigns.get()) {
                   chunk.signs++;
                }
+            }
+
+            if (this.isScatteredStructure(containers)) {
+               return;
             }
 
             if (chunk.getTotal() >= (Integer)this.minimumStorageCount.get() || this.meetsThresholds(chunk)) {
@@ -903,9 +952,32 @@ public class StashFinder extends Module {
     * present in 62 of the 73 templates) framed with dark oak, and mansions only generate in
     * dark forest. Only the section palettes are consulted, so this stays a handful of
     * lookups per chunk rather than a walk over every block position.
+    *
+    * <p>Both halves are needed. Birch and dark oak alone would swallow a player's stash that
+    * happens to store those two woods, and skipping a real stash is the failure that costs
+    * something — a mansion reported is noise you can see, a base ignored is a base you never
+    * knew about. The biome is what keeps the block signature confined to the only places a
+    * mansion can exist.
     */
    private boolean isInWoodlandMansion(WorldChunk chunk) {
-      BlockPos center = chunk.getPos().getStartPos().add(8, 0, 8);
+      // Sampled at the surface, not at the bottom of the world. This asked for the biome at
+      // Y=0 — getStartPos() builds its BlockPos with a hard zero for Y, and .add(8, 0, 8)
+      // only shifts X and Z — which is some eighty blocks below the mansion. Biomes have
+      // been three-dimensional since 1.18, so down there a dark forest routinely reads as
+      // dripstone or lush caves, the guard returned false before ever reaching the block
+      // check, and the mansion sailed through as an ordinary stash. That it sometimes held
+      // is exactly why the false positives looked impossible to get rid of.
+      int surfaceY = chunk.hasHeightmap(Heightmap.Type.WORLD_SURFACE)
+         ? chunk.sampleHeightmap(Heightmap.Type.WORLD_SURFACE, 8, 8)
+         : Integer.MIN_VALUE;
+
+      // No heightmap means no trustworthy biome, and with the biome gone the block signature
+      // is not safe to use on its own. Reporting the chunk is the right way to be wrong here.
+      if (surfaceY == Integer.MIN_VALUE) {
+         return false;
+      }
+
+      BlockPos center = chunk.getPos().getStartPos().withY(surfaceY).add(8, 0, 8);
       if (!this.mc.world.getBiome(center).matchesKey(BiomeKeys.DARK_FOREST)) {
          return false;
       }
@@ -932,6 +1004,58 @@ public class StashFinder extends Module {
       }
 
       return false;
+   }
+
+   /**
+    * Whether these containers are spread the way a generated structure spreads them.
+    *
+    * <p>Works on any structure without knowing which one it is looking at. A mansion, a
+    * village, an ancient city all put one chest per room; a player piles them against each
+    * other, because reaching a wall of chests is the point. The count alone cannot tell the
+    * two apart — twenty-eight is twenty-eight — but the arrangement can.
+    *
+    * <p>The measure is the densest local pack: for each container, how many others sit
+    * within {@code pack-radius}, and the largest such number wins. A bounding box would have
+    * been simpler and wrong — one container in a far corner inflates the volume and a
+    * perfectly normal two-storey base reads as scattered. Counting neighbours ignores
+    * outliers entirely, and it still catches a stash whose chests are spaced a block apart
+    * to avoid forming doubles, which a strict adjacency test would have thrown away.
+    *
+    * <p>Judgement is withheld when there are too few containers to have an arrangement at
+    * all: below the threshold nothing can be concluded, and the chunk goes through. Every
+    * uncertainty here resolves towards reporting — a structure announced is noise you can
+    * see and dismiss, a base dropped is one you never learn exists.
+    */
+   private boolean isScatteredStructure(List<BlockPos> containers) {
+      if (!(Boolean)this.ignoreStructures.get()) {
+         return false;
+      }
+
+      int required = (Integer)this.minPackedContainers.get();
+      if (containers.size() < required) {
+         return false;
+      }
+
+      int radius = (Integer)this.packRadius.get();
+      double radiusSq = radius * radius;
+
+      for (BlockPos anchor : containers) {
+         int packed = 0;
+
+         for (BlockPos other : containers) {
+            if (anchor.getSquaredDistance(other) <= radiusSq) {
+               packed++;
+
+               // Early exit: one pack big enough is all it takes to keep the chunk, so
+               // there is nothing to gain from finishing the count or trying other anchors.
+               if (packed >= required) {
+                  return false;
+               }
+            }
+         }
+      }
+
+      return true;
    }
 
    /** How many storage minecarts occupy one block right now. */
