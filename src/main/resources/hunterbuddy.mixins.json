@@ -17,6 +17,7 @@
     "render.GameRendererHandGlowMixin",
     "render.OrderedRenderCommandQueueHandGlowMixin",
     "accessors.LivingEntityAccessor",
+    "accessors.MobSpawnerLogicAccessor",
     "accessors.PlayerInventoryAccessor",
     "accessors.EntityVelocityUpdateS2CPacketAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
