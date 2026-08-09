@@ -23,6 +23,8 @@
     "accessors.DisconnectS2CPacketAccessor",
     "fireworkboost.FireworkRocketEntityMixin",
     "DisconnectedScreenMixin",
+    "PlayerDeathMixin",
+    "ServerDisconnectMixin",
     "Fix2b2tBundlesMixin",
     "Fix2b2tGhostItemsMixin",
     "KeyBindingMixin",
