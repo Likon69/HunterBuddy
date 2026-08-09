@@ -12,6 +12,7 @@
     "EntityGlowMixin",
     "EntityTeamColorMixin",
     "render.WorldRendererGlowMixin",
+    "render.WorldRendererOutlineMixin",
     "render.ShaderLoaderGlowMixin",
     "render.GameRendererHandGlowMixin",
     "render.OrderedRenderCommandQueueHandGlowMixin",

@@ -25,25 +25,23 @@ public final class GlowUniforms {
     private static final DynamicUniformStorage<PostData> POST =
         new DynamicUniformStorage<>("HunterBuddy - Glow Post UBO", POST_SIZE, 8);
 
-    // BlurData — horizontal pass.
+    // MaskData — horizontal dilation pass.
 
-    private static final int BLUR_SIZE = new Std140SizeCalculator()
-        .putVec2()
+    private static final int MASK_SIZE = new Std140SizeCalculator()
         .putFloat()
-        .putInt()
         .get();
 
-    private static final DynamicUniformStorage<BlurData> BLUR =
-        new DynamicUniformStorage<>("HunterBuddy - Glow Blur UBO", BLUR_SIZE, 8);
+    private static final DynamicUniformStorage<MaskData> MASK =
+        new DynamicUniformStorage<>("HunterBuddy - Glow Mask UBO", MASK_SIZE, 8);
 
-    // GlowData — vertical pass + compositing.
+    // GlowData — distance-field outline, glow and fill.
 
     private static final int GLOW_SIZE = new Std140SizeCalculator()
-        .putVec2()
+        .putFloat()
+        .putFloat()
+        .putFloat()
         .putFloat()
         .putInt()
-        .putFloat()
-        .putFloat()
         .putInt()
         .get();
 
@@ -52,7 +50,7 @@ public final class GlowUniforms {
 
     public static void flipFrame() {
         POST.clear();
-        BLUR.clear();
+        MASK.clear();
         GLOW.clear();
     }
 
@@ -60,13 +58,13 @@ public final class GlowUniforms {
         return POST.write(new PostData(sizeX, sizeY, time));
     }
 
-    public static GpuBufferSlice blur(float dirX, float dirY, float radius, int samples) {
-        return BLUR.write(new BlurData(dirX, dirY, radius, samples));
+    public static GpuBufferSlice mask(float radius) {
+        return MASK.write(new MaskData(radius));
     }
 
-    public static GpuBufferSlice glow(float dirX, float dirY, float radius, int samples,
-                                      float intensity, float fillOpacity, int flags) {
-        return GLOW.write(new GlowData(dirX, dirY, radius, samples, intensity, fillOpacity, flags));
+    public static GpuBufferSlice glow(float thickness, float radius, float intensity,
+                                      float fillOpacity, int quality, int flags) {
+        return GLOW.write(new GlowData(thickness, radius, intensity, fillOpacity, quality, flags));
     }
 
     private record PostData(float sizeX, float sizeY, float time) implements DynamicUniformStorage.Uploadable {
@@ -78,26 +76,24 @@ public final class GlowUniforms {
         }
     }
 
-    private record BlurData(float dirX, float dirY, float radius, int samples) implements DynamicUniformStorage.Uploadable {
+    private record MaskData(float radius) implements DynamicUniformStorage.Uploadable {
         @Override
         public void write(ByteBuffer buffer) {
             Std140Builder.intoBuffer(buffer)
-                .putVec2(dirX, dirY)
-                .putFloat(radius)
-                .putInt(samples);
+                .putFloat(radius);
         }
     }
 
-    private record GlowData(float dirX, float dirY, float radius, int samples,
-                            float intensity, float fillOpacity, int flags) implements DynamicUniformStorage.Uploadable {
+    private record GlowData(float thickness, float radius, float intensity,
+                            float fillOpacity, int quality, int flags) implements DynamicUniformStorage.Uploadable {
         @Override
         public void write(ByteBuffer buffer) {
             Std140Builder.intoBuffer(buffer)
-                .putVec2(dirX, dirY)
+                .putFloat(thickness)
                 .putFloat(radius)
-                .putInt(samples)
                 .putFloat(intensity)
                 .putFloat(fillOpacity)
+                .putInt(quality)
                 .putInt(flags);
         }
     }

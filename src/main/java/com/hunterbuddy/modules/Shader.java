@@ -1,12 +1,18 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.render.HbGlowShader;
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Post;
-import meteordevelopment.meteorclient.renderer.ShapeMode;
+import meteordevelopment.meteorclient.renderer.MeshBuilder;
+import meteordevelopment.meteorclient.renderer.MeshRenderer;
+import meteordevelopment.meteorclient.renderer.MeteorRenderPipelines;
+import meteordevelopment.meteorclient.utils.render.MeshBuilderVertexConsumerProvider;
+import meteordevelopment.meteorclient.utils.render.SimpleBlockRenderer;
+import net.minecraft.client.gl.Framebuffer;
 import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -20,11 +26,19 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.BrewingStandBlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.block.entity.ChiseledBookshelfBlockEntity;
+import net.minecraft.block.entity.CrafterBlockEntity;
+import net.minecraft.block.entity.DecoratedPotBlockEntity;
+import net.minecraft.block.entity.DispenserBlockEntity;
 import net.minecraft.block.entity.EnderChestBlockEntity;
+import net.minecraft.block.entity.HopperBlockEntity;
 import net.minecraft.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.block.entity.TrappedChestBlockEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
@@ -38,8 +52,6 @@ import net.minecraft.entity.vehicle.MinecartEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.client.world.ClientChunkManager;
 import net.minecraft.world.chunk.WorldChunk;
 
@@ -47,6 +59,7 @@ public class Shader extends Module {
     private final SettingGroup sgTargets = settings.createGroup("Targets");
     private final SettingGroup sgRender  = settings.createGroup("Render");
     private final SettingGroup sgColors  = settings.createGroup("Colors");
+    private final SettingGroup sgStorageColors = settings.createGroup("Storage Colors");
 
     // Targets
     private final Setting<Boolean> self = sgTargets.add(new Builder()
@@ -81,23 +94,30 @@ public class Shader extends Module {
     // Render
     private final Setting<Boolean> outline = sgRender.add(new Builder()
         .name("outline")
-        .description("Force the vanilla outline shader on each target. Master switch: the glow post-process builds on the silhouettes this produces.")
+        .description("Trace each target with a crisp line following its real silhouette. Also gates which entities are collected, so turning it off leaves entities with neither line nor glow. Storages and portals have their own switches.")
         .defaultValue(true).build());
+    private final Setting<Double> outlineWidth = sgRender.add(new DoubleSetting.Builder()
+        .name("outline-width")
+        .description("Thickness of that line in pixels. Vanilla's own outline has no width control, which is why small targets like a firework rocket used to be swallowed whole by it.")
+        .defaultValue(1.5).min(0.25).max(6.0).sliderRange(0.25, 6.0)
+        .visible(outline::get).build());
     private final Setting<Boolean> glow = sgRender.add(new Builder()
         .name("glow")
-        .description("Add a gaussian glow halo around the outline (post-process).")
+        .description("Add a halo around the outline, fading with the distance to the silhouette so a thin target glows as strongly as a wide one.")
         .defaultValue(true).build());
     private final Setting<Double> glowWidth = sgRender.add(new DoubleSetting.Builder()
         .name("glow-width").description("Glow radius in pixels.")
         .defaultValue(9.0).min(1.0).max(20.0).sliderRange(1.0, 20.0)
         .visible(glow::get).build());
     private final Setting<Integer> glowSamples = sgRender.add(new IntSetting.Builder()
-        .name("glow-samples").description("Gaussian taps per side. Higher is smoother and costlier.")
+        .name("glow-quality")
+        .description("How finely the distance to the nearest silhouette is searched. Only matters at large radii, where a coarse sweep plus a refine pass replaces the full search.")
         .defaultValue(2).min(1).max(10).sliderRange(1, 10)
         .visible(glow::get).build());
     private final Setting<Double> glowIntensity = sgRender.add(new DoubleSetting.Builder()
-        .name("glow-intensity").description("Glow strength.")
-        .defaultValue(0.13).min(0.01).max(1.0).sliderRange(0.01, 1.0)
+        .name("glow-intensity")
+        .description("Opacity of the halo where it leaves the line. This is now read directly, where the old blur multiplied it eightfold — a config from before will look far dimmer until it is raised.")
+        .defaultValue(0.35).min(0.01).max(1.0).sliderRange(0.01, 1.0)
         .visible(glow::get).build());
     private final Setting<Boolean> filled = sgRender.add(new Builder()
         .name("filled").description("Fill the entity silhouette with a semi-transparent colour.")
@@ -135,9 +155,39 @@ public class Shader extends Module {
     private final Setting<SettingColor> itemsColor = sgColors.add(new ColorSetting.Builder()
         .name("items-color").description("Outline color for dropped items.")
         .defaultValue(new SettingColor(255, 255, 255, 220)).build());
-    private final Setting<SettingColor> storagesColor = sgColors.add(new ColorSetting.Builder()
-        .name("storages-color").description("Color for storage block highlights.")
-        .defaultValue(new SettingColor(255, 165, 0, 150)).build());
+    private final Setting<SettingColor> chestColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("chest-color").description("Outline color for chests.")
+        .defaultValue(new SettingColor(255, 160, 0, 255)).build());
+    private final Setting<SettingColor> trappedChestColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("trapped-chest-color").description("Outline color for trapped chests.")
+        .defaultValue(new SettingColor(255, 60, 60, 255)).build());
+    private final Setting<SettingColor> barrelColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("barrel-color").description("Outline color for barrels.")
+        .defaultValue(new SettingColor(190, 130, 60, 255)).build());
+    private final Setting<SettingColor> shulkerColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("shulker-box-color").description("Outline color for shulker boxes.")
+        .defaultValue(new SettingColor(200, 80, 255, 255)).build());
+    private final Setting<SettingColor> enderChestColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("ender-chest-color").description("Outline color for ender chests.")
+        .defaultValue(new SettingColor(60, 240, 220, 255)).build());
+    private final Setting<SettingColor> hopperColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("hopper-color").description("Outline color for hoppers.")
+        .defaultValue(new SettingColor(150, 150, 160, 255)).build());
+    private final Setting<SettingColor> furnaceColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("furnace-color").description("Outline color for furnaces, blast furnaces and smokers.")
+        .defaultValue(new SettingColor(230, 230, 230, 255)).build());
+    private final Setting<SettingColor> dispenserColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("dispenser-color").description("Outline color for dispensers and droppers.")
+        .defaultValue(new SettingColor(120, 200, 255, 255)).build());
+    private final Setting<SettingColor> crafterColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("crafter-color").description("Outline color for crafters.")
+        .defaultValue(new SettingColor(255, 220, 90, 255)).build());
+    private final Setting<SettingColor> brewingStandColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("brewing-stand-color").description("Outline color for brewing stands.")
+        .defaultValue(new SettingColor(180, 255, 140, 255)).build());
+    private final Setting<SettingColor> otherStorageColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("other-storage-color").description("Outline color for bookshelves and decorated pots.")
+        .defaultValue(new SettingColor(210, 170, 120, 255)).build());
     private final Setting<SettingColor> armorColor = sgColors.add(new ColorSetting.Builder()
         .name("armor-color").description("Outline color for armor stands.")
         .defaultValue(new SettingColor(180, 180, 180, 220)).build());
@@ -148,6 +198,11 @@ public class Shader extends Module {
     private final Set<Entity> glowTargets = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<BlockPos> storageTargets = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<BlockPos> portalPositions = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
+    /** Block geometry for the current frame, blitted into the silhouette buffer. */
+    private final MeshBuilder blockMesh = new MeshBuilder(MeteorRenderPipelines.WORLD_COLORED);
+    private final MeshBuilderVertexConsumerProvider blockMeshProvider = new MeshBuilderVertexConsumerProvider(blockMesh);
+    private final Color storageScratch = new Color();
 
     public Shader() {
         super(HunterBuddyAddon.FUTURE_CATEGORY, "shader",
@@ -162,12 +217,25 @@ public class Shader extends Module {
 
     /** True when the post-process pass has anything to do at all. */
     public boolean postProcessEnabled() {
-        return glow.get() || filled.get();
+        return glow.get() || filled.get() || outline.get();
     }
 
-    /** True when there is at least one silhouette in the outline framebuffer. */
+    /** True while we draw the outline ourselves, which also suppresses vanilla's. */
+    public boolean outlineEnabled() {
+        return outline.get();
+    }
+
+    public double outlineWidth() {
+        return outlineWidth.get();
+    }
+
+    /**
+     * True when there is at least one silhouette to work with. Storages and
+     * portals count: they are drawn into the capture buffer during the 3D pass,
+     * and that buffer only exists if the capture ran, which this gates.
+     */
     public boolean hasPostProcessTargets() {
-        return !glowTargets.isEmpty() || handGlowActive();
+        return !glowTargets.isEmpty() || !storageTargets.isEmpty() || !portalPositions.isEmpty() || handGlowActive();
     }
 
     public boolean glowEnabled() {
@@ -276,17 +344,20 @@ public class Shader extends Module {
         storageTargets.clear();
         portalPositions.clear();
         if (mc.world == null || mc.player == null) return;
-        if (!outline.get() && !portals.get()) return;
+        if (!outline.get() && !storages.get() && !portals.get()) return;
         if (outline.get()) {
             for (Entity e : mc.world.getEntities()) {
                 if (!isTarget(e)) continue;
                 glowTargets.add(e);
             }
-            if (storages.get()) {
-                for (BlockEntity be : Utils.blockEntities()) {
-                    if (!isStorageBlock(be)) continue;
-                    storageTargets.add(be.getPos());
-                }
+        }
+        // Storages are their own target set: they feed the silhouette buffer
+        // directly rather than through the entity path, so gating them on the
+        // entity outline switch only hid them for no reason.
+        if (storages.get()) {
+            for (BlockEntity be : Utils.blockEntities()) {
+                if (!isStorageBlock(be)) continue;
+                storageTargets.add(be.getPos());
             }
         }
         if (portals.get()) {
@@ -317,52 +388,115 @@ public class Shader extends Module {
         return be instanceof ChestBlockEntity
             || be instanceof BarrelBlockEntity
             || be instanceof ShulkerBoxBlockEntity
-            || be instanceof EnderChestBlockEntity;
+            || be instanceof EnderChestBlockEntity
+            || be instanceof HopperBlockEntity
+            || be instanceof AbstractFurnaceBlockEntity
+            || be instanceof DispenserBlockEntity
+            || be instanceof CrafterBlockEntity
+            || be instanceof BrewingStandBlockEntity
+            || be instanceof ChiseledBookshelfBlockEntity
+            || be instanceof DecoratedPotBlockEntity;
     }
 
+    /**
+     * Colour for one storage block. Trapped chests are tested before plain chests
+     * and droppers before dispensers: both are subclasses, so the wrong order
+     * silently collapses two colours into one.
+     */
+    private Color colorForStorage(BlockEntity be) {
+        SettingColor c;
+
+        if (be instanceof TrappedChestBlockEntity) c = trappedChestColor.get();
+        else if (be instanceof ChestBlockEntity) c = chestColor.get();
+        else if (be instanceof BarrelBlockEntity) c = barrelColor.get();
+        else if (be instanceof ShulkerBoxBlockEntity) c = shulkerColor.get();
+        else if (be instanceof EnderChestBlockEntity) c = enderChestColor.get();
+        else if (be instanceof HopperBlockEntity) c = hopperColor.get();
+        else if (be instanceof AbstractFurnaceBlockEntity) c = furnaceColor.get();
+        else if (be instanceof DispenserBlockEntity) c = dispenserColor.get();
+        else if (be instanceof CrafterBlockEntity) c = crafterColor.get();
+        else if (be instanceof BrewingStandBlockEntity) c = brewingStandColor.get();
+        else c = otherStorageColor.get();
+
+        // Forced opaque. WORLD_COLORED blends translucently with no depth test, so
+        // a colour with alpha would write darkened RGB and let overlapping faces
+        // of the same block re-blend into each other — the composite would then
+        // read a marbled, dimmed silhouette instead of a flat one. Softness is the
+        // job of glow-intensity and fill-opacity, not of the silhouette buffer.
+        //
+        // Reused rather than allocated per block per frame: the mesh bakes the
+        // colour into the vertices during the render call that follows.
+        return storageScratch.set(c.r, c.g, c.b, 255);
+    }
+
+    /**
+     * Draws storages and portals into the same silhouette buffer the entities
+     * live in, so the one composite pass gives them the identical outline, glow
+     * and fill.
+     *
+     * <p>These used to be axis-aligned boxes built from the block's VoxelShape
+     * bounds. A chest is 14/16 wide, so the box never matched the model, and an
+     * open lid or a shulker mid-animation was not represented at all. Rendering
+     * the block model plus its block-entity renderer gives the real shape, lid
+     * included, which is the whole point of a shader outline.
+     *
+     * <p>The timing works because {@code Render3DEvent} is dispatched from
+     * {@code GameRenderer.renderWorld} after {@code WorldRenderer.render} has
+     * returned, so the capture already happened and its depth is cleared. The
+     * buffer is deliberately not cleared here — the entity silhouettes are
+     * already in it.
+     */
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (!storageTargets.isEmpty()) {
-            Color sc = toColor(storagesColor.get());
-            for (BlockPos pos : storageTargets) {
-                BlockState state = mc.world.getBlockState(pos);
-                VoxelShape shape = state.getOutlineShape(mc.world, pos);
-                if (!shape.isEmpty()) {
-                    event.renderer.box(
-                        pos.getX() + shape.getMin(Direction.Axis.X),
-                        pos.getY() + shape.getMin(Direction.Axis.Y),
-                        pos.getZ() + shape.getMin(Direction.Axis.Z),
-                        pos.getX() + shape.getMax(Direction.Axis.X),
-                        pos.getY() + shape.getMax(Direction.Axis.Y),
-                        pos.getZ() + shape.getMax(Direction.Axis.Z),
-                        sc, sc, ShapeMode.Both, 0);
-                } else {
-                    event.renderer.box(pos, sc, sc, ShapeMode.Both, 0);
-                }
+        if (mc.world == null) return;
+        if (storageTargets.isEmpty() && portalPositions.isEmpty()) return;
+
+        Framebuffer target = HbGlowShader.captureTarget();
+        if (target == null) return;
+
+        boolean any = false;
+
+        for (BlockPos pos : storageTargets) {
+            BlockEntity be = mc.world.getBlockEntity(pos);
+            if (be == null || be.isRemoved()) continue;
+
+            if (!any) {
+                blockMesh.begin();
+                any = true;
             }
+
+            blockMeshProvider.setColor(colorForStorage(be));
+            SimpleBlockRenderer.renderWithBlockEntity(be, event.tickDelta, blockMeshProvider);
         }
-        if (portals.get() && !portalPositions.isEmpty()) {
-            Color pc = toColor(portalColor.get());
+
+        if (portals.get()) {
+            SettingColor p = portalColor.get();
+            Color pc = storageScratch.set(p.r, p.g, p.b, 255);
+
             for (BlockPos pos : portalPositions) {
                 BlockState state = mc.world.getBlockState(pos);
-                VoxelShape shape = state.getOutlineShape(mc.world, pos);
-                if (!shape.isEmpty()) {
-                    event.renderer.box(
-                        pos.getX() + shape.getMin(Direction.Axis.X),
-                        pos.getY() + shape.getMin(Direction.Axis.Y),
-                        pos.getZ() + shape.getMin(Direction.Axis.Z),
-                        pos.getX() + shape.getMax(Direction.Axis.X),
-                        pos.getY() + shape.getMax(Direction.Axis.Y),
-                        pos.getZ() + shape.getMax(Direction.Axis.Z),
-                        pc, pc, ShapeMode.Both, 0);
-                } else {
-                    event.renderer.box(pos, pc, pc, ShapeMode.Both, 0);
+                if (!state.isOf(Blocks.NETHER_PORTAL)) continue;
+
+                if (!any) {
+                    blockMesh.begin();
+                    any = true;
                 }
+
+                // A portal has no block entity, so the offset the block-entity
+                // path normally sets has to be supplied by hand.
+                blockMeshProvider.setColor(pc);
+                blockMeshProvider.setOffset(pos.getX(), pos.getY(), pos.getZ());
+                SimpleBlockRenderer.render(pos, state, blockMeshProvider);
             }
         }
+
+        if (!any) return;
+
+        MeshRenderer.begin()
+            .attachments(target)
+            .pipeline(MeteorRenderPipelines.WORLD_COLORED)
+            .mesh(blockMesh, event.matrices)
+            .end();
     }
 
-    private static Color toColor(SettingColor c) {
-        return new Color(c.r, c.g, c.b, c.a);
-    }
 }

@@ -27,28 +27,28 @@ import org.apache.commons.io.IOUtils;
 public final class HbRenderPipelines {
     private static final List<RenderPipeline> PIPELINES = new ArrayList<>();
 
-    /** Horizontal half of the separable gaussian: silhouette -> scratch buffer. */
-    public static final RenderPipeline GLOW_BLUR = add(RenderPipeline.builder()
-        .withLocation(id("pipeline/post/glow_blur"))
+    /** Horizontal half of the separable dilation: silhouette -> scratch buffer. */
+    public static final RenderPipeline GLOW_MASK = add(RenderPipeline.builder()
+        .withLocation(id("pipeline/post/glow_mask"))
         .withVertexFormat(MeteorVertexFormats.POS2, VertexFormat.DrawMode.TRIANGLES)
         .withVertexShader(id("shaders/post/base.vert"))
-        .withFragmentShader(id("shaders/post/glow_blur.frag"))
+        .withFragmentShader(id("shaders/post/glow_mask.frag"))
         .withSampler("u_Texture")
         .withUniform("PostData", UniformType.UNIFORM_BUFFER)
-        .withUniform("BlurData", UniformType.UNIFORM_BUFFER)
+        .withUniform("MaskData", UniformType.UNIFORM_BUFFER)
         .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
         .withDepthWrite(false)
         .withCull(false)
         .build());
 
-    /** Vertical half + fill/glow compositing: scratch buffer -> main framebuffer. */
+    /** Distance-field outline and glow, composited onto the main framebuffer. */
     public static final RenderPipeline GLOW_COMPOSITE = add(RenderPipeline.builder()
         .withLocation(id("pipeline/post/glow_composite"))
         .withVertexFormat(MeteorVertexFormats.POS2, VertexFormat.DrawMode.TRIANGLES)
         .withVertexShader(id("shaders/post/base.vert"))
         .withFragmentShader(id("shaders/post/glow_composite.frag"))
-        .withSampler("u_Texture")
         .withSampler("u_Origin")
+        .withSampler("u_Mask")
         .withUniform("PostData", UniformType.UNIFORM_BUFFER)
         .withUniform("GlowData", UniformType.UNIFORM_BUFFER)
         .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
