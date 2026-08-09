@@ -169,6 +169,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Commands.add(new SetOutput());
         Commands.add(new StashStatus());
         Commands.add(new SetClear());
+        Commands.add(new com.hunterbuddy.commands.AreaLoaderReset());
         // ExperienceTraderModule and ExperienceTraderStarterModule are hidden for now
         // (files kept, but not registered in module list).
         // ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
