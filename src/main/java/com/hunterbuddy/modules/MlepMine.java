@@ -173,7 +173,7 @@ public class MlepMine extends Module {
       );
    private final Setting<MlepMine.Swap> swapConfig = this.sgGeneral
       .add(
-         new Builder<MlepMine.Swap>().name("auto-swap").description("Swaps to the best tool once the mining is complete")
+         new Builder<MlepMine.Swap>().name("auto-swap").description("Holds the best hotbar tool from the first packet until the block is gone. The tool must be in the hotbar: only a hotbar slot can be selected, so a pickaxe left in the backpack is invisible here.")
                   .defaultValue(MlepMine.Swap.SILENT)
                .visible(() -> this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
             .build()
@@ -344,7 +344,29 @@ public class MlepMine extends Module {
    private static final long ANTI_CRAWL_DELAY_MS = 100L;
    private int swappedToSlot = -1;
    private int originalSlot = -1;
-   private int swapBackTicks = 0;
+
+   /**
+    * True while this module is the one sending an {@code UpdateSelectedSlotC2SPacket}.
+    *
+    * <p>{@code switch-reset} exists to zero the progress bar when <em>the player</em>
+    * changes slot. Now that the tool swap happens before the first mining packet
+    * rather than after the last, that reset would fire on the module's own packet
+    * and wipe the bar it just started.
+    */
+   private boolean ownSlotChange = false;
+
+   /** Block the tool is currently being held for, and when the hold started. */
+   private BlockPos toolHeldFor = null;
+   private long toolHeldSince = 0L;
+
+   /**
+    * Ceiling on a tool hold, in milliseconds.
+    *
+    * <p>Long enough to cover a real break the server is still working through —
+    * obsidian with a netherite pickaxe is a few seconds — and short enough that a
+    * break the server never grants gives the hand back rather than wedging it.
+    */
+   private static final long TOOL_HOLD_TIMEOUT_MS = 5000L;
    private InventoryManager inventoryManager;
 
    public MlepMine() {
@@ -389,7 +411,9 @@ public class MlepMine extends Module {
 
       this.swappedToSlot = -1;
       this.originalSlot = -1;
-      this.swapBackTicks = 0;
+      this.ownSlotChange = false;
+      this.toolHeldFor = null;
+      this.toolHeldSince = 0L;
       this.lastAutoMineBlock = null;
       this.lastAutoMineTime = 0L;
       this.lastAntiCrawlBlock = null;
@@ -404,13 +428,22 @@ public class MlepMine extends Module {
 
          this.pendingQueue.clear();
          this.fadeList.clear();
-         if (this.swapConfig.get() == MlepMine.Swap.SILENT && this.inventoryManager != null) {
+
+         // The slot is held for as long as a block is being mined, so switching
+         // the module off mid-block is one of the ways that hold has to end —
+         // otherwise the hand keeps the pickaxe until the next break, which for a
+         // module that was just turned off never comes.
+         if (this.swappedToSlot != -1 && this.originalSlot != -1) {
+            this.swapBack(this.originalSlot);
+         } else if (this.swapConfig.get() == MlepMine.Swap.SILENT && this.inventoryManager != null) {
             this.inventoryManager.syncToClient();
          }
 
          this.swappedToSlot = -1;
          this.originalSlot = -1;
-         this.swapBackTicks = 0;
+         this.ownSlotChange = false;
+         this.toolHeldFor = null;
+         this.toolHeldSince = 0L;
          this.lastAutoMineBlock = null;
          this.lastAutoMineTime = 0L;
          this.lastAntiCrawlBlock = null;
@@ -432,7 +465,9 @@ public class MlepMine extends Module {
       this.fadeList.clear();
       this.swappedToSlot = -1;
       this.originalSlot = -1;
-      this.swapBackTicks = 0;
+      this.ownSlotChange = false;
+      this.toolHeldFor = null;
+      this.toolHeldSince = 0L;
       this.lastAutoMineBlock = null;
       this.lastAutoMineTime = 0L;
       this.lastAntiCrawlBlock = null;
@@ -443,15 +478,6 @@ public class MlepMine extends Module {
    @EventHandler
    public void onPlayerTick(Pre event) {
       if (!this.mc.player.isCreative() && !this.mc.player.isSpectator()) {
-         if (this.swapBackTicks > 0) {
-            this.swapBackTicks--;
-            if (this.swapBackTicks == 0 && this.swappedToSlot != -1 && this.originalSlot != -1) {
-               this.swapBack(this.originalSlot);
-               this.swappedToSlot = -1;
-               this.originalSlot = -1;
-            }
-         }
-
          if (!((Keybind)this.autoMineKey.get()).isPressed() || this.mc.currentScreen != null) {
             this.autoMineTogglePressed = false;
          } else if (!this.autoMineTogglePressed) {
@@ -605,6 +631,11 @@ public class MlepMine extends Module {
             // broken entry is removed, so the queue empties between blocks and a
             // promotion nested in there would never fire again after the first one.
             this.promoteFromQueue();
+
+            // After the promotion, never before: a backlog run would otherwise give
+            // the tool back between every pair of blocks and take it again a
+            // millisecond later, two slot packets per block for nothing.
+            this.releaseTool();
          }
       }
    }
@@ -630,11 +661,14 @@ public class MlepMine extends Module {
          this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.ABORT_DESTROY_BLOCK, packet.getPos(), packet.getDirection()));
       }
 
+      // Only a slot change the player made counts. The module's own swap and its
+      // restore are both wrapped in ownSlotChange, which is the whole point: the
+      // swap now lands before the first mining packet, so without this guard it
+      // would reset the progress of the block it is about to start.
       if (event.packet instanceof UpdateSelectedSlotC2SPacket
          && (Boolean)this.switchResetConfig.get()
          && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET
-         && this.swapBackTicks <= 0
-         && this.swappedToSlot == -1) {
+         && !this.ownSlotChange) {
          for (MlepMine.MiningData data : this.ensureMiningQueue()) {
             data.resetDamage();
          }
@@ -864,6 +898,18 @@ public class MlepMine extends Module {
       }
 
       data.setStarted();
+
+      // Before the burst below, not after it. Packet mining sends START and STOP
+      // in the same breath and then lets the server accumulate the break on its
+      // own clock, recomputing the speed each tick from the item it sees in the
+      // hand. Swapping once the client-side bar is full — which is what this used
+      // to do — showed the server the pickaxe for three ticks at the very end,
+      // long after it had measured the whole window at bare-hand speed. On
+      // anything harder than dirt the block simply never broke: the bar filled at
+      // pickaxe speed, the 500 ms attempt timeout dropped the entry, and the
+      // outline vanished with nothing to show for it.
+      this.holdToolFor(data);
+
       float breakDelta = this.calcBlockBreakingDelta(data.getState(), this.mc.world, data.getPos());
       boolean isInstantBreak = breakDelta >= 1.0F;
       if ((Boolean)this.grimNewConfig.get()) {
@@ -912,53 +958,165 @@ public class MlepMine extends Module {
             this.applyMineRotation(rotations);
          }
 
-         int bestSlot = data.getSlot();
-         int currentSlot = ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot();
-         boolean needsSwap = bestSlot != -1 && bestSlot != currentSlot;
-         if (needsSwap && this.swappedToSlot == -1) {
-            this.originalSlot = currentSlot;
-         }
-
-         if (needsSwap) {
-            this.swapTo(bestSlot);
-            this.swappedToSlot = bestSlot;
-            this.swapBackTicks = 3;
-         } else if (this.swappedToSlot != -1) {
-            this.swapBackTicks = 3;
-         }
-
+         // No swap here any more. The tool was taken in startMining and is held
+         // until the block is confirmed gone; changing slot at this point would
+         // restart the server's accumulation on the very block that is one packet
+         // away from breaking.
          this.stopMiningInternal(data);
          this.lastBreak = System.currentTimeMillis();
       }
    }
 
-   private void swapTo(int slot) {
-      switch ((MlepMine.Swap)this.swapConfig.get()) {
-         case NORMAL:
-            ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(slot);
-            this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
-            break;
-         case SILENT:
-            if (this.inventoryManager == null) {
-               this.inventoryManager = InventoryManager.getInstance();
-            }
+   /**
+    * Takes the best hotbar tool for this block and keeps it until the block is gone.
+    *
+    * <p>Called once, from {@link #startMining}, before any mining packet leaves.
+    * It deliberately does nothing on a block already under way: a slot change
+    * during the server's accumulation restarts that accumulation, which is the
+    * same reason {@code switch-reset} exists on the client side.
+    *
+    * <p>The candidate has to beat what is already in the hand, not merely exist.
+    * The old selection walked the hotbar with a floor of zero, and every stack —
+    * dirt, a sword, an empty slot — answers 1.0 when it has no {@code TOOL}
+    * component, so slot 0 always won and the module swapped to it even when the
+    * hand already held the right pickaxe.
+    */
+   private void holdToolFor(MlepMine.MiningData data) {
+      if (this.swapConfig.get() == MlepMine.Swap.OFF) return;
+      if (this.mc.player == null) return;
 
-            this.inventoryManager.setSlot(slot);
+      int best = this.betterToolSlot(data.getState());
+
+      // Nothing beats the hand for this block. If a slot is already held from the
+      // previous block of a run, keep it and just move the watch onto the new
+      // position — giving it back here would be a slot change mid-run, exactly
+      // what the hold exists to avoid. Under NORMAL this is the normal path from
+      // the second block onwards, since the hand is by then the pickaxe itself.
+      if (best == -1) {
+         if (this.swappedToSlot != -1) {
+            this.toolHeldFor = data.getPos();
+            this.toolHeldSince = System.currentTimeMillis();
+         }
+
+         return;
+      }
+
+      if (best != this.swappedToSlot) {
+         if (this.swappedToSlot == -1) {
+            this.originalSlot = ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot();
+         }
+
+         this.swapTo(best);
+         this.swappedToSlot = best;
+      }
+
+      this.toolHeldFor = data.getPos();
+      this.toolHeldSince = System.currentTimeMillis();
+   }
+
+   /**
+    * Gives the hand back once nothing solid is left to mine.
+    *
+    * <p>An empty queue is not enough on its own. With {@code instant} off the
+    * entry is dropped the moment the client-side bar fills, which is precisely the
+    * moment the server may still be accumulating — releasing there would hand the
+    * pickaxe back a tick before the break and reproduce the bug this whole change
+    * exists to fix. So the real signal is the world block turning to air, which is
+    * the block update the server sends when it actually breaks it.
+    *
+    * <p>The timeout is the way out when that update never comes: a break the
+    * server refuses, a chunk unloading, a block someone else replaced. Without it
+    * the hand would stay on the pickaxe indefinitely.
+    */
+   private void releaseTool() {
+      if (this.swappedToSlot == -1 || this.originalSlot == -1) return;
+      if (this.hasSolidMiningEntry()) return;
+
+      if (this.toolHeldFor != null
+         && this.mc.world != null
+         && !this.mc.world.getBlockState(this.toolHeldFor).isAir()
+         && System.currentTimeMillis() - this.toolHeldSince < TOOL_HOLD_TIMEOUT_MS) {
+         return;
+      }
+
+      // The player reached for another slot themselves. Their choice wins: drop
+      // the hold without dragging them back to where the module found them.
+      boolean playerMoved = this.swapConfig.get() == MlepMine.Swap.NORMAL
+         && ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot() != this.swappedToSlot;
+
+      if (!playerMoved) {
+         this.swapBack(this.originalSlot);
+      }
+
+      this.swappedToSlot = -1;
+      this.originalSlot = -1;
+      this.toolHeldFor = null;
+   }
+
+   /**
+    * Hotbar slot that mines this block strictly faster than the held item, or -1.
+    *
+    * <p>Hotbar only, and that is a hard limit rather than an oversight: the slot
+    * packet can only name indices 0-8. Reaching a pickaxe left in the backpack
+    * would mean moving it into the hotbar first — a real inventory click, visible
+    * to the server and to anyone watching. The setting description says so.
+    */
+   private int betterToolSlot(BlockState state) {
+      var inventory = this.mc.player.getInventory();
+      int held = ((PlayerInventoryAccessor)inventory).getSelectedSlot();
+      float bestSpeed = inventory.getStack(held).getMiningSpeedMultiplier(state);
+      int bestSlot = -1;
+
+      for (int i = 0; i < 9; i++) {
+         float speed = inventory.getStack(i).getMiningSpeedMultiplier(state);
+         if (speed > bestSpeed) {
+            bestSpeed = speed;
+            bestSlot = i;
+         }
+      }
+
+      return bestSlot;
+   }
+
+   private void swapTo(int slot) {
+      this.ownSlotChange = true;
+
+      try {
+         switch ((MlepMine.Swap)this.swapConfig.get()) {
+            case NORMAL:
+               ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(slot);
+               this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+               break;
+            case SILENT:
+               if (this.inventoryManager == null) {
+                  this.inventoryManager = InventoryManager.getInstance();
+               }
+
+               this.inventoryManager.setSlot(slot);
+         }
+      } finally {
+         this.ownSlotChange = false;
       }
    }
 
    private void swapBack(int originalSlot) {
-      switch ((MlepMine.Swap)this.swapConfig.get()) {
-         case NORMAL:
-            ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(originalSlot);
-            this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(originalSlot));
-            break;
-         case SILENT:
-            if (this.inventoryManager == null) {
-               this.inventoryManager = InventoryManager.getInstance();
-            }
+      this.ownSlotChange = true;
 
-            this.inventoryManager.syncToClient();
+      try {
+         switch ((MlepMine.Swap)this.swapConfig.get()) {
+            case NORMAL:
+               ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(originalSlot);
+               this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(originalSlot));
+               break;
+            case SILENT:
+               if (this.inventoryManager == null) {
+                  this.inventoryManager = InventoryManager.getInstance();
+               }
+
+               this.inventoryManager.syncToClient();
+         }
+      } finally {
+         this.ownSlotChange = false;
       }
    }
 
