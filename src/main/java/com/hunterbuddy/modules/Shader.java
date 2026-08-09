@@ -40,6 +40,7 @@ import net.minecraft.block.entity.HopperBlockEntity;
 import net.minecraft.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.block.entity.TrappedChestBlockEntity;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.SpawnGroup;
@@ -56,6 +57,20 @@ import net.minecraft.client.world.ClientChunkManager;
 import net.minecraft.world.chunk.WorldChunk;
 
 public class Shader extends Module {
+    /**
+     * One entry per entity type, since the hash behind a shade never changes.
+     *
+     * <p>Cleared whenever the mode, the spread or either family colour changes — the shades
+     * are derived from those, so a stale cache would leave the world painted from settings
+     * the player has already moved on from.
+     */
+    private static final java.util.Map<EntityType<?>, SettingColor> typeColorCache = new ConcurrentHashMap<>();
+
+    public enum EntityColorMode {
+        CATEGORY,
+        PER_TYPE
+    }
+
     private final SettingGroup sgTargets = settings.createGroup("Targets");
     private final SettingGroup sgRender  = settings.createGroup("Render");
     private final SettingGroup sgColors  = settings.createGroup("Colors");
@@ -134,12 +149,30 @@ public class Shader extends Module {
     private final Setting<SettingColor> playersColor = sgColors.add(new ColorSetting.Builder()
         .name("players-color").description("Outline color for other players.")
         .defaultValue(new SettingColor(255, 80, 80, 220)).build());
+    private final Setting<Shader.EntityColorMode> entityColorMode = sgColors.add(
+        new meteordevelopment.meteorclient.settings.EnumSetting.Builder<Shader.EntityColorMode>()
+            .name("entity-color-mode")
+            .description("CATEGORY paints every hostile the same and every passive the same. PER_TYPE keeps those two families but gives each species its own shade inside its family, so a zombie, a skeleton and a creeper stop looking alike without losing what tells you which is dangerous.")
+            .defaultValue(Shader.EntityColorMode.CATEGORY)
+            .onChanged(v -> typeColorCache.clear())
+            .build());
+    private final Setting<Integer> typeColorSpread = sgColors.add(new IntSetting.Builder()
+        .name("type-color-spread")
+        .description("How far a species may drift from its family hue, in degrees. Small keeps the family obvious, large tells species apart more sharply but starts bleeding into neighbouring hues.")
+        .defaultValue(25).min(10).max(60).sliderRange(10, 60)
+        .visible(() -> entityColorMode.get() == Shader.EntityColorMode.PER_TYPE)
+        .onChanged(v -> typeColorCache.clear())
+        .build());
     private final Setting<SettingColor> monstersColor = sgColors.add(new ColorSetting.Builder()
         .name("monsters-color").description("Outline color for hostile mobs.")
-        .defaultValue(new SettingColor(255, 160, 40, 220)).build());
+        .defaultValue(new SettingColor(255, 160, 40, 220))
+        .onChanged(v -> typeColorCache.clear())
+        .build());
     private final Setting<SettingColor> animalsColor = sgColors.add(new ColorSetting.Builder()
         .name("animals-color").description("Outline color for passive mobs.")
-        .defaultValue(new SettingColor(80, 255, 80, 220)).build());
+        .defaultValue(new SettingColor(80, 255, 80, 220))
+        .onChanged(v -> typeColorCache.clear())
+        .build());
     private final Setting<SettingColor> vehiclesColor = sgColors.add(new ColorSetting.Builder()
         .name("vehicles-color").description("Outline color for boats and minecarts.")
         .defaultValue(new SettingColor(255, 255, 80, 220)).build());
@@ -288,17 +321,95 @@ public class Shader extends Module {
         if (e instanceof MinecartEntity) return vehiclesColor.get();
         if (e instanceof LivingEntity le) {
             SpawnGroup g = le.getType().getSpawnGroup();
-            if (g == SpawnGroup.MONSTER) return monstersColor.get();
+            if (g == SpawnGroup.MONSTER) return shadeForType(le.getType(), monstersColor.get());
             if (g == SpawnGroup.CREATURE || g == SpawnGroup.AMBIENT
-                || g == SpawnGroup.WATER_CREATURE || g == SpawnGroup.WATER_AMBIENT) return animalsColor.get();
+                || g == SpawnGroup.WATER_CREATURE || g == SpawnGroup.WATER_AMBIENT) return shadeForType(le.getType(), animalsColor.get());
             String id = net.minecraft.registry.Registries.ENTITY_TYPE.getId(le.getType()).toString();
             if (id.equals("minecraft:armor_stand")) return armorColor.get();
         }
         return othersColor.get();
     }
 
+    /**
+     * The family colour, nudged onto a shade of its own for this species.
+     *
+     * <p>Returns the family colour untouched in CATEGORY mode, so nothing about the existing
+     * look changes unless the mode is switched.
+     *
+     * <p>The nudge is a hue offset derived from the entity type's registry id. Being a hash
+     * of a stable string, a zombie lands on the same shade every session and on every world,
+     * which is what makes the colours learnable rather than merely varied. The offset is
+     * bounded by the spread setting so hostiles stay in the warm half and passives in the
+     * green half: telling a creeper from a skeleton is worth something, but not at the cost
+     * of knowing at a glance which one can kill you.
+     *
+     * <p>Brightness moves too, on a second, independent hash. Hue alone leaves collisions —
+     * inside a window of fifty degrees plenty of species land close together — and a lighter
+     * or darker version of nearly the same hue separates them at no cost to the family read.
+     */
+    private SettingColor shadeForType(EntityType<?> type, SettingColor base) {
+        if (entityColorMode.get() != Shader.EntityColorMode.PER_TYPE) return base;
+
+        return typeColorCache.computeIfAbsent(type, t -> {
+            int spread = typeColorSpread.get();
+            String id = net.minecraft.registry.Registries.ENTITY_TYPE.getId(t).toString();
+
+            float[] hsb = java.awt.Color.RGBtoHSB(clamp(base.r), clamp(base.g), clamp(base.b), null);
+
+            int h = mix(id.hashCode());
+
+            // Spread over 1024 steps rather than one per whole degree. A degree-wide bucket
+            // leaves only 51 slots at the default spread, and with some forty hostile types
+            // the birthday problem alone puts several pairs on the exact same shade —
+            // measured, not assumed: zombie and creeper came out byte-identical.
+            float t01 = (h & 1023) / 1024.0f;
+            float hueOffset = (t01 * 2.0f - 1.0f) * spread / 360.0f;
+            float hue = (hsb[0] + hueOffset + 1.0f) % 1.0f;
+
+            // Darkens only, never brightens. Both family colours ship at full brightness, so
+            // any upward variation was clipped straight back to where it started and the
+            // tie-break silently did nothing.
+            //
+            // The bits come from a different slice of the same mixed hash, not from hashing a
+            // suffixed string. String.hashCode is linear, so h(id + "#shade") is an affine
+            // function of h(id); modulo 1024 that is a bijection, and two types sharing a hue
+            // were therefore guaranteed to share a brightness too. The tie-break was dead in
+            // exactly the case it existed for — hoglin and guardian came out identical, as
+            // did donkey and camel.
+            int shadeHash = (h >>> 10) & 1023;
+            float brightness = Math.max(0.20f, hsb[2] * (1.0f - shadeHash / 1024.0f * 0.30f));
+
+            int rgb = java.awt.Color.HSBtoRGB(hue, hsb[1], brightness);
+
+            // Alpha is carried over rather than rebuilt: these colours ship at 220, and the
+            // outline pass reads it.
+            return new SettingColor((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, base.a);
+        });
+    }
+
     private static int clamp(int v) {
         return Math.max(0, Math.min(255, v));
+    }
+
+    /**
+     * Avalanche step, so slices of the result can be treated as unrelated to one another.
+     *
+     * <p>Raw {@code String.hashCode} values are far from it: for short ids that differ late,
+     * the low bits carry nearly all of the difference and the high bits barely move. Slicing
+     * such a value would give a brightness that tracks the hue instead of separating it. This
+     * is the finalizer from MurmurHash3, which spreads every input bit across all 32.
+     *
+     * <p>Disjoint slices alone are enough for the seventy-odd vanilla mobs — that much is
+     * measured. The mixer is what keeps it true if a mod ever adds a few hundred more, and it
+     * runs once per entity type in a lifetime.
+     */
+    private static int mix(int h) {
+        h ^= h >>> 16;
+        h *= 0x85EBCA6B;
+        h ^= h >>> 13;
+        h *= 0xC2B2AE35;
+        h ^= h >>> 16;
+        return h;
     }
 
     private boolean isTarget(Entity e) {
