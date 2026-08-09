@@ -1,6 +1,8 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.events.PlayerDeathEvent;
+import com.hunterbuddy.events.ServerDisconnectEvent;
 import com.hunterbuddy.modules.regear.util.MsgUtil;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.mojang.authlib.GameProfile;
@@ -225,6 +227,20 @@ public class VisualRangeNotifier extends Module {
     private final Setting<Boolean> discordPvp = sgDiscord.add(new BoolSetting.Builder()
         .name("discord-pvp")
         .description("Send crystal/anchor activity to Discord.")
+        .defaultValue(true)
+        .visible(discordEnabled::get)
+        .build());
+
+    private final Setting<Boolean> discordDeath = sgDiscord.add(new BoolSetting.Builder()
+        .name("discord-death")
+        .description("Send your own death to Discord, with the server's own wording so the killer and the cause come along.")
+        .defaultValue(true)
+        .visible(discordEnabled::get)
+        .build());
+
+    private final Setting<Boolean> discordDisconnect = sgDiscord.add(new BoolSetting.Builder()
+        .name("discord-disconnect")
+        .description("Send every disconnect to Discord — kicks, timeouts and AutoLogPlus alike. Leaving through the menu counts too.")
         .defaultValue(true)
         .visible(discordEnabled::get)
         .build());
@@ -561,10 +577,39 @@ public class VisualRangeNotifier extends Module {
         ));
     }
 
+    @EventHandler
+    private void onPlayerDeath(PlayerDeathEvent event) {
+        if (!discordEnabled.get() || !discordDeath.get() || webhookUrl.get().isEmpty()) return;
+
+        // Snapshot now: by the time the request leaves, the respawn screen has
+        // already moved the player somewhere else.
+        String where = mc.player != null
+            ? String.format("%.0f, %.0f, %.0f", mc.player.getX(), mc.player.getY(), mc.player.getZ())
+            : "unknown";
+
+        sendDiscordAsync("You Died",
+            event.message().getString() + "\nPosition: " + where + "\nDimension: " + getDimension());
+    }
+
+    @EventHandler
+    private void onServerDisconnect(ServerDisconnectEvent event) {
+        if (!discordEnabled.get() || !discordDisconnect.get() || webhookUrl.get().isEmpty()) return;
+
+        // AutoLogPlus writes its own reason into this text, so a logout it caused
+        // arrives already labelled without either module knowing about the other.
+        sendDiscordAsync("Disconnected",
+            "Reason: " + event.reason().getString()
+                + "\nTime: " + java.time.LocalTime.now().withNano(0));
+    }
+
     private void sendDiscordAsync(String title, String message) {
         String url = webhookUrl.get();
         String ping = pingId.get().isEmpty() ? null : pingId.get();
-        String sender = mc.player != null ? mc.player.getGameProfile().name() : "Unknown";
+        // The player is already being torn down while a disconnect is dispatched,
+        // so the session is the only name still available at that point.
+        String sender = mc.player != null
+            ? mc.player.getGameProfile().name()
+            : (mc.getSession() != null ? mc.getSession().getUsername() : "Unknown");
 
         MeteorExecutor.execute(() -> Utils.sendWebhook(url, title, message, ping, sender));
     }
