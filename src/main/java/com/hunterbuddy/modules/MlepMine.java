@@ -119,6 +119,36 @@ public class MlepMine extends Module {
                   .description("Key to toggle the instant mining option")
                .defaultValue(Keybind.none()).build()
       );
+   public final Setting<Boolean> queueConfig = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("queue")
+                     .description("Click several blocks and break them one after another. Nothing is sent for a waiting block, so the server only ever sees one break at a time, exactly as if you clicked them yourself.")
+                  .defaultValue(false)
+               .visible(() -> this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
+               .onChanged(v -> {
+                  if (!Boolean.TRUE.equals(v)) this.pendingQueue.clear();
+               })
+            .build()
+      );
+   private final Setting<Keybind> queueClearKey = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.KeybindSetting.Builder()
+                     .name("queue-clear-key")
+                  .description("Key to drop every block still waiting in the queue.")
+               .defaultValue(Keybind.none())
+               .visible(() -> this.queueConfig.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
+            .build()
+      );
+   private final Setting<SettingColor> queueColor = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
+                     .name("queue-color")
+                  .description("Color of the blocks waiting in the queue.")
+               .defaultValue(new SettingColor(120, 180, 255, 60))
+               .visible(this.queueConfig::get)
+            .build()
+      );
    private final Setting<Boolean> persistentConfig = this.sgGeneral
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -293,6 +323,15 @@ public class MlepMine extends Module {
       );
    private final Map<MlepMine.MiningData, MlepMine.Animation> fadeList = new HashMap<>();
    private MlepMine.FirstOutQueue<MlepMine.MiningData> miningQueue;
+
+   /**
+    * Blocks clicked while something was still breaking. Purely client side —
+    * nothing is sent for an entry until it is promoted into {@link #miningQueue},
+    * so the server never sees more than the one break it already saw before.
+    */
+   private final List<MlepMine.MiningData> pendingQueue = new ArrayList<>();
+   private static final int PENDING_QUEUE_LIMIT = 16;
+   private boolean queueClearPressed;
    private long lastBreak;
    private boolean instantTogglePressed = false;
    private boolean autoMineTogglePressed = false;
@@ -363,6 +402,7 @@ public class MlepMine extends Module {
             this.miningQueue.clear();
          }
 
+         this.pendingQueue.clear();
          this.fadeList.clear();
          if (this.swapConfig.get() == MlepMine.Swap.SILENT && this.inventoryManager != null) {
             this.inventoryManager.syncToClient();
@@ -385,6 +425,10 @@ public class MlepMine extends Module {
          this.miningQueue.clear();
       }
 
+      // Positions are meaningless once the world is gone: kept across a
+      // reconnect, the backlog would happily promote old coordinates and mine
+      // whatever solid block now sits there.
+      this.pendingQueue.clear();
       this.fadeList.clear();
       this.swappedToSlot = -1;
       this.originalSlot = -1;
@@ -416,6 +460,18 @@ public class MlepMine extends Module {
             if (this.mc.player != null) {
                String status = this.autoMine.get() ? "\u00a7aenabled" : "\u00a7cdisabled";
                this.mc.player.sendMessage(Text.literal("\u00a77[\u00a7bMlepMine\u00a77] \u00a7fAuto-mine " + status), false);
+            }
+         }
+
+         if (!((Keybind)this.queueClearKey.get()).isPressed() || this.mc.currentScreen != null) {
+            this.queueClearPressed = false;
+         } else if (!this.queueClearPressed) {
+            this.queueClearPressed = true;
+            int dropped = this.pendingQueue.size();
+            this.pendingQueue.clear();
+            if (this.mc.player != null) {
+               this.mc.player
+                  .sendMessage(Text.literal("\u00a77[\u00a7bMlepMine\u00a77] \u00a7fQueue cleared (" + dropped + " block(s))"), false);
             }
          }
 
@@ -544,6 +600,11 @@ public class MlepMine extends Module {
                   }
                }
             }
+
+            // Outside the "queue not empty" branch on purpose: with instant off the
+            // broken entry is removed, so the queue empties between blocks and a
+            // promotion nested in there would never fire again after the first one.
+            this.promoteFromQueue();
          }
       }
    }
@@ -608,6 +669,30 @@ public class MlepMine extends Module {
    @EventHandler
    public void onRenderWorld(Render3DEvent event) {
       if (!this.mc.player.isCreative() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET && (Boolean)this.render.get()) {
+         // Waiting blocks, drawn small so they read as "later" next to the block
+         // actually being mined. A box vanishing here is also the only feedback a
+         // dropped block gets — nothing is printed for those.
+         if ((Boolean)this.queueConfig.get() && !this.pendingQueue.isEmpty()) {
+            SettingColor pending = (SettingColor)this.queueColor.get();
+
+            for (MlepMine.MiningData waiting : this.pendingQueue) {
+               BlockPos pos = waiting.getPos();
+               event.renderer
+                  .box(
+                     pos.getX() + 0.25,
+                     pos.getY() + 0.25,
+                     pos.getZ() + 0.25,
+                     pos.getX() + 0.75,
+                     pos.getY() + 0.75,
+                     pos.getZ() + 0.75,
+                     pending,
+                     pending,
+                     (ShapeMode)this.shapeMode.get(),
+                     0
+                  );
+            }
+         }
+
          for (MlepMine.MiningData data : this.miningQueue) {
             if (!data.getState().isAir() && !this.fadeList.containsKey(data)) {
                this.fadeList.put(data, new MlepMine.Animation(true, ((Integer)this.fadeTimeConfig.get()).intValue()));
@@ -685,9 +770,78 @@ public class MlepMine extends Module {
    }
 
    public void clickMine(MlepMine.MiningData miningData) {
+      // With the queue on, a click that arrives while something is still solid
+      // goes to the backlog instead of evicting it. Clicking a block already
+      // waiting takes it back out — the same gesture serves as undo.
+      if ((Boolean)this.queueConfig.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET) {
+         if (this.pendingQueue.removeIf(d -> d.getPos().equals(miningData.getPos()))) {
+            return;
+         }
+
+         if (this.hasSolidMiningEntry()) {
+            if (this.isMiningBlock(miningData.getPos())) return;
+            if (miningData.getState().isAir()) return;
+            if (this.pendingQueue.size() >= PENDING_QUEUE_LIMIT) return;
+
+            this.pendingQueue.add(miningData);
+            return;
+         }
+      }
+
       int maxQueueSize = (Boolean) this.doubleBreakConfig.get() ? 2 : 1;
       if (this.ensureMiningQueue().size() <= maxQueueSize) {
          this.queueMiningData(miningData);
+      }
+   }
+
+   /** True while any queued entry still has a block left to break. */
+   private boolean hasSolidMiningEntry() {
+      if (this.miningQueue == null) return false;
+
+      for (MlepMine.MiningData data : this.miningQueue) {
+         if (!data.getState().isAir()) return true;
+      }
+
+      return false;
+   }
+
+   /**
+    * Moves the next clicked block into the real mining queue.
+    *
+    * <p>The gate is "nothing solid left", not "queue empty". With {@code instant}
+    * on, the broken entry is deliberately kept in the queue — that is what makes
+    * a block replaced on the same spot break again at once — so waiting for an
+    * empty queue would stall the backlog after the very first block. Keeping the
+    * air entry around also means {@code addFirst} slides it into the second slot,
+    * so the spot you just cleared stays the hot one while the next block breaks.
+    *
+    * <p>An entry that stays solid because the server refused the break is dropped
+    * by the existing 500 ms attempt timeout, so this cannot deadlock.
+    */
+   private void promoteFromQueue() {
+      if (!(Boolean)this.queueConfig.get() || this.pendingQueue.isEmpty()) return;
+      if (this.modeConfig.get() != MlepMine.SpeedmineMode.PACKET) return;
+      if (this.mc.player == null || this.mc.world == null) return;
+      if (this.mc.player.isUsingItem() && !(Boolean)this.multitaskConfig.get()) return;
+      if (this.hasSolidMiningEntry() || this.isBlockDelayGrim()) return;
+
+      double range = (Double)this.rangeConfig.get();
+      double rangeSq = range * range;
+
+      while (!this.pendingQueue.isEmpty()) {
+         MlepMine.MiningData next = this.pendingQueue.remove(0);
+         BlockPos pos = next.getPos();
+         BlockState state = this.mc.world.getBlockState(pos);
+
+         // Dropped without a word: the queue render disappearing is the feedback,
+         // and a line per block would spam the moment someone else mines part of
+         // your selection or you drift out of range.
+         if (state.isAir()) continue;
+         if (state.getHardness(this.mc.world, pos) < 0.0F) continue;
+         if (this.mc.player.getEyePos().squaredDistanceTo(pos.toCenterPos()) > rangeSq) continue;
+
+         this.queueMiningData(new MlepMine.MiningData(pos, next.getDirection()));
+         return;
       }
    }
 
