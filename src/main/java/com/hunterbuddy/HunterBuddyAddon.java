@@ -59,6 +59,7 @@ import com.hunterbuddy.modules.ItemSearchBar;
 import com.hunterbuddy.modules.RotationDetector;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import com.hunterbuddy.modules.SignRender;
+import com.hunterbuddy.modules.SpawnerDetector;
 import com.hunterbuddy.modules.StashFinder;
 import com.hunterbuddy.modules.TrailFollower;
 import com.hunterbuddy.modules.UnfocusedFpsLimiter;
@@ -134,6 +135,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new MlepScaffold());
         Modules.get().add(new Replenish());
         Modules.get().add(new StashFinder());
+        Modules.get().add(new SpawnerDetector());
         Modules.get().add(new Pitch40());
         Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
