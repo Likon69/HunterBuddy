@@ -112,37 +112,44 @@ public final class HbGlowShader {
 
         float time = (float) glfwGetTime();
         float radius = shader.glowEnabled() ? (float) shader.glowWidth() : 0.0f;
-        int samples = shader.glowSamples();
+        float thickness = shader.outlineEnabled() ? (float) shader.outlineWidth() : 0.0f;
 
         int flags = 0;
         if (shader.glowEnabled()) flags |= 1;
         if (shader.filled()) flags |= 2;
+        if (shader.outlineEnabled()) flags |= 4;
 
-        var linear = RenderSystem.getSamplerCache().get(FilterMode.LINEAR);
+        // Must match the composite's own reach, or the rejection mask would cut
+        // off pixels the distance search still had something to say about.
+        float reach = Math.max(thickness, thickness > 0.0f ? 1.0f : 0.0f) + radius + 1.0f;
+
+        // NEAREST everywhere: both passes read the silhouette as discrete texels.
+        // Linear filtering would blend a transparent neighbour's black into the
+        // colour and hand the distance search fractional coverage it cannot use.
         var nearest = RenderSystem.getSamplerCache().get(FilterMode.NEAREST);
 
-        // Pass 1 — horizontal gaussian into the scratch buffer.
+        // Pass 1 — horizontal dilation, the cheap rejection mask.
         MeshRenderer.begin()
             .attachments(scratch.getColorAttachmentView(), null)
-            .pipeline(HbRenderPipelines.GLOW_BLUR)
+            .pipeline(HbRenderPipelines.GLOW_MASK)
             .fullscreen()
             .uniform("PostData", GlowUniforms.post(width, height, time))
-            .uniform("BlurData", GlowUniforms.blur(1.0f, 0.0f, radius, samples))
-            .sampler("u_Texture", capture.getColorAttachmentView(), linear)
+            .uniform("MaskData", GlowUniforms.mask(reach))
+            .sampler("u_Texture", capture.getColorAttachmentView(), nearest)
             .end();
 
-        // Pass 2 — vertical gaussian + fill, straight onto the main framebuffer.
+        // Pass 2 — distance-field outline, glow and fill onto the main framebuffer.
         MeshRenderer.begin()
             .attachments(mc.getFramebuffer())
             .pipeline(HbRenderPipelines.GLOW_COMPOSITE)
             .fullscreen()
             .uniform("PostData", GlowUniforms.post(width, height, time))
             .uniform("GlowData", GlowUniforms.glow(
-                0.0f, 1.0f, radius, samples,
-                (float) shader.glowIntensity(), (float) shader.fillOpacity(), flags
+                thickness, radius, (float) shader.glowIntensity(),
+                (float) shader.fillOpacity(), shader.glowSamples(), flags
             ))
-            .sampler("u_Texture", scratch.getColorAttachmentView(), linear)
             .sampler("u_Origin", capture.getColorAttachmentView(), nearest)
+            .sampler("u_Mask", scratch.getColorAttachmentView(), nearest)
             .end();
     }
 
