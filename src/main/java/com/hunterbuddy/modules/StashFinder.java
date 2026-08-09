@@ -86,6 +86,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
+import net.minecraft.entity.vehicle.StorageMinecartEntity;
 import net.minecraft.item.Items;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.sound.SoundEvents;
@@ -279,6 +280,14 @@ public class StashFinder extends Module {
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
                      .name("ender-pearls")
                   .description("Detect loaded ender pearl entities (pearls in stasis chambers).")
+               .defaultValue(true)
+            .build()
+      );
+   private final Setting<Boolean> detectStackedMinecarts = this.sgDetection
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                     .name("stacked-minecarts")
+                  .description("Detect several storage minecarts sharing one block. A rail line leaves them spread out; a pile in a single block is somebody hiding shulkers where no chest shows up on a scan.")
                .defaultValue(true)
             .build()
       );
@@ -495,6 +504,15 @@ public class StashFinder extends Module {
                .defaultValue(1)
             .min(0)
             .sliderRange(0, 20)
+            .build()
+      );
+   private final Setting<Integer> minStackedMinecarts = this.sgThresholds
+      .add(
+         new Builder().name("min-stacked-minecarts")
+                  .description("How many storage minecarts must share one block before it counts. Two can happen by accident at a station; three or more is deliberate.")
+               .defaultValue(3)
+            .min(2)
+            .sliderRange(2, 12)
             .build()
       );
    private final Setting<Integer> minNamedEntities = this.sgThresholds
@@ -872,16 +890,47 @@ public class StashFinder extends Module {
       return false;
    }
 
+   /** How many storage minecarts occupy one block right now. */
+   private int countStorageMinecartsAt(BlockPos pos) {
+      if (this.mc.world == null) {
+         return 0;
+      }
+
+      int count = 0;
+
+      for (Entity other : this.mc.world.getEntities()) {
+         if (other instanceof StorageMinecartEntity && other.getBlockPos().equals(pos)) {
+            count++;
+         }
+      }
+
+      return count;
+   }
+
    @EventHandler
    private void onEntityAdded(EntityAddedEvent event) {
       if (this.mc.player != null && this.mc.world != null) {
          Entity entity = event.entity;
          boolean detected = false;
          String detectionType = null;
+         int minecartPileDepth = 0;
          ChunkPos chunkPos;
          if ((Boolean)this.detectEnderPearls.get() && entity instanceof EnderPearlEntity) {
             chunkPos = new ChunkPos(entity.getBlockPos());
             detectionType = "enderPearl";
+            detected = true;
+         } else if ((Boolean)this.detectStackedMinecarts.get() && entity instanceof StorageMinecartEntity) {
+            // Counted at the moment one arrives: the others already sit in the
+            // world by then, so a single sweep of that block gives the real depth
+            // of the pile. Below the threshold nothing is recorded at all, which
+            // is what keeps ordinary rail stations out of the results.
+            minecartPileDepth = this.countStorageMinecartsAt(entity.getBlockPos());
+            if (minecartPileDepth < (Integer)this.minStackedMinecarts.get()) {
+               return;
+            }
+
+            chunkPos = new ChunkPos(entity.getBlockPos());
+            detectionType = "stackedMinecart";
             detected = true;
          } else if ((Boolean)this.detectNamedEntities.get() && entity instanceof LivingEntity living) {
             if (!living.hasCustomName()) {
@@ -938,6 +987,11 @@ public class StashFinder extends Module {
                   case "mapItemFrame":
                      chunk.mapItemFrames++;
                      break;
+                  case "stackedMinecart":
+                     // The depth of the pile, not a running total: every cart in it
+                     // fires this handler, so incrementing would count it N times.
+                     chunk.stackedMinecarts = Math.max(chunk.stackedMinecarts, minecartPileDepth);
+                     break;
                   case "itemFrame":
                      chunk.itemFrames++;
                }
@@ -992,6 +1046,8 @@ public class StashFinder extends Module {
          && (Integer)this.minEnderPearls.get() == 0
          && (Integer)this.minNamedEntities.get() == 0;
       if (allZero) {
+         return true;
+      } else if ((Integer)this.minStackedMinecarts.get() > 0 && chunk.stackedMinecarts >= (Integer)this.minStackedMinecarts.get()) {
          return true;
       } else if ((Integer)this.minChests.get() > 0 && chunk.chests >= (Integer)this.minChests.get()) {
          return true;
@@ -1114,6 +1170,7 @@ public class StashFinder extends Module {
                   mergedChunk.itemFrames = mergedChunk.itemFrames + c.itemFrames;
                   mergedChunk.enderPearls = mergedChunk.enderPearls + c.enderPearls;
                   mergedChunk.namedEntities = mergedChunk.namedEntities + c.namedEntities;
+                  mergedChunk.stackedMinecarts = Math.max(mergedChunk.stackedMinecarts, c.stackedMinecarts);
                   if (c.getTotal() > bestTotal) {
                      bestTotal = c.getTotal();
                      mergedChunk.x = c.x;
@@ -1330,6 +1387,10 @@ public class StashFinder extends Module {
 
                         if (chunk.enderPearls > 0) {
                            content.append("• Ender Pearls: ").append(chunk.enderPearls).append("\n");
+                        }
+
+                        if (chunk.stackedMinecarts > 0) {
+                           content.append("• Stacked Minecarts: ").append(chunk.stackedMinecarts).append(" in one block\n");
                         }
 
                         if (chunk.namedEntities > 0) {
@@ -1874,6 +1935,7 @@ public class StashFinder extends Module {
       public int itemFrames;
       public int enderPearls;
       public int namedEntities;
+      public int stackedMinecarts;
 
       public StashChunk(ChunkPos chunkPos) {
          this.chunkPos = chunkPos;
@@ -1930,7 +1992,8 @@ public class StashFinder extends Module {
                && this.mapItemFrames == c.mapItemFrames
                && this.itemFrames == c.itemFrames
                && this.enderPearls == c.enderPearls
-               && this.namedEntities == c.namedEntities;
+               && this.namedEntities == c.namedEntities
+               && this.stackedMinecarts == c.stackedMinecarts;
       }
 
       @Override
