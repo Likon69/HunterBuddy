@@ -68,9 +68,8 @@ public class Circle extends AreaLoaderMode {
       } else if (!file.exists()) {
          this.startFreshFromPlayer();
          this.debugInfo(
-            "Polar spiral started: center=(%d, %d), scale=%.0f, steps/orbit=%.0f, dir=%s",
-            this.pd.centerX,
-            this.pd.centerZ,
+            "Polar spiral started: center=%s, scale=%.0f, steps/orbit=%.0f, dir=%s",
+            this.searchArea.coords(this.pd.centerX, this.pd.centerZ),
             this.scale(),
             ((Number)this.searchArea.circleSteps.get()).doubleValue(),
             this.searchArea.circleDirection.get()
@@ -87,9 +86,8 @@ public class Circle extends AreaLoaderMode {
             } else {
                this.goingToStart = true;
                this.debugInfo(
-                  "Loaded polar spiral state: center=(%d, %d), angle=%.4f rad (%.1f deg)",
-                  this.pd.centerX,
-                  this.pd.centerZ,
+                  "Loaded polar spiral state: center=%s, angle=%.4f rad (%.1f deg)",
+                  this.searchArea.coords(this.pd.centerX, this.pd.centerZ),
                   this.pd.currentAngle,
                   Math.toDegrees(this.pd.currentAngle)
                );
@@ -107,8 +105,30 @@ public class Circle extends AreaLoaderMode {
     *  spiral step on a ray from the configured center through the player,
     *  exactly like the reference onEnable(). */
    private void startFreshFromPlayer() {
-      int cx = ((BlockPos)this.searchArea.circleCenter.get()).getX();
-      int cz = ((BlockPos)this.searchArea.circleCenter.get()).getZ();
+      BlockPos configured = (BlockPos)this.searchArea.circleCenter.get();
+      int cx = configured.getX();
+      int cz = configured.getZ();
+
+      // An unset centre means "start here", not "start at spawn". The spiral is
+      // r = scale * angle, so a centre thousands of blocks away puts the first
+      // goal at that same radius: with the default 64 steps per orbit, each leg
+      // is 2*PI*radius/64 blocks long and turns only 5.6 degrees. At 5000 blocks
+      // out that is a 490-block leg — geometrically a spiral, visually a straight
+      // line — and past the loop's 1000-winding cap the goal lands hundreds of
+      // thousands of blocks away. The reference has a Reset Center button for
+      // exactly this; defaulting to the player is the same thing without a click.
+      //
+      // Deliberately not written back into the setting: the centre lives in the
+      // pathing data instead. Writing it would refill the field the moment the
+      // module starts, which makes the reset button next to it look broken —
+      // you clear it, it comes back. Left empty, the field stays a pure user
+      // override, and "Set Here" is there for whoever wants to pin one.
+      if (cx == 0 && cz == 0) {
+         cx = this.mc.player.getBlockX();
+         cz = this.mc.player.getBlockZ();
+         ChatUtils.info("Polar spiral centre set to your position: %s", this.searchArea.coords(cx, cz));
+      }
+
       double playerX = this.mc.player.getX();
       double playerZ = this.mc.player.getZ();
       double rps = this.radiansPerStep();
@@ -216,7 +236,7 @@ public class Circle extends AreaLoaderMode {
          if (deltaX * deltaX + deltaZ * deltaZ < 1.0) {
             this.pd.currentAngle += this.radiansPerStep();
             this.updateGoalFromAngle();
-            this.debugInfo("Polar spiral: advanced to angle=%.2f deg, goal=(%.1f, %.1f)", Math.toDegrees(this.pd.currentAngle), this.pd.goalX, this.pd.goalZ);
+            this.debugInfo("Polar spiral: advanced to angle=%.2f deg, goal=%s", Math.toDegrees(this.pd.currentAngle), this.searchArea.coords(this.pd.goalX, this.pd.goalZ));
          }
       } else {
          // First tick: seed the goal.

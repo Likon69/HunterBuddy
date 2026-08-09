@@ -223,7 +223,7 @@ public class AreaRecoveryScreen extends WindowScreen {
          if (corner != null) {
             this.currentXEdit.set(String.valueOf(corner[0]));
             this.currentZEdit.set(String.valueOf(corner[1]));
-            ChatUtils.info("Resume coordinates set to next corner: (%d, %d)", new Object[]{corner[0], corner[1]});
+            ChatUtils.info("Resume coordinates set to next corner: %s", new Object[]{this.searchArea.coords(corner[0], corner[1])});
          }
       }
    }
