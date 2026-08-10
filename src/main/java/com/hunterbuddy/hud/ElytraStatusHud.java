@@ -1,6 +1,10 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.util.ElytraFlightMath;
+import com.hunterbuddy.util.HudGlowPanel;
+import java.util.ArrayList;
+import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -10,6 +14,7 @@ import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -139,6 +144,33 @@ public class ElytraStatusHud extends HudElement {
          .defaultValue(new SettingColor(255, 80, 80, 255)).build()
    );
 
+   private final SettingGroup sgPanel = settings.createGroup("Panel");
+   private final HudGlowPanel panel = new HudGlowPanel(this.sgPanel);
+
+   /**
+    * Segments queued for this frame, so the panel can be sized and drawn under them.
+    *
+    * <p>The line used to be drawn field by field as it was computed, which meant its width was
+    * only known once everything was already on screen — too late to put anything behind it.
+    */
+   private final List<Segment> segments = new ArrayList<>();
+
+   /**
+    * State of the smooth countdown on the worn elytra.
+    *
+    * <p>Durability only drops once every few seconds — four, at Unbreaking III — and the time is
+    * that durability multiplied back up. So the reading sat still and then fell by four at once,
+    * which looks like a fault even though the arithmetic is right. These carry the last real
+    * measurement and when it was taken, so the seconds in between can be counted off one by one.
+    */
+   private int flightAnchorSeconds = -1;
+   private int flightAnchorDurability = -1;
+   private long flightAnchorAt;
+   private HudGlowPanel.Severity severity = HudGlowPanel.Severity.OK;
+
+   private record Segment(String prefix, String value, String unit, SettingColor color, boolean first) {
+   }
+
    public ElytraStatusHud() {
       super(INFO);
    }
@@ -150,6 +182,9 @@ public class ElytraStatusHud extends HudElement {
          return;
       }
 
+      this.segments.clear();
+      this.severity = HudGlowPanel.Severity.OK;
+
       Vec3d vel = MeteorClient.mc.player.getVelocity();
       double bps = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 20.0;
       float pitch = MeteorClient.mc.player.getPitch();
@@ -160,6 +195,10 @@ public class ElytraStatusHud extends HudElement {
       int durability = hasElytra ? chest.getMaxDamage() - chest.getDamage() : -1;
       int maxDurability = hasElytra ? chest.getMaxDamage() : -1;
       int rockets = hasElytra ? this.countRockets() : -1;
+
+      // Flying without one is the worst state the line can report, and no field says so on its
+      // own: the durability slot just reads "None" in grey.
+      if (!hasElytra) this.severity = HudGlowPanel.Severity.CRITICAL;
 
       boolean shadow = this.textShadow.get();
       double scale = this.textScale.get();
@@ -233,7 +272,7 @@ public class ElytraStatusHud extends HudElement {
       }
 
       if (this.showFlight.get()) {
-         int seconds = this.flightSecondsOf(chest);
+         int seconds = this.smoothFlightSeconds(chest, durability);
          SettingColor flightColor;
 
          if (!hasElytra) {
@@ -241,8 +280,13 @@ public class ElytraStatusHud extends HudElement {
          } else if (seconds <= 0) {
             flightColor = this.dangerColor.get();
          } else {
-            // Reuses the durability warning threshold so both fields turn at once.
-            flightColor = (seconds * 100.0) / maxDurability < this.lowDurabilityPct.get()
+            // Measured against durability, not against seconds. Once Unbreaking multiplies
+            // the time, seconds can run to several times the maximum durability, and a
+            // percentage built from them would sit above a hundred for most of the flight —
+            // the warning would simply never arrive. Durability is the quantity the threshold
+            // is written in, so both fields still turn at the same moment.
+            int pctLeft = (durability * 100) / maxDurability;
+            flightColor = pctLeft < this.lowDurabilityPct.get()
                ? this.warnColor.get() : this.valueColor.get();
          }
 
@@ -295,7 +339,15 @@ public class ElytraStatusHud extends HudElement {
          totalWidth = curX - this.x;
       }
 
-      this.setSize(Math.max(totalWidth, 80.0), textHeight);
+      // The content sits one padding in, so the panel it stands on lands exactly on the element
+      // box. Drawn from the raw origin instead, the panel would spill past the top and left of
+      // what the editor lets you grab.
+      double width = Math.max(totalWidth, 80.0);
+      double inset = this.panel.padding();
+      this.panel.draw(renderer, this.x + inset, this.y + inset, width, textHeight, this.severity);
+      this.flushSegments(renderer, shadow, scale, pad, inset);
+
+      this.setSize(width + inset * 2.0, textHeight + inset * 2.0);
    }
 
    /**
@@ -306,92 +358,116 @@ public class ElytraStatusHud extends HudElement {
     * end of the line whenever the last enabled field changed — and which field is
     * last is a runtime question, since every one of them has its own toggle.
     */
+   /** Queues one field and returns where the next would start. */
    private double drawSegment(HudRenderer renderer, double curX, double curY,
                               String prefix, String value, String unit, SettingColor valueColor,
                               boolean shadow, double scale, boolean first, double pad) {
-      double x = curX;
+      this.segments.add(new Segment(prefix, value, unit, valueColor, first));
+      this.severity = HudGlowPanel.worst(this.severity, severityOf(valueColor));
 
-      if (!first) {
-         x += pad;
-         renderer.text("·", x, curY, this.labelColor.get(), shadow, scale);
-         x += renderer.textWidth("·", shadow, scale) + pad;
-      }
-
-      if (prefix != null) {
-         renderer.text(prefix, x, curY, this.labelColor.get(), shadow, scale);
-         x += renderer.textWidth(prefix, shadow, scale);
-      }
-
-      renderer.text(value, x, curY, valueColor, shadow, scale);
-      x += renderer.textWidth(value, shadow, scale);
-
-      if (unit != null) {
-         renderer.text(unit, x, curY, this.labelColor.get(), shadow, scale);
-         x += renderer.textWidth(unit, shadow, scale);
-      }
-
-      return x;
+      return curX + this.segmentWidth(renderer, prefix, value, unit, first, shadow, scale, pad);
    }
 
    /**
-    * Seconds of gliding left in a stack, or 0 when it is at or under the reserve.
+    * Severity read back from the colour the field chose.
     *
-    * <p>A gliding item takes one point of damage every twenty ticks — verified in
-    * {@code LivingEntity}: the wear fires when {@code fallFlyTicks % 10 == 0} and
-    * the resulting count is even. Remaining durability is therefore remaining
-    * seconds of flight, one for one. Nothing here depends on fireworks; boosting
-    * covers more ground in the same seconds, it does not spend the elytra faster.
+    * <p>Taken from the colour rather than recomputed: every threshold already decides one, and
+    * a second copy of that logic would be a second thing to keep in agreement. The comparison
+    * is by reference, which holds because a setting hands back the same instance every call.
     */
+   private HudGlowPanel.Severity severityOf(SettingColor color) {
+      if (color == this.dangerColor.get()) return HudGlowPanel.Severity.CRITICAL;
+      if (color == this.warnColor.get()) return HudGlowPanel.Severity.WARN;
+      return HudGlowPanel.Severity.OK;
+   }
+
+   private double segmentWidth(HudRenderer renderer, String prefix, String value, String unit,
+                               boolean first, boolean shadow, double scale, double pad) {
+      double w = 0.0;
+      if (!first) w += pad * 2 + renderer.textWidth("·", shadow, scale);
+      if (prefix != null) w += renderer.textWidth(prefix, shadow, scale);
+      w += renderer.textWidth(value, shadow, scale);
+      if (unit != null) w += renderer.textWidth(unit, shadow, scale);
+      return w;
+   }
+
+   /** Draws the queued fields left to right, once the panel is underneath them. */
+   private void flushSegments(HudRenderer renderer, boolean shadow, double scale, double pad, double inset) {
+      double x = this.x + inset;
+      double y = this.y + inset;
+
+      for (Segment segment : this.segments) {
+         if (!segment.first) {
+            x += pad;
+            renderer.text("·", x, y, this.labelColor.get(), shadow, scale);
+            x += renderer.textWidth("·", shadow, scale) + pad;
+         }
+
+         if (segment.prefix != null) {
+            renderer.text(segment.prefix, x, y, this.labelColor.get(), shadow, scale);
+            x += renderer.textWidth(segment.prefix, shadow, scale);
+         }
+
+         renderer.text(segment.value, x, y, segment.color, shadow, scale);
+         x += renderer.textWidth(segment.value, shadow, scale);
+
+         if (segment.unit != null) {
+            renderer.text(segment.unit, x, y, this.labelColor.get(), shadow, scale);
+            x += renderer.textWidth(segment.unit, shadow, scale);
+         }
+      }
+   }
+
+   /**
+    * The worn elytra's remaining seconds, counted down continuously.
+    *
+    * <p>Re-anchored on every genuine durability change, so it can never drift away from the
+    * truth: between two drops it merely spends the seconds the last drop bought, and the moment
+    * a real one lands it snaps back to whatever the item says.
+    *
+    * <p>Only ticks down while you are gliding. On the ground the elytra is not being spent, and a
+    * number falling while you stand still would be a lie.
+    */
+   private int smoothFlightSeconds(ItemStack chest, int durability) {
+      int actual = this.flightSecondsOf(chest);
+
+      if (durability != this.flightAnchorDurability || actual > this.flightAnchorSeconds) {
+         this.flightAnchorDurability = durability;
+         this.flightAnchorSeconds = actual;
+         this.flightAnchorAt = System.currentTimeMillis();
+         return actual;
+      }
+
+      if (MeteorClient.mc.player == null || !MeteorClient.mc.player.isGliding()) {
+         this.flightAnchorAt = System.currentTimeMillis();
+         return actual;
+      }
+
+      int elapsed = (int) ((System.currentTimeMillis() - this.flightAnchorAt) / 1000L);
+      return Math.max(0, actual - elapsed);
+   }
+
    private int flightSecondsOf(ItemStack stack) {
-      if (!stack.isOf(Items.ELYTRA)) return 0;
-
-      int max = stack.getMaxDamage();
-      if (max <= 0) return 0;
-
-      // The reserve is what stops you landing on a broken elytra at 20k blocks out.
-      int reserve = Math.max(1, (int) Math.ceil(max * this.unusablePct.get() / 100.0));
-      return Math.max(0, max - stack.getDamage() - reserve);
+      return ElytraFlightMath.flightSecondsOf(stack, this.unusablePct.get());
    }
 
-   /** Wearable elytras in the inventory, the equipped one included. */
    private int countUsableElytras() {
-      int count = 0;
-      // Bounded to the backpack, not to size(): PlayerInventory.size() is
-      // main.size() + EQUIPMENT_SLOTS.size(), so the loop would walk over the
-      // chest slot and the worn elytra would then be counted a second time by the
-      // explicit add below. That inflated the spare count by one — the "only one
-      // left" warning could never fire — and the total by a full elytra, several
-      // kilometres of range that do not exist.
-      var inventory = MeteorClient.mc.player.getInventory().getMainStacks();
-
-      for (int i = 0; i < inventory.size(); i++) {
-         if (this.flightSecondsOf(inventory.get(i)) > 0) count++;
-      }
-
-      if (this.flightSecondsOf(MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST)) > 0) count++;
-
-      return count;
+      return ElytraFlightMath.countUsableElytras(MeteorClient.mc.player, this.unusablePct.get());
    }
 
-   /** Total gliding seconds across every usable elytra, equipped one included. */
    private int totalFlightSeconds() {
-      int total = 0;
-      // Bounded to the backpack, not to size(): PlayerInventory.size() is
-      // main.size() + EQUIPMENT_SLOTS.size(), so the loop would walk over the
-      // chest slot and the worn elytra would then be counted a second time by the
-      // explicit add below. That inflated the spare count by one — the "only one
-      // left" warning could never fire — and the total by a full elytra, several
-      // kilometres of range that do not exist.
-      var inventory = MeteorClient.mc.player.getInventory().getMainStacks();
-
-      for (int i = 0; i < inventory.size(); i++) {
-         total += this.flightSecondsOf(inventory.get(i));
-      }
-
-      return total + this.flightSecondsOf(MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST));
+      return ElytraFlightMath.totalUsableSeconds(MeteorClient.mc.player, this.unusablePct.get());
    }
 
+   /**
+    * Minutes and seconds, or hours and minutes once there is more than an hour of it.
+    *
+    * <p>Past sixty minutes the m:ss form stops being read as a duration at all: twenty elytras
+    * came out as {@code 549:00}, which looks like a count of something rather than nine hours
+    * of flight. The worn elytra keeps the familiar form, since it never reaches an hour.
+    */
    private static String formatTime(int seconds) {
+      if (seconds >= 3600) return String.format("%dh %02dm", seconds / 3600, (seconds % 3600) / 60);
       return String.format("%d:%02d", seconds / 60, seconds % 60);
    }
 
