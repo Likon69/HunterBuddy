@@ -132,13 +132,27 @@ public class PingMeterHud extends HudElement {
         double left = x + pad;
         double top = y + pad;
 
+        // With no latency reported, the big figure becomes the one thing actually measured on
+        // this side: how long ago the server last spoke. It answers the question the ping was
+        // there to answer — is the line alive — without pretending to a number nobody sent.
+        boolean hasMs = !live || PingSampler.get().hasLatency();
+
         Color pingColor = ping < 0 ? labelColor.get()
             : ping >= criticalPing.get() ? criticalColor.get()
             : ping >= warnPing.get() ? warnColor.get()
             : valueColor.get();
 
-        renderer.text(ping < 0 ? "-" : String.valueOf(ping), left, top, pingColor, shadow, bigScale);
-        renderer.text(" ms", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
+        if (!hasMs) {
+            String age = keepAliveAge < 0.0 ? "-" : String.format("%.0f", keepAliveAge);
+            Color ageColor = keepAliveAge > 20.0 ? criticalColor.get()
+                : keepAliveAge > 10.0 ? warnColor.get() : valueColor.get();
+
+            renderer.text(age, left, top, ageColor, shadow, bigScale);
+            renderer.text(" s idle", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
+        } else {
+            renderer.text(ping < 0 ? "-" : String.valueOf(ping), left, top, pingColor, shadow, bigScale);
+            renderer.text(" ms", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
+        }
 
         drawSparkline(renderer, history, left + pingSlot + msW + 6.0 * scale, top + 1.0, sparkW, sparkH);
 
