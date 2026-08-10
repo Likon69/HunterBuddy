@@ -60,22 +60,6 @@ public class ElytraHelperHud extends HudElement {
                .defaultValue(true)
             .build()
       );
-   private final Setting<Boolean> showEquipped = this.sgSections
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("show-equipped")
-                  .description("Show equipped elytra durability and estimated remaining flight time.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> showInventory = this.sgSections
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("show-inventory")
-                  .description("Show total flight time from all elytras in inventory.")
-               .defaultValue(true)
-            .build()
-      );
    private final Setting<Boolean> showSession = this.sgSections
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -115,14 +99,6 @@ public class ElytraHelperHud extends HudElement {
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
                      .name("show-speed")
                   .description("Show current flight speed.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> showModuleStatus = this.sgSections
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("show-module-status")
-                  .description("Show status of hunt modules (AreaLoader, TrailFollower, ElytraSwap, etc.).")
                .defaultValue(true)
             .build()
       );
@@ -235,63 +211,7 @@ public class ElytraHelperHud extends HudElement {
             curY += lineH + spacing;
          }
 
-         if ((Boolean)this.showEquipped.get()) {
-            ItemStack chest = MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-            if (chest.getItem() == Items.ELYTRA) {
-               int durability = chest.getMaxDamage() - chest.getDamage();
-               int maxDurability = chest.getMaxDamage();
-               int unbreaking = this.getUnbreakingLevel(chest);
-               double flightSeconds = this.calcFlightSeconds(durability, unbreaking);
-               String durText = durability + "/" + maxDurability;
-               if (unbreaking > 0) {
-                  durText = durText + " (U" + unbreaking + ")";
-               }
 
-               String timeText = this.formatTime((long)flightSeconds);
-               SettingColor durColor = this.getDurabilityColor(durability, maxDurability);
-               String label = this.compactMode.get() ? "Eq: " : "Equipped: ";
-               maxW = Math.max(maxW, this.drawLabelValue(renderer, label, durText + " | " + timeText, curX, curY, durColor));
-            } else {
-               String label = this.compactMode.get() ? "Eq: " : "Equipped: ";
-               maxW = Math.max(maxW, this.drawLabelValue(renderer, label, "None", curX, curY, (SettingColor)this.dangerColor.get()));
-            }
-
-            curY += lineH + spacing;
-         }
-
-         if ((Boolean)this.showInventory.get()) {
-            int totalElytras = 0;
-            double totalFlightSeconds = 0.0;
-            int bestDurability = 0;
-
-            for (int i = 0; i < 36; i++) {
-               ItemStack stack = MeteorClient.mc.player.getInventory().getStack(i);
-               if (stack.getItem() == Items.ELYTRA) {
-                  int dur = stack.getMaxDamage() - stack.getDamage();
-                  int ub = this.getUnbreakingLevel(stack);
-                  totalFlightSeconds += this.calcFlightSeconds(dur, ub);
-                  totalElytras++;
-                  bestDurability = Math.max(bestDurability, dur);
-               }
-            }
-
-            ItemStack chest = MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-            if (chest.getItem() == Items.ELYTRA) {
-               int dur = chest.getMaxDamage() - chest.getDamage();
-               int ub = this.getUnbreakingLevel(chest);
-               totalFlightSeconds += this.calcFlightSeconds(dur, ub);
-               totalElytras++;
-               bestDurability = Math.max(bestDurability, dur);
-            }
-
-            String invLabel = this.compactMode.get() ? "Inv: " : "Inventory: ";
-            String invValue = totalElytras + "x | " + this.formatTime((long)totalFlightSeconds);
-            SettingColor invColor = totalElytras > 2
-               ? (SettingColor)this.goodColor.get()
-               : (totalElytras > 0 ? (SettingColor)this.warnColor.get() : (SettingColor)this.dangerColor.get());
-            maxW = Math.max(maxW, this.drawLabelValue(renderer, invLabel, invValue, curX, curY, invColor));
-            curY += lineH + spacing;
-         }
 
          if ((Boolean)this.showSession.get()) {
             maxW = Math.max(
@@ -312,6 +232,18 @@ public class ElytraHelperHud extends HudElement {
             String distLabel = this.compactMode.get() ? "Dist: " : "Distance: ";
             maxW = Math.max(
                maxW, this.drawLabelValue(renderer, distLabel, this.formatDistance(this.sessionDistance), curX, curY, (SettingColor)this.valueColor.get())
+            );
+            curY += lineH + spacing;
+
+            // Read from SessionStats rather than counted here: HuntTally shows the same number,
+            // and two tallies of one thing are two chances to disagree.
+            String rocketLabel = this.compactMode.get() ? "Rkt: " : "Rockets: ";
+            maxW = Math.max(
+               maxW,
+               this.drawLabelValue(
+                  renderer, rocketLabel, String.valueOf(com.hunterbuddy.util.SessionStats.get().rocketsUsed()),
+                  curX, curY, (SettingColor)this.valueColor.get()
+               )
             );
             curY += lineH + spacing;
             if ((Boolean)this.showAverageSpeed.get()) {
@@ -351,22 +283,6 @@ public class ElytraHelperHud extends HudElement {
             curY += lineH + spacing;
          }
 
-         if ((Boolean)this.showModuleStatus.get()) {
-            maxW = Math.max(
-               maxW, this.drawText(renderer, this.compactMode.get() ? "-- Modules --" : "--- Modules ---", curX, curY, (SettingColor)this.sectionColor.get())
-            );
-            curY += lineH + spacing;
-            maxW = Math.max(maxW, this.drawModuleStatus(renderer, "AreaLoader", AreaLoader.class, curX, curY));
-            curY += lineH + spacing;
-            maxW = Math.max(maxW, this.drawModuleStatus(renderer, "TrailFollower", TrailFollower.class, curX, curY));
-            curY += lineH + spacing;
-            maxW = Math.max(maxW, this.drawModuleStatus(renderer, "ElytraSwap", ElytraSwap.class, curX, curY));
-            curY += lineH + spacing;
-            maxW = Math.max(maxW, this.drawModuleStatus(renderer, "ElytraBounce", ElytraBounce.class, curX, curY));
-            curY += lineH + spacing;
-            maxW = Math.max(maxW, this.drawModuleStatus(renderer, "ElytraRecast", ElytraRecast.class, curX, curY));
-            curY += lineH + spacing;
-         }
 
          this.setSize(Math.max(maxW, 80.0), curY - this.y);
       } else {
@@ -376,23 +292,7 @@ public class ElytraHelperHud extends HudElement {
       }
    }
 
-   private int getUnbreakingLevel(ItemStack stack) {
-      return Utils.getEnchantmentLevel(stack, Enchantments.UNBREAKING);
-   }
 
-   private double calcFlightSeconds(int durability, int unbreakingLevel) {
-      int usable = Math.max(0, durability - 1);
-      if (usable == 0) {
-         return 0.0;
-      }
-
-      if (unbreakingLevel <= 0) {
-         return usable;
-      }
-
-      double lossChance = (60.0 + 40.0 / (unbreakingLevel + 1)) / 100.0;
-      return usable / lossChance;
-   }
 
    private double drawText(HudRenderer renderer, String text, double dx, double dy, SettingColor color) {
       renderer.text(text, dx, dy, color, (Boolean)this.textShadow.get(), (Double)this.textScale.get());
@@ -407,14 +307,6 @@ public class ElytraHelperHud extends HudElement {
       return lw + vw;
    }
 
-   private double drawModuleStatus(HudRenderer renderer, String name, Class<? extends Module> clazz, double dx, double dy) {
-      Module module = Modules.get().get(clazz);
-      boolean active = module != null && module.isActive();
-      String label = (this.compactMode.get() ? name.substring(0, Math.min(name.length(), 6)) : name) + ": ";
-      String status = active ? "ON" : "OFF";
-      SettingColor statusColor = active ? (SettingColor)this.goodColor.get() : (SettingColor)this.dangerColor.get();
-      return this.drawLabelValue(renderer, label, status, dx, dy, statusColor);
-   }
 
    private String formatTime(long totalSeconds) {
       if (totalSeconds < 0L) {
@@ -448,18 +340,6 @@ public class ElytraHelperHud extends HudElement {
       return base;
    }
 
-   private SettingColor getDurabilityColor(int current, int max) {
-      if (max <= 0) {
-         return (SettingColor)this.dangerColor.get();
-      } else {
-         double pct = (double)current / max;
-         if (pct > 0.5) {
-            return (SettingColor)this.goodColor.get();
-         } else {
-            return pct > 0.2 ? (SettingColor)this.warnColor.get() : (SettingColor)this.dangerColor.get();
-         }
-      }
-   }
 
    private void renderEditorPreview(HudRenderer renderer) {
       double curX = this.x;
@@ -472,20 +352,14 @@ public class ElytraHelperHud extends HudElement {
          curY += lineH + spacing;
       }
 
-      if ((Boolean)this.showEquipped.get()) {
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "Equipped: ", "318/432 (U3) | 7m 34s", curX, curY, (SettingColor)this.goodColor.get()));
-         curY += lineH + spacing;
-      }
 
-      if ((Boolean)this.showInventory.get()) {
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "Inventory: ", "4x | 45m 12s", curX, curY, (SettingColor)this.goodColor.get()));
-         curY += lineH + spacing;
-      }
 
       if ((Boolean)this.showSession.get()) {
          maxW = Math.max(maxW, this.drawText(renderer, "--- Session ---", curX, curY, (SettingColor)this.sectionColor.get()));
          curY += lineH + spacing;
          maxW = Math.max(maxW, this.drawLabelValue(renderer, "Flying: ", "12m 34s", curX, curY, (SettingColor)this.valueColor.get()));
+         curY += lineH + spacing;
+         maxW = Math.max(maxW, this.drawLabelValue(renderer, "Rockets: ", "48", curX, curY, (SettingColor)this.valueColor.get()));
          curY += lineH + spacing;
          maxW = Math.max(maxW, this.drawLabelValue(renderer, "Session: ", "25m 10s", curX, curY, (SettingColor)this.valueColor.get()));
          curY += lineH + spacing;
@@ -500,20 +374,6 @@ public class ElytraHelperHud extends HudElement {
          curY += lineH + spacing;
       }
 
-      if ((Boolean)this.showModuleStatus.get()) {
-         maxW = Math.max(maxW, this.drawText(renderer, "--- Modules ---", curX, curY, (SettingColor)this.sectionColor.get()));
-         curY += lineH + spacing;
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "AreaLoader: ", "ON", curX, curY, (SettingColor)this.goodColor.get()));
-         curY += lineH + spacing;
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "TrailFollower: ", "OFF", curX, curY, (SettingColor)this.dangerColor.get()));
-         curY += lineH + spacing;
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "ElytraSwap: ", "ON", curX, curY, (SettingColor)this.goodColor.get()));
-         curY += lineH + spacing;
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "ElytraBounce: ", "ON", curX, curY, (SettingColor)this.goodColor.get()));
-         curY += lineH + spacing;
-         maxW = Math.max(maxW, this.drawLabelValue(renderer, "ElytraRecast: ", "OFF", curX, curY, (SettingColor)this.dangerColor.get()));
-         curY += lineH + spacing;
-      }
 
       this.setSize(Math.max(maxW, 80.0), curY - this.y);
    }
