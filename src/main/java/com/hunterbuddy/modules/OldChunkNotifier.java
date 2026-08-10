@@ -320,6 +320,18 @@ public class OldChunkNotifier extends Module {
         return true;
     }
 
+    /**
+     * Whether this chunk sits in a confirmed old-chunk cluster.
+     *
+     * <p>For the heat-map HUD, which asks about the grid around the player once a second. Only
+     * confirmed states count: the pending ones are exactly the noise the cluster threshold
+     * exists to hold back.
+     */
+    public boolean isConfirmedOld(RegistryKey<World> dimension, int chunkX, int chunkZ) {
+        ChunkState state = trackedChunks.get(new ChunkKey(dimension, chunkX, chunkZ));
+        return state != null && state.confirmed;
+    }
+
     private ChunkState trackChunk(ChunkKey key, DetectedChunkType type, boolean offHighway) {
         ChunkState state = trackedChunks.get(key);
         if (state == null) {
@@ -406,6 +418,15 @@ public class OldChunkNotifier extends Module {
             ChunkState state = trackedChunks.get(chunk);
             state.confirmed = true;
             if (wantsMarkers) createMapMarker(chunk);
+        }
+
+        // Once per new cluster, not per chunk: an extension of a cluster already announced is
+        // the same trail, and the feed line would otherwise repeat for every chunk it grows by.
+        if (!joinsConfirmedCluster) {
+            com.hunterbuddy.util.HuntFeed.get().publish(
+                com.hunterbuddy.util.HuntFeed.Type.OLD_CHUNK,
+                "Old chunks · cluster of " + pendingCluster.size(),
+                new net.minecraft.util.math.BlockPos(pos.x() << 4, 0, pos.z() << 4));
         }
 
         Set<ChunkKey> confirmedCluster = collectCluster(pos, true);

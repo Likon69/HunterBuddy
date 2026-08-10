@@ -927,6 +927,11 @@ public class StashFinder extends Module {
                boolean isNew = prevChunk == null || !chunk.countsEqual(prevChunk);
                if (isNew && this.meetsThresholds(chunk)) {
                   this.addWaypoint(chunk);
+                  com.hunterbuddy.util.SessionStats.get().onStashFound();
+                  com.hunterbuddy.util.HuntFeed.get()
+                     .publish(com.hunterbuddy.util.HuntFeed.Type.STASH,
+                        "Stash · " + chunk.getTotal() + " containers",
+                        new BlockPos(chunk.x, 0, chunk.z));
                   if ((Boolean)this.sendNotifications.get()) {
                      this.sendNotification(chunk);
                   }
@@ -1198,6 +1203,11 @@ public class StashFinder extends Module {
                   boolean isNew = prevChunk == null || !chunk.countsEqual(prevChunk);
                   if (isNew && this.meetsThresholds(chunk)) {
                      this.addWaypoint(chunk);
+                  com.hunterbuddy.util.SessionStats.get().onStashFound();
+                  com.hunterbuddy.util.HuntFeed.get()
+                     .publish(com.hunterbuddy.util.HuntFeed.Type.STASH,
+                        "Stash · " + chunk.getTotal() + " containers",
+                        new BlockPos(chunk.x, 0, chunk.z));
                      if ((Boolean)this.sendNotifications.get()) {
                         this.sendNotification(chunk);
                      }
