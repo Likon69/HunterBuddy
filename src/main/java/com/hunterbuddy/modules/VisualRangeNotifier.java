@@ -685,23 +685,86 @@ public class VisualRangeNotifier extends Module {
      * own subscription is therefore delivered to nobody; this object is still listening.
      */
     public static final class Hooks {
+        /**
+         * Identifies the departure currently waiting to be announced, or 0.
+         *
+         * <p>A join clears it, which is how a transfer is told apart from a real exit.
+         */
+        private static volatile long pendingLeave;
+
+        /** How long a reasonless departure waits to see whether you are simply arriving. */
+        private static final long TRANSFER_GRACE_MS = 4000L;
+
+        /**
+         * A session has to last this long before leaving it counts as leaving.
+         *
+         * <p>Connecting to this server is a sequence of leaves: the queue hands you to the main
+         * server through a reconfiguration, and Meteor posts a departure for it. The arrival that
+         * follows can be a long way behind — reconfiguration is not instant — so waiting a few
+         * seconds for it is not enough to tell the two apart. What does tell them apart is that
+         * you were never really there: a transient happens seconds into a session, a real exit
+         * happens after you have played.
+         */
+        private static final long MIN_SESSION_MS = 45_000L;
+
+        /** When the current session actually began, or 0 if none has. */
+        private static volatile long joinedAt;
+
         @EventHandler
         private void onGameLeft(meteordevelopment.meteorclient.events.game.GameLeftEvent event) {
             VisualRangeNotifier module = Modules.get().get(VisualRangeNotifier.class);
-            HunterBuddyAddon.LOG.info("[HB] game left: module={} active={}",
-                module != null, module != null && module.isActive());
-
             if (module == null || !module.isActive()) return;
 
-            // A reason from the last second or so belongs to this departure; anything older is
-            // left over from a previous one and would mislabel a clean logout as a kick.
-            net.minecraft.text.Text reason =
-                (lastDisconnectReason != null && System.currentTimeMillis() - lastDisconnectReasonAt < 2000L)
-                    ? lastDisconnectReason
-                    : net.minecraft.text.Text.literal("Left the server");
+            boolean fromServer = lastDisconnectReason != null
+                && System.currentTimeMillis() - lastDisconnectReasonAt < 2000L;
 
-            lastDisconnectReason = null;
-            module.onDisconnect(reason);
+            if (fromServer) {
+                // A kick or a timeout is unambiguous and worth knowing about at once, even if
+                // AutoReconnect is about to bring you straight back.
+                net.minecraft.text.Text reason = lastDisconnectReason;
+                lastDisconnectReason = null;
+                pendingLeave = 0L;
+                module.onDisconnect(reason);
+                return;
+            }
+
+            // Nothing to leave. Either no session has started at all — the game has just been
+            // launched — or it began moments ago, which on this server means you are still
+            // arriving rather than departing.
+            long began = joinedAt;
+            if (began == 0L || System.currentTimeMillis() - began < MIN_SESSION_MS) {
+                pendingLeave = 0L;
+                return;
+            }
+
+            // Past that, a departure still waits briefly: a server transfer mid-session looks
+            // the same until the arrival that follows it proves otherwise.
+            long token = System.nanoTime();
+            pendingLeave = token;
+
+            MeteorExecutor.execute(() -> {
+                try {
+                    Thread.sleep(TRANSFER_GRACE_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+
+                if (pendingLeave != token) return;
+                pendingLeave = 0L;
+
+                VisualRangeNotifier late = Modules.get().get(VisualRangeNotifier.class);
+                if (late == null || !late.isActive()) return;
+
+                late.onDisconnect(net.minecraft.text.Text.literal("Left the server"));
+            });
+        }
+
+        @EventHandler
+        private void onGameJoined(GameJoinedEvent event) {
+            // An arrival means the departure just seen was a step on the way in.
+            pendingLeave = 0L;
+            joinedAt = System.currentTimeMillis();
         }
     }
 
