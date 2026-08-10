@@ -6,12 +6,15 @@ import com.hunterbuddy.hud.DubCounterHud;
 import com.hunterbuddy.hud.ElytraHelperHud;
 import com.hunterbuddy.hud.ElytraStatusHud;
 import com.hunterbuddy.hud.EntityList;
+import com.hunterbuddy.hud.HuntTallyHud;
 import com.hunterbuddy.hud.ItemCounterHud;
 import com.hunterbuddy.hud.MobInfo;
 import com.hunterbuddy.hud.MovementStatusHud;
+import com.hunterbuddy.hud.RegearStatusHud;
 import com.hunterbuddy.hud.SpeedKMH;
 import com.hunterbuddy.hud.SystemStatsHud;
 import com.hunterbuddy.hud.TimerSpeedHud;
+import com.hunterbuddy.hud.TravelHud;
 import com.hunterbuddy.commands.logistics.SetClear;
 import com.hunterbuddy.commands.logistics.SetInput;
 import com.hunterbuddy.commands.logistics.SetOutput;
@@ -96,6 +99,14 @@ public class HunterBuddyAddon extends MeteorAddon {
         LOG.info("Initializing HunterBuddy Addon");
         StashMoverSelectionHandler.init();
         MeteorClient.EVENT_BUS.subscribe(HbGlowShader.class);
+        com.hunterbuddy.util.SessionStats.init();
+        com.hunterbuddy.util.HuntFeed.init();
+        com.hunterbuddy.util.ActivityTracker.init();
+        com.hunterbuddy.util.TpsSampler.init();
+        com.hunterbuddy.util.ChunkStreamSampler.init();
+        com.hunterbuddy.util.PingSampler.init();
+        com.hunterbuddy.util.LifetimeStats.init();
+        MeteorClient.EVENT_BUS.subscribe(new com.hunterbuddy.modules.VisualRangeNotifier.Hooks());
 
         // HUDs
         Hud.get().register(ElytraHelperHud.INFO);
@@ -109,6 +120,19 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(TimerSpeedHud.INFO);
         Hud.get().register(SystemStatsHud.INFO);
         Hud.get().register(ElytraStatusHud.INFO);
+        Hud.get().register(RegearStatusHud.INFO);
+        Hud.get().register(TravelHud.INFO);
+        Hud.get().register(HuntTallyHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.Pitch40CycleHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.FindsTickerHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.SpiralCoverageHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.ThreatBoardHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.TpsCardiogramHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.PingMeterHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.OdometerHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.SessionTimelineHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.SpeedSpectrumHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.DimensionBannerHud.INFO);
 
         // HunterBuddy modules
         // Modules.get().add(new AFKVanillaFly());
