@@ -649,6 +649,39 @@ public abstract class AreaLoaderMode {
       return this.type.toString();
    }
 
+   /**
+    * A read-only sketch of this mode's path for the SpiralCoverage HUD: an ordered world-XZ
+    * polyline, how many leading segments are already flown, the current position, and a little
+    * text. Null when there is nothing to draw (no path loaded).
+    */
+   public CoveragePreview coveragePreview() {
+      return null;
+   }
+
+   public static final class CoveragePreview {
+      public final java.util.List<double[]> points;
+      public final int flownSegments;
+      public final double currentX;
+      public final double currentZ;
+      public final String label;
+      public final String detail;
+      public final double nextTurnDistance;
+      public final boolean recovering;
+
+      public CoveragePreview(java.util.List<double[]> points, int flownSegments, double currentX,
+                             double currentZ, String label, String detail, double nextTurnDistance,
+                             boolean recovering) {
+         this.points = points;
+         this.flownSegments = flownSegments;
+         this.currentX = currentX;
+         this.currentZ = currentZ;
+         this.label = label;
+         this.detail = detail;
+         this.nextTurnDistance = nextTurnDistance;
+         this.recovering = recovering;
+      }
+   }
+
    protected enum CurrentDimension {
       OVERWORLD,
       NETHER,

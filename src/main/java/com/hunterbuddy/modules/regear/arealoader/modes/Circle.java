@@ -312,6 +312,44 @@ public class Circle extends AreaLoaderMode {
       }
    }
 
+   @Override
+   public AreaLoaderMode.CoveragePreview coveragePreview() {
+      if (this.pd == null) {
+         return null;
+      }
+
+      double s = this.scale();
+      double flip = (double) this.flip();
+      double cur = this.pd.currentAngle;
+      double end = cur + 4.0 * Math.PI;
+
+      double step = this.radiansPerStep();
+      int maxPts = 360;
+      if (step <= 0.0 || end / step > maxPts) {
+         step = end / maxPts;
+      }
+
+      java.util.List<double[]> points = new java.util.ArrayList<>();
+      int flown = 0;
+      for (double a = 0.0; a <= end; a += step) {
+         double px = this.pd.centerX + s * a * flip * Math.cos(a);
+         double pz = this.pd.centerZ + s * a * Math.sin(a);
+         points.add(new double[]{px, pz});
+         if (a <= cur) {
+            flown = points.size() - 1;
+         }
+      }
+
+      double curX = this.mc.player != null ? this.mc.player.getX() : this.pd.centerX;
+      double curZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.centerZ;
+
+      double nextTurn = this.pd.goalX == 0.0 && this.pd.goalZ == 0.0
+         ? -1.0 : Math.hypot(this.pd.goalX - curX, this.pd.goalZ - curZ);
+
+      return new AreaLoaderMode.CoveragePreview(points, flown, curX, curZ, "circle",
+         "r " + (int) Math.round(s * cur), nextTurn, false);
+   }
+
    public enum SpiralDirection {
       CLOCKWISE,
       COUNTERCLOCKWISE;

@@ -388,6 +388,63 @@ public class ZigZag extends AreaLoaderMode {
       }
    }
 
+   @Override
+   public AreaLoaderMode.CoveragePreview coveragePreview() {
+      if (this.pd == null || this.pd.initialPos == null || this.pd.currPos == null) {
+         return null;
+      }
+
+      int legLength = (Integer) this.searchArea.zigzagLegLength.get();
+      int rowGap = (Integer) this.searchArea.zigzagRowGap.get();
+
+      java.util.List<double[]> points = new java.util.ArrayList<>();
+      double x = this.pd.initialPos.getX();
+      double z = this.pd.initialPos.getZ();
+      points.add(new double[]{x, z});
+
+      boolean onMain = true;
+      boolean forward = true;
+      int legs = this.pd.legsCompleted + 4;
+      for (int i = 0; i < legs * 2; i++) {
+         float yaw = onMain ? (forward ? this.pd.mainYaw : this.normalizeYaw(this.pd.mainYaw + 180.0F)) : this.pd.sideYaw;
+         int dist = onMain ? legLength : rowGap;
+         double[] d = yawStep(yaw);
+         x += d[0] * dist;
+         z += d[1] * dist;
+         points.add(new double[]{x, z});
+         if (onMain) {
+            onMain = false;
+         } else {
+            onMain = true;
+            forward = !forward;
+         }
+      }
+
+      double curX = this.mc.player != null ? this.mc.player.getX() : this.pd.currPos.getX();
+      double curZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.currPos.getZ();
+
+      int flown = Math.min(points.size() - 1, this.pd.legsCompleted * 2);
+
+      double nextTurn = this.nextWaypointTarget != null
+         ? Math.hypot(this.nextWaypointTarget.getX() - curX, this.nextWaypointTarget.getZ() - curZ) : -1.0;
+
+      return new AreaLoaderMode.CoveragePreview(points, flown, curX, curZ, "zigzag",
+         legLength + "/" + rowGap, nextTurn, this.recovering);
+   }
+
+   private static double[] yawStep(float yaw) {
+      float n = ((yaw % 360.0F) + 360.0F) % 360.0F;
+      if (n >= 315.0F || n < 45.0F) {
+         return new double[]{0.0, 1.0};
+      } else if (n < 135.0F) {
+         return new double[]{-1.0, 0.0};
+      } else if (n < 225.0F) {
+         return new double[]{0.0, -1.0};
+      } else {
+         return new double[]{1.0, 0.0};
+      }
+   }
+
    public static class PathingDataZigZag extends AreaLoaderMode.PathingData {
       public float mainYaw;
       public float sideYaw;
