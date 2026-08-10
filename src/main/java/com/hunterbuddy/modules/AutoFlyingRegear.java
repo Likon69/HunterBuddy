@@ -3869,7 +3869,77 @@ public class AutoFlyingRegear extends Module {
    public String getInfoString() {
       int rockets = this.countRockets();
       int elytras = this.countValidElytras();
-      return rockets + "R/" + elytras + "E - " + this.state.name();
+      return rockets + "R/" + elytras + "E - " + this.getPhaseLabel();
+   }
+
+   /**
+    * The current state, named for a human.
+    *
+    * <p>Thirty-three states is the right granularity for the machine and the wrong one for
+    * anybody watching: {@code WAIT_SHULKER_PICKUP} says nothing that {@code Shulker} does not,
+    * and the raw enum name was what the module reported in the Meteor list.
+    */
+   public String getPhaseLabel() {
+      if (this.state == null) return "Idle";
+
+      return switch (this.state) {
+         case IDLE, COMPLETE -> "Idle";
+         case TAKING_OFF -> "Takeoff";
+         case SWAP_TO_CHESTPLATE, DISABLING_MODULES -> "Preparing";
+         case DROPPING, CENTERING_ON_PLATFORM, CREATING_INITIAL_PLATFORM, CREATING_WALLS,
+              CLEARING_ECHEST_AREA -> "Platform";
+         case ROTATING_FOR_ECHEST, PLACING_ECHEST, WAIT_ECHEST_PLACE, OPENING_ECHEST,
+              OPENING_ECHEST_RETURN -> "Ender chest";
+         case TAKING_SHULKER, WAIT_SHULKER_TAKEN, POSITIONING_FOR_SHULKER, ROTATING_FOR_SHULKER,
+              PLACING_SHULKER, WAIT_SHULKER_PLACE, OPENING_SHULKER, BREAKING_SHULKER,
+              WAIT_SHULKER_BREAK, WAIT_SHULKER_PICKUP, RETURNING_SHULKER,
+              CHECK_NEXT_SHULKER -> "Shulker";
+         case TRANSFERRING_ITEMS -> "Transfer";
+         case BREAKING_ECHEST, WAIT_ECHEST_BREAK -> "Recovering chest";
+         case REPAIRING_ELYTRA -> "Mending elytra";
+         case RESTORING_ELYTRA -> "Restoring elytra";
+         case CLEANUP -> "Cleanup";
+      };
+   }
+
+   /** True while the machine is doing anything at all. */
+   public boolean isBusy() {
+      return this.state != null
+         && this.state != AutoFlyingRegear.FlyingRegearState.IDLE
+         && this.state != AutoFlyingRegear.FlyingRegearState.COMPLETE;
+   }
+
+   public AutoFlyingRegear.ElytraMode getElytraMode() {
+      return this.elytraMode.get();
+   }
+
+   public int getBottleCount() {
+      return this.mc.player == null ? 0 : this.countExperienceBottles();
+   }
+
+   public int getRocketCount() {
+      return this.mc.player == null ? 0 : this.countRockets();
+   }
+
+   public int getValidElytraCount() {
+      return this.mc.player == null ? 0 : this.countValidElytras();
+   }
+
+   /**
+    * Durability percentage of the elytra being mended, or -1 when none is.
+    *
+    * <p>Deliberately the progress of the operation and not the full durability picture — that
+    * belongs to the elytra status line, and repeating it here would be two places to keep in
+    * agreement for no gain.
+    */
+   public int getRepairPercent() {
+      if (this.state != AutoFlyingRegear.FlyingRegearState.REPAIRING_ELYTRA) return -1;
+      if (this.mc.player == null || this.repairHotbarSlot == -1) return -1;
+
+      ItemStack held = this.mc.player.getInventory().getStack(this.repairHotbarSlot);
+      if (held.getItem() != Items.ELYTRA || held.getMaxDamage() <= 0) return -1;
+
+      return (held.getMaxDamage() - held.getDamage()) * 100 / held.getMaxDamage();
    }
 
    private enum FlyingRegearState {
