@@ -468,6 +468,48 @@ public class Rectangle extends AreaLoaderMode {
       }
    }
 
+   @Override
+   public AreaLoaderMode.CoveragePreview coveragePreview() {
+      if (this.pd == null || this.pd.initialPos == null || this.pd.targetPos == null || this.pd.currPos == null) {
+         return null;
+      }
+
+      int gap = Math.max(16, 16 * (Integer) this.searchArea.rowGap.get());
+      int x0 = this.pd.initialPos.getX();
+      int z0 = this.pd.initialPos.getZ();
+      int x1 = this.pd.targetPos.getX();
+      int z1 = this.pd.targetPos.getZ();
+      int stepZ = z1 >= z0 ? gap : -gap;
+
+      java.util.List<double[]> points = new java.util.ArrayList<>();
+      int z = z0;
+      boolean toEnd = true;
+      points.add(new double[]{x0, z});
+      for (int row = 0; row < 400; row++) {
+         int rowX = toEnd ? x1 : x0;
+         points.add(new double[]{rowX, z});
+         if ((stepZ > 0 && z >= z1) || (stepZ < 0 && z <= z1)) {
+            break;
+         }
+
+         z += stepZ;
+         points.add(new double[]{rowX, z});
+         toEnd = !toEnd;
+      }
+
+      double curX = this.mc.player != null ? this.mc.player.getX() : this.pd.currPos.getX();
+      double curZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.currPos.getZ();
+
+      int rowsCompleted = Math.abs(this.pd.lastCompleteRowZ - z0) / gap;
+      int flown = Math.min(points.size() - 1, rowsCompleted * 2);
+
+      double nextTurn = this.nextWaypointTarget != null
+         ? Math.hypot(this.nextWaypointTarget.getX() - curX, this.nextWaypointTarget.getZ() - curZ) : -1.0;
+
+      return new AreaLoaderMode.CoveragePreview(points, flown, curX, curZ, "rect",
+         Math.abs(x1 - x0) + "x" + Math.abs(z1 - z0), nextTurn, this.recovering);
+   }
+
    public static class PathingDataRectangle extends AreaLoaderMode.PathingData {
       public BlockPos targetPos;
       public int lastCompleteRowZ;

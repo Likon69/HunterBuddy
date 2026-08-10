@@ -129,6 +129,57 @@ public class Spiral extends AreaLoaderMode {
       this.debugInfo("Spiral state reset. Next activation will start fresh.");
    }
 
+   /**
+    * A read-only view of where the spiral has got to, for the SpiralCoverage HUD.
+    *
+    * <p>Null while no path is loaded. The block gap is resolved here because it lives on the
+    * module settings, and a HUD replaying the legs must use the same one the pathing did.
+    */
+   public Snapshot snapshot() {
+      if (this.pd == null || this.pd.spiralOrigin == null || this.pd.currPos == null || this.pd.initialPos == null) {
+         return null;
+      }
+
+      return new Snapshot(this.pd.spiralOrigin, this.pd.initialPos, this.pd.currPos,
+         this.pd.spiralWidth, this.pd.spiralHeight, this.pd.yawDirection, this.pd.mainPath,
+         this.goingToStart, this.recovering, 16 * (Integer)this.searchArea.rowGap.get());
+   }
+
+   public record Snapshot(BlockPos origin, BlockPos legStart, BlockPos current, int width, int height,
+                          float yaw, boolean mainPath, boolean goingToStart, boolean recovering, int blockGap) {
+   }
+
+   @Override
+   public AreaLoaderMode.CoveragePreview coveragePreview() {
+      if (this.pd == null || this.pd.spiralOrigin == null || this.pd.currPos == null) {
+         return null;
+      }
+
+      int gap = Math.max(16, 16 * (Integer) this.searchArea.rowGap.get());
+      int legsDone = (this.pd.spiralWidth + this.pd.spiralHeight) / gap;
+
+      java.util.List<Spiral.SpiralCornerState> corners =
+         this.generateSpiralCorners(this.pd.spiralOrigin.getX(), this.pd.spiralOrigin.getZ(), gap, legsDone + 4);
+
+      java.util.List<double[]> points = new java.util.ArrayList<>();
+      for (Spiral.SpiralCornerState c : corners) {
+         points.add(new double[]{c.cornerX, c.cornerZ});
+      }
+
+      double curX = this.mc.player != null ? this.mc.player.getX() : this.pd.currPos.getX();
+      double curZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.currPos.getZ();
+
+      double nextTurn = -1.0;
+      int nextIdx = Math.min(legsDone + 1, points.size() - 1);
+      if (nextIdx >= 0) {
+         double[] n = points.get(nextIdx);
+         nextTurn = Math.hypot(n[0] - curX, n[1] - curZ);
+      }
+
+      return new AreaLoaderMode.CoveragePreview(points, legsDone, curX, curZ, "spiral",
+         this.pd.spiralWidth + "x" + this.pd.spiralHeight, nextTurn, this.recovering);
+   }
+
    @Override
    public void onTick() {
       super.onTick();

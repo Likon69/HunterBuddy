@@ -264,6 +264,11 @@ public class AreaLoader extends Module {
       );
    private AreaLoaderMode currentMode = new Rectangle();
 
+   /** The mode object currently driving the loader. Read by the SpiralCoverage HUD. */
+   public AreaLoaderMode currentMode() {
+      return this.currentMode;
+   }
+
    public AreaLoader() {
       super(
          HunterBuddyAddon.HUNT_CATEGORY,
