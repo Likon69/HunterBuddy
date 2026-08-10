@@ -287,6 +287,10 @@ public class SpawnerDetector extends Module {
     private void record(BlockPos pos, Category category, String mob, int chests) {
         found.put(pos, new Detection(category, mob, chests, new Animation(fadeTime.get())));
 
+        com.hunterbuddy.util.HuntFeed.get().publish(
+            com.hunterbuddy.util.HuntFeed.Type.SPAWNER,
+            category.label + " spawner · " + mob, pos);
+
         if (chatFeedback.get()) {
             info("%s spawner at %d %d %d (%d container%s)",
                 category.label, pos.getX(), pos.getY(), pos.getZ(), chests, chests == 1 ? "" : "s");

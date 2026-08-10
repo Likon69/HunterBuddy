@@ -695,6 +695,10 @@ public class MlepMine extends Module {
          for (MlepMine.MiningData data : this.miningQueue) {
             if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
                data.setAttemptedBreak(false);
+
+               // The server confirming the block is gone, which is the only moment a break is
+               // certain: the client-side bar filling proves nothing.
+               com.hunterbuddy.util.SessionStats.get().onBlockMined();
             }
          }
       }
