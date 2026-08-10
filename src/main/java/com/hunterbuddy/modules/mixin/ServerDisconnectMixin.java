@@ -25,6 +25,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class ServerDisconnectMixin {
     @Inject(method = "onDisconnected", at = @At("HEAD"))
     private void hb$onDisconnected(DisconnectionInfo info, CallbackInfo ci) {
-        MeteorClient.EVENT_BUS.post(new ServerDisconnectEvent(info.reason()));
+        com.hunterbuddy.HunterBuddyAddon.LOG.info("[HB] mixin fired: {}", "ServerDisconnectMixin.java");
+        com.hunterbuddy.modules.VisualRangeNotifier.notifyDisconnect(info.reason());
     }
 }

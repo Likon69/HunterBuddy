@@ -20,6 +20,7 @@ import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.sound.PositionedSoundInstance;
@@ -283,10 +284,27 @@ public class VisualRangeNotifier extends Module {
     private void onTick(Pre event) {
         if (mc.player == null || mc.world == null) return;
 
-        if (playerEnter.get() || playerLeave.get()) tickPlayers();
-        if (itemNotify.get()) tickItems();
-        if (anchorPop.get()) tickAnchorTracking();
+        // Each watch is isolated. Run one after another in a bare sequence, a single failure in
+        // the first silently takes the other two with it — the module goes quiet everywhere at
+        // once and nothing says which part broke. Caught here, a failing watch costs only itself
+        // and names itself in the log.
+        if (playerEnter.get() || playerLeave.get()) guard("players", this::tickPlayers);
+        if (itemNotify.get()) guard("items", this::tickItems);
+        if (anchorPop.get()) guard("anchors", this::tickAnchorTracking);
     }
+
+    /** Reports the first failure of each watch once, rather than once per tick. */
+    private void guard(String what, Runnable task) {
+        try {
+            task.run();
+        } catch (Exception e) {
+            if (reportedFailures.add(what)) {
+                HunterBuddyAddon.LOG.error("[HB] VisualRange '{}' watch failed", what, e);
+            }
+        }
+    }
+
+    private final Set<String> reportedFailures = new HashSet<>();
 
     @EventHandler
     public void onReceivePacket(Receive event) {
@@ -327,7 +345,14 @@ public class VisualRangeNotifier extends Module {
         if (mc.player == null) return false;
         if (player == mc.player) return true;
         if (player.getUuid().equals(mc.player.getUuid())) return true;
-        return player.getGameProfile().name().equals(mc.player.getGameProfile().name());
+
+        // Compared through Objects.equals, and never the other way round. Written as
+        // player.getGameProfile().name().equals(mine), one neighbour with no profile name — which
+        // a server can perfectly well send — throws here. And this is the first thing done to the
+        // first player of the loop, so that throw took the whole watch with it: no sighting, no
+        // item, no anchor, in complete silence.
+        return java.util.Objects.equals(player.getGameProfile().name(),
+            mc.player.getGameProfile().name());
     }
 
     private void tickPlayers() {
@@ -338,6 +363,15 @@ public class VisualRangeNotifier extends Module {
                 UUID uuid = player.getUuid();
                 currentPlayers.add(uuid);
                 uuidNameCache.put(uuid, player.getGameProfile().name());
+
+                if (!trackedPlayers.contains(uuid)
+                    && (!ignoreFriends.get() || !Friends.get().isFriend(player))) {
+                    // The feed line is not gated on the chat/webhook toggles: the HUDs reading it
+                    // want the sighting itself, however the notifier is configured to announce it.
+                    com.hunterbuddy.util.HuntFeed.get().publish(
+                        com.hunterbuddy.util.HuntFeed.Type.PLAYER_ENTER,
+                        player.getGameProfile().name(), player.getBlockPos());
+                }
 
                 if (playerEnter.get() && !trackedPlayers.contains(uuid) &&
                     (!ignoreFriends.get() || !Friends.get().isFriend(player))) {
@@ -366,6 +400,18 @@ public class VisualRangeNotifier extends Module {
                     }
                 }
             }
+        }
+
+        for (UUID uuid : trackedPlayers) {
+            if (currentPlayers.contains(uuid)) continue;
+            if (ignoreFriends.get()) {
+                PlayerListEntry entry = mc.getNetworkHandler() != null ?
+                    mc.getNetworkHandler().getPlayerListEntry(uuid) : null;
+                if (entry != null && Friends.get().get(entry.getProfile().name()) != null) continue;
+            }
+
+            com.hunterbuddy.util.HuntFeed.get().publish(
+                com.hunterbuddy.util.HuntFeed.Type.PLAYER_LEAVE, getNameFromUuid(uuid), null);
         }
 
         if (playerLeave.get()) {
@@ -596,8 +642,73 @@ public class VisualRangeNotifier extends Module {
         ));
     }
 
-    @EventHandler
-    private void onPlayerDeath(PlayerDeathEvent event) {
+    /**
+     * Announces your death. Called straight from the mixin, not through the event bus.
+     *
+     * <p>The bus is not usable at this point in a session's life. Meteor unsubscribes every
+     * active module when it posts {@code GameLeftEvent}, and it posts that from
+     * {@code MinecraftClient.disconnect} — which {@code onDisconnected} calls on its second
+     * instruction. Quitting by hand goes through {@code disconnect} first of all, so by the time
+     * the disconnect reaches a listener there are no listeners left: the notification was being
+     * posted into an empty room. Reaching the module directly sidesteps the whole question,
+     * since the instance outlives its subscription.
+     */
+    public static void notifyDeath(net.minecraft.text.Text message) {
+        VisualRangeNotifier module = Modules.get().get(VisualRangeNotifier.class);
+        if (module == null || !module.isActive()) return;
+
+        module.onDeath(message);
+    }
+
+    /**
+     * Records why the server dropped you, for the notification that follows.
+     *
+     * <p>Only a disconnect the server initiates carries a reason, and only that kind reaches
+     * {@code onDisconnected} at all — leaving through the menu closes the connection from this
+     * side and never calls it. So this stores the reason rather than sending: the send happens
+     * on the one signal both kinds of departure share.
+     */
+    public static void notifyDisconnect(net.minecraft.text.Text reason) {
+        lastDisconnectReason = reason;
+        lastDisconnectReasonAt = System.currentTimeMillis();
+    }
+
+    private static net.minecraft.text.Text lastDisconnectReason;
+    private static long lastDisconnectReasonAt;
+
+    /**
+     * The listener that outlives the module.
+     *
+     * <p>Subscribed once when the addon loads and never unsubscribed, unlike a module — which
+     * Meteor detaches from the bus the moment it posts {@code GameLeftEvent}, from inside
+     * {@code MinecraftClient.disconnect}. A departure notification delivered through a module's
+     * own subscription is therefore delivered to nobody; this object is still listening.
+     */
+    public static final class Hooks {
+        @EventHandler
+        private void onGameLeft(meteordevelopment.meteorclient.events.game.GameLeftEvent event) {
+            VisualRangeNotifier module = Modules.get().get(VisualRangeNotifier.class);
+            HunterBuddyAddon.LOG.info("[HB] game left: module={} active={}",
+                module != null, module != null && module.isActive());
+
+            if (module == null || !module.isActive()) return;
+
+            // A reason from the last second or so belongs to this departure; anything older is
+            // left over from a previous one and would mislabel a clean logout as a kick.
+            net.minecraft.text.Text reason =
+                (lastDisconnectReason != null && System.currentTimeMillis() - lastDisconnectReasonAt < 2000L)
+                    ? lastDisconnectReason
+                    : net.minecraft.text.Text.literal("Left the server");
+
+            lastDisconnectReason = null;
+            module.onDisconnect(reason);
+        }
+    }
+
+    private void onDeath(net.minecraft.text.Text message) {
+        HunterBuddyAddon.LOG.info("[HB] death hook: enabled={} death={} url={}",
+            discordEnabled.get(), discordDeath.get(), !webhookUrl.get().isEmpty());
+
         if (!discordEnabled.get() || !discordDeath.get() || webhookUrl.get().isEmpty()) return;
 
         // Snapshot now: by the time the request leaves, the respawn screen has
@@ -607,17 +718,19 @@ public class VisualRangeNotifier extends Module {
             : "unknown";
 
         sendDiscordAsync("You Died",
-            event.message().getString() + "\nPosition: " + where + "\nDimension: " + getDimension());
+            message.getString() + "\nPosition: " + where + "\nDimension: " + getDimension());
     }
 
-    @EventHandler
-    private void onServerDisconnect(ServerDisconnectEvent event) {
+    void onDisconnect(net.minecraft.text.Text reason) {
+        HunterBuddyAddon.LOG.info("[HB] disconnect hook: enabled={} disconnect={} url={}",
+            discordEnabled.get(), discordDisconnect.get(), !webhookUrl.get().isEmpty());
+
         if (!discordEnabled.get() || !discordDisconnect.get() || webhookUrl.get().isEmpty()) return;
 
         // AutoLogPlus writes its own reason into this text, so a logout it caused
         // arrives already labelled without either module knowing about the other.
         sendDiscordAsync("Disconnected",
-            "Reason: " + event.reason().getString()
+            "Reason: " + reason.getString()
                 + "\nTime: " + java.time.LocalTime.now().withNano(0));
     }
 
@@ -630,7 +743,11 @@ public class VisualRangeNotifier extends Module {
             ? mc.player.getGameProfile().name()
             : (mc.getSession() != null ? mc.getSession().getUsername() : "Unknown");
 
-        MeteorExecutor.execute(() -> Utils.sendWebhook(url, title, message, ping, sender));
+        HunterBuddyAddon.LOG.info("[HB] webhook queued: {}", title);
+        MeteorExecutor.execute(() -> {
+            Utils.sendWebhook(url, title, message, ping, sender);
+            HunterBuddyAddon.LOG.info("[HB] webhook sent: {}", title);
+        });
     }
 
     private String getDimension() {
