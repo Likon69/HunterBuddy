@@ -39,6 +39,7 @@ public class PlayerDeathMixin {
         // The packet is also sent for other players' deaths on some servers.
         if (player == null || packet.playerId() != player.getId()) return;
 
-        MeteorClient.EVENT_BUS.post(new PlayerDeathEvent(packet.message()));
+        com.hunterbuddy.HunterBuddyAddon.LOG.info("[HB] mixin fired: {}", "PlayerDeathMixin.java");
+        com.hunterbuddy.modules.VisualRangeNotifier.notifyDeath(packet.message());
     }
 }
