@@ -123,6 +123,11 @@ public class Pitch40 extends Module {
       super(HunterBuddyAddon.HUNT_CATEGORY, "Pitch40", "Utility for Pitch40 elytra flying. Syncs bounds with ElytraFly and auto-enables on reconnect.");
    }
 
+   /** Which half of the cycle the flight is in right now. Read by the Pitch40Cycle HUD. */
+   public boolean isClimbing() {
+      return this.goingUp;
+   }
+
    private Module getElytraFly() {
       if (this.elytraFly == null) {
          this.elytraFly = Modules.get().get(ElytraFly.class);

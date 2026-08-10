@@ -50,7 +50,8 @@ public class ElytraAutoFly extends Module {
 
     // ---- Cycle settings (descend phase) ----
 
-    private final Setting<Integer> maxAltitude = sgCycle.add(new IntSetting.Builder()
+    /** Ceiling of the climb-and-glide window. Public so a HUD can draw the cycle it defines. */
+    public final Setting<Integer> maxAltitude = sgCycle.add(new IntSetting.Builder()
         .name("max-altitude")
         .description("Switch from Pitch40 climb to manual-pitch descend when player Y reaches this. Rusherhack's 'Max Height'.")
         .defaultValue(220)
@@ -60,7 +61,8 @@ public class ElytraAutoFly extends Module {
         .build()
     );
 
-    private final Setting<Integer> minAltitude = sgCycle.add(new IntSetting.Builder()
+    /** Floor of that window. */
+    public final Setting<Integer> minAltitude = sgCycle.add(new IntSetting.Builder()
         .name("min-altitude")
         .description("Switch back to Pitch40 climb when player Y drops to this. Rusherhack's 'Min Height'.")
         .defaultValue(256)
