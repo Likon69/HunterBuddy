@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules.regear.util;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import java.io.File;
 import java.io.OutputStream;
@@ -279,20 +281,48 @@ public class Utils {
         return diff < -180 ? diff + 360 : diff;
     }
 
+    /**
+     * Posts an embed to a Discord webhook.
+     *
+     * <p>Built through Gson rather than by pasting strings together. Nearly every notification
+     * carries a real newline — a position on its own line, a timestamp under a reason — and a
+     * raw newline inside a JSON string is not legal JSON: Discord answered 400 and dropped it.
+     * That is why the disconnect and death notices never arrived while the one message written
+     * with an escaped {@code \n} did. A quotation mark in a kick reason broke it the same way.
+     * Gson escapes all of it and the question stops being ours.
+     */
     public static void sendWebhook(String webhookURL, String title, String message, String pingID, String playerName) {
-        String json = "{\"embeds\": [{\"title\": \"" + title + "\",\"description\": \"" + message +
-            "\",\"color\": 15258703,\"footer\": {\"text\": \"From: " + playerName + "\"}}]}";
-        sendRequest(webhookURL, json);
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", title);
+        embed.addProperty("description", message);
+        embed.addProperty("color", 15258703);
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", "From: " + playerName);
+        embed.add("footer", footer);
+
+        JsonArray embeds = new JsonArray();
+        embeds.add(embed);
+
+        JsonObject payload = new JsonObject();
+        payload.add("embeds", embeds);
+
+        sendRequest(webhookURL, payload.toString());
 
         if (pingID != null) {
-            sendRequest(webhookURL, "{\"content\": \"<@" + pingID + ">\"}");
+            JsonObject ping = new JsonObject();
+            ping.addProperty("content", "<@" + pingID + ">");
+            sendRequest(webhookURL, ping.toString());
         }
     }
 
     public static void sendWebhook(String webhookURL, String jsonObject, String pingID) {
         sendRequest(webhookURL, jsonObject);
+
         if (pingID != null) {
-            sendRequest(webhookURL, "{\"content\": \"<@" + pingID + ">\"}");
+            JsonObject ping = new JsonObject();
+            ping.addProperty("content", "<@" + pingID + ">");
+            sendRequest(webhookURL, ping.toString());
         }
     }
 
@@ -306,12 +336,29 @@ public class Utils {
             con.setRequestMethod("POST");
 
             try (OutputStream os = con.getOutputStream()) {
-                os.write(json.getBytes());
+                // Explicitly UTF-8. The platform default is Windows-1252 here, and an accent in a
+                // player name or a kick reason would go out as bytes Discord cannot read.
+                os.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 os.flush();
             }
-            con.getInputStream().close();
+
+            int code = con.getResponseCode();
+
+            // getInputStream throws on any 4xx, so reading it was itself what hid every rejection
+            // behind the empty catch below. The error stream is where Discord explains itself.
+            if (code >= 400) {
+                String detail = "";
+                try (java.io.InputStream err = con.getErrorStream()) {
+                    if (err != null) detail = new String(err.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                }
+
+                com.hunterbuddy.HunterBuddyAddon.LOG.error("[HB] webhook refused: HTTP {} {}", code, detail);
+            }
+
             con.disconnect();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            com.hunterbuddy.HunterBuddyAddon.LOG.error("[HB] webhook failed", e);
+        }
     }
 
     public enum IllegalDisconnectMethod {
