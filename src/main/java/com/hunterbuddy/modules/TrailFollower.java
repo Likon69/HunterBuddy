@@ -156,7 +156,7 @@ public class TrailFollower extends Module
     public final Setting<Double> startDirectionWeighting = sgAdvanced.add(new DoubleSetting.Builder()
         .name("start-direction-weight")
         .description("Initial bias toward the direction you're facing when enabling. Decays as trail becomes established. 0 = no bias, 1 = strong bias.")
-        .defaultValue(0.7)
+        .defaultValue(0.4)
         .min(0)
         .sliderMax(1)
         .build()
@@ -222,6 +222,15 @@ public class TrailFollower extends Module
         .build()
     );
 
+    public final Setting<Double> maxRecenterAngle = sgAdvanced.add(new DoubleSetting.Builder()
+        .name("max-recenter-angle")
+        .description("How hard to steer back over the trail when only near chunks are seen. Caps the sideways correction so a far-off-to-the-side trail nudges the heading instead of yanking it. 0 disables it.")
+        .defaultValue(12.0)
+        .min(0.0)
+        .sliderRange(0.0, 45.0)
+        .build()
+    );
+
     public final Setting<Double> circleRadiusGrowth = sgAdvanced.add(new DoubleSetting.Builder()
         .name("circle-radius-growth")
         .description("How fast the search spiral widens, in blocks per second, while circling for the next chunk.")
@@ -242,8 +251,8 @@ public class TrailFollower extends Module
 
     public final Setting<Double> circlingDegPerTick = sgAdvanced.add(new DoubleSetting.Builder()
         .name("Circling-degrees-per-tick")
-        .description("The amount of degrees to change per tick while circling.")
-        .defaultValue(2.0)
+        .description("The amount of degrees to change per tick at the spiral's starting radius. It eases off as the spiral widens so the aim point keeps a speed you can actually fly.")
+        .defaultValue(1.5)
         .min(1.0)
         .sliderMax(20.0)
         .build()
@@ -307,6 +316,16 @@ public class TrailFollower extends Module
     private ArrayDeque<Vec3d> trail = new ArrayDeque<>();
     private ArrayDeque<Vec3d> possibleTrail = new ArrayDeque<>();
 
+    /**
+     * The last few chunks that were too close to aim at.
+     *
+     * <p>Useless as targets, but they still say which side of us the trail is on, which is the one
+     * thing the aim deque can no longer tell us once every arriving chunk is a near one.
+     */
+    private ArrayDeque<Vec3d> nearChunks = new ArrayDeque<>();
+
+    private static final int NEAR_CHUNK_MEMORY = 6;
+
     private long lastFoundTrailTime;
     private long lastFoundPossibleTrailTime;
 
@@ -328,10 +347,6 @@ public class TrailFollower extends Module
 
     /** World position of the last valid chunk accepted, near or far. The place worth waiting at. */
     private Vec3d lastChunkPos;
-
-    /** When the aim deque last gained a point, and when it last went empty. */
-    private long lastTrailAddAt;
-    private long trailEmptySince;
 
     /** When circling started, so the abandon clock counts only time spent circling. */
     private long circleEnteredAt;
@@ -358,15 +373,57 @@ public class TrailFollower extends Module
         followingTrail = false;
         trail = new ArrayDeque<>();
         possibleTrail = new ArrayDeque<>();
+        nearChunks = new ArrayDeque<>();
         hasInitialDirection = false;
         chunksFoundSinceStart = 0;
         state = SearchState.FOLLOW;
         lastChunkPos = null;
-        lastTrailAddAt = 0L;
-        trailEmptySince = 0L;
         circleEnteredAt = 0L;
         circleAngle = 0.0;
         ticksInCircle = 0;
+    }
+
+    /**
+     * A bounded nudge back over the trail, in degrees, added to the heading at the last moment.
+     *
+     * <p>Excluding near chunks from the aim average killed the yaw thrashing, but it also removed
+     * the only thing that kept us centred. A dense trail recentres itself for free: near chunks
+     * off to one side sit in the average and lean the heading their way. On a sparse trail every
+     * arriving chunk is a near one, so the heading goes rigid and the trail slides off the flank
+     * — seen at yaw 185 while chunks marched from 19 to 64 blocks out to the left.
+     *
+     * <p>The near chunks come back in, but only to answer which side, never where to point. The
+     * answer is capped, so a trail sixty degrees off the flank bends us twelve degrees rather
+     * than swinging us onto a target ten blocks away — that swing was the original instability.
+     * Being an offset re-derived each tick and never written into targetYaw, it also cannot
+     * accumulate: as the gap closes the correction shrinks, and over the trail it is zero.
+     */
+    private double recenterCorrection()
+    {
+        if (state != SearchState.FOLLOW || maxRecenterAngle.get() <= 0.0 || nearChunks.isEmpty()) return 0.0;
+
+        Vec3d me = mc.player.getEntityPos();
+        Vec3d heading = yawToDirection(targetYaw);
+
+        double sx = 0, sz = 0;
+        int n = 0;
+
+        for (Vec3d p : nearChunks)
+        {
+            // Only what is still ahead. A chunk we have gone past would pull us backwards.
+            if ((p.x - me.x) * heading.x + (p.z - me.z) * heading.z <= 0) continue;
+
+            sx += p.x;
+            sz += p.z;
+            n++;
+        }
+
+        if (n == 0) return 0.0;
+
+        double toTrail = angleDifference(Rotations.getYaw(new Vec3d(sx / n, me.y, sz / n)), targetYaw);
+        double limit = maxRecenterAngle.get();
+
+        return Math.max(-limit, Math.min(limit, toTrail));
     }
 
     /** Horizontal only: trail points sit at Y=0 and the player does not. */
@@ -387,6 +444,15 @@ public class TrailFollower extends Module
      * distant, unreached points in the average, which is the geometry a dense 1.19 trail has for
      * free. Consumption is permanent: a point we have already flown past cannot become a target
      * again, so turning back can never aim us at ground we have already covered.
+     *
+     * <p>Distance alone was not enough. We only come within a hundred blocks of a point by flying
+     * more or less over it, so as soon as the trail bends away, the points we left behind stay in
+     * the deque at two and three hundred blocks and keep voting — the original steer-at-what-is-
+     * behind-you bug, back through the one door still open. Anything the heading has taken us
+     * past is therefore consumed too, however far off it is.
+     *
+     * <p>Only while following, though. RETURN is a deliberate turn back on ourselves: everything
+     * behind becomes ahead, and consuming on that basis would eat the trail we are going back to.
      */
     private void consumeReachedPoints()
     {
@@ -395,11 +461,10 @@ public class TrailFollower extends Module
 
         trail.removeIf(p -> horizontalDistance(p, me) < min);
 
-        if (trail.isEmpty())
-        {
-            if (trailEmptySince == 0L) trailEmptySince = System.currentTimeMillis();
-        }
-        else trailEmptySince = 0L;
+        if (state != SearchState.FOLLOW) return;
+
+        Vec3d heading = yawToDirection(targetYaw);
+        trail.removeIf(p -> (p.x - me.x) * heading.x + (p.z - me.z) * heading.z <= 0);
     }
 
     boolean started = false;
@@ -589,17 +654,18 @@ public class TrailFollower extends Module
                 }
             }
         }
-        // Starvation is having nothing left to aim at, not merely nothing arriving. Until the
-        // timeout runs out we fly straight on the heading we kept, which is what carries us over
-        // a gap in chunk loading.
+        // Starvation is no chunks arriving at all — not an empty aim deque. The two came apart
+        // once near chunks stopped being stored: the trail can be streaming past underneath you,
+        // every chunk of it too close to steer by, while the deque sits empty. Circling then is
+        // searching for something you are already flying over. As long as anything is coming in,
+        // we stay in FOLLOW and hold the last sound heading.
         if (followingTrail
             && state == SearchState.FOLLOW
-            && trail.isEmpty()
             && lastChunkPos != null
-            && now - Math.max(lastTrailAddAt, trailEmptySince) > chunkFoundTimeout.get())
+            && now - lastFoundTrailTime > chunkFoundTimeout.get())
         {
             state = SearchState.RETURN;
-            log("Nothing left to aim at, returning to the last chunk "
+            log("No chunks for " + (now - lastFoundTrailTime) / 1000 + "s, returning to the last one "
                 + (int) horizontalDistance(lastChunkPos, mc.player.getEntityPos()) + " blocks away.");
         }
 
@@ -629,9 +695,17 @@ public class TrailFollower extends Module
                 // little each second means the search eventually crosses wherever the trail went,
                 // and crosses it sooner the further it has already had to look.
                 ticksInCircle++;
-                circleAngle += circlingDegPerTick.get();
 
                 double radius = circleReturnRadius.get() + circleRadiusGrowth.get() * (ticksInCircle / 20.0);
+
+                // Angular speed goes as 1/radius so the target's tangential speed stays constant
+                // and flyable. Held fixed, the aim point runs away as r×w — at radius 400 that is
+                // some 290 blocks a second against the 35 we actually fly — so we cut the corner
+                // and orbit the anchor while the radius inflates on paper. Measured: the radius
+                // reached 421 while we never got further than 60 blocks out, and the search never
+                // crossed the trail it was widening to find.
+                circleAngle += circlingDegPerTick.get() * circleReturnRadius.get() / radius;
+
                 Vec3d target = lastChunkPos.add(yawToDirection(circleAngle).multiply(radius));
 
                 targetYaw = Rotations.getYaw(target);
@@ -644,6 +718,8 @@ public class TrailFollower extends Module
             }
         }
 
+        double recenter = recenterCorrection();
+
         if (debug.get() && followingTrail && mc.player.age % 20 == 0)
         {
             long since = now - lastFoundTrailTime;
@@ -655,9 +731,9 @@ public class TrailFollower extends Module
                 ? (int) (circleReturnRadius.get() + circleRadiusGrowth.get() * (ticksInCircle / 20.0))
                 : -1;
 
-            HunterBuddyAddon.LOG.info("[HB][TF] tick pos=({},{}) yaw={} sinceChunk={}ms trail={} state={} distAnchor={} spiral={}",
+            HunterBuddyAddon.LOG.info("[HB][TF] tick pos=({},{}) yaw={} sinceChunk={}ms trail={} state={} distAnchor={} spiral={} recenter={}",
                 (int) mc.player.getX(), (int) mc.player.getZ(),
-                (int) mc.player.getYaw(), since, trail.size(), state, distAnchor, spiral);
+                (int) mc.player.getYaw(), since, trail.size(), state, distAnchor, spiral, (int) recenter);
         }
 
         switch (followMode)
@@ -711,7 +787,7 @@ public class TrailFollower extends Module
                 break;
             }
             case YAWLOCK: {
-                mc.player.setYaw(smoothRotation(getActualYaw(mc.player.getYaw()), targetYaw, rotateScaling.get()));
+                mc.player.setYaw(smoothRotation(getActualYaw(mc.player.getYaw()), targetYaw + recenter, rotateScaling.get()));
                 break;
             }
         }
@@ -791,7 +867,6 @@ public class TrailFollower extends Module
                 lastFoundTrailTime = System.currentTimeMillis();
                 chunksFoundSinceStart = possibleTrail.size();
                 lastChunkPos = possibleTrail.getLast();
-                lastTrailAddAt = lastFoundTrailTime;
                 trail.addAll(possibleTrail);
                 possibleTrail.clear();
             }
@@ -824,15 +899,21 @@ public class TrailFollower extends Module
                 (int) angleDiff, trail.size() + (aimable ? 1 : 0), (int) chunkDistance, aimable);
         }
 
-        if (!aimable) return;
-
-        lastTrailAddAt = lastFoundTrailTime;
-        trailEmptySince = 0L;
-
+        // Any chunk at all ends the search — that is what we were spiralling to find. Head at it
+        // straight away; if it is far enough to steer by, the average below refines this in the
+        // same breath, and if it is close we keep this heading until a distant one turns up.
         if (state != SearchState.FOLLOW)
         {
             state = SearchState.FOLLOW;
+            targetYaw = Rotations.getYaw(pos);
             log("Trail picked up again, following.");
+        }
+
+        if (!aimable)
+        {
+            nearChunks.addLast(pos);
+            while (nearChunks.size() > NEAR_CHUNK_MEMORY) nearChunks.pollFirst();
+            return;
         }
 
         while(trail.size() >= maxTrailLength.get())
@@ -970,13 +1051,18 @@ public class TrailFollower extends Module
      * How much the direction you were facing on enable still counts for.
      *
      * <p>Full weight at the start, when a handful of chunks is not yet evidence of anything, and
-     * gone by the time twice a trail's worth has been found and the trail speaks for itself.
+     * gone by the time the deque holds a full trail's worth of real ones.
+     *
+     * <p>It used to decay over twice that, which on a sparse trail is minutes of flying: a trail
+     * that turned seventy-five degrees was still being pulled a fifth of the way back towards the
+     * heading the module was switched on with, long after the chunks themselves had said
+     * otherwise. This bias is for the first ten chunks, not the first forty.
      */
     private double getDecayedInitialWeight()
     {
         if (!hasInitialDirection || startDirectionWeighting.get() <= 0.0) return 0.0;
 
-        int decayChunks = maxTrailLength.get() * 2;
+        int decayChunks = maxTrailLength.get();
         double decayFactor = Math.max(0.0, 1.0 - (double) chunksFoundSinceStart / decayChunks);
 
         return startDirectionWeighting.get() * decayFactor;
