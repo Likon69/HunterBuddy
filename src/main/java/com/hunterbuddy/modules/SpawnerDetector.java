@@ -1,7 +1,6 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.mixin.accessors.MobSpawnerLogicAccessor;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -9,8 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
-import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BlockListSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -43,6 +42,9 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.world.ClientChunkManager;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.Palette;
 import net.minecraft.world.chunk.WorldChunk;
 
 /**
@@ -78,6 +80,16 @@ public class SpawnerDetector extends Module {
         .name("require-chests")
         .description("Hide a find with no container left around it. An emptied dungeon is not worth the detour.")
         .defaultValue(false).build());
+
+    private final Setting<Boolean> airChecker = sgGeneral.add(new BoolSetting.Builder()
+        .name("air-disturbance")
+        .description("Detect spawners a player has dug into, without the countdown (which never crosses ViaVersion). Cave air plus ordinary air around the spawner means a human was here. Some false positives. THIS is the mode that works at distance on a Via setup.")
+        .defaultValue(false).build());
+
+    private final Setting<Boolean> ignoreGeodes = sgGeneral.add(new BoolSetting.Builder()
+        .name("ignore-geodes")
+        .description("Skip the air check near an amethyst geode: its pockets put ordinary air against cave air with nobody having dug, which reads as a false positive.")
+        .defaultValue(true).visible(airChecker::get).build());
 
     private final Setting<Integer> scanInterval = sgGeneral.add(new IntSetting.Builder()
         .name("scan-interval")
@@ -156,19 +168,25 @@ public class SpawnerDetector extends Module {
         .defaultValue(new SettingColor(120, 180, 255, 200)).build());
 
     /**
-     * Spawners seen in a chunk packet and not yet judged.
+     * Spawners found and not yet judged.
      *
-     * <p>Discovery is event-driven for a reason: the published version rebuilds a set of every
-     * loaded chunk on every tick and walks all of them. Here a chunk announces its spawners
-     * once, when it arrives.
+     * <p>Filled by sweeping every chunk the client holds, not by waiting for chunks to arrive.
+     * Listening for arrivals was cheaper and wrong in the ordinary case: switch the module on
+     * while flying and the chunks around you are already loaded, so no arrival is ever announced,
+     * nothing is ever queued, and a spawner you are standing next to is never looked at. The
+     * published version sweeps for exactly this reason.
      */
     private final Set<BlockPos> pending = ConcurrentHashMap.newKeySet();
 
     private final Map<BlockPos, Detection> found = new ConcurrentHashMap<>();
+
+    /** Air-scanned once each, like the reference's scannedPositions, so the block walk never repeats. */
+    private final Set<BlockPos> scanned = ConcurrentHashMap.newKeySet();
+
     private int scanCooldown;
 
     public SpawnerDetector() {
-        super(HunterBuddyAddon.HUNT_CATEGORY, "SpawnerDetector",
+        super(HunterBuddyAddon.VISUALS_CATEGORY, "SpawnerDetector",
             "Finds spawners a player has already visited, and whether the loot is still there.");
     }
 
@@ -176,6 +194,7 @@ public class SpawnerDetector extends Module {
     public void onActivate() {
         pending.clear();
         found.clear();
+        scanned.clear();
         scanCooldown = 0;
     }
 
@@ -183,18 +202,7 @@ public class SpawnerDetector extends Module {
     public void onDeactivate() {
         pending.clear();
         found.clear();
-    }
-
-    @EventHandler
-    private void onChunkData(ChunkDataEvent event) {
-        if (mc.world == null) return;
-
-        for (BlockEntity be : event.chunk().getBlockEntities().values()) {
-            if (be instanceof MobSpawnerBlockEntity || be instanceof TrialSpawnerBlockEntity) {
-                BlockPos pos = be.getPos().toImmutable();
-                if (!found.containsKey(pos)) pending.add(pos);
-            }
-        }
+        scanned.clear();
     }
 
     @EventHandler
@@ -207,7 +215,37 @@ public class SpawnerDetector extends Module {
         }
 
         scanCooldown = scanInterval.get();
+        sweepLoadedChunks();
         evaluatePending();
+    }
+
+    /**
+     * Queues every spawner the client currently holds a chunk for.
+     *
+     * <p>Straight off the client's own storage array, the same thing the published detector walks
+     * each tick. It is the whole set of chunks the client knows about — there is no such thing as
+     * a loaded chunk outside it — so nothing within reach can be missed however the module came
+     * to be switched on.
+     *
+     * <p>The cost is one pass over an array of a few thousand slots, once per scan-interval
+     * rather than once per tick, and positions already judged never re-enter the queue.
+     */
+    private void sweepLoadedChunks() {
+        if (!(mc.world.getChunkManager() instanceof ClientChunkManager manager)) return;
+
+        AtomicReferenceArray<WorldChunk> chunks = manager.chunks.chunks;
+
+        for (int i = 0; i < chunks.length(); i++) {
+            WorldChunk chunk = chunks.get(i);
+            if (chunk == null) continue;
+
+            for (BlockEntity be : chunk.getBlockEntities().values()) {
+                if (!(be instanceof MobSpawnerBlockEntity) && !(be instanceof TrialSpawnerBlockEntity)) continue;
+
+                BlockPos pos = be.getPos().toImmutable();
+                if (!found.containsKey(pos)) pending.add(pos);
+            }
+        }
     }
 
     /**
@@ -248,15 +286,56 @@ public class SpawnerDetector extends Module {
     }
 
     private void classifyMobSpawner(BlockPos pos, MobSpawnerBlockEntity spawner) {
-        if (!detectActivated.get()) return;
+        int delay = spawner.getLogic().spawnDelay;
+        boolean nether = mc.world.getRegistryKey() == net.minecraft.world.World.NETHER;
 
-        int delay = ((MobSpawnerLogicAccessor) spawner.getLogic()).hb$getSpawnDelay();
+        // Qualified and quoted, exactly as the reference builds it: the ":spider" test below
+        // leans on the colon to tell a spider from a cave_spider.
+        String monster = null;
+        var entry = spawner.getLogic().spawnEntry;
+        if (entry != null && entry.getNbt().get("id") != null) monster = entry.getNbt().get("id").toString();
 
-        // 20 is the value a spawner sits at while no player has ever come close. In the Nether
-        // a fresh one also reads 0, so that value carries no information there and is skipped
-        // rather than reported as a find.
-        if (delay == 20) return;
-        if (delay == 0 && mc.world.getRegistryKey() == net.minecraft.world.World.NETHER) return;
+        boolean activated = false;
+
+        if (airChecker.get() && (delay == 20 || delay == 0)) {
+            // Reads blocks, not the timer, and only at the default countdown — the one value that
+            // survives the trip. Each position is walked once and then remembered.
+            if (monster != null && scanned.add(pos)) {
+                WorldChunk chunk = mc.world.getChunk(pos.getX() >> 4, pos.getZ() >> 4);
+                boolean geodeNearby = false;
+
+                if (ignoreGeodes.get() && chunk != null
+                    && chunkContainsGeodeBlocks(chunk, Math.min(chunk.getSectionArray().length, 20))) {
+                    outer:
+                    for (int gx = -5; gx <= 5; gx++)
+                        for (int gy = -5; gy <= 5; gy++)
+                            for (int gz = -5; gz <= 5; gz++)
+                                if (GEODE_BLOCKS.contains(mc.world.getBlockState(pos.add(gx, gy, gz)).getBlock())) {
+                                    geodeNearby = true;
+                                    break outer;
+                                }
+                }
+
+                if (!geodeNearby) {
+                    if (monster.contains("zombie") || monster.contains("skeleton") || monster.contains(":spider")) {
+                        activated = airAndCaveAir(pos, -2, 1, -1, 2, -2, 1);
+                    } else if (monster.contains("cave_spider")) {
+                        activated = airAndCaveAir(pos, -1, 1, 0, 1, -1, 1);
+                    } else if (monster.contains("silverfish")) {
+                        activated = airAndCaveAir(pos, -3, 3, -2, 3, -3, 3);
+                    }
+                }
+            }
+        } else if (delay != 20) {
+            // 20 is the value a spawner sits at while no player has ever come close. In the Nether
+            // a fresh one also reads 0, so that value carries no information there.
+            if (delay == 0 && nether) return;
+            if (!detectActivated.get()) return;
+
+            activated = true;
+        }
+
+        if (!activated) return;
 
         int chests = countContainersAround(pos);
         boolean lit = detectTorches.get() && hasLightNear(pos);
@@ -272,6 +351,40 @@ public class SpawnerDetector extends Module {
             : (chests > 0 ? Category.DUNGEON : Category.EMPTIED);
 
         record(pos, category, mobNameOf(spawner), chests);
+    }
+
+    /** Both ordinary AIR and generated CAVE_AIR in the box: someone dug into a natural spawner room. */
+    private boolean airAndCaveAir(BlockPos pos, int x0, int x1, int y0, int y1, int z0, int z1) {
+        boolean air = false, caveAir = false;
+        BlockPos.Mutable c = new BlockPos.Mutable();
+        for (int x = x0; x <= x1; x++)
+            for (int y = y0; y <= y1; y++)
+                for (int z = z0; z <= z1; z++) {
+                    Block b = mc.world.getBlockState(c.set(pos.getX() + x, pos.getY() + y, pos.getZ() + z)).getBlock();
+                    if (b == Blocks.AIR) air = true;
+                    else if (b == Blocks.CAVE_AIR) caveAir = true;
+                    if (air && caveAir) return true;
+                }
+        return false;
+    }
+
+    private static final Set<Block> GEODE_BLOCKS = Set.of(
+        Blocks.AMETHYST_BLOCK, Blocks.BUDDING_AMETHYST, Blocks.CALCITE, Blocks.SMOOTH_BASALT,
+        Blocks.AMETHYST_CLUSTER, Blocks.LARGE_AMETHYST_BUD, Blocks.MEDIUM_AMETHYST_BUD, Blocks.SMALL_AMETHYST_BUD);
+
+    private boolean chunkContainsGeodeBlocks(WorldChunk chunk, int sectionsToCheck) {
+        ChunkSection[] sections = chunk.getSectionArray();
+        for (int i = 0; i < sectionsToCheck; i++) {
+            ChunkSection section = sections[i];
+            if (!section.isEmpty()) {
+                var container = section.getBlockStateContainer();
+                Palette<BlockState> palette = container.data.palette();
+                int len = palette.getSize();
+                for (int j = 0; j < len; j++)
+                    if (GEODE_BLOCKS.contains(palette.get(j).getBlock())) return true;
+            }
+        }
+        return false;
     }
 
     private void classifyTrialSpawner(BlockPos pos, TrialSpawnerBlockEntity trial) {
@@ -421,7 +534,7 @@ public class SpawnerDetector extends Module {
     /** Short name of the mob the spawner is queued to produce, or "spawner". */
     private String mobNameOf(MobSpawnerBlockEntity spawner) {
         try {
-            var entry = ((MobSpawnerLogicAccessor) spawner.getLogic()).hb$getSpawnEntry();
+            var entry = spawner.getLogic().spawnEntry;
             if (entry == null) return "spawner";
 
             String id = entry.getNbt().getString("id", "");
