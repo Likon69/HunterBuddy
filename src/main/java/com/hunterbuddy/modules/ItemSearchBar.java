@@ -245,7 +245,7 @@ public class ItemSearchBar extends Module {
    private String currentSearchQuery = "";
 
    public ItemSearchBar() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "ItemSearchBar", "Search and highlight items in inventory and containers.");
+      super(HunterBuddyAddon.VISUALS_CATEGORY, "ItemSearchBar", "Search and highlight items in inventory and containers.");
    }
 
    public void onActivate() {

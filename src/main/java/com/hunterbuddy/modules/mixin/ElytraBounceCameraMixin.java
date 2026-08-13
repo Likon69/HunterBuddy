@@ -1,7 +1,6 @@
 package com.hunterbuddy.modules.mixin;
 
 import com.hunterbuddy.modules.ElytraBounce;
-import com.hunterbuddy.modules.FireworkVector;
 import com.llamalad7.mixinextras.sugar.Local;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
@@ -22,12 +21,6 @@ public class ElytraBounceCameraMixin {
         ElytraBounce elytraBounce = Modules.get().get(ElytraBounce.class);
         if (elytraBounce != null && elytraBounce.isFreePitchEnabled() && focusedEntity != null) {
             args.set(1, elytraBounce.cameraPitch);
-            return;
-        }
-
-        FireworkVector fireworkVector = Modules.get().get(FireworkVector.class);
-        if (fireworkVector != null && fireworkVector.isFreeCameraActive() && focusedEntity != null) {
-            args.set(1, fireworkVector.cameraPitch);
         }
     }
 }

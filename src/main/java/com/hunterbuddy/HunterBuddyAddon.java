@@ -25,8 +25,6 @@ import com.hunterbuddy.modules.AutoEXPPlus;
 import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
-import com.hunterbuddy.modules.BoatFlyLab;
-import com.hunterbuddy.modules.BoatFlyLab2;
 import com.hunterbuddy.modules.CaveAirESP;
 import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
 import com.hunterbuddy.modules.ClientSideTime;
@@ -55,7 +53,6 @@ import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.Replenish;
-import com.hunterbuddy.modules.FireworkVector;
 import com.hunterbuddy.modules.RocketBoost;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.ItemSearchBar;
@@ -88,10 +85,10 @@ import org.slf4j.Logger;
 public class HunterBuddyAddon extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category HUNT_CATEGORY = new Category("Hunt", Items.ENDER_CHEST.getDefaultStack());
+    public static final Category VISUALS_CATEGORY = new Category("Visuals", Items.ENDER_EYE.getDefaultStack());
     public static final Category LOGISTICS_CATEGORY = new Category("Logistics", Items.SHULKER_BOX.getDefaultStack());
     public static final Category UTILITY_CATEGORY = new Category("Utility", Items.NETHER_STAR.getDefaultStack());
     public static final Category LAB_CATEGORY = new Category("Lab", Items.COMPARATOR.getDefaultStack());
-    public static final Category FUTURE_CATEGORY = new Category("Future", Items.ENDER_PEARL.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("HunterBuddy");
 
     @Override
@@ -168,8 +165,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new MlepAirPlace());
         Modules.get().add(new AngleCalculator());
         Modules.get().add(new RotationDetector());
-        Modules.get().add(new BoatFlyLab());
-        Modules.get().add(new BoatFlyLab2());
         Modules.get().add(new SignRender());
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
@@ -180,7 +175,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new com.hunterbuddy.modules.Shader());
         Modules.get().add(new RocketBoost());
-        Modules.get().add(new FireworkVector());
         Modules.get().add(new com.hunterbuddy.modules.FuturePacketMine());
         Modules.get().add(new com.hunterbuddy.modules.FutureNuker());
         Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
@@ -206,10 +200,10 @@ public class HunterBuddyAddon extends MeteorAddon {
     @Override
     public void onRegisterCategories() {
         Modules.registerCategory(HUNT_CATEGORY);
+        Modules.registerCategory(VISUALS_CATEGORY);
         Modules.registerCategory(LOGISTICS_CATEGORY);
         Modules.registerCategory(UTILITY_CATEGORY);
         Modules.registerCategory(LAB_CATEGORY);
-        Modules.registerCategory(FUTURE_CATEGORY);
     }
 
     @Override

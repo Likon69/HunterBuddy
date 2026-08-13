@@ -342,7 +342,7 @@ public class EntityView extends Module {
     private long lastFrameNanos;
 
     public EntityView() {
-        super(HunterBuddyAddon.HUNT_CATEGORY, "entity-view",
+        super(HunterBuddyAddon.VISUALS_CATEGORY, "entity-view",
             "Rescales mobs and players, and shows their gear above them through walls.");
 
         appearProgress.defaultReturnValue(0.0f);

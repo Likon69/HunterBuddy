@@ -160,7 +160,7 @@ public class RotationDetector extends Module {
     private int totalDetected = 0;
 
     public RotationDetector() {
-        super(HunterBuddyAddon.HUNT_CATEGORY, "rotation-detector", "Detects horizontal blocks that only spawn vertical naturally.");
+        super(HunterBuddyAddon.VISUALS_CATEGORY, "rotation-detector", "Detects horizontal blocks that only spawn vertical naturally.");
     }
 
     @Override

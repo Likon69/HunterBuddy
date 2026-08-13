@@ -220,7 +220,7 @@ public class RocketBoost extends Module {
    public final List<Packet<?>> pongQueue = new ArrayList<>();
 
    public RocketBoost() {
-      super(HunterBuddyAddon.LAB_CATEGORY, "rocket-boost", "Approach A: cancel destroy + queue pongs (Grim-aware, 800ms default).");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "rocket-boost", "Approach A: cancel destroy + queue pongs (Grim-aware, 800ms default).");
    }
 
    @Override

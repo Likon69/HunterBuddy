@@ -221,7 +221,7 @@ public class CaveAirESP extends Module {
    private static final int[][] OFFSETS = new int[][]{{0, 1, 0}, {0, -1, 0}, {0, 0, -1}, {0, 0, 1}, {1, 0, 0}, {-1, 0, 0}};
 
    public CaveAirESP() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "cave-air", "Detects portal-shaped disturbances in cave air");
+      super(HunterBuddyAddon.VISUALS_CATEGORY, "cave-air", "Detects portal-shaped disturbances in cave air");
    }
 
    private boolean isDimensionEnabled() {

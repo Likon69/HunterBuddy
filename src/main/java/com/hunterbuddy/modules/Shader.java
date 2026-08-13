@@ -238,7 +238,7 @@ public class Shader extends Module {
     private final Color storageScratch = new Color();
 
     public Shader() {
-        super(HunterBuddyAddon.FUTURE_CATEGORY, "shader",
+        super(HunterBuddyAddon.VISUALS_CATEGORY, "shader",
             "Entity glow/outline shader driven by EntityGlowMixin + EntityTeamColorMixin.");
     }
 

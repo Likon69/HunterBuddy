@@ -122,7 +122,7 @@ public class LoreLocator extends Module {
       );
 
    public LoreLocator() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "LoreLocator", "Slot highlighter for rare, unique, and anomalous items.");
+      super(HunterBuddyAddon.VISUALS_CATEGORY, "LoreLocator", "Slot highlighter for rare, unique, and anomalous items.");
    }
 
    private int enchantmentsCount(ItemStack stack) {
