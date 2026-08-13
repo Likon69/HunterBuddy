@@ -27,7 +27,15 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.Item;
 import net.minecraft.network.packet.Packet;
+import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
+import meteordevelopment.meteorclient.utils.player.FindItemResult;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
+import meteordevelopment.meteorclient.utils.world.BlockUtils;
+import meteordevelopment.orbit.EventPriority;
+import net.minecraft.block.BlockState;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
@@ -51,6 +59,27 @@ public class FuturePacketMine extends Module {
     private final SettingGroup sgQueueRenders = settings.createGroup("Queue Renders");
 
     // ============ General settings (matches lambda) ============
+
+    private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
+        .name("rotate")
+        .description("Face a block before mining it. Servers that check where you are looking reject the break otherwise.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> swing = sgGeneral.add(new BoolSetting.Builder()
+        .name("swing")
+        .description("Swing the hand visibly. Off still sends the swing packet, it just does not animate.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> autoSwitch = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-tool")
+        .description("Switch to the fastest tool once a block is ready to fall.")
+        .defaultValue(true)
+        .build()
+    );
 
     private final Setting<List<Item>> ignoreWhenHolding = sgGeneral.add(new ItemListSetting.Builder()
         .name("ignore-when-holding")
@@ -235,7 +264,7 @@ public class FuturePacketMine extends Module {
     private boolean attackedThisTick = false;
 
     public FuturePacketMine() {
-        super(HunterBuddyAddon.FUTURE_CATEGORY, "lambda-packet-mine",
+        super(HunterBuddyAddon.LAB_CATEGORY, "lambda-packet-mine",
             "Lambda PacketMine (port) — automatic block breaking with double-break, queue, and rebreak.");
     }
 
@@ -319,7 +348,9 @@ public class FuturePacketMine extends Module {
 
         // Remove if already queued OR already in breakPositions[1] (lambda logic)
         positions.removeIf(breakPos ->
-            (Boolean.TRUE.equals(this.queue.get()) && this.queuePositions.stream().anyMatch(it -> it == breakPos))
+            // equals, not ==: these are separate BlockPos objects for the same block, so identity
+            // is never true and the queue check silently did nothing.
+            (Boolean.TRUE.equals(this.queue.get()) && this.queuePositions.stream().anyMatch(it -> it.contains(breakPos)))
                 || breakPos.equals(breakPositions[1])
         );
 
@@ -465,8 +496,12 @@ public class FuturePacketMine extends Module {
         }
         breakPositions[0] = pos;
         this.rebreakPos = null;
-        slotStates.put(pos, new SlotState());
-        this.startMining(pos);
+
+        SlotState state = new SlotState();
+        state.direction = BlockUtils.getDirection(pos);
+        slotStates.put(pos, state);
+
+        this.startMining(pos, state.direction);
     }
 
     private void removeBreak(BlockPos pos) {
@@ -495,44 +530,92 @@ public class FuturePacketMine extends Module {
                 i--;
                 continue;
             }
-            double dist = mc.player.getEyePos().squaredDistanceTo(pos.toCenterPos());
-            if (dist > 36.0) {
-                this.abortMining(pos);
-                this.removeBreak(pos);
-                continue;
-            }
             SlotState s = slotStates.get(pos);
             if (s == null) {
                 s = new SlotState();
+                s.direction = BlockUtils.getDirection(pos);
                 slotStates.put(pos, s);
             }
-            float delta = mc.world.getBlockState(pos).calcBlockBreakingDelta(mc.player, mc.world, pos);
-            s.damage(delta);
+
+            double dist = mc.player.getEyePos().squaredDistanceTo(pos.toCenterPos());
+            if (dist > 36.0) {
+                this.abortMining(pos, s.direction);
+                this.removeBreak(pos);
+                continue;
+            }
+
+            // Progress measured against the tool that will actually be used, the way Meteor's
+            // PacketMine does — otherwise a block reads as ready long after or long before it is.
+            BlockState state = mc.world.getBlockState(pos);
+            FindItemResult tool = InvUtils.findFastestTool(state);
+            int slot = tool.found() ? tool.slot() : mc.player.getInventory().getSelectedSlot();
+
+            s.damage((float) BlockUtils.getBreakDelta(slot, state));
+
             if (s.damage >= 1.0F && !s.attemptedBreak) {
                 s.attemptedBreak = true;
-                this.stopMining(pos);
+                // The stop was already sent with the start; what remains is to be holding the
+                // right tool when the server decides the block falls.
+                this.autoSwitch(tool);
             }
         }
     }
 
     // ============ Mining primitives (simplest, lambda-equivalent) ============
 
-    private void startMining(BlockPos pos) {
-        if (mc.getNetworkHandler() == null) return;
-        mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, Direction.UP));
+    /**
+     * Opens the break on a block: face it, then send the pair.
+     *
+     * <p>Start and stop go out together and once, which is what packet mining is — the server
+     * then counts the block down on its own and drops it when the time is up. The previous
+     * version held the stop back until the client thought the block was done, which is the legit
+     * mining pattern and needs the player to keep looking at the block the whole time.
+     */
+    private void startMining(BlockPos pos, Direction direction) {
+        if (Boolean.TRUE.equals(this.rotate.get())) {
+            Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), 50, () -> sendMinePackets(pos, direction));
+        } else {
+            sendMinePackets(pos, direction);
+        }
     }
 
-    private void abortMining(BlockPos pos) {
-        if (mc.getNetworkHandler() == null) return;
-        mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, Direction.UP));
+    private void sendMinePackets(BlockPos pos, Direction direction) {
+        if (mc.interactionManager == null || mc.world == null) return;
+
+        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
+            PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, direction, sequence));
+        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
+            PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, direction, sequence));
+
+        if (this.swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
+        else mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
     }
 
-    private void stopMining(BlockPos pos) {
-        if (mc.getNetworkHandler() == null) return;
-        mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, Direction.UP));
+    private void abortMining(BlockPos pos, Direction direction) {
+        if (mc.interactionManager == null || mc.world == null) return;
+
+        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
+            PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, direction, sequence));
+    }
+
+    /** Holds the fastest tool for the block that is about to fall. */
+    private void autoSwitch(FindItemResult tool) {
+        if (!Boolean.TRUE.equals(this.autoSwitch.get())) return;
+        if (!tool.found() || !tool.isHotbar()) return;
+        if (mc.player.getInventory().getSelectedSlot() == tool.slot()) return;
+
+        mc.player.getInventory().setSelectedSlot(tool.slot());
+        mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(tool.slot()));
+    }
+
+    /**
+     * Keeps the vanilla break cooldown out of the way.
+     *
+     * <p>The pause the game imposes after each break is what stalls continuous mining.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    private void onBlockBreakingCooldown(BlockBreakingCooldownEvent event) {
+        event.cooldown = 0;
     }
 
     // ============ queueSorted getter (lambda) ============
@@ -654,6 +737,10 @@ public class FuturePacketMine extends Module {
     private static class SlotState {
         float damage = 0.0F;
         boolean attemptedBreak = false;
+
+        /** The face the break was opened against, kept so every packet about it agrees. */
+        Direction direction = Direction.UP;
+
         void damage(float d) { damage += d; }
     }
 
