@@ -23,3 +23,17 @@ accessible	field	net/minecraft/client/gui/screen/ingame/AnvilScreen nameField Ln
 accessible	method	net/minecraft/client/gui/screen/ingame/HandledScreen onMouseClick (Lnet/minecraft/screen/slot/Slot;IILnet/minecraft/screen/slot/SlotActionType;)V
 accessible	field	net/minecraft/client/gui/screen/ingame/MerchantScreen selectedIndex I
 accessible	method	net/minecraft/client/gui/screen/ingame/MerchantScreen syncRecipeIndex ()V
+
+# A section's palette, to test a chunk for geode blocks without walking every block in it.
+accessible	class	net/minecraft/world/chunk/PalettedContainer$Data
+accessible	field	net/minecraft/world/chunk/PalettedContainer data Lnet/minecraft/world/chunk/PalettedContainer$Data;
+accessible	method	net/minecraft/world/chunk/PalettedContainer$Data palette ()Lnet/minecraft/world/chunk/Palette;
+
+# Read straight off the spawner, the way Trouser-Streak reads it, with nothing in between.
+accessible	field	net/minecraft/block/spawner/MobSpawnerLogic spawnDelay I
+accessible	field	net/minecraft/block/spawner/MobSpawnerLogic spawnEntry Lnet/minecraft/block/spawner/MobSpawnerEntry;
+
+# The client's own array of loaded chunks, which is what Trouser-Streak walks to find spawners.
+accessible	class	net/minecraft/client/world/ClientChunkManager$ClientChunkMap
+accessible	field	net/minecraft/client/world/ClientChunkManager chunks Lnet/minecraft/client/world/ClientChunkManager$ClientChunkMap;
+accessible	field	net/minecraft/client/world/ClientChunkManager$ClientChunkMap chunks Ljava/util/concurrent/atomic/AtomicReferenceArray;
