@@ -2,6 +2,7 @@ package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.util.HudGlowPanel;
+import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.PingSampler;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -45,6 +46,27 @@ public class PingMeterHud extends HudElement {
         .name("sparkline-width").description("Width of the history sparkline.")
         .defaultValue(84.0).min(40.0).max(200.0).sliderRange(50.0, 140.0).build());
 
+    private final Setting<HudPulse.Style> animationStyle = sgGeneral.add(
+        new meteordevelopment.meteorclient.settings.EnumSetting.Builder<HudPulse.Style>()
+            .name("animation-style")
+            .description("Subtle keeps the movement small. Lively beats harder and makes the figure hop when the ping changes band.")
+            .defaultValue(HudPulse.Style.Subtle).build());
+
+    private final Setting<Boolean> heartbeat = sgGeneral.add(new BoolSetting.Builder()
+        .name("heartbeat")
+        .description("The dot at the end of the sparkline swells on every new sample. When samples stop, so does the beat.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> flashOnChange = sgGeneral.add(new BoolSetting.Builder()
+        .name("flash-on-change")
+        .description("Flare the big figure when the ping crosses into another band.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> pulseWhenCritical = sgGeneral.add(new BoolSetting.Builder()
+        .name("pulse-when-critical")
+        .description("Breathe the big figure while the ping is critical or the keepalives have gone quiet.")
+        .defaultValue(true).build());
+
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
         .name("text-scale").description("Scale of the text.")
         .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
@@ -73,6 +95,7 @@ public class PingMeterHud extends HudElement {
         .defaultValue(new SettingColor(255, 80, 80, 255)).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
+    private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
     public PingMeterHud() {
         super(INFO);
@@ -142,19 +165,35 @@ public class PingMeterHud extends HudElement {
             : ping >= warnPing.get() ? warnColor.get()
             : valueColor.get();
 
+        // Watched by name rather than by value: crossing a threshold is the event worth showing,
+        // and the number itself moves constantly without meaning anything has changed.
+        float bandFlash = flashOnChange.get()
+            ? pulse.freshness("band", severity.name(), 500L)
+            : 0.0f;
+
+        boolean ailing = severity == HudGlowPanel.Severity.CRITICAL;
+        double breathe = pulseWhenCritical.get() && ailing ? breath() : 1.0;
+
         if (!hasMs) {
             String age = keepAliveAge < 0.0 ? "-" : String.format("%.0f", keepAliveAge);
             Color ageColor = keepAliveAge > 20.0 ? criticalColor.get()
                 : keepAliveAge > 10.0 ? warnColor.get() : valueColor.get();
 
-            renderer.text(age, left, top, ageColor, shadow, bigScale);
+            drawBig(renderer, age, left, top, ageColor, bandFlash, breathe, shadow, bigScale, scale);
             renderer.text(" s idle", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
         } else {
-            renderer.text(ping < 0 ? "-" : String.valueOf(ping), left, top, pingColor, shadow, bigScale);
+            drawBig(renderer, ping < 0 ? "-" : String.valueOf(ping), left, top, pingColor,
+                bandFlash, breathe, shadow, bigScale, scale);
             renderer.text(" ms", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
         }
 
-        drawSparkline(renderer, history, left + pingSlot + msW + 6.0 * scale, top + 1.0, sparkW, sparkH);
+        // Keyed on the newest sample: no new reading, no beat, which is exactly what a stalled
+        // connection should look like.
+        float beat = heartbeat.get() && history.length > 0
+            ? pulse.freshness("beat", String.valueOf(history[history.length - 1]), 700L)
+            : 0.0f;
+
+        drawSparkline(renderer, history, left + pingSlot + msW + 6.0 * scale, top + 1.0, sparkW, sparkH, beat);
 
         double ty = top + bigH + 2.0;
         double tx = left;
@@ -170,8 +209,41 @@ public class PingMeterHud extends HudElement {
         setSize(w + pad * 2.0, h + pad * 2.0);
     }
 
+    /**
+     * The big figure, flared on a band change and breathing while the line is in trouble.
+     *
+     * <p>Drawn at a fixed origin whatever the animation is doing. The hop of the lively style is
+     * vertical only and the flare is pure colour, so nothing here can move the " ms" beside it.
+     */
+    private void drawBig(HudRenderer renderer, String text, double left, double top, Color base,
+                         float flash, double breathe, boolean shadow, double bigScale, double scale) {
+        // Flared towards white rather than towards the band's own colour: the figure is already
+        // painted in that colour, so tinting it towards itself would show nothing at all. The
+        // white is the flash; the colour underneath is what the flash announces.
+        Color colour = flash > 0.0f
+            ? HudPulse.tint(animationStyle.get(), toSetting(base), new SettingColor(255, 255, 255, base.a), flash)
+            : base;
+
+        if (breathe < 1.0) {
+            colour = new Color(colour.r, colour.g, colour.b, (int) (colour.a * breathe));
+        }
+
+        renderer.text(text, left, top + HudPulse.bounce(animationStyle.get(), flash, scale),
+            colour, shadow, bigScale);
+    }
+
+    /** A slow sine on the clock, for something that should look alive while it is unwell. */
+    private static double breath() {
+        return 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(System.currentTimeMillis() / 380.0));
+    }
+
+    private static SettingColor toSetting(Color color) {
+        return new SettingColor(color.r, color.g, color.b, color.a);
+    }
+
     /** Normalised to the window's own min/max: the shape of the wobble, not its absolute scale. */
-    private void drawSparkline(HudRenderer renderer, int[] history, double left, double top, double w, double h) {
+    private void drawSparkline(HudRenderer renderer, int[] history, double left, double top, double w, double h,
+                               float beat) {
         if (history.length < 2) return;
 
         int min = Integer.MAX_VALUE;
@@ -195,7 +267,19 @@ public class PingMeterHud extends HudElement {
         }
 
         SettingColor dot = sparkColor.get();
-        renderer.quad(prevX - 1.5, prevY - 1.5, 3.0, 3.0, new Color(dot.r, dot.g, dot.b, 255));
+
+        // Swollen from its own centre, so the line it caps does not appear to move. The lively
+        // style beats to the full amplitude; the subtle one takes half of it.
+        double amplitude = animationStyle.get() == HudPulse.Style.Lively ? 1.0 : 0.5;
+        double size = 3.0 * (1.0 + (HudPulse.pop(beat) - 1.0) * amplitude);
+
+        // Brightening with the beat as well as growing: at this size a couple of pixels alone are
+        // easy to miss, and the two together read as one pulse.
+        int lift = (int) (beat * 90.0);
+        Color colour = new Color(
+            Math.min(255, dot.r + lift), Math.min(255, dot.g + lift), Math.min(255, dot.b + lift), 255);
+
+        renderer.quad(prevX - size / 2.0, prevY - size / 2.0, size, size, colour);
     }
 
     private double label(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale) {

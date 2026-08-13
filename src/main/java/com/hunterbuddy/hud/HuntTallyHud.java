@@ -119,6 +119,9 @@ public class HuntTallyHud extends HudElement {
     private final Setting<Boolean> showBlocks = sgFields.add(new BoolSetting.Builder()
         .name("show-blocks").description("Blocks MlepMine broke.").defaultValue(true).build());
 
+    private final Setting<Boolean> showJumps = sgFields.add(new BoolSetting.Builder()
+        .name("show-jumps").description("Jumps this session.").defaultValue(true).build());
+
     private final Setting<Boolean> showDistance = sgFields.add(new BoolSetting.Builder()
         .name("show-distance").description("Ground covered this session.").defaultValue(true).build());
 
@@ -138,11 +141,11 @@ public class HuntTallyHud extends HudElement {
         .description("React when a counter moves, so a find registers even when you were looking elsewhere.")
         .defaultValue(true).build());
 
-    private final Setting<HudPulse.Style> animationStyle = sgGeneral.add(
-        new EnumSetting.Builder<HudPulse.Style>()
+    private final Setting<Anim> animationStyle = sgGeneral.add(
+        new EnumSetting.Builder<Anim>()
             .name("animation-style")
-            .description("Subtle tints the new number briefly. Lively also makes it hop.")
-            .defaultValue(HudPulse.Style.Subtle)
+            .description("Subtle tints the new number briefly. Lively also makes it hop. IconPop swells the icon instead. Flash takes the accent colour outright.")
+            .defaultValue(Anim.Subtle)
             .visible(animate::get).build());
 
     private final Setting<Integer> animationMs = sgGeneral.add(new IntSetting.Builder()
@@ -154,6 +157,30 @@ public class HuntTallyHud extends HudElement {
         .name("change-color").description("Colour a number takes on the instant it changes.")
         .defaultValue(new SettingColor(120, 240, 255, 255))
         .visible(animate::get).build());
+
+    /**
+     * How a counter reacts when it moves.
+     *
+     * <p>Subtle and Lively lead the list and keep their names, so a config written before the
+     * other two existed still lands on the setting it chose.
+     */
+    public enum Anim {
+        Subtle,
+        Lively,
+        IconPop,
+        Flash
+    }
+
+    /** Which pulse style the number's tint borrows. Flash takes the accent at full weight. */
+    private HudPulse.Style tintStyle() {
+        Anim anim = animationStyle.get();
+        return anim == Anim.Lively || anim == Anim.Flash ? HudPulse.Style.Lively : HudPulse.Style.Subtle;
+    }
+
+    /** Only Lively moves the number itself; the others leave the row where it is. */
+    private HudPulse.Style bounceStyle() {
+        return animationStyle.get() == Anim.Lively ? HudPulse.Style.Lively : HudPulse.Style.Subtle;
+    }
 
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
@@ -234,6 +261,7 @@ public class HuntTallyHud extends HudElement {
         add(stats, showStashes.get(), "Stashes", s.stashesFound(), Items.WHITE_BANNER);
         add(stats, showXpBottles.get(), "XP", s.xpBottlesUsed(), Items.EXPERIENCE_BOTTLE);
         add(stats, showBlocks.get(), "Mined", s.blocksMined(), Items.NETHERITE_PICKAXE);
+        add(stats, showJumps.get(), "Jumps", s.jumps(), Items.RABBIT_FOOT);
 
         if (showDistance.get()) {
             double blocks = s.distance();
@@ -336,8 +364,16 @@ public class HuntTallyHud extends HudElement {
         boolean hasIcon = mode != LabelMode.Text && !stat.icon.isEmpty();
         double textY = y + (rowHeight - renderer.textHeight(shadow, scale)) / 2.0;
 
+        // Read before anything is drawn: the icon reacts too, and on a left-hand icon it is drawn
+        // before the number that the freshness used to be measured at.
+        float freshness = animate.get()
+            ? pulse.freshness(stat.label, stat.value, animationMs.get())
+            : 0.0f;
+
+        double iconY = y + (rowHeight - iconSize) / 2.0;
+
         if (hasIcon && iconOnLeft.get()) {
-            drawIcon(renderer, stat, x, y + (rowHeight - iconSize) / 2.0, iconSize);
+            drawPoppedIcon(renderer, stat, x, iconY, iconSize, freshness);
             x += iconSize + 2.0 * scale;
         }
 
@@ -346,23 +382,39 @@ public class HuntTallyHud extends HudElement {
             x += renderer.textWidth(stat.label + " ", shadow, scale);
         }
 
-        float freshness = animate.get()
-            ? pulse.freshness(stat.label, stat.value, animationMs.get())
-            : 0.0f;
-
         renderer.text(stat.value, x,
-            textY + HudPulse.bounce(animationStyle.get(), freshness, scale),
-            HudPulse.tint(animationStyle.get(), valueColor.get(), accentColor.get(), freshness),
+            textY + HudPulse.bounce(bounceStyle(), freshness, scale),
+            HudPulse.tint(tintStyle(), valueColor.get(), accentColor.get(), freshness),
             shadow, scale);
         x += renderer.textWidth(stat.value, shadow, scale);
 
         if (hasIcon && !iconOnLeft.get()) {
             x += 2.0 * scale;
-            drawIcon(renderer, stat, x, y + (rowHeight - iconSize) / 2.0, iconSize);
+            drawPoppedIcon(renderer, stat, x, iconY, iconSize, freshness);
             x += iconSize;
         }
 
         return x;
+    }
+
+    /**
+     * The icon, swollen from its centre when the counter has just moved.
+     *
+     * <p>Grown about the middle rather than from the corner, so it never leans into the row above
+     * or the field beside it. The layout is measured on the resting size throughout: an icon that
+     * pushed its neighbours along as it grew would make the whole line breathe.
+     */
+    private void drawPoppedIcon(HudRenderer renderer, Stat stat, double x, double y, double size,
+                                float freshness) {
+        if (animationStyle.get() != Anim.IconPop || freshness <= 0.0f) {
+            drawIcon(renderer, stat, x, y, size);
+            return;
+        }
+
+        double grown = size * HudPulse.pop(freshness);
+        double offset = (grown - size) / 2.0;
+
+        drawIcon(renderer, stat, x - offset, y - offset, grown);
     }
 
     /**

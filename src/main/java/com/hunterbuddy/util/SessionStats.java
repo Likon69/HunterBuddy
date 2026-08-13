@@ -56,6 +56,13 @@ public final class SessionStats {
     private int blocksMined;
     private int stashesFound;
     private double distance;
+
+    /** Ticks spent gliding, so the total is game time rather than wall time. */
+    private long flightTicks;
+
+    private int jumps;
+    private boolean wasOnGround;
+
     private long startedAt = System.currentTimeMillis();
 
     private final List<BlockPos> countedPortals = new ArrayList<>();
@@ -151,6 +158,20 @@ public final class SessionStats {
         return (System.currentTimeMillis() - startedAt) / 1000L;
     }
 
+    /**
+     * Time spent gliding this session.
+     *
+     * <p>Counted in ticks rather than off the wall clock, so it measures time the game actually
+     * ran: a freeze while chunks load is not flight, and neither is a session left paused.
+     */
+    public long flightSeconds() {
+        return flightTicks / 20L;
+    }
+
+    public int jumps() {
+        return jumps;
+    }
+
     /** Called by MlepMine when the server confirms a block it was mining is gone. */
     public void onBlockMined() {
         blocksMined++;
@@ -171,6 +192,9 @@ public final class SessionStats {
         blocksMined = 0;
         stashesFound = 0;
         distance = 0.0;
+        flightTicks = 0L;
+        jumps = 0;
+        wasOnGround = false;
         startedAt = System.currentTimeMillis();
         countedPortals.clear();
         countedContainers.clear();
@@ -331,6 +355,16 @@ public final class SessionStats {
         }
 
         if (ignitionAge < Integer.MAX_VALUE) ignitionAge++;
+
+        // Every kind of gliding, whether a module is flying or you are. Firework boosts and the
+        // gaps between them are all flight; what this excludes is walking, and standing still.
+        if (MeteorClient.mc.player.isGliding()) flightTicks++;
+
+        // Leaving the ground upwards. A jump starts at about 0.42 and a fall is negative, so the
+        // threshold separates the two without counting a walk off a ledge.
+        boolean onGround = MeteorClient.mc.player.isOnGround();
+        if (wasOnGround && !onGround && MeteorClient.mc.player.getVelocity().y > 0.3) jumps++;
+        wasOnGround = onGround;
 
         double x = MeteorClient.mc.player.getX();
         double z = MeteorClient.mc.player.getZ();

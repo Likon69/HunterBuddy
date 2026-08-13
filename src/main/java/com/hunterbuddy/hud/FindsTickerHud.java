@@ -6,9 +6,11 @@ import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.HuntFeed;
 import java.util.ArrayList;
 import java.util.List;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -17,6 +19,7 @@ import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import net.minecraft.util.math.BlockPos;
 
 /**
  * The last few finds as a live feed: coloured dot, what it was, how long ago.
@@ -30,7 +33,14 @@ public class FindsTickerHud extends HudElement {
         "Recent finds and sightings as a fading feed.",
         FindsTickerHud::new);
 
+    /** Which way the dot and the text sit against the panel. */
+    public enum Align {
+        Left,
+        Right
+    }
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgDisplay = settings.createGroup("Display");
     private final SettingGroup sgTypes = settings.createGroup("Types");
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
@@ -58,6 +68,21 @@ public class FindsTickerHud extends HudElement {
 
     private final Setting<Boolean> textShadow = sgGeneral.add(new BoolSetting.Builder()
         .name("text-shadow").description("Render shadow behind text.").defaultValue(true).build());
+
+    private final Setting<Boolean> showDistance = sgDisplay.add(new BoolSetting.Builder()
+        .name("show-distance")
+        .description("How far each find is and which way, as a compass point.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> showCoords = sgDisplay.add(new BoolSetting.Builder()
+        .name("show-coords")
+        .description("Show the find's exact x, z instead of a distance and bearing. Wants a wider panel.")
+        .defaultValue(false).build());
+
+    private final Setting<Align> align = sgDisplay.add(new EnumSetting.Builder<Align>()
+        .name("align")
+        .description("Which side the dot and the entry text sit on.")
+        .defaultValue(Align.Left).build());
 
     private final Setting<Boolean> showStashes = sgTypes.add(new BoolSetting.Builder()
         .name("stashes").description("Stash detections.").defaultValue(true).build());
@@ -157,27 +182,128 @@ public class FindsTickerHud extends HudElement {
 
         SettingColor dot = colorFor(entry.type());
         double dotSize = 3.0 * scale;
+        double gap = 4.0 * scale;
         double textH = renderer.textHeight(shadow, scale);
 
-        renderer.quad(left, top + (textH - dotSize) / 2.0, dotSize, dotSize,
+        String ageText = formatAge(age);
+        String whereText = where(entry);
+
+        // Both side columns get a fixed slot sized from a worst-case template. Measured from their
+        // own text, the age would slide left as "9 s" became "10 min" and the whole row would
+        // twitch every time a line aged.
+        double ageSlot = renderer.textWidth("88 min", shadow, scale);
+        double whereSlot = whereText == null ? 0.0 : renderer.textWidth(whereTemplate(), shadow, scale) + gap;
+
+        boolean right = align.get() == Align.Right;
+
+        double dotX, textLeft, textRight, whereX, ageX;
+
+        if (right) {
+            ageX = left;
+            whereX = left + ageSlot + gap;
+            textLeft = left + ageSlot + gap + whereSlot;
+            textRight = left + w - dotSize - gap;
+            dotX = left + w - dotSize;
+        } else {
+            dotX = left;
+            textLeft = left + dotSize + gap;
+            textRight = left + w - ageSlot - whereSlot - 2.0 * scale;
+            whereX = textRight + 2.0 * scale;
+            ageX = left + w - ageSlot;
+        }
+
+        renderer.quad(dotX, top + (textH - dotSize) / 2.0, dotSize, dotSize,
             new Color(dot.r, dot.g, dot.b, (int) (dot.a * fade)));
 
-        String ageText = formatAge(age);
-        double ageW = renderer.textWidth("88 min", shadow, scale);
-        double textLeft = left + dotSize + 4.0 * scale;
-        double textRight = left + w - ageW - 2.0 * scale;
-
-        String label = fit(renderer, entry.label(), textRight - textLeft, shadow, scale);
+        String label = fit(renderer, displayText(entry), textRight - textLeft, shadow, scale);
 
         SettingColor base = valueColor.get();
         Color faded = new Color(base.r, base.g, base.b, (int) (base.a * fade));
-        renderer.text(label, textLeft, top,
-            freshness > 0.0f ? HudPulse.tint(HudPulse.Style.Subtle, toSetting(faded), dot, freshness) : faded,
-            shadow, scale);
+        Color textColor = freshness > 0.0f
+            ? HudPulse.tint(HudPulse.Style.Subtle, toSetting(faded), dot, freshness)
+            : faded;
+
+        renderer.text(label, right ? textRight - renderer.textWidth(label, shadow, scale) : textLeft,
+            top, textColor, shadow, scale);
 
         SettingColor ageBase = labelColor.get();
-        renderer.text(ageText, left + w - renderer.textWidth(ageText, shadow, scale), top,
-            new Color(ageBase.r, ageBase.g, ageBase.b, (int) (ageBase.a * fade)), shadow, scale);
+        Color ageColor = new Color(ageBase.r, ageBase.g, ageBase.b, (int) (ageBase.a * fade));
+
+        if (whereText != null) {
+            // Pinned to the side the age is on, so the two side columns read as one block.
+            double whereW = renderer.textWidth(whereText, shadow, scale);
+            renderer.text(whereText, right ? whereX : whereX + (whereSlot - gap) - whereW, top, ageColor, shadow, scale);
+        }
+
+        renderer.text(ageText, right ? ageX : ageX + ageSlot - renderer.textWidth(ageText, shadow, scale),
+            top, ageColor, shadow, scale);
+    }
+
+    /**
+     * What the line actually says.
+     *
+     * <p>The player sources publish a bare name, which is all a webhook needs but leaves the feed
+     * saying "Fit2Win" twice with no way to tell an arrival from a departure. The wording belongs
+     * here rather than in the notifier: the same event still reaches Discord unchanged.
+     */
+    private static String displayText(HuntFeed.Entry entry) {
+        return switch (entry.type()) {
+            case PLAYER_ENTER -> entry.label() + " entered range";
+            case PLAYER_LEAVE -> entry.label() + " left range";
+            // "Portal lit" reads as a noun until you get to the end of it. You lit it, so say so.
+            case PORTAL -> "Lit a portal";
+            default -> entry.label();
+        };
+    }
+
+    /**
+     * The distance-and-bearing column, or null when it is switched off.
+     *
+     * <p>A dash when there is nothing honest to say — no position recorded, no world to compare
+     * against, or a find made in another dimension, where the numbers do not convert and a bearing
+     * would point confidently at nothing.
+     */
+    private String where(HuntFeed.Entry entry) {
+        if (!showDistance.get() && !showCoords.get()) return null;
+        if (entry.pos() == null) return "-";
+
+        if (showCoords.get()) return entry.pos().getX() + ", " + entry.pos().getZ();
+
+        if (MeteorClient.mc.player == null || MeteorClient.mc.world == null) return "-";
+
+        String here = MeteorClient.mc.world.getRegistryKey().getValue().toString();
+        if (entry.dimension() != null && !entry.dimension().equals(here)) return "-";
+
+        double dx = entry.pos().getX() - MeteorClient.mc.player.getX();
+        double dz = entry.pos().getZ() - MeteorClient.mc.player.getZ();
+
+        return formatDistance(Math.sqrt(dx * dx + dz * dz)) + " " + bearing(dx, dz);
+    }
+
+    /** The widest the column can get, so its slot never has to move. */
+    private String whereTemplate() {
+        return showCoords.get() ? "-8888888, -8888888" : "8888km NW";
+    }
+
+    private static String formatDistance(double blocks) {
+        if (blocks < 1000.0) return (int) blocks + "m";
+
+        double km = blocks / 1000.0;
+        return km < 10.0 ? String.format("%.1fkm", km) : (int) km + "km";
+    }
+
+    /**
+     * Eight-point compass, written out.
+     *
+     * <p>Letters rather than an arrow on purpose: the HUD font carries six code point ranges and
+     * an arrow is in none of them, so it would render as a blank space rather than a glyph.
+     */
+    private static String bearing(double dx, double dz) {
+        // atan2(dz, dx) is 0 due east and grows towards south, matching Minecraft's axes.
+        double degrees = (Math.toDegrees(Math.atan2(dz, dx)) + 360.0) % 360.0;
+        String[] points = {"E", "SE", "S", "SW", "W", "NW", "N", "NE"};
+
+        return points[(int) Math.round(degrees / 45.0) % 8];
     }
 
     private List<HuntFeed.Entry> collect() {
@@ -237,13 +363,36 @@ public class FindsTickerHud extends HudElement {
         return new SettingColor(color.r, color.g, color.b, color.a);
     }
 
+    /**
+     * A sample of every kind of line, so the editor shows what the settings actually do.
+     *
+     * <p>Positions are laid out around wherever you happen to be standing, which is what makes the
+     * distance column show real numbers while you drag the panel about. The last one is marked as
+     * another dimension on purpose: it is the only way to see the dash in the editor.
+     */
     private List<HuntFeed.Entry> demoEntries() {
         long now = System.currentTimeMillis();
         List<HuntFeed.Entry> out = new ArrayList<>();
-        out.add(new HuntFeed.Entry(HuntFeed.Type.STASH, now - 2_000L, "Stash · 26 containers", null));
-        out.add(new HuntFeed.Entry(HuntFeed.Type.SPAWNER, now - 70_000L, "Dungeon spawner · skeleton", null));
-        out.add(new HuntFeed.Entry(HuntFeed.Type.PORTAL, now - 240_000L, "Portal lit", null));
-        out.add(new HuntFeed.Entry(HuntFeed.Type.PLAYER_ENTER, now - 660_000L, "Fit2Win", null));
+
+        String here = MeteorClient.mc.world == null
+            ? null
+            : MeteorClient.mc.world.getRegistryKey().getValue().toString();
+
+        out.add(new HuntFeed.Entry(HuntFeed.Type.STASH, now - 2_000L, "Stash · 26 chests", demoPos(240, -240), here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.SPAWNER, now - 120_000L, "Skeleton spawner", demoPos(1200, 60), here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.PORTAL, now - 240_000L, "Portal lit", demoPos(-62, 62), here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.PLAYER_ENTER, now - 360_000L, "Fit2Win", demoPos(0, -210), here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.PLAYER_LEAVE, now - 480_000L, "ObamaCare", null, here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.OLD_CHUNK, now - 660_000L, "Old chunks · cluster of 12",
+            demoPos(-300, -300), "minecraft:the_nether"));
+
         return out.subList(0, Math.min(out.size(), maxLines.get()));
+    }
+
+    private static BlockPos demoPos(int dx, int dz) {
+        if (MeteorClient.mc.player == null) return null;
+
+        return BlockPos.ofFloored(
+            MeteorClient.mc.player.getX() + dx, MeteorClient.mc.player.getY(), MeteorClient.mc.player.getZ() + dz);
     }
 }

@@ -36,6 +36,9 @@ public final class LifetimeStats {
         public double distance;
         public long seconds;
         public int stashes;
+
+        /** Added later: an older file has no such key and Gson leaves it at zero. */
+        public long flightSeconds;
     }
 
     private Data data = new Data();
@@ -44,6 +47,7 @@ public final class LifetimeStats {
     private double foldedDistance;
     private long foldedSeconds;
     private int foldedStashes;
+    private long foldedFlightSeconds;
 
     private long lastFoldAt;
     private long lastSaveAt;
@@ -79,6 +83,11 @@ public final class LifetimeStats {
         return data.seconds + (s >= foldedSeconds ? s - foldedSeconds : s);
     }
 
+    public synchronized long totalFlightSeconds() {
+        long s = SessionStats.get().flightSeconds();
+        return data.flightSeconds + (s >= foldedFlightSeconds ? s - foldedFlightSeconds : s);
+    }
+
     public synchronized int totalStashes() {
         int s = SessionStats.get().stashesFound();
         return data.stashes + (s >= foldedStashes ? s - foldedStashes : s);
@@ -110,22 +119,27 @@ public final class LifetimeStats {
         double distance = session.distance();
         long seconds = session.elapsedSeconds();
         int stashes = session.stashesFound();
+        long flight = session.flightSeconds();
 
         // A counter below its baseline means SessionStats has reset under us; the new session
         // starts folding from zero and nothing is counted twice.
-        if (distance < foldedDistance || seconds < foldedSeconds || stashes < foldedStashes) {
+        if (distance < foldedDistance || seconds < foldedSeconds || stashes < foldedStashes
+            || flight < foldedFlightSeconds) {
             foldedDistance = 0.0;
             foldedSeconds = 0L;
             foldedStashes = 0;
+            foldedFlightSeconds = 0L;
         }
 
         data.distance += Math.max(0.0, distance - foldedDistance);
         data.seconds += Math.max(0L, seconds - foldedSeconds);
         data.stashes += Math.max(0, stashes - foldedStashes);
+        data.flightSeconds += Math.max(0L, flight - foldedFlightSeconds);
 
         foldedDistance = distance;
         foldedSeconds = seconds;
         foldedStashes = stashes;
+        foldedFlightSeconds = flight;
     }
 
     private File file() {
