@@ -168,7 +168,7 @@ public class ContainerTooltips extends Module {
    private static boolean blockInteractionCallbackRegistered = false;
 
    public ContainerTooltips() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "container-tooltips", "Shows container contents when looking at tracked containers or shulkers in item frames.");
+      super(HunterBuddyAddon.VISUALS_CATEGORY, "container-tooltips", "Shows container contents when looking at tracked containers or shulkers in item frames.");
    }
 
    public void onActivate() {

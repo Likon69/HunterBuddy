@@ -399,7 +399,7 @@ public class FlowESP extends Module {
    private final LongOpenHashSet inRangeKeys = new LongOpenHashSet();
 
    public FlowESP() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "flow-esp", "Chunk activity detector via fluid spread analysis");
+      super(HunterBuddyAddon.VISUALS_CATEGORY, "flow-esp", "Chunk activity detector via fluid spread analysis");
    }
 
    public void onActivate() {
