@@ -101,6 +101,24 @@ public class ElytraStatusHud extends HudElement {
          .build()
    );
 
+   private final Setting<Boolean> showDurabilityBar = sgDisplay.add(new Builder()
+      .name("show-durability-bar")
+      .description("A bar under the line for the worn elytra's durability. Hidden when you are not wearing one.")
+      .defaultValue(true).build());
+
+   private final Setting<Integer> barHeightPx = sgDisplay.add(
+      new meteordevelopment.meteorclient.settings.IntSetting.Builder()
+         .name("bar-height").description("Thickness of the durability bar, in pixels.")
+         .defaultValue(3).min(1).max(10).sliderRange(1, 6)
+         .visible(showDurabilityBar::get).build());
+
+   private final Setting<com.hunterbuddy.util.HudPulse.Style> barStyle = sgDisplay.add(
+      new meteordevelopment.meteorclient.settings.EnumSetting.Builder<com.hunterbuddy.util.HudPulse.Style>()
+         .name("bar-style")
+         .description("Subtle glides the fill and shades it from red to green. Lively adds a highlight sweeping the filled part.")
+         .defaultValue(com.hunterbuddy.util.HudPulse.Style.Subtle)
+         .visible(showDurabilityBar::get).build());
+
    private final Setting<Boolean> hideRocketsIfZero = sgDisplay.add(new Builder()
       .name("hide-rockets-if-zero")
       .description("Hide the Rockets field entirely when count is 0 (cleaner display).")
@@ -130,6 +148,12 @@ public class ElytraStatusHud extends HudElement {
       new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
          .name("value-color").description("Color of values when in normal range.")
          .defaultValue(new SettingColor(255, 255, 255, 255)).build()
+   );
+
+   private final Setting<SettingColor> goodColor = sgColors.add(
+      new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
+         .name("good-color").description("Top of the durability bar's gradient, for a healthy elytra.")
+         .defaultValue(new SettingColor(110, 240, 130, 255)).build()
    );
 
    private final Setting<SettingColor> warnColor = sgColors.add(
@@ -168,6 +192,12 @@ public class ElytraStatusHud extends HudElement {
    private long flightAnchorAt;
    private HudGlowPanel.Severity severity = HudGlowPanel.Severity.OK;
 
+   private final com.hunterbuddy.util.HudPulse.Tracker pulse = new com.hunterbuddy.util.HudPulse.Tracker();
+
+   /** Length of the last frame, so the bar eases at the same rate on any machine. */
+   private long lastFrameNanos;
+   private double lastFrameSeconds = 0.016;
+
    private record Segment(String prefix, String value, String unit, SettingColor color, boolean first) {
    }
 
@@ -177,8 +207,31 @@ public class ElytraStatusHud extends HudElement {
 
    @Override
    public void render(HudRenderer renderer) {
-      if (MeteorClient.mc.player == null || MeteorClient.mc.world == null) {
-         this.setSize(80.0, renderer.textHeight(this.textShadow.get(), this.textScale.get()));
+      boolean shadow = this.textShadow.get();
+      double scale = this.textScale.get();
+      double textHeight = renderer.textHeight(shadow, scale);
+      // Padding on each side of the separator, scaled with the text so the line
+      // does not fall apart when the element is enlarged.
+      double pad = (this.compactSpacing.get() ? 2.0 : 5.0) * scale;
+
+      this.tickFrame();
+
+      boolean live = MeteorClient.mc.player != null && MeteorClient.mc.world != null;
+      ItemStack chest = live
+         ? MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST)
+         : ItemStack.EMPTY;
+      boolean hasElytra = chest.getItem() == Items.ELYTRA;
+
+      // With nothing to report there was nothing on screen, so the editor showed an empty box and
+      // none of these settings could be judged. Standing in for the missing readings lets the
+      // whole line — and the bar under it — be laid out against something.
+      if (this.isInEditor() && !hasElytra) {
+         this.renderDemo(renderer, shadow, scale, textHeight, pad);
+         return;
+      }
+
+      if (!live) {
+         this.setSize(80.0, textHeight);
          return;
       }
 
@@ -189,9 +242,6 @@ public class ElytraStatusHud extends HudElement {
       double bps = Math.sqrt(vel.x * vel.x + vel.z * vel.z) * 20.0;
       float pitch = MeteorClient.mc.player.getPitch();
 
-      // Cache elytra ItemStack once (avoid double getEquippedStack call)
-      ItemStack chest = MeteorClient.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-      boolean hasElytra = chest.getItem() == Items.ELYTRA;
       int durability = hasElytra ? chest.getMaxDamage() - chest.getDamage() : -1;
       int maxDurability = hasElytra ? chest.getMaxDamage() : -1;
       int rockets = hasElytra ? this.countRockets() : -1;
@@ -200,12 +250,111 @@ public class ElytraStatusHud extends HudElement {
       // own: the durability slot just reads "None" in grey.
       if (!hasElytra) this.severity = HudGlowPanel.Severity.CRITICAL;
 
-      boolean shadow = this.textShadow.get();
-      double scale = this.textScale.get();
-      double textHeight = renderer.textHeight(shadow, scale);
-      // Padding on each side of the separator, scaled with the text so the line
-      // does not fall apart when the element is enlarged.
-      double pad = (this.compactSpacing.get() ? 2.0 : 5.0) * scale;
+      // Left unasked when the field is off, as before: the smoothing keeps anchors of its own and
+      // there is no reason to advance them for a reading nobody is looking at.
+      int flightSeconds = this.showFlight.get() ? this.smoothFlightSeconds(chest, durability) : 0;
+      int spares = (this.showElytraCount.get() || this.showRange.get()) ? this.countUsableElytras() : 0;
+      int totalSeconds = (this.showTotalFlight.get() || this.showRange.get()) ? this.totalFlightSeconds() : 0;
+
+      double totalWidth = this.buildLine(renderer, bps, pitch, hasElytra, durability, maxDurability,
+         rockets, flightSeconds, spares, totalSeconds, shadow, scale, pad);
+
+      this.finish(renderer, totalWidth,
+         hasElytra && maxDurability > 0 ? durability / (double) maxDurability : -1.0,
+         shadow, scale, pad, textHeight);
+   }
+
+   /**
+    * The editor preview: the real line, drawn from stand-in readings.
+    *
+    * <p>It goes through the same {@link #buildLine} the live path does, so every toggle, colour
+    * and threshold behaves here exactly as it will in the air.
+    */
+   private void renderDemo(HudRenderer renderer, boolean shadow, double scale, double textHeight, double pad) {
+      this.segments.clear();
+      this.severity = HudGlowPanel.Severity.OK;
+
+      int maxDurability = 432;
+      int durability = (int) (maxDurability * 0.68);
+
+      double totalWidth = this.buildLine(renderer, 42.0, -38.0f, true, durability, maxDurability,
+         27, 252, 3, 870, shadow, scale, pad);
+
+      this.finish(renderer, totalWidth, durability / (double) maxDurability, shadow, scale, pad, textHeight);
+   }
+
+   /** Panel, line, and the bar beneath it. {@code fraction} is negative with no elytra worn. */
+   private void finish(HudRenderer renderer, double totalWidth, double fraction,
+                       boolean shadow, double scale, double pad, double textHeight) {
+      // The content sits one padding in, so the panel it stands on lands exactly on the element
+      // box. Drawn from the raw origin instead, the panel would spill past the top and left of
+      // what the editor lets you grab.
+      double width = Math.max(totalWidth, 80.0);
+      double inset = this.panel.padding();
+      boolean bar = this.showDurabilityBar.get() && fraction >= 0.0;
+      double barHeight = bar ? (this.barHeightPx.get() + 1) * scale : 0.0;
+
+      this.panel.draw(renderer, this.x + inset, this.y + inset, width, textHeight + barHeight, this.severity);
+      this.flushSegments(renderer, shadow, scale, pad, inset);
+
+      if (bar) {
+         this.drawDurabilityBar(renderer, this.x + inset, this.y + inset + textHeight + 1.0 * scale,
+            width, this.barHeightPx.get() * scale, fraction);
+      }
+
+      this.setSize(width + inset * 2.0, textHeight + barHeight + inset * 2.0);
+   }
+
+   /**
+    * How much elytra is left, as a bar that shades from red through amber to green.
+    *
+    * <p>The percentage is already on the line; this is for the glance that does not read it. The
+    * fill is eased rather than set so a repair or a swap slides instead of jumping.
+    */
+   private void drawDurabilityBar(HudRenderer renderer, double x, double y, double width, double height,
+                                  double fraction) {
+      renderer.quad(x, y, width, height, this.labelColor.get());
+
+      double eased = this.pulse.ease("durability", fraction, Math.max(0.001, this.lastFrameSeconds), 0.35);
+      if (eased <= 0.0) return;
+
+      double filled = width * eased;
+      SettingColor from = eased < 0.5 ? this.dangerColor.get() : this.warnColor.get();
+      SettingColor to = eased < 0.5 ? this.warnColor.get() : this.goodColor.get();
+      float t = (float) (eased < 0.5 ? eased * 2.0 : (eased - 0.5) * 2.0);
+
+      Color fill = new Color(
+         (int) (from.r + (to.r - from.r) * t),
+         (int) (from.g + (to.g - from.g) * t),
+         (int) (from.b + (to.b - from.b) * t),
+         from.a);
+
+      renderer.quad(x, y, filled, height, fill);
+
+      double sweep = com.hunterbuddy.util.HudPulse.shimmer(this.barStyle.get(), 2200L);
+      if (sweep < 0.0 || filled <= 0.0) return;
+
+      // Clipped to the filled part, so the highlight never suggests durability that is not there.
+      double bandWidth = Math.max(4.0, filled * 0.15);
+      double bandX = x + sweep * (filled + bandWidth) - bandWidth;
+      double left = Math.max(x, bandX);
+      double right = Math.min(x + filled, bandX + bandWidth);
+
+      if (right > left) renderer.quad(left, y, right - left, height, new Color(255, 255, 255, 70));
+   }
+
+   private void tickFrame() {
+      long now = System.nanoTime();
+      double dt = this.lastFrameNanos == 0L ? 0.0 : (now - this.lastFrameNanos) / 1_000_000_000.0;
+      this.lastFrameNanos = now;
+
+      if (dt > 0.0 && dt < 1.0) this.lastFrameSeconds = dt;
+   }
+
+   /** Queues every enabled field and returns the width of the line. */
+   private double buildLine(HudRenderer renderer, double bps, float pitch, boolean hasElytra,
+                            int durability, int maxDurability, int rockets, int flightSeconds,
+                            int spares, int totalSeconds, boolean shadow, double scale, double pad) {
       double curX = this.x;
       double totalWidth = 0.0;
 
@@ -272,7 +421,7 @@ public class ElytraStatusHud extends HudElement {
       }
 
       if (this.showFlight.get()) {
-         int seconds = this.smoothFlightSeconds(chest, durability);
+         int seconds = flightSeconds;
          SettingColor flightColor;
 
          if (!hasElytra) {
@@ -296,9 +445,6 @@ public class ElytraStatusHud extends HudElement {
          totalWidth = curX - this.x;
          first = false;
       }
-
-      int spares = (this.showElytraCount.get() || this.showRange.get()) ? this.countUsableElytras() : 0;
-      int totalSeconds = (this.showTotalFlight.get() || this.showRange.get()) ? this.totalFlightSeconds() : 0;
 
       if (this.showElytraCount.get()) {
          SettingColor countColor = spares == 0 ? this.dangerColor.get()
@@ -339,15 +485,7 @@ public class ElytraStatusHud extends HudElement {
          totalWidth = curX - this.x;
       }
 
-      // The content sits one padding in, so the panel it stands on lands exactly on the element
-      // box. Drawn from the raw origin instead, the panel would spill past the top and left of
-      // what the editor lets you grab.
-      double width = Math.max(totalWidth, 80.0);
-      double inset = this.panel.padding();
-      this.panel.draw(renderer, this.x + inset, this.y + inset, width, textHeight, this.severity);
-      this.flushSegments(renderer, shadow, scale, pad, inset);
-
-      this.setSize(width + inset * 2.0, textHeight + inset * 2.0);
+      return totalWidth;
    }
 
    /**

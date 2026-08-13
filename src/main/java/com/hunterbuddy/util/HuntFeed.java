@@ -34,8 +34,20 @@ public final class HuntFeed {
         DANGER
     }
 
-    /** One event. {@code pos} may be null when the event has no single place. */
-    public record Entry(Type type, long at, String label, BlockPos pos) {
+    /**
+     * One event. {@code pos} may be null when the event has no single place.
+     *
+     * <p>{@code dimension} is where that position means something. A find is recorded with the
+     * world it was found in because coordinates alone lie across a portal: 400 blocks in the
+     * Nether is 3200 in the overworld, and a reader offering to point you at it has to know
+     * whether the arrow would mean anything at all.
+     */
+    public record Entry(Type type, long at, String label, BlockPos pos, String dimension) {
+        /** For entries with no dimension to speak of, such as the HUDs' editor previews. */
+        public Entry(Type type, long at, String label, BlockPos pos) {
+            this(type, at, label, pos, null);
+        }
+
         public long ageMs() {
             return System.currentTimeMillis() - at;
         }
@@ -62,8 +74,14 @@ public final class HuntFeed {
      * see it torn.
      */
     public synchronized void publish(Type type, String label, BlockPos pos) {
+        // Taken here rather than asked of the publishers: every one of them already knows where it
+        // is, and none of them should have to remember to say so.
+        String dimension = MeteorClient.mc.world == null
+            ? null
+            : MeteorClient.mc.world.getRegistryKey().getValue().toString();
+
         entries.addFirst(new Entry(type, System.currentTimeMillis(), label,
-            pos == null ? null : pos.toImmutable()));
+            pos == null ? null : pos.toImmutable(), dimension));
 
         while (entries.size() > MAX_ENTRIES) entries.removeLast();
     }

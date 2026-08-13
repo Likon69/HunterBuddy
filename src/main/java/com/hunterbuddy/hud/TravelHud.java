@@ -47,6 +47,12 @@ public class TravelHud extends HudElement {
         Detailed
     }
 
+    /** What the arrival time is divided by. */
+    public enum EtaBasis {
+        Progress,
+        Cruise
+    }
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgDisplay = settings.createGroup("Display");
     private final SettingGroup sgColors = settings.createGroup("Colors");
@@ -70,6 +76,11 @@ public class TravelHud extends HudElement {
         .name("eta-averaging")
         .description("Seconds of flight the arrival time is averaged over. Long enough to swallow a climb-and-glide cycle, so the estimate settles instead of chasing every boost.")
         .defaultValue(45.0).min(5.0).max(300.0).sliderRange(10.0, 120.0).build());
+
+    private final Setting<EtaBasis> etaBasis = sgGeneral.add(new EnumSetting.Builder<EtaBasis>()
+        .name("eta-basis")
+        .description("Progress divides by how fast the target is actually getting closer, so detours and a winding trail count against the estimate. Cruise divides by ground speed, which assumes you are flying straight at it.")
+        .defaultValue(EtaBasis.Progress).build());
 
     private final Setting<Double> reservePct = sgGeneral.add(new DoubleSetting.Builder()
         .name("elytra-reserve-pct")
@@ -174,6 +185,22 @@ public class TravelHud extends HudElement {
      */
     private final Map<String, Double> baselines = new HashMap<>();
 
+    /** When each baseline was set, so progress since then can be turned into a speed. */
+    private final Map<String, Long> baselineAt = new HashMap<>();
+
+    /**
+     * How fast the target is actually getting closer, smoothed.
+     *
+     * <p>Ground speed answers "how fast am I moving"; this answers "how fast am I arriving", and
+     * on anything but a straight run they are different numbers. Following a trail that winds, or
+     * detouring around a stash, covers ground at full speed while closing on the destination at a
+     * fraction of it — and an estimate built on the first is optimistic by exactly that fraction.
+     */
+    private double closingSpeed;
+
+    /** Target the closing speed belongs to, so switching destination does not inherit it. */
+    private String closingTarget = "";
+
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
     /** Length of the last frame, so the bar eases at the same rate on any machine. */
@@ -192,15 +219,26 @@ public class TravelHud extends HudElement {
         double scale = textScale.get();
         double lineHeight = renderer.textHeight(shadow, scale);
 
-        if (MeteorClient.mc.player == null || MeteorClient.mc.world == null) {
-            setSize(90.0, lineHeight);
-            return;
-        }
+        boolean live = MeteorClient.mc.player != null && MeteorClient.mc.world != null;
 
-        tickMotion();
+        if (live) tickMotion();
 
-        Target target = findTarget();
+        Target target = live ? findTarget() : null;
+
         if (target == null) {
+            // Both ways out of here used to happen before the format switch, so the editor —
+            // where there is rarely a waypoint to aim at — only ever saw "no destination", and
+            // toggling Compact against Detailed changed nothing on screen.
+            if (isInEditor()) {
+                renderDemo(renderer, shadow, scale, lineHeight);
+                return;
+            }
+
+            if (!live) {
+                setSize(90.0, lineHeight);
+                return;
+            }
+
             renderer.text("no destination", this.x, this.y, labelColor.get(), shadow, scale);
             setSize(renderer.textWidth("no destination", shadow, scale), lineHeight);
             return;
@@ -216,11 +254,18 @@ public class TravelHud extends HudElement {
         String worldKey = MeteorClient.mc.world.getRegistryKey().getValue().toString();
         if (!worldKey.equals(baselineWorld)) {
             baselines.clear();
+            baselineAt.clear();
             baselineWorld = worldKey;
         }
 
-        double baseline = baselines.compute(target.name,
-            (k, v) -> v == null ? distance : Math.max(v, distance));
+        Double previous = baselines.get(target.name);
+        double baseline = previous == null ? distance : Math.max(previous, distance);
+        baselines.put(target.name, baseline);
+
+        // The clock is tied to the baseline, not to the first sighting. The baseline rises again
+        // whenever you end up further out than you have ever been from this target, and measuring
+        // progress from an old mark against a new distance would report ground you never gained.
+        if (previous == null || baseline > previous) baselineAt.put(target.name, System.currentTimeMillis());
 
         // Estimated on the last speed you actually held when you are stopped, rather than
         // giving up. Standing still to check the bag is exactly when the shortfall is worth
@@ -228,6 +273,11 @@ public class TravelHud extends HudElement {
         // could still change your mind.
         if (cruiseSpeed >= 2.0) lastGoodSpeed = cruiseSpeed;
         double etaSpeed = cruiseSpeed >= 2.0 ? cruiseSpeed : lastGoodSpeed;
+
+        if (etaBasis.get() == EtaBasis.Progress) {
+            double closing = trackClosing(target.name, baseline, distance);
+            if (closing > 0.0) etaSpeed = closing;
+        }
 
         int etaSeconds = etaSpeed >= 2.0 ? quantiseEta((int) (distance / etaSpeed)) : -1;
         int rangeSeconds = ElytraFlightMath.totalUsableSeconds(MeteorClient.mc.player, reservePct.get());
@@ -240,6 +290,58 @@ public class TravelHud extends HudElement {
             renderDetailed(renderer, target, distance, etaSeconds, rangeSeconds, short_, baseline, dx, dz,
                 shadow, scale, lineHeight);
         }
+    }
+
+    /**
+     * The editor preview: the chosen format, drawn from made-up but plausible numbers.
+     *
+     * <p>It runs the real render path rather than a mock-up of it, so what you line the panel up
+     * against in the editor is what will be on screen in flight — every setting, down to the bar
+     * style and the arrival clock, behaves here exactly as it will there.
+     *
+     * <p>The bearing is derived from where you are actually looking so the arrow reads as on
+     * course, which is the state worth laying the element out against.
+     */
+    private void renderDemo(HudRenderer renderer, boolean shadow, double scale, double lineHeight) {
+        Target target = new Target("Hunt_Base", 0.0, 0.0);
+
+        double distance = 12_400.0;
+        int eta = 740;
+        int rangeSeconds = 900;
+
+        // Distance is 30% of the baseline, so the bar sits at 70%.
+        double baseline = distance / 0.3;
+
+        double bearing = Math.toRadians(playerYaw() + 90.0);
+        double dx = Math.cos(bearing) * distance;
+        double dz = Math.sin(bearing) * distance;
+
+        // Both readings come from fields the live path owns. Borrowed rather than assigned: the
+        // editor is opened in-game, and leaving 8.3 km behind in the session odometer would be a
+        // real number quietly replaced by a decorative one.
+        double savedSpeed = speed;
+        double savedSession = sessionDistance;
+
+        speed = 48.0;
+        sessionDistance = 8_300.0;
+
+        try {
+            if (format.get() == Format.Compact) {
+                renderCompact(renderer, target, distance, eta, rangeSeconds, false, baseline, dx, dz,
+                    shadow, scale, lineHeight);
+            } else {
+                renderDetailed(renderer, target, distance, eta, rangeSeconds, false, baseline, dx, dz,
+                    shadow, scale, lineHeight);
+            }
+        } finally {
+            speed = savedSpeed;
+            sessionDistance = savedSession;
+        }
+    }
+
+    /** Zero with no player, so the editor preview can ask before there is one. */
+    private static float playerYaw() {
+        return MeteorClient.mc.player == null ? 0.0f : MeteorClient.mc.player.getYaw();
     }
 
     /**
@@ -294,6 +396,43 @@ public class TravelHud extends HudElement {
         lastX = x;
         lastZ = z;
         if (dt > 0.0 && dt < 1.0) lastFrameSeconds = dt;
+    }
+
+    /**
+     * The rate the target is closing at, or 0 while there is not yet enough of it to trust.
+     *
+     * <p>Averaged over the whole approach rather than sampled: the quantity wanted is exactly
+     * "ground gained divided by time taken", which already carries every detour and every pause
+     * in it. The smoothing on top is only there so the reading does not step when the baseline is
+     * re-marked.
+     *
+     * <p>It stays quiet until fifty blocks and five seconds have gone by. Before that the divisor
+     * is small enough that a boost or a bend swings the answer wildly, and a wrong arrival time
+     * is worse than the honest fallback to ground speed.
+     */
+    private double trackClosing(String name, double baseline, double distance) {
+        if (!name.equals(closingTarget)) {
+            closingTarget = name;
+            closingSpeed = 0.0;
+        }
+
+        Long since = baselineAt.get(name);
+        if (since == null) return 0.0;
+
+        double gained = baseline - distance;
+        double elapsed = (System.currentTimeMillis() - since) / 1000.0;
+
+        if (gained < 50.0 || elapsed < 5.0) return 0.0;
+
+        double sample = gained / elapsed;
+
+        // Seeded outright the first time so the estimate is usable the moment it qualifies,
+        // rather than climbing out of zero and reading as hours remaining while it does.
+        if (closingSpeed <= 0.0) closingSpeed = sample;
+        else closingSpeed += (1.0 - Math.exp(-lastFrameSeconds / Math.max(1.0, cruiseWindow.get())))
+            * (sample - closingSpeed);
+
+        return closingSpeed;
     }
 
     /**
@@ -505,7 +644,7 @@ public class TravelHud extends HudElement {
 
         if (showHeading.get()) {
             double off = Math.abs(MathHelper.wrapDegrees(
-                Math.toDegrees(Math.atan2(dz, dx)) - 90.0 - MeteorClient.mc.player.getYaw()));
+                Math.toDegrees(Math.atan2(dz, dx)) - 90.0 - playerYaw()));
             if (off > 5.0) return HudGlowPanel.Severity.WARN;
         }
 
@@ -647,7 +786,7 @@ public class TravelHud extends HudElement {
     /** Bearing to the target relative to where you are looking. */
     private String headingArrow(double dx, double dz) {
         double relative = MathHelper.wrapDegrees(
-            Math.toDegrees(Math.atan2(dz, dx)) - 90.0 - MeteorClient.mc.player.getYaw());
+            Math.toDegrees(Math.atan2(dz, dx)) - 90.0 - playerYaw());
         int sector = (int) Math.round(relative / 45.0) & 7;
 
         return switch (sector) {
@@ -669,7 +808,7 @@ public class TravelHud extends HudElement {
 
     private SettingColor headingColor(double dx, double dz) {
         double relative = Math.abs(MathHelper.wrapDegrees(
-            Math.toDegrees(Math.atan2(dz, dx)) - 90.0 - MeteorClient.mc.player.getYaw()));
+            Math.toDegrees(Math.atan2(dz, dx)) - 90.0 - playerYaw()));
         return relative <= 5.0 ? goodColor.get() : warnColor.get();
     }
 

@@ -105,6 +105,18 @@ public final class HudPulse {
     }
 
     /**
+     * Scale factor for something that has just changed: swells and settles back to 1.
+     *
+     * <p>For icons, where a hop would only shift the row. Growing and shrinking says the same
+     * thing without moving anything else, and it ends exactly where it started.
+     */
+    public static double pop(float freshness) {
+        if (freshness <= 0.0f) return 1.0;
+
+        return 1.0 + 0.4 * Math.sin(freshness * Math.PI);
+    }
+
+    /**
      * Position of the highlight sweeping a progress bar, from 0 to 1, or -1 when there is none.
      *
      * <p>Runs on the clock rather than on any event, because its job is to say the bar is live

@@ -2,6 +2,7 @@ package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.util.HudGlowPanel;
+import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.TpsSampler;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -54,6 +55,27 @@ public class TpsCardiogramHud extends HudElement {
         .name("grid").description("Faint vertical rules behind the trace.")
         .defaultValue(true).build());
 
+    private final Setting<com.hunterbuddy.util.HudPulse.Style> animationStyle = sgGeneral.add(
+        new EnumSetting.Builder<com.hunterbuddy.util.HudPulse.Style>()
+            .name("animation-style")
+            .description("Subtle keeps the movement small. Lively lengthens the beat's trail, blinks harder, and makes the TPS figure hop when the server turns bad.")
+            .defaultValue(com.hunterbuddy.util.HudPulse.Style.Subtle).build());
+
+    private final Setting<Boolean> beatGlow = sgGeneral.add(new BoolSetting.Builder()
+        .name("beat-glow")
+        .description("The sweeping beat leaves a fading trail behind it. Cardiogram style only.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> flatlineBlink = sgGeneral.add(new BoolSetting.Builder()
+        .name("flatline-blink")
+        .description("Blink the flatline while ticks have stopped, so a stalled server cannot be missed.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> pulseWhenCritical = sgGeneral.add(new BoolSetting.Builder()
+        .name("pulse-when-critical")
+        .description("Breathe the TPS figure while the server is below the critical rate or flatlined.")
+        .defaultValue(true).build());
+
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
         .name("text-scale").description("Scale of the text.")
         .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
@@ -82,6 +104,7 @@ public class TpsCardiogramHud extends HudElement {
         .defaultValue(new SettingColor(110, 240, 130, 28)).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
+    private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
     public TpsCardiogramHud() {
         super(INFO);
@@ -163,7 +186,12 @@ public class TpsCardiogramHud extends HudElement {
         if (flatlined) {
             double flatW = Math.min(w, sinceLastTick / 60.0 * w);
             double flatY = traceY(0.0f, top, traceH) - 1.0;
-            renderer.quad(left + w - flatW, flatY, flatW, 2.0, flatlineColor.get());
+            SettingColor flat = flatlineColor.get();
+
+            // Blinking rather than glowing: a steady red bar becomes part of the furniture within
+            // a minute, and this is the one reading that should stay uncomfortable.
+            int alpha = flatlineBlink.get() ? (int) (flat.a * blink()) : flat.a;
+            renderer.quad(left + w - flatW, flatY, flatW, 2.0, new Color(flat.r, flat.g, flat.b, alpha));
         }
 
         if (style.get() == Style.Cardiogram && !flatlined) {
@@ -172,9 +200,19 @@ public class TpsCardiogramHud extends HudElement {
 
         double ty = top + traceH + 4.0;
         double tx = left;
+
+        boolean ailing = severity == HudGlowPanel.Severity.CRITICAL;
+        float sevFlash = pulse.freshness("severity", severity.name(), 500L);
+        double bump = HudPulse.bounce(animationStyle.get(), sevFlash, scale);
+
+        SettingColor tpsBase = flatlined ? flatlineColor.get() : valueColor.get();
+        Color tpsColor = pulseWhenCritical.get() && ailing
+            ? new Color(tpsBase.r, tpsBase.g, tpsBase.b, (int) (tpsBase.a * breath()))
+            : new Color(tpsBase.r, tpsBase.g, tpsBase.b, tpsBase.a);
+
         tx = label(renderer, "TPS ", tx, ty, shadow, scale);
-        tx = fixed(renderer, String.format("%.1f", Math.min(20.0f, current)), "88.8", tx, ty,
-            flatlined ? flatlineColor.get() : valueColor.get(), shadow, scale);
+        tx = fixed(renderer, String.format("%.1f", Math.min(20.0f, current)), "88.8", tx, ty + bump,
+            tpsColor, shadow, scale);
         tx = label(renderer, "  min 60s ", tx, ty, shadow, scale);
         tx = fixed(renderer, String.format("%.1f", Math.min(20.0f, worst)), "88.8", tx, ty, valueColor.get(), shadow, scale);
 
@@ -206,13 +244,46 @@ public class TpsCardiogramHud extends HudElement {
         double baseY = top + traceH * 0.55;
 
         SettingColor color = traceColor.get();
-        Color bright = new Color(color.r, color.g, color.b, 235);
 
-        if (beatX + 7.0 <= left + w) {
-            renderer.line(beatX, baseY, beatX + 2.0, baseY - amp, bright);
-            renderer.line(beatX + 2.0, baseY - amp, beatX + 4.0, baseY + amp * 0.5, bright);
-            renderer.line(beatX + 4.0, baseY + amp * 0.5, beatX + 7.0, baseY, bright);
+        // The trail is drawn first so the live spike sits on top of it, and each ghost is a copy
+        // of the spike a moment further back — the shape is the same, only fainter, which reads as
+        // the same mark moving rather than as several marks.
+        if (beatGlow.get()) {
+            int ghosts = animationStyle.get() == HudPulse.Style.Lively ? 4 : 2;
+
+            for (int i = ghosts; i >= 1; i--) {
+                double ghostX = beatX - i * (w * 0.018);
+                if (ghostX < left) continue;
+
+                int alpha = (int) (235.0 * (1.0 - i / (double) (ghosts + 1)) * 0.55);
+                drawSpike(renderer, ghostX, baseY, amp, left, w, new Color(color.r, color.g, color.b, alpha));
+            }
         }
+
+        drawSpike(renderer, beatX, baseY, amp, left, w, new Color(color.r, color.g, color.b, 235));
+    }
+
+    /** One QRS mark. Clipped to the trace, so nothing is ever drawn past the right edge. */
+    private void drawSpike(HudRenderer renderer, double beatX, double baseY, double amp,
+                           double left, double w, Color color) {
+        if (beatX + 7.0 > left + w) return;
+
+        renderer.line(beatX, baseY, beatX + 2.0, baseY - amp, color);
+        renderer.line(beatX + 2.0, baseY - amp, beatX + 4.0, baseY + amp * 0.5, color);
+        renderer.line(beatX + 4.0, baseY + amp * 0.5, beatX + 7.0, baseY, color);
+    }
+
+    /** A slow sine on the clock, for a figure that should look alive while it is unwell. */
+    private static double breath() {
+        return 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(System.currentTimeMillis() / 380.0));
+    }
+
+    /** Faster and deeper than the breath: this one is meant to nag. */
+    private double blink() {
+        double depth = animationStyle.get() == HudPulse.Style.Lively ? 0.75 : 0.45;
+        double period = animationStyle.get() == HudPulse.Style.Lively ? 240.0 : 380.0;
+
+        return 1.0 - depth * (0.5 + 0.5 * Math.sin(System.currentTimeMillis() / period));
     }
 
     private double label(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale) {
