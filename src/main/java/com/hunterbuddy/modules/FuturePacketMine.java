@@ -30,16 +30,11 @@ import net.minecraft.network.packet.Packet;
 import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
-import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.block.BlockState;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
-import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
@@ -79,6 +74,14 @@ public class FuturePacketMine extends Module {
         .description("Switch to the fastest tool once a block is ready to fall.")
         .defaultValue(true)
         .build()
+    );
+
+    private final Setting<com.hunterbuddy.lambda.BreakConfig.BreakMode> breakMode = sgGeneral.add(
+        new EnumSetting.Builder<com.hunterbuddy.lambda.BreakConfig.BreakMode>()
+            .name("break-mode")
+            .description("Which packet sequence to open a break with. Grim is the current bypass; OldGrim adds the offset burst that spends the server's delay.")
+            .defaultValue(com.hunterbuddy.lambda.BreakConfig.BreakMode.Grim)
+            .build()
     );
 
     private final Setting<List<Item>> ignoreWhenHolding = sgGeneral.add(new ItemListSetting.Builder()
@@ -255,6 +258,11 @@ public class FuturePacketMine extends Module {
     // ============ State ============
 
     /** Primary slots — index 0 is being actively broken, index 1 is queued. */
+    private final com.hunterbuddy.lambda.BreakContextFactory.Configs automated =
+        new com.hunterbuddy.lambda.BreakContextFactory.Configs(breakConfig);
+
+    private final com.hunterbuddy.lambda.BreakEngine engine = new com.hunterbuddy.lambda.BreakEngine();
+
     private final BlockPos[] breakPositions = new BlockPos[2];
     /** Queue of pending block sets. */
     private final List<Set<BlockPos>> queuePositions = new ArrayList<>();
@@ -270,6 +278,8 @@ public class FuturePacketMine extends Module {
 
     @Override
     public void onActivate() {
+        engine.clear();
+        syncConfig();
         breakPositions[0] = null;
         breakPositions[1] = null;
         queuePositions.clear();
@@ -279,6 +289,9 @@ public class FuturePacketMine extends Module {
 
     @Override
     public void onDeactivate() {
+        // Without this the engine keeps the block and keeps sending about it after the module is
+        // switched off.
+        engine.clear();
         breakPositions[0] = null;
         breakPositions[1] = null;
         queuePositions.clear();
@@ -288,29 +301,58 @@ public class FuturePacketMine extends Module {
 
     // ============ TickEvent.Input.Post equivalent — re-submit every tick ============
 
+    /**
+     * The whole breaking half of the tick, kept in Pre.
+     *
+     * <p>The engine queues a rotation and sends its break packets from the callback, which Meteor
+     * runs partway through the tick; asked at the end of one, the packets land in the next and
+     * every break opens against a stale angle.
+     */
     @EventHandler
     private void onTickPre(Pre event) {
         if (mc.world == null || mc.player == null) return;
-        if (attackedThisTick) return;
 
-        List<BlockPos> activeBreaking = new ArrayList<>();
-        if (breakPositions[0] != null) activeBreaking.add(breakPositions[0]);
-        if (breakPositions[1] != null) activeBreaking.add(breakPositions[1]);
-        for (Set<BlockPos> q : this.getQueueSorted()) {
-            activeBreaking.addAll(q);
+        this.syncConfig();
+
+        // Cleared as it is read. An attack has already submitted its own positions, so the
+        // re-submission is skipped once — left set, it silenced this handler for good.
+        boolean attacked = this.attackedThisTick;
+        this.attackedThisTick = false;
+
+        if (!attacked) {
+            List<BlockPos> activeBreaking = new ArrayList<>();
+            if (breakPositions[0] != null) activeBreaking.add(breakPositions[0]);
+            if (breakPositions[1] != null) activeBreaking.add(breakPositions[1]);
+            for (Set<BlockPos> q : this.getQueueSorted()) {
+                activeBreaking.addAll(q);
+            }
+            if (!activeBreaking.isEmpty()) {
+                this.requestBreakManager(activeBreaking, false);
+            }
+            if (this.rebreakMode.get() == RebreakMode.Auto && this.rebreakPos != null) {
+                this.requestBreakManager(Collections.singletonList(this.rebreakPos), true);
+            }
         }
-        if (!activeBreaking.isEmpty()) {
-            this.requestBreakManager(activeBreaking, false);
-        }
-        if (this.rebreakMode.get() == RebreakMode.Auto && this.rebreakPos != null) {
-            this.requestBreakManager(Collections.singletonList(this.rebreakPos), true);
-        }
+
+        engine.tick();
     }
 
     @EventHandler
     private void onTickPost(Post event) {
         if (mc.world == null || mc.player == null) return;
         this.processActiveBreaks();
+    }
+
+    /** Pushes the module's own settings into the config the engine reads. */
+    private void syncConfig() {
+        breakConfig.setRotate(this.rotate.get());
+        breakConfig.setSwing(this.swing.get()
+            ? com.hunterbuddy.lambda.BreakConfig.SwingMode.StartAndEnd
+            : com.hunterbuddy.lambda.BreakConfig.SwingMode.None);
+        breakConfig.setSwapMode(this.autoSwitch.get()
+            ? com.hunterbuddy.lambda.BreakConfig.SwapMode.Start
+            : com.hunterbuddy.lambda.BreakConfig.SwapMode.None);
+        breakConfig.setBreakMode(this.breakMode.get());
     }
 
     // ============ PlayerEvent.Breaking.Update equivalent — attack block ============
@@ -501,7 +543,9 @@ public class FuturePacketMine extends Module {
         state.direction = BlockUtils.getDirection(pos);
         slotStates.put(pos, state);
 
-        this.startMining(pos, state.direction);
+        // The engine owns the packet sequence from here: opening burst shaped by the break mode,
+        // the countdown, and the closing stop. What stays here is the queue and what gets drawn.
+        engine.request(com.hunterbuddy.lambda.BreakContextFactory.create(pos, automated));
     }
 
     private void removeBreak(BlockPos pos) {
@@ -516,6 +560,7 @@ public class FuturePacketMine extends Module {
 
     // ============ Tick processing ============
 
+    /** Bookkeeping only: the packets went out in Pre, this is what the boxes are drawn from. */
     private void processActiveBreaks() {
         // Damage accumulation
         for (int i = 0; i < 2; i++) {
@@ -539,7 +584,7 @@ public class FuturePacketMine extends Module {
 
             double dist = mc.player.getEyePos().squaredDistanceTo(pos.toCenterPos());
             if (dist > 36.0) {
-                this.abortMining(pos, s.direction);
+                engine.onBlockRemoved(pos);
                 this.removeBreak(pos);
                 continue;
             }
@@ -552,61 +597,17 @@ public class FuturePacketMine extends Module {
 
             s.damage((float) BlockUtils.getBreakDelta(slot, state));
 
-            if (s.damage >= 1.0F && !s.attemptedBreak) {
-                s.attemptedBreak = true;
-                // The stop was already sent with the start; what remains is to be holding the
-                // right tool when the server decides the block falls.
-                this.autoSwitch(tool);
-            }
+            // Display only. The engine runs its own count off the same block state and decides
+            // when the break actually closes; this one exists so the box can be coloured.
+            if (s.damage >= 1.0F) s.attemptedBreak = true;
         }
     }
 
     // ============ Mining primitives (simplest, lambda-equivalent) ============
 
-    /**
-     * Opens the break on a block: face it, then send the pair.
-     *
-     * <p>Start and stop go out together and once, which is what packet mining is — the server
-     * then counts the block down on its own and drops it when the time is up. The previous
-     * version held the stop back until the client thought the block was done, which is the legit
-     * mining pattern and needs the player to keep looking at the block the whole time.
-     */
-    private void startMining(BlockPos pos, Direction direction) {
-        if (Boolean.TRUE.equals(this.rotate.get())) {
-            Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), 50, () -> sendMinePackets(pos, direction));
-        } else {
-            sendMinePackets(pos, direction);
-        }
-    }
 
-    private void sendMinePackets(BlockPos pos, Direction direction) {
-        if (mc.interactionManager == null || mc.world == null) return;
 
-        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, direction, sequence));
-        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, direction, sequence));
 
-        if (this.swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
-        else mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
-    }
-
-    private void abortMining(BlockPos pos, Direction direction) {
-        if (mc.interactionManager == null || mc.world == null) return;
-
-        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, direction, sequence));
-    }
-
-    /** Holds the fastest tool for the block that is about to fall. */
-    private void autoSwitch(FindItemResult tool) {
-        if (!Boolean.TRUE.equals(this.autoSwitch.get())) return;
-        if (!tool.found() || !tool.isHotbar()) return;
-        if (mc.player.getInventory().getSelectedSlot() == tool.slot()) return;
-
-        mc.player.getInventory().setSelectedSlot(tool.slot());
-        mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(tool.slot()));
-    }
 
     /**
      * Keeps the vanilla break cooldown out of the way.
