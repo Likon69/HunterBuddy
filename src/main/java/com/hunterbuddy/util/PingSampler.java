@@ -8,9 +8,9 @@ import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.network.packet.c2s.play.ClientStatusC2SPacket;
+import net.minecraft.network.packet.c2s.play.RequestCommandCompletionsC2SPacket;
 import net.minecraft.network.packet.s2c.common.KeepAliveS2CPacket;
-import net.minecraft.network.packet.s2c.play.StatisticsS2CPacket;
+import net.minecraft.network.packet.s2c.play.CommandSuggestionsS2CPacket;
 
 /**
  * The connection's recent past: half a minute of ping, and how fresh the keepalives are.
@@ -29,7 +29,15 @@ public final class PingSampler {
     private final ArrayDeque<Integer> samples = new ArrayDeque<>();
     private long lastSampleAt;
 
-    /** When the outstanding stats request went out, or 0 when none is pending. */
+    /**
+     * The id our completion requests carry, so the reply can be told from the chat box's own.
+     *
+     * <p>The server echoes the id back untouched, and the client is asking for completions
+     * whenever anyone types a slash; a fixed, unlikely number is what keeps the two apart.
+     */
+    private static final int PING_PROBE_ID = 134414;
+
+    /** When the outstanding probe went out, or 0 when none is pending. */
     private volatile long probeSentAt;
     // Written on the network thread, read on the render thread; volatile to avoid a torn long.
     private volatile long lastKeepAliveAt;
@@ -131,9 +139,10 @@ public final class PingSampler {
      *
      * <p>The tab-list latency is what every client reads first, and on 2b2t through ViaVersion it
      * stays at zero — a value that looks like an answer and is not one. But the play protocol
-     * does contain one exchange the client itself starts: asking for statistics gets exactly one
-     * reply. Sending it and timing the reply measures the line directly, which is why other
-     * clients show a figure here where reading the tab list shows nothing.
+     * does contain an exchange the client itself starts: asking for command completions gets
+     * exactly one reply, answered off the server's command tree rather than behind the world
+     * tick. Timing that reply measures the line and not the server's workload, which is why it
+     * reads what the game's own tab list reads where a heavier request reads high.
      *
      * <p>Once a second, and never two at a time: an outstanding request is left to finish or to
      * time out rather than being piled on.
@@ -166,7 +175,7 @@ public final class PingSampler {
 
         probeSentAt = now;
         MeteorClient.mc.getNetworkHandler()
-            .sendPacket(new ClientStatusC2SPacket(ClientStatusC2SPacket.Mode.REQUEST_STATS));
+            .sendPacket(new RequestCommandCompletionsC2SPacket(PING_PROBE_ID, "w "));
     }
 
     private synchronized void record(int latency) {
@@ -181,7 +190,9 @@ public final class PingSampler {
             return;
         }
 
-        if (event.packet instanceof StatisticsS2CPacket) {
+        // id() and not getCompletionId(): the reply is a record, and the getter of that name lives
+        // on the request we sent, not on the answer.
+        if (event.packet instanceof CommandSuggestionsS2CPacket c && c.id() == PING_PROBE_ID) {
             long sent = probeSentAt;
             if (sent == 0L) return;
 
