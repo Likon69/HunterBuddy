@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
-import meteordevelopment.meteorclient.events.world.TickEvent.Post;
+import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
@@ -13,21 +13,14 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
-import meteordevelopment.meteorclient.utils.player.Rotations;
-import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 
 /**
  * FutureNuker — port of lambda's Nuker
@@ -146,25 +139,40 @@ public class FutureNuker extends Module {
         .build()
     );
 
-    private final Setting<Integer> maxBlocksPerTick = sgGeneral.add(new IntSetting.Builder()
-        .name("max-blocks-per-tick")
-        .description("How many blocks may be broken in one tick. Only ever applies to blocks that break instantly; anything slower takes one per tick by nature.")
-        .defaultValue(1)
-        .min(1).max(64).sliderRange(1, 16)
-        .build()
+    private final Setting<com.hunterbuddy.lambda.BreakConfig.BreakMode> breakMode = sgGeneral.add(
+        new EnumSetting.Builder<com.hunterbuddy.lambda.BreakConfig.BreakMode>()
+            .name("break-mode")
+            .description("Which packet sequence to open a break with. Grim is the current bypass; OldGrim adds the offset burst that spends the server's delay.")
+            .defaultValue(com.hunterbuddy.lambda.BreakConfig.BreakMode.Grim)
+            .build()
     );
 
     /** Per-Nuker BreakConfig instance (gives access to fillFluids for target selection). */
     private final com.hunterbuddy.lambda.BreakConfig breakConfig = new com.hunterbuddy.lambda.BreakConfig();
+
+    private final com.hunterbuddy.lambda.BreakContextFactory.Configs automated =
+        new com.hunterbuddy.lambda.BreakContextFactory.Configs(breakConfig);
+
+    private final com.hunterbuddy.lambda.BreakEngine engine = new com.hunterbuddy.lambda.BreakEngine();
 
     public FutureNuker() {
         super(HunterBuddyAddon.LAB_CATEGORY, "lambda-nuker",
             "Lambda Nuker (port) — breaks blocks around you, direct packet-mine (no PacketMine dep).");
     }
 
+    /**
+     * Pre and not Post: the engine queues a rotation whose callback carries the break packets, and
+     * Meteor runs that callback partway through the tick. Started at the end of one, it lands in
+     * the next.
+     */
     @EventHandler
-    private void onTick(Post event) {
+    private void onTick(Pre event) {
         if (mc.world == null || mc.player == null || mc.interactionManager == null) return;
+
+        // Read every tick rather than only on enable: the settings can be turned while the module
+        // is running, and the engine only ever looks at the config object.
+        syncConfig();
+
         if (Boolean.TRUE.equals(this.onGround.get()) && !mc.player.isOnGround()) return;
 
         BlockPos playerPos = mc.player.getBlockPos();
@@ -197,21 +205,13 @@ public class FutureNuker extends Module {
         targets.sort((a, b) -> Double.compare(
             a.getSquaredDistance(eyes.x, eyes.y, eyes.z), b.getSquaredDistance(eyes.x, eyes.y, eyes.z)));
 
-        int broken = 0;
+        // The engine owns the sequence; the module only decides which block is worth offering.
+        // It refuses anything while a break is running or the inter-block delay is still going,
+        // so handing it the nearest candidate every tick is enough.
+        engine.tick();
 
         for (BlockPos pos : targets) {
-            if (broken >= this.maxBlocksPerTick.get()) break;
-
-            boolean insta = BlockUtils.canInstaBreak(pos);
-
-            this.autoSwitch(pos);
-            this.breakBlock(pos);
-            broken++;
-
-            // A block that does not break instantly needs the progress kept on it, and the
-            // client can only be breaking one block at a time. Moving on would restart the
-            // count somewhere else and neither would ever finish.
-            if (!insta) break;
+            if (engine.request(com.hunterbuddy.lambda.BreakContextFactory.create(pos, automated))) break;
         }
 
         if (Boolean.TRUE.equals(this.fillFloor.get())) {
@@ -220,52 +220,35 @@ public class FutureNuker extends Module {
         // No autoDisable — lambda's Nuker stays active.
     }
 
-    /**
-     * Breaks one block the way Meteor's own Nuker does.
-     *
-     * <p>Instant blocks get the sequenced START/STOP pair; anything slower goes through
-     * {@link BlockUtils#breakBlock} which keeps the progress across ticks. Both take the real
-     * face from {@link BlockUtils#getDirection} — the previous version claimed UP for every
-     * block, which is a face the server can see is wrong for anything you are not standing on.
-     */
-    private void breakBlock(BlockPos pos) {
-        if (Boolean.TRUE.equals(this.rotate.get())) {
-            Rotations.rotate(Rotations.getYaw(pos), Rotations.getPitch(pos), 50, () -> sendBreak(pos));
-        } else {
-            sendBreak(pos);
-        }
+    @Override
+    public void onActivate() {
+        engine.clear();
+        syncConfig();
     }
 
-    private void sendBreak(BlockPos pos) {
-        if (!BlockUtils.canInstaBreak(pos)) {
-            BlockUtils.breakBlock(pos, this.swing.get());
-            return;
-        }
-
-        Direction direction = BlockUtils.getDirection(pos);
-
-        // Sequenced, not raw: the server hands out an id per action and answers with it, and a
-        // client that never quotes one is trivially not a vanilla client.
-        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, direction, sequence));
-
-        if (this.swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
-        else mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
-
-        mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(
-            PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, direction, sequence));
+    @Override
+    public void onDeactivate() {
+        engine.clear();
     }
 
-    /** Picks the fastest tool for the block, so stone is not attacked with a fist. */
-    private void autoSwitch(BlockPos pos) {
-        if (!Boolean.TRUE.equals(this.autoSwitch.get())) return;
+    /** Pushes the module's own settings into the config the engine reads. */
+    private void syncConfig() {
+        breakConfig.setRotate(this.rotate.get());
+        breakConfig.setSwing(this.swing.get()
+            ? com.hunterbuddy.lambda.BreakConfig.SwingMode.StartAndEnd
+            : com.hunterbuddy.lambda.BreakConfig.SwingMode.None);
+        breakConfig.setSwapMode(this.autoSwitch.get()
+            ? com.hunterbuddy.lambda.BreakConfig.SwapMode.Start
+            : com.hunterbuddy.lambda.BreakConfig.SwapMode.None);
+        breakConfig.setBreakMode(this.breakMode.get());
+    }
 
-        FindItemResult slot = InvUtils.findFastestTool(mc.world.getBlockState(pos));
-        if (!slot.found() || !slot.isHotbar()) return;
-        if (mc.player.getInventory().getSelectedSlot() == slot.slot()) return;
-
-        mc.player.getInventory().setSelectedSlot(slot.slot());
-        mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(slot.slot()));
+    @EventHandler
+    private void onBlockUpdate(meteordevelopment.meteorclient.events.packets.PacketEvent.Receive event) {
+        if (event.packet instanceof net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket packet
+            && packet.getState().isAir()) {
+            engine.onBlockRemoved(packet.getPos());
+        }
     }
 
     /**
