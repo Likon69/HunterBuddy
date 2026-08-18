@@ -266,8 +266,15 @@ public class RocketBoost extends Module {
       }
       pongQueue.clear();
 
-      if (mc.world != null && idToRemove != -1) {
-         mc.world.removeEntity(idToRemove, net.minecraft.entity.Entity.RemovalReason.KILLED);
+      // A setback reaches us as PacketEvent.Receive, which Meteor fires on the netty thread, so
+      // this can run while the render thread is walking the entity list. That list is a live
+      // fastutil map with no locking behind getEntities(), and removing from under the iterator
+      // makes it hand back a null entity. Take the rocket out on the main thread instead.
+      if (idToRemove != -1) {
+         final int rocketId = idToRemove;
+         mc.execute(() -> {
+            if (mc.world != null) mc.world.removeEntity(rocketId, net.minecraft.entity.Entity.RemovalReason.KILLED);
+         });
       }
 
       lastEventTime = System.currentTimeMillis();
@@ -359,7 +366,11 @@ public class RocketBoost extends Module {
          }
       }
       if (found && !remaining.isEmpty()) {
-         mc.getNetworkHandler().onEntitiesDestroy(new EntitiesDestroyS2CPacket(remaining));
+         // Same thread, same list: onEntitiesDestroy takes entities straight out of it.
+         EntitiesDestroyS2CPacket rest = new EntitiesDestroyS2CPacket(remaining);
+         mc.execute(() -> {
+            if (mc.getNetworkHandler() != null) mc.getNetworkHandler().onEntitiesDestroy(rest);
+         });
       }
    }
 
