@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,6 +65,7 @@ import net.minecraft.util.math.Vec3d;
 import xaeroplus.module.ModuleManager;
 import xaeroplus.module.impl.OldChunks;
 import xaeroplus.module.impl.PaletteNewChunks;
+import xaeroplus.util.ChunkUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
@@ -358,7 +360,7 @@ public class StashFinder extends Module {
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
                      .name("old-chunks-only")
-                  .description("Only detect stashes in previously loaded chunks (using XaeroPlus chunk detection).")
+                  .description("Only report chunks XaeroPlus's Old Chunks module calls old terrain. Terrain generating as you fly past is skipped. Needs that module switched on in XaeroPlus - with it off, nothing is reported at all.")
                .defaultValue(true)
             .build()
       );
@@ -761,6 +763,19 @@ public class StashFinder extends Module {
    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
    private static final String CATEGORY = "StashFinder";
 
+   /**
+    * Chunks held back a tick so XaeroPlus has had time to class them.
+    *
+    * <p>Both mods hang their handler off the end of the same vanilla method - XaeroPlus at
+    * {@code RETURN}, Meteor at {@code TAIL} of {@code ClientPlayNetworkHandler.onChunkData} - and
+    * nothing decides which of the two lands first. Asking the old-chunk cache about the chunk that
+    * is arriving right now is a coin toss; a tick later the answer is in.
+    */
+   private final Set<ChunkPos> pendingOldChunkScan = new LinkedHashSet<>();
+
+   /** Said once a session, not once a chunk. */
+   private boolean warnedOldChunksUnavailable;
+
    public StashFinder() {
       super(HunterBuddyAddon.HUNT_CATEGORY, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
    }
@@ -770,6 +785,8 @@ public class StashFinder extends Module {
       this.loaded = false;
       this.notifiedChunks.clear();
       this.clusterWaypoints.clear();
+      this.pendingOldChunkScan.clear();
+      this.warnedOldChunksUnavailable = false;
    }
 
    @EventHandler
@@ -781,6 +798,8 @@ public class StashFinder extends Module {
       if (((Keybind)this.openCoordListBind.get()).isPressed() && this.mc.currentScreen == null) {
          this.openCoordinateList();
       }
+
+      this.drainPendingChunkScans();
 
       if (this.minecartSweepCooldown > 0) {
          this.minecartSweepCooldown--;
@@ -826,27 +845,106 @@ public class StashFinder extends Module {
 
    @EventHandler
    private void onChunkData(ChunkDataEvent event) {
+      if (this.mc.player == null || this.mc.world == null) {
+         return;
+      }
+
+      if ((Boolean)this.oldChunksOnly.get()) {
+         this.pendingOldChunkScan.add(event.chunk().getPos());
+         return;
+      }
+
+      this.scanChunk(event.chunk());
+   }
+
+   /**
+    * Scans the chunks held back last tick, and drops the ones XaeroPlus did not class as old.
+    *
+    * <p>The position is kept rather than the chunk itself: holding the object across a tick pins a
+    * chunk the client may already have dropped, and by now the world either still has it or there
+    * is nothing left to read.
+    */
+   private void drainPendingChunkScans() {
+      if (this.pendingOldChunkScan.isEmpty()) {
+         return;
+      }
+
+      List<ChunkPos> due = new ArrayList<>(this.pendingOldChunkScan);
+      this.pendingOldChunkScan.clear();
+
+      if (this.mc.world == null || this.mc.player == null) {
+         return;
+      }
+
+      for (ChunkPos pos : due) {
+         if (!this.isOldChunk(pos)) {
+            continue;
+         }
+
+         WorldChunk worldChunk = this.mc.world.getChunk(pos.x, pos.z);
+
+         if (worldChunk != null) {
+            this.scanChunk(worldChunk);
+         }
+      }
+   }
+
+   /**
+    * Whether XaeroPlus classes this chunk as old terrain.
+    *
+    * <p>Its Old Chunks module sorts every chunk it is given into one of two caches, by whether the
+    * chunk holds any block that only exists in a recent version. Terrain generated years ago holds
+    * none of them, terrain generated as you fly holds plenty - which is the whole distinction out
+    * at the far coordinates, where the chunks streaming past have never been loaded by anyone.
+    *
+    * <p>The answer is no when the module is off, and it is said out loud once. That cache is only
+    * filled while the module runs, so with it off every chunk reads as not-old; reporting anyway
+    * would be the unfiltered behaviour wearing the filter's name, and the filter is ticked
+    * precisely so that nothing gets through.
+    */
+   private boolean isOldChunk(ChunkPos pos) {
+      try {
+         OldChunks module = ModuleManager.getModule(OldChunks.class);
+
+         if (module != null && module.isEnabled()) {
+            return module.isOldChunk(pos.x, pos.z, ChunkUtils.getActualDimension());
+         }
+
+         this.warnOldChunksUnavailable("XaeroPlus's Old Chunks module is off", null);
+      } catch (Throwable t) {
+         this.warnOldChunksUnavailable("XaeroPlus's Old Chunks module could not be reached", t);
+      }
+
+      return false;
+   }
+
+   private void warnOldChunksUnavailable(String reason, Throwable t) {
+      if (this.warnedOldChunksUnavailable) {
+         return;
+      }
+
+      this.warnedOldChunksUnavailable = true;
+
+      if (t != null) {
+         HunterBuddyAddon.LOG.error("StashFinder: old chunk lookup failed", t);
+      }
+
+      ChatUtils.warningPrefix(
+         CATEGORY, "old-chunks-only is on but " + reason + " - nothing will be reported until it is available."
+      );
+   }
+
+   /** Reads one chunk's block entities and records it when it clears the thresholds. */
+   private void scanChunk(WorldChunk worldChunk) {
       if (this.mc.player != null && this.mc.world != null) {
-         if (this.isInWoodlandMansion(event.chunk())) {
+         if (this.isInWoodlandMansion(worldChunk)) {
             return;
          }
 
-         double chunkXAbs = Math.abs(event.chunk().getPos().x * 16);
-         double chunkZAbs = Math.abs(event.chunk().getPos().z * 16);
+         double chunkXAbs = Math.abs(worldChunk.getPos().x * 16);
+         double chunkZAbs = Math.abs(worldChunk.getPos().z * 16);
          if (!(Math.sqrt(chunkXAbs * chunkXAbs + chunkZAbs * chunkZAbs) < ((Integer)this.minimumDistance.get()).intValue())) {
-            if ((Boolean)this.oldChunksOnly.get()) {
-               ChunkPos cp = event.chunk().getPos();
-               RegistryKey<World> dim = this.mc.world.getRegistryKey();
-               PaletteNewChunks paletteNewChunks = (PaletteNewChunks)ModuleManager.getModule(PaletteNewChunks.class);
-               OldChunks oldChunksModule = (OldChunks)ModuleManager.getModule(OldChunks.class);
-               boolean isNewChunk = paletteNewChunks.isNewChunk(cp.x, cp.z, dim);
-               boolean isOldChunk = oldChunksModule.isOldChunk(cp.x, cp.z, dim);
-               if (isNewChunk && !isOldChunk) {
-                  return;
-               }
-            }
-
-            StashFinder.StashChunk chunk = new StashFinder.StashChunk(event.chunk().getPos());
+            StashFinder.StashChunk chunk = new StashFinder.StashChunk(worldChunk.getPos());
             chunk.dimension = this.getCurrentDimension();
             List<Block> blockBlacklist = (List<Block>)this.blacklistedBlocks.get();
 
@@ -856,7 +954,7 @@ public class StashFinder extends Module {
             // scattered chunk look packed.
             List<BlockPos> containers = new ArrayList<>();
 
-            for (BlockEntity blockEntity : event.chunk().getBlockEntities().values()) {
+            for (BlockEntity blockEntity : worldChunk.getBlockEntities().values()) {
                if (!blockBlacklist.isEmpty()) {
                   boolean isWallMounted = blockEntity instanceof BannerBlockEntity || blockEntity instanceof SignBlockEntity;
                   if (this.isNearBlacklistedBlock(blockEntity.getPos(), blockBlacklist, isWallMounted)) {
@@ -1152,6 +1250,13 @@ public class StashFinder extends Module {
             double chunkXAbs = Math.abs(chunkPos.x * 16);
             double chunkZAbs = Math.abs(chunkPos.z * 16);
             if (!(Math.sqrt(chunkXAbs * chunkXAbs + chunkZAbs * chunkZAbs) < ((Integer)this.minimumDistance.get()).intValue())) {
+               // The same filter as the block path, which this one never had. A pearl, a named mob
+               // or a pile of minecarts in terrain that generated as you flew past is not a stash,
+               // and the entity is already in a loaded chunk, so the answer is in the cache now.
+               if ((Boolean)this.oldChunksOnly.get() && !this.isOldChunk(chunkPos)) {
+                  return;
+               }
+
                StashFinder.StashChunk chunk = null;
 
                for (StashFinder.StashChunk c : this.chunks) {
