@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.Items;
@@ -22,7 +23,9 @@ import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
@@ -83,6 +86,14 @@ public class AutoPortal extends Module {
     private final Setting<SettingColor> lineColor = sgGeneral.add(new ColorSetting.Builder()
         .name("line-color")
         .defaultValue(new SettingColor(100, 100, 255, 255))
+        .build()
+    );
+
+    private final Setting<Boolean> interiorPreview = sgGeneral.add(new BoolSetting.Builder()
+        .name("interior-preview")
+        .description("Outlines the opening the portal will fill while the frame is still going up, so you can see where it lands before it exists.")
+        .defaultValue(true)
+        .visible(render::get)
         .build()
     );
 
@@ -148,6 +159,9 @@ public class AutoPortal extends Module {
     private enum Phase { BUILDING, WAITING, DONE }
     private Phase phase = Phase.BUILDING;
     private int waitTicksRemaining = 0;
+
+    /** How long the lit-portal highlight spends fading out at the end of its life. */
+    private static final float HIGHLIGHT_FADE_MS = 2000.0F;
 
     public AutoPortal() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "auto-portal",
@@ -427,36 +441,108 @@ public class AutoPortal extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        // Existing obsidian-frame render (unchanged).
-        if (render.get()) {
-            for (int i = index; i < portalBlocks.size(); i++) {
-                BlockPos pos = portalBlocks.get(i);
-                event.renderer.box(pos, sideColor.get(), lineColor.get(), shapeMode.get(), 0);
-            }
+        if (render.get()) renderFrame(event);
+        if (highlightLitPortal.get()) renderLitPortals(event);
+    }
+
+    /**
+     * The frame under construction, in three weights.
+     *
+     * <p>One look answers three questions instead of one. The blocks already down
+     * keep a thin outline, so the shape of the portal reads from the very first
+     * one rather than appearing all at once at the end. What is still missing
+     * stays solid. And the one going down next is drawn full size at full
+     * strength while the ones behind it shrink and fade, so the order the module
+     * works in is visible instead of being guessed from boxes disappearing.
+     */
+    private void renderFrame(Render3DEvent event) {
+        if (portalBlocks.isEmpty()) return;
+
+        // Before the frame, so the frame draws over it.
+        if (interiorPreview.get() && phase == Phase.BUILDING && portalRight != null) {
+            event.renderer
+                .box(
+                    interiorBox(portalBlocks.get(0).up(), portalRight),
+                    fade(portalSideColor.get(), 0.3F),
+                    fade(portalLineColor.get(), 0.4F),
+                    ShapeMode.Both,
+                    0
+                );
         }
 
-        // Lit-portal highlight: only portals I activated, only for render-duration seconds.
-        if (highlightLitPortal.get() && !litPortalAnchors.isEmpty()) {
-            long now = System.currentTimeMillis();
-            Iterator<Map.Entry<BlockPos, LitPortal>> it = litPortalAnchors.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry<BlockPos, LitPortal> e = it.next();
-                if (e.getValue().expiresAtMs() <= now) {
-                    it.remove();
-                    continue;
-                }
-                BlockPos anchor = e.getKey();
-                Direction right = e.getValue().right();
-                // Interior is 2 wide (along `right`) x 3 tall (along +Y), starting at the anchor.
-                for (int x = 0; x < 2; x++) {
-                    for (int y = 0; y < 3; y++) {
-                        BlockPos interiorPos = anchor.offset(right, x).up(y);
-                        event.renderer.box(interiorPos,
-                            portalSideColor.get(), portalLineColor.get(),
-                            ShapeMode.Both, 0);
-                    }
-                }
-            }
+        for (int i = 0; i < index && i < portalBlocks.size(); i++) {
+            event.renderer.box(portalBlocks.get(i), fade(sideColor.get(), 0.0F), fade(lineColor.get(), 0.3F), ShapeMode.Lines, 0);
         }
+
+        for (int i = index; i < portalBlocks.size(); i++) {
+            BlockPos pos = portalBlocks.get(i);
+            boolean next = i == index;
+            int rank = Math.min(i - index, 4);
+            float dim = next ? 1.0F : 0.85F - 0.15F * rank;
+            double inset = next ? 0.0 : 0.1 + 0.02 * rank;
+
+            event.renderer
+                .box(
+                    new Box(
+                        pos.getX() + inset,
+                        pos.getY() + inset,
+                        pos.getZ() + inset,
+                        pos.getX() + 1.0 - inset,
+                        pos.getY() + 1.0 - inset,
+                        pos.getZ() + 1.0 - inset
+                    ),
+                    fade(sideColor.get(), dim),
+                    fade(lineColor.get(), dim),
+                    shapeMode.get(),
+                    0
+                );
+        }
+    }
+
+    /** Portals I lit, as one opening rather than six stacked cubes, fading out at the end. */
+    private void renderLitPortals(Render3DEvent event) {
+        if (litPortalAnchors.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<BlockPos, LitPortal>> it = litPortalAnchors.entrySet().iterator();
+
+        while (it.hasNext()) {
+            Map.Entry<BlockPos, LitPortal> e = it.next();
+            long left = e.getValue().expiresAtMs() - now;
+            if (left <= 0L) {
+                it.remove();
+                continue;
+            }
+
+            // Fades over its last two seconds instead of blinking out.
+            float factor = left >= HIGHLIGHT_FADE_MS ? 1.0F : (float)left / HIGHLIGHT_FADE_MS;
+            event.renderer
+                .box(
+                    interiorBox(e.getKey(), e.getValue().right()),
+                    fade(portalSideColor.get(), factor),
+                    fade(portalLineColor.get(), factor),
+                    ShapeMode.Both,
+                    0
+                );
+        }
+    }
+
+    /** The opening as a single box: 2 wide along {@code right}, 3 tall, from the anchor up. */
+    private Box interiorBox(BlockPos anchor, Direction right) {
+        BlockPos far = anchor.offset(right, 1).up(2);
+
+        return new Box(
+            Math.min(anchor.getX(), far.getX()),
+            anchor.getY(),
+            Math.min(anchor.getZ(), far.getZ()),
+            Math.max(anchor.getX(), far.getX()) + 1.0,
+            far.getY() + 1.0,
+            Math.max(anchor.getZ(), far.getZ()) + 1.0
+        );
+    }
+
+    /** The configured colour at a fraction of its own alpha, so the menu still rules. */
+    private Color fade(SettingColor base, float factor) {
+        return new Color(base.r, base.g, base.b, MathHelper.clamp(Math.round(base.a * factor), 0, 255));
     }
 }
