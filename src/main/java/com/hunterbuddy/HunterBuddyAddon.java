@@ -26,6 +26,7 @@ import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.CaveAirESP;
+import com.hunterbuddy.modules.ChunkProfiler;
 import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
 import com.hunterbuddy.modules.ClientSideTime;
 import com.hunterbuddy.modules.ContainerTooltips;
@@ -130,6 +131,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(com.hunterbuddy.hud.SessionTimelineHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.SpeedSpectrumHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.DimensionBannerHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.ChunkProfilerHud.INFO);
 
         // HunterBuddy modules
         // Modules.get().add(new AFKVanillaFly());
@@ -143,6 +145,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new NoHurtCam());
         Modules.get().add(new NoJumpDelay());
         Modules.get().add(new OldChunkNotifier());
+        Modules.get().add(new ChunkProfiler());
         Modules.get().add(new ElytraBounce());
         Modules.get().add(new ElytraRecast());
         Modules.get().add(new ControlFly());
