@@ -15,15 +15,26 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.MeteorClient;
+import net.minecraft.entity.EntityPosition;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.common.CommonPongC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 public class RocketBoost extends Module {
    private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -47,7 +58,7 @@ public class RocketBoost extends Module {
 
    public final Setting<Double> speedMultiplier = sgGeneral.add(new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
       .name("speed-multiplier")
-      .description("Firework speed multiplier (vanilla 1.5). Applied directly — higher values give more speed but may trigger Grim setback depending on look angle. With auto-speed on, this becomes the hard ceiling instead.")
+      .description("Firework speed multiplier (vanilla 1.5), applied raw. Higher values give more speed but may trigger a Grim setback depending on your look angle — on a cardinal heading anything above vanilla eventually overshoots, since vanilla already sits on the limit there. Ignored while auto-speed is on, which uses its own ceiling instead.")
       .defaultValue(2.0)
       .min(1.0)
       .max(5.0)
@@ -98,6 +109,17 @@ public class RocketBoost extends Module {
       .build()
    );
 
+   public final Setting<Double> autoCeiling = sgAuto.add(new DoubleSetting.Builder()
+      .name("auto-ceiling")
+      .description("Highest multiplier auto-speed may ask for. Separate from speed-multiplier so that raising the ceiling for the solver cannot make the manual mode dangerous. The solver stops finding anything to use with past 2.5; above that the first boosted tick from a standstill overshoots far enough to be set back on the spot.")
+      .defaultValue(2.5)
+      .min(1.5)
+      .max(5.0)
+      .sliderRange(1.5, 3.5)
+      .visible(autoSpeed::get)
+      .build()
+   );
+
    public final Setting<Double> autoAxisLimit = sgAuto.add(new DoubleSetting.Builder()
       .name("auto-axis-limit")
       .description("Per-axis velocity ceiling Grim tolerates during a firework boost, in blocks/tick. 1.7 is the constant Grim uses in UncertaintyHandler#tickFireworksBox. Lower it if you get set back.")
@@ -122,7 +144,14 @@ public class RocketBoost extends Module {
 
    public final Setting<Boolean> yawJitter = sgAuto.add(new BoolSetting.Builder()
       .name("yaw-jitter")
-      .description("Alternate your yaw by +/-0.01 degrees each tick while boosting. Grim builds its tolerance box from this tick's look vector AND the previous one, so the jitter widens the box for free. Invisible in game.")
+      .description("Alternate your yaw by +/-0.01 degrees each tick while boosting. Measures as worth nothing: Grim sums the two look vectors with a 0.05 floor under each side, and a 0.01 degree yaw moves an axis by 0.0002, which that floor swallows whole. Kept because it is harmless, not because it helps.")
+      .defaultValue(false)
+      .build()
+   );
+
+   public final Setting<Boolean> logTrace = sgAuto.add(new BoolSetting.Builder()
+      .name("log-trace")
+      .description("Write one line per boosted tick to hunterbuddy/rocketboost-trace.csv: velocity per axis, look, the multiplier asked for, the bounds we think Grim is holding us to, and how far outside them we landed. Works in manual mode too, which is where it is worth the most - a multiplier you already trust is the cleanest way to measure the model against the server. Costs no speed.")
       .defaultValue(false)
       .build()
    );
@@ -132,6 +161,20 @@ public class RocketBoost extends Module {
 
    /** Grim's per-axis slack for a skipped tick, mirrored from its firework box. */
    private static final double ANTI_TICK_SKIPPING = 0.05;
+
+   /**
+    * The 1.7 Grim writes twice in its firework box - once as the scale, once as the clamp.
+    *
+    * <p>Deliberately not {@link #autoAxisLimit}: that setting stands in for both, so lowering it
+    * shrinks the box twice over. The narrowing pass below has to mirror Grim, not our slider.
+    */
+   private static final double GRIM_FIREWORK_SCALE = 1.7;
+
+   /** Bisection steps for the narrowing pass. 20 halvings resolve the multiplier past 1e-5. */
+   private static final int GRIM_BOUND_STEPS = 20;
+
+   /** How far a teleport has to move us before it counts as a setback rather than a resync. */
+   private static final double SETBACK_MIN_DISTANCE_SQ = 0.25;
 
    /** Ticks spent climbing back from vanilla speed to the solved one after a setback. */
    private static final int AUTO_RECOVERY_TICKS = 60;
@@ -144,10 +187,34 @@ public class RocketBoost extends Module {
    private boolean hasLastRotation = false;
    private boolean jitterUp = false;
    private double lastAutoSpeed = Double.NaN;
-   private double autoRecovery = 1.0;
+
+   /** Written from the netty thread when a setback lands, read from the main thread each tick. */
+   private volatile double autoRecovery = 1.0;
+
+   private final double[] traceLo = new double[3];
+   private final double[] traceHi = new double[3];
+   private final double[] tracePrevLo = new double[3];
+   private final double[] tracePrevHi = new double[3];
+   private boolean traceValid = false;
+   private boolean tracePrevValid = false;
+   private double traceClosed = Double.NaN;
+   private double traceFinal = Double.NaN;
+   private BufferedWriter traceWriter;
+   private int tracePending = 0;
+   private int lastTraceAge = -1;
 
    public double getSpeed() {
-      if (!autoSpeed.get()) return speedMultiplier.get();
+      if (!autoSpeed.get()) {
+         double manual = speedMultiplier.get();
+
+         // The trace is worth more here than under the solver: a multiplier already known to fly
+         // clean is the cleanest thing to measure the model against, and it changes no speed.
+         if (logTrace.get()) {
+            traceManual(manual);
+         }
+
+         return manual;
+      }
 
       double auto = computeAutoSpeed();
       if (Double.isNaN(auto)) return speedMultiplier.get();
@@ -169,12 +236,20 @@ public class RocketBoost extends Module {
    private double computeAutoSpeed() {
       if (mc.player == null) return Double.NaN;
 
+      Vec3d velocity = mc.player.getVelocity();
       Vec3d look = mc.player.getRotationVector();
       Vec3d lastLook = hasLastRotation ? Vec3d.fromPolar(lastPitch, lastYaw) : look;
-      double solved = solveMaxMultiplier(mc.player.getVelocity(), look, lastLook, autoAxisLimit.get());
+      double solved = solveMaxMultiplier(velocity, look, lastLook, autoAxisLimit.get());
       if (Double.isNaN(solved)) return Double.NaN;
 
-      solved = MathHelper.clamp(solved, VANILLA_SPEED, speedMultiplier.get());
+      solved = MathHelper.clamp(solved, VANILLA_SPEED, autoCeiling.get());
+      traceClosed = solved;
+      solved = narrowToGrimBound(solved, velocity, look, lastLook);
+      traceFinal = solved;
+
+      if (logTrace.get()) {
+         recordTrace(velocity, look);
+      }
 
       // Grim's offset accumulator decays at 0.999, so a flag is close to permanent and the
       // next one arrives that much sooner. After a setback, fall back to vanilla and walk
@@ -211,6 +286,294 @@ public class RocketBoost extends Module {
       return axis == 0 ? vec.x : (axis == 1 ? vec.y : vec.z);
    }
 
+   /**
+    * Trims a candidate multiplier down to what Grim will actually take.
+    *
+    * <p>{@link #solveMaxMultiplier} bounds the boosted velocity <em>before</em> the glide step,
+    * against the raw firework box. That is not the comparison being made. Grim runs the same
+    * fall-flying step the client does and checks the movement that comes out of it against a box
+    * centred on its own unboosted prediction, widened per axis by whatever is left of the firework
+    * box above the velocity it already had. The box is an expansion around a prediction, not a
+    * ceiling: {@code PredictionEngine:618-628} adds {@code max(0, fireworkMax - previous)}, so an
+    * axis already past 1.7 gets nothing from the firework, and one still well under it gets more
+    * room than the raw box suggests.
+    *
+    * <p>Near cruising speed the closed form is the tighter of the two and this changes nothing.
+    * Down at low speed it is the looser one, and asks for a multiplier the server will refuse -
+    * which is the moment right after a takeoff, where a setback costs the most.
+    *
+    * <p>The result is never above the value handed in, so this can only slow the boost, never
+    * speed it up. Whatever works today keeps working.
+    *
+    * <p>Grim's own idea of "the velocity we had" is the previous movement after it clamped it into
+    * the box. While we stay inside that box the clamp is the identity and its copy matches ours,
+    * which is exactly the regime we are trying to stay in; once we are outside it, the numbers here
+    * drift from the server's, and that is what {@code log-trace} is for.
+    */
+   private double narrowToGrimBound(double candidate, Vec3d velocity, Vec3d look, Vec3d lastLook) {
+      traceValid = false;
+      if (mc.player == null) return candidate;
+
+      double gravity = effectiveGravity(velocity);
+      float pitch = mc.player.getPitch();
+      computeGrimBounds(velocity, look, lastLook, pitch, gravity);
+
+      // Below vanilla there is nothing left to narrow, but the bounds are computed first and kept
+      // anyway. That case is the fast one - an axis already past its share of the box, which is
+      // where the closed form gives up - and it is exactly the regime the trace has to record.
+      if (candidate <= VANILLA_SPEED) return candidate;
+
+      // Vanilla is the floor by contract. If even that lands outside, no multiplier saves the
+      // tick and dropping below vanilla would only make the client and the server disagree more.
+      if (!fitsGrimBound(VANILLA_SPEED, velocity, look, pitch, gravity)) return VANILLA_SPEED;
+      if (fitsGrimBound(candidate, velocity, look, pitch, gravity)) return candidate;
+
+      double low = VANILLA_SPEED;
+      double high = candidate;
+
+      for (int i = 0; i < GRIM_BOUND_STEPS; i++) {
+         double mid = (low + high) * 0.5;
+
+         if (fitsGrimBound(mid, velocity, look, pitch, gravity)) {
+            low = mid;
+         } else {
+            high = mid;
+         }
+      }
+
+      return low;
+   }
+
+   /**
+    * Fills the per-axis bounds the server should be holding us to this tick.
+    *
+    * <p>Stored raw, without the safety margin: the margin is ours, not Grim's, and folding it in
+    * would make the logged offsets read as violations that never happened.
+    */
+   private void computeGrimBounds(Vec3d velocity, Vec3d look, Vec3d lastLook, float pitch, double gravity) {
+      Vec3d predicted = applyGlide(velocity, look, pitch, gravity);
+
+      for (int axis = 0; axis < 3; axis++) {
+         double dir = axisOf(look, axis);
+         double last = axisOf(lastLook, axis);
+         double boxMin = Math.max(
+            -GRIM_FIREWORK_SCALE,
+            (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, last)) * GRIM_FIREWORK_SCALE
+         );
+         double boxMax = Math.min(
+            GRIM_FIREWORK_SCALE,
+            (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, last)) * GRIM_FIREWORK_SCALE
+         );
+         double had = axisOf(velocity, axis);
+         double centre = axisOf(predicted, axis);
+
+         traceLo[axis] = centre + Math.min(0.0, boxMin - had);
+         traceHi[axis] = centre + Math.max(0.0, boxMax - had);
+      }
+
+      traceValid = true;
+   }
+
+   /** Whether the movement this multiplier produces lands inside the bounds, margin included. */
+   private boolean fitsGrimBound(double multiplier, Vec3d velocity, Vec3d look, float pitch, double gravity) {
+      double margin = autoYMargin.get();
+      Vec3d boosted = velocity.multiply(0.5).add(look.multiply(0.1 + 0.5 * multiplier));
+      Vec3d moved = applyGlide(boosted, look, pitch, gravity);
+
+      for (int axis = 0; axis < 3; axis++) {
+         double low = traceLo[axis] + margin;
+         double high = traceHi[axis] - margin;
+
+         // A margin wider than the box itself would veto every multiplier including vanilla.
+         // Leave the axis unjudged rather than let the safety margin become the constraint.
+         if (high < low) continue;
+
+         double value = axisOf(moved, axis);
+
+         if (value < low || value > high) {
+            return false;
+         }
+      }
+
+      return true;
+   }
+
+   /**
+    * Vanilla's effective gravity, which {@code getFinalGravity} is not.
+    *
+    * <p>{@code LivingEntity#getEffectiveGravity} caps gravity at 0.01 while slow falling is up and
+    * you are on the way down, and it is protected, so the condition is mirrored here rather than
+    * reached. Grim applies the same cap, so leaving it out would put the two predictions apart by
+    * an order of magnitude on the one axis that binds in a dive.
+    */
+   private double effectiveGravity(Vec3d velocity) {
+      double gravity = mc.player.getFinalGravity();
+
+      if (velocity.y <= 0.0 && mc.player.hasStatusEffect(StatusEffects.SLOW_FALLING)) {
+         return Math.min(gravity, 0.01);
+      }
+
+      return gravity;
+   }
+
+   /**
+    * Writes one line per boosted tick: what we asked for, and what the server made of the last one.
+    *
+    * <p>The velocity read here is the movement Grim is judging right now - the client has already
+    * run its glide step and the rocket has not touched it yet - so measuring it against the bounds
+    * computed on the previous tick gives the offset Grim should have seen. If those offsets stay at
+    * zero and the server still sets us back, the model is wrong about 2b2t. If they run above 0.001
+    * and nothing ever happens, 2b2t is looser than the defaults say.
+    */
+   private void recordTrace(Vec3d velocity, Vec3d look) {
+      if (mc.player == null) return;
+
+      // The constant this module replaces appears three times in the same vanilla expression and
+      // the injection has no ordinal, so getSpeed is reached three times a tick. Key on the tick.
+      if (mc.player.age == lastTraceAge) return;
+
+      // Bounds are only worth comparing against the tick that immediately follows them. Across a
+      // gap - a boost that ended, a rocket that ran out - the stored ones describe a different
+      // flight, and measuring a fresh velocity against them invents an offset nobody ever had.
+      if (mc.player.age != lastTraceAge + 1) {
+         tracePrevValid = false;
+      }
+
+      lastTraceAge = mc.player.age;
+
+      double offset = 0.0;
+
+      if (tracePrevValid) {
+         for (int axis = 0; axis < 3; axis++) {
+            double value = axisOf(velocity, axis);
+            double over = value > tracePrevHi[axis]
+               ? value - tracePrevHi[axis]
+               : (value < tracePrevLo[axis] ? value - tracePrevLo[axis] : 0.0);
+            offset += over * over;
+         }
+
+         offset = Math.sqrt(offset);
+      }
+
+      writeTraceLine(String.format(
+         Locale.ROOT,
+         "%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f%n",
+         mc.player.age,
+         velocity.x, velocity.y, velocity.z,
+         look.x, look.y, look.z,
+         mc.player.getYaw(), mc.player.getPitch(),
+         traceClosed, traceFinal, offset,
+         traceLo[0], traceHi[0], traceLo[1], traceHi[1], traceLo[2], traceHi[2]
+      ));
+
+      if (traceValid) {
+         System.arraycopy(traceLo, 0, tracePrevLo, 0, 3);
+         System.arraycopy(traceHi, 0, tracePrevHi, 0, 3);
+      }
+
+      tracePrevValid = traceValid;
+   }
+
+   /** Records a line for a tick the manual multiplier drove. The solver never runs, the trace does. */
+   private void traceManual(double multiplier) {
+      if (mc.player == null) return;
+
+      Vec3d velocity = mc.player.getVelocity();
+      Vec3d look = mc.player.getRotationVector();
+      Vec3d lastLook = hasLastRotation ? Vec3d.fromPolar(lastPitch, lastYaw) : look;
+
+      traceValid = false;
+      computeGrimBounds(velocity, look, lastLook, mc.player.getPitch(), effectiveGravity(velocity));
+      traceClosed = multiplier;
+      traceFinal = multiplier;
+      recordTrace(velocity, look);
+   }
+
+   private void writeTraceLine(String line) {
+      try {
+         if (traceWriter == null) {
+            File file = new File(new File(MeteorClient.FOLDER, "hunterbuddy"), "rocketboost-trace.csv");
+            file.getParentFile().mkdirs();
+            boolean fresh = !file.exists() || file.length() == 0L;
+            traceWriter = new BufferedWriter(new FileWriter(file, true));
+
+            if (fresh) {
+               traceWriter.write("age,vx,vy,vz,lookx,looky,lookz,yaw,pitch,m_closed,m_final,offset,lo_x,hi_x,lo_y,hi_y,lo_z,hi_z"
+                  + System.lineSeparator());
+            }
+         }
+
+         traceWriter.write(line);
+         tracePending++;
+
+         if (tracePending >= 20) {
+            traceWriter.flush();
+            tracePending = 0;
+         }
+      } catch (IOException e) {
+         HunterBuddyAddon.LOG.error("RocketBoost: could not write the auto-speed trace", e);
+         closeTrace();
+      }
+   }
+
+   private void closeTrace() {
+      if (traceWriter == null) return;
+
+      try {
+         traceWriter.flush();
+         traceWriter.close();
+      } catch (IOException e) {
+         HunterBuddyAddon.LOG.error("RocketBoost: could not close the auto-speed trace", e);
+      }
+
+      traceWriter = null;
+      tracePending = 0;
+      tracePrevValid = false;
+      lastTraceAge = -1;
+   }
+
+   /**
+    * Vanilla's fall-flying step, ported from {@code LivingEntity#updateFallFlyingMovement}.
+    *
+    * <p>Grim replays this same step to predict where a gliding player ends up, so it is the
+    * difference between the velocity we hand the firework and the movement the server judges.
+    * Kept in the order the original writes it, down to reading the horizontal speed before
+    * gravity is added, because the climb term feeds on that earlier value.
+    */
+   private static Vec3d applyGlide(Vec3d velocity, Vec3d look, float pitch, double gravity) {
+      // Kept as a float, and the sine taken from MathHelper's table rather than Math: vanilla does
+      // both, and the table differs from the real sine by enough to matter on the vertical axis.
+      float pitchRad = pitch * 0.017453292F;
+      double lookHorizontal = Math.sqrt(look.x * look.x + look.z * look.z);
+      double speedHorizontal = velocity.horizontalLength();
+      double cosSquared = MathHelper.square(Math.cos(pitchRad));
+
+      double x = velocity.x;
+      double y = velocity.y + gravity * (-1.0 + cosSquared * 0.75);
+      double z = velocity.z;
+
+      if (y < 0.0 && lookHorizontal > 0.0) {
+         double fall = y * -0.1 * cosSquared;
+         x += look.x * fall / lookHorizontal;
+         y += fall;
+         z += look.z * fall / lookHorizontal;
+      }
+
+      if (pitchRad < 0.0F && lookHorizontal > 0.0) {
+         double climb = speedHorizontal * -MathHelper.sin(pitchRad) * 0.04;
+         x += -look.x * climb / lookHorizontal;
+         y += climb * 3.2;
+         z += -look.z * climb / lookHorizontal;
+      }
+
+      if (lookHorizontal > 0.0) {
+         x += (look.x / lookHorizontal * speedHorizontal - x) * 0.1;
+         z += (look.z / lookHorizontal * speedHorizontal - z) * 0.1;
+      }
+
+      return new Vec3d(x * 0.99, y * 0.98, z * 0.99);
+   }
+
    public int trackedRocketId = -1;
    public long boostStartMs = -1;
    public long trackStartMs = -1;
@@ -230,6 +593,8 @@ public class RocketBoost extends Module {
       hasLastRotation = false;
       lastAutoSpeed = Double.NaN;
       autoRecovery = 1.0;
+      traceValid = false;
+      closeTrace();
    }
 
    public void setTrackedRocket(int entityId) {
@@ -280,6 +645,31 @@ public class RocketBoost extends Module {
       lastEventTime = System.currentTimeMillis();
    }
 
+   /**
+    * Whether a teleport actually moved us, rather than agreeing with where we already are.
+    *
+    * <p>The server sends this same packet for plain position resyncs, which agree with where you
+    * already are, and each one used to cost sixty ticks back at vanilla speed plus a flushed
+    * boost. Those are what this filters. A portal or a dimension change moves you far and still
+    * reads as a setback - that is not fixed here, and a real setback in flight moves you further
+    * than a tick of gliding, so it is never missed. Axes flagged relative carry a delta rather
+    * than a destination, so they are read as one.
+    */
+   private boolean isSetbackTeleport(PlayerPositionLookS2CPacket packet) {
+      if (mc.player == null) return true;
+
+      EntityPosition change = packet.change();
+      Set<PositionFlag> relatives = packet.relatives();
+      Vec3d target = change.position();
+      Vec3d current = mc.player.getEntityPos();
+
+      double dx = relatives.contains(PositionFlag.X) ? target.x : target.x - current.x;
+      double dy = relatives.contains(PositionFlag.Y) ? target.y : target.y - current.y;
+      double dz = relatives.contains(PositionFlag.Z) ? target.z : target.z - current.z;
+
+      return dx * dx + dy * dy + dz * dz > SETBACK_MIN_DISTANCE_SQ;
+   }
+
    /** True while one of our rockets is pushing us, whether or not we are extending it. */
    private boolean isUnderBoost() {
       return mc.player != null && mc.player.isGliding() && (boosting || FireworkBoostTracker.isBoosting(200));
@@ -289,8 +679,9 @@ public class RocketBoost extends Module {
    private void onTickJitter(TickEvent.Pre event) {
       if (!yawJitter.get() || !isUnderBoost()) return;
 
-      // Grim unions this tick's look vector with the last one when it builds the box,
-      // so alternating the yaw by a hair widens it without moving the camera.
+      // Grim unions this tick's look vector with the last one when it builds the box, but each
+      // side of that union sits on a 0.05 floor, and a hundredth of a degree of yaw is worth
+      // 0.0002 on an axis. The box comes out identical. Left in place, and left off.
       jitterUp = !jitterUp;
       mc.player.setYaw(mc.player.getYaw() + (jitterUp ? 0.01F : -0.01F));
    }
@@ -340,14 +731,16 @@ public class RocketBoost extends Module {
          }
       }
 
+      boolean setback = event.packet instanceof PlayerPositionLookS2CPacket teleport && isSetbackTeleport(teleport);
+
       // A setback can land outside a boost window too, and it means the same thing either
       // way: Grim rejected our last movement, so stop asking for the solved multiplier.
-      if (autoSpeed.get() && event.packet instanceof net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket) {
+      if (autoSpeed.get() && setback) {
          autoRecovery = 0.0;
       }
 
       if (!boosting) return;
-      if (setbackDetector.get() && event.packet instanceof net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket) {
+      if (setbackDetector.get() && setback) {
          setbackCount++;
          flushAndStop();
          return;
@@ -374,6 +767,24 @@ public class RocketBoost extends Module {
       }
    }
 
+   /**
+    * Gives up on a rocket whose destroy packet is never coming.
+    *
+    * <p>This test used to live inside the debug handler, behind the debug toggle and behind a five
+    * second gate on the last event - and with max-track-time defaulting to five seconds too, it
+    * could not fire. A rocket that leaves render distance is never destroyed for us, and without
+    * this the boost stays held open with the pongs queued behind it.
+    */
+   @EventHandler
+   private void onTickWatchdog(TickEvent.Post event) {
+      if (mc.player == null) return;
+
+      if (boosting && boostStartMs == -1 && trackStartMs != -1
+         && System.currentTimeMillis() - trackStartMs >= maxTrackTime.get()) {
+         flushAndStop();
+      }
+   }
+
    @EventHandler
    private void onSendPacket(PacketEvent.Send event) {
       if (mc.player == null || !mc.player.isGliding()) return;
@@ -395,14 +806,6 @@ public class RocketBoost extends Module {
 
       if (System.currentTimeMillis() - lastEventTime > 5000) {
          return;
-      }
-
-      if (boosting && boostStartMs == -1 && trackStartMs != -1) {
-         long waiting = System.currentTimeMillis() - trackStartMs;
-         if (waiting >= maxTrackTime.get()) {
-            flushAndStop();
-            return;
-         }
       }
 
       String msg;
