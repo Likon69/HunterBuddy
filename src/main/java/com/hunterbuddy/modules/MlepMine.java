@@ -14,6 +14,7 @@ import meteordevelopment.meteorclient.events.entity.player.StartBreakingBlockEve
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Send;
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -23,10 +24,12 @@ import meteordevelopment.meteorclient.settings.EnumSetting.Builder;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
+import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.component.type.ItemEnchantmentsComponent;
@@ -108,8 +111,19 @@ public class MlepMine extends Module {
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
                      .name("instant")
-                  .description("Instantly mines already broken blocks")
+                  .description("Keeps the spot you just cleared hot: a block placed back there breaks again on its own, with no click. Turn it off and a cleared spot is forgotten the moment it breaks.")
                .defaultValue(false)
+            .build()
+      );
+   private final Setting<Integer> instantWindow = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
+                        .name("instant-window")
+                     .description("How long a cleared spot stays hot on the client, in milliseconds, so a block placed there long after is left alone instead of breaking on sight. 0 never forgets, which is what the server does anyway. Note that the click needed after a spot goes cold restarts the server timer, so that one block breaks at normal speed.")
+                  .defaultValue(0)
+                  .min(0)
+                  .sliderRange(0, 30000)
+               .visible(this.instantConfig::get)
             .build()
       );
    private final Setting<Keybind> instantToggleKey = this.sgGeneral
@@ -147,6 +161,23 @@ public class MlepMine extends Module {
                   .description("Color of the blocks waiting in the queue.")
                .defaultValue(new SettingColor(120, 180, 255, 60))
                .visible(this.queueConfig::get)
+            .build()
+      );
+   private final Setting<Boolean> vanillaOneShot = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("vanilla-one-shot")
+                     .description("Hand any block your held item takes down in a single hit back to the normal client break. It is faster there, since the client predicts the break instead of waiting for the round trip, and it sends none of the packets an anticheat counts against a break rate. Two side effects: a vanilla break restarts the server clock on a spot instant was keeping hot, and vanilla pauses 250 ms after a one-hit break.")
+                  .defaultValue(true)
+               .visible(() -> this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
+            .build()
+      );
+   private final Setting<java.util.List<Block>> vanillaBlocks = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BlockListSetting.Builder()
+                     .name("leave-to-vanilla")
+                  .description("Blocks this module keeps its hands off entirely, whatever they are worth a hit. The normal client break takes them.")
+               .visible(() -> this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
             .build()
       );
    private final Setting<Boolean> persistentConfig = this.sgGeneral
@@ -321,6 +352,52 @@ public class MlepMine extends Module {
                .visible(() -> false)
             .build()
       );
+   private final Setting<MlepMine.RenderStyle> styleConfig = this.sgRender
+      .add(
+         new Builder<MlepMine.RenderStyle>().name("style")
+                  .description("How the block being mined is drawn. Classic is the old box growing out of the middle. Fill raises a level inside the block instead, the way a bar fills, which is readable from any angle and at any distance. Pulse is Fill with a breath on it.")
+               .defaultValue(MlepMine.RenderStyle.FILL)
+               .visible(this.render::get)
+            .build()
+      );
+   private final Setting<Double> pulseRate = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+                        .name("pulse-rate")
+                     .description("Breaths per second.")
+                  .defaultValue(1.2)
+                  .min(0.1)
+                  .sliderRange(0.1, 3.0)
+               .visible(() -> (Boolean)this.render.get() && this.styleConfig.get() == MlepMine.RenderStyle.PULSE)
+            .build()
+      );
+   private final Setting<Boolean> outlineConfig = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("block-outline")
+                     .description("Draws a faint outline on the whole block behind the progress box, so you can still tell which block is being mined while the box is small.")
+                  .defaultValue(true)
+               .visible(this.render::get)
+            .build()
+      );
+   private final Setting<Boolean> queueChain = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("queue-chain")
+                     .description("Links the waiting blocks with a line, in the order they will be mined.")
+                  .defaultValue(true)
+               .visible(() -> (Boolean)this.render.get() && (Boolean)this.queueConfig.get())
+            .build()
+      );
+   private final Setting<Boolean> queueNumbers = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("queue-numbers")
+                     .description("Prints the rank of each waiting block above it. 1 is the next one to go.")
+                  .defaultValue(true)
+               .visible(() -> (Boolean)this.render.get() && (Boolean)this.queueConfig.get())
+            .build()
+      );
    private final Map<MlepMine.MiningData, MlepMine.Animation> fadeList = new HashMap<>();
    private MlepMine.FirstOutQueue<MlepMine.MiningData> miningQueue;
 
@@ -332,6 +409,25 @@ public class MlepMine extends Module {
    private final List<MlepMine.MiningData> pendingQueue = new ArrayList<>();
    private static final int PENDING_QUEUE_LIMIT = 16;
    private boolean queueClearPressed;
+
+   /**
+    * Tick of the last attack event, whatever block it was on.
+    *
+    * <p>Meteor cancels {@code attackBlock} at its head, so vanilla never records
+    * the block as "currently breaking" and calls it again on every tick for as
+    * long as the button is held — twice on the tick of the press itself. One
+    * press therefore arrives here twenty times a second, and Baritone, which
+    * never releases, arrives every tick forever.
+    *
+    * <p>A press is real when nothing at all came in on the previous tick. Which
+    * block it was on is irrelevant: sweeping the crosshair across blocks with the
+    * button down is still one press. Only a real press is allowed to take a block
+    * back out of the queue — see {@link #clickMine(MiningData, boolean)}.
+    */
+   private int lastEventTick = -100;
+
+   /** Block the press currently under way took out of the queue, if it took one. */
+   private BlockPos droppedByPress;
    private long lastBreak;
    private boolean instantTogglePressed = false;
    private boolean autoMineTogglePressed = false;
@@ -427,6 +523,7 @@ public class MlepMine extends Module {
          }
 
          this.pendingQueue.clear();
+         this.droppedByPress = null;
          this.fadeList.clear();
 
          // The slot is held for as long as a block is being mined, so switching
@@ -462,6 +559,7 @@ public class MlepMine extends Module {
       // reconnect, the backlog would happily promote old coordinates and mine
       // whatever solid block now sits there.
       this.pendingQueue.clear();
+      this.droppedByPress = null;
       this.fadeList.clear();
       this.swappedToSlot = -1;
       this.originalSlot = -1;
@@ -495,6 +593,7 @@ public class MlepMine extends Module {
             this.queueClearPressed = true;
             int dropped = this.pendingQueue.size();
             this.pendingQueue.clear();
+            this.droppedByPress = null;
             if (this.mc.player != null) {
                this.mc.player
                   .sendMessage(Text.literal("\u00a77[\u00a7bMlepMine\u00a77] \u00a7fQueue cleared (" + dropped + " block(s))"), false);
@@ -517,6 +616,10 @@ public class MlepMine extends Module {
          }
 
          if (this.modeConfig.get() != MlepMine.SpeedmineMode.DAMAGE) {
+            // Picks up a double-break the player ticked or unticked since the
+            // module was switched on.
+            this.ensureMiningQueue();
+
             if ((Boolean)this.autoMine.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET) {
                int maxQueueSize = this.doubleBreakConfig.get() ? 2 : 1;
                long currentTime = System.currentTimeMillis();
@@ -572,10 +675,35 @@ public class MlepMine extends Module {
 
             if (!this.miningQueue.isEmpty()) {
                List<MlepMine.MiningData> toRemove = new ArrayList<>();
+               long now = System.currentTimeMillis();
+               long hotWindow = ((Integer)this.instantWindow.get()).longValue();
 
                for (MlepMine.MiningData data : this.miningQueue) {
                   if (data.getState().isAir()) {
                      data.resetBreakTime();
+                     data.markAir(now);
+
+                     // With instant off, a cleared spot is forgotten, full stop.
+                     // The removal that runs at the break itself only fires while
+                     // the block is still solid on the client, so a break the
+                     // server granted first — the ordinary case at grim speeds —
+                     // used to leave the entry sitting there, and the next block
+                     // placed on that spot was broken once with nobody having
+                     // clicked it.
+                     //
+                     // With instant on, instant-window is the optional ceiling.
+                     // Off by default: the server holds its open break position
+                     // until a START goes elsewhere, so forgetting early only
+                     // costs a click, and that click restarts the server timer.
+                     boolean stayHot = (Boolean)this.instantConfig.get()
+                        && (hotWindow <= 0L || !data.airedOut(now, hotWindow));
+
+                     if (!stayHot) {
+                        toRemove.add(data);
+                        continue;
+                     }
+                  } else {
+                     data.markSolid();
                   }
 
                   if (!this.isDataPacketMine(data) || !data.getState().isAir() && (!data.hasAttemptedBreak() || !data.passedAttemptedBreakTime(500L))) {
@@ -591,6 +719,10 @@ public class MlepMine extends Module {
                         }
                      }
                   } else {
+                     // Deliberately dropped, including with instant on. The server
+                     // keeps exactly one open break position, so a second cleared
+                     // spot cannot be re-broken by a bare STOP: it is ignored, and
+                     // the ABORT behind it logs a position mismatch on every tick.
                      toRemove.add(data);
                   }
                }
@@ -612,6 +744,17 @@ public class MlepMine extends Module {
                      if (miningData2.getBlockDamage() >= (Double)this.speedConfig.get()) {
                         if (this.mc.player.isUsingItem() && !(Boolean)this.multitaskConfig.get()) {
                            return;
+                        }
+
+                        // A block put back on a spot that had been cleared. This
+                        // break never goes through startMining, so the tool taken
+                        // there was already handed back when the spot went empty
+                        // and the server would measure this one with whatever is
+                        // in the hand — while farming, the stack being placed.
+                        // That is the break that silently fails and has you click
+                        // again once the 500 ms timeout has let go of the entry.
+                        if (miningData2.consumeRehold()) {
+                           this.holdToolFor(miningData2);
                         }
 
                         this.stopMining(miningData2);
@@ -643,10 +786,29 @@ public class MlepMine extends Module {
    @EventHandler
    public void onAttackBlock(StartBreakingBlockEvent event) {
       if (!this.mc.player.isCreative() && !this.mc.player.isSpectator() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET) {
-         event.cancel();
+         // Recorded before anything can return, so that a block handed to vanilla
+         // or a swing at bedrock still counts as "the button was down last tick".
+         int tick = this.mc.player.age;
+         // The backwards test is not paranoia: player age restarts at zero on
+         // death and on a dimension change, and without it every event after one
+         // of those reads as a repeat until the counter climbs back — the gesture
+         // that drops a block from the queue would be dead for the best part of
+         // an hour.
+         boolean fresh = tick < this.lastEventTick || tick - this.lastEventTick > 1;
+         this.lastEventTick = tick;
+
          BlockState blockState = this.mc.world.getBlockState(event.blockPos);
+
+         // Left to the normal client break, and the event is not cancelled at
+         // all. Vanilla predicts the break locally rather than waiting for the
+         // round trip, so it is the faster of the two on anything that goes down
+         // in one hit, and it sends none of the packets a break-rate check counts.
+         if (this.leaveToVanilla(blockState, event.blockPos)) return;
+
+         event.cancel();
+
          if (blockState.getHardness(this.mc.world, event.blockPos) != -1.0F && !blockState.isAir()) {
-            this.startManualMine(event.blockPos, event.direction);
+            this.clickMine(new MlepMine.MiningData(event.blockPos, event.direction), fresh);
             this.mc.player.swingHand(Hand.MAIN_HAND);
          }
       }
@@ -707,29 +869,7 @@ public class MlepMine extends Module {
    @EventHandler
    public void onRenderWorld(Render3DEvent event) {
       if (!this.mc.player.isCreative() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET && (Boolean)this.render.get()) {
-         // Waiting blocks, drawn small so they read as "later" next to the block
-         // actually being mined. A box vanishing here is also the only feedback a
-         // dropped block gets — nothing is printed for those.
-         if ((Boolean)this.queueConfig.get() && !this.pendingQueue.isEmpty()) {
-            SettingColor pending = (SettingColor)this.queueColor.get();
-
-            for (MlepMine.MiningData waiting : this.pendingQueue) {
-               BlockPos pos = waiting.getPos();
-               event.renderer
-                  .box(
-                     pos.getX() + 0.25,
-                     pos.getY() + 0.25,
-                     pos.getZ() + 0.25,
-                     pos.getX() + 0.75,
-                     pos.getY() + 0.75,
-                     pos.getZ() + 0.75,
-                     pending,
-                     pending,
-                     (ShapeMode)this.shapeMode.get(),
-                     0
-                  );
-            }
-         }
+         this.renderPendingQueue(event);
 
          for (MlepMine.MiningData data : this.miningQueue) {
             if (!data.getState().isAir() && !this.fadeList.containsKey(data)) {
@@ -744,92 +884,313 @@ public class MlepMine extends Module {
          }
 
          for (Entry<MlepMine.MiningData, MlepMine.Animation> set : this.fadeList.entrySet()) {
-            MlepMine.MiningData data = set.getKey();
-            int boxAlpha = (int)(40.0F * set.getValue().getFactor());
-            int lineAlpha = (int)(100.0F * set.getValue().getFactor());
-            int boxColor = !(data.getBlockDamage() >= 0.95F) && !data.getState().isAir()
-               ? ((SettingColor)this.colorConfig.get()).getPacked()
-               : ((SettingColor)this.colorDoneConfig.get()).getPacked();
-            int lineColor = !(data.getBlockDamage() >= 0.95F) && !data.getState().isAir()
-               ? ((SettingColor)this.colorConfig.get()).getPacked()
-               : ((SettingColor)this.colorDoneConfig.get()).getPacked();
-            boxColor = boxColor & 16777215 | boxAlpha << 24;
-            lineColor = lineColor & 16777215 | lineAlpha << 24;
-            BlockPos mining = data.getPos();
-            VoxelShape outlineShape = data.getState().getOutlineShape(this.mc.world, mining);
-            outlineShape = outlineShape.isEmpty() ? VoxelShapes.fullCube() : outlineShape;
-            Box render1 = outlineShape.getBoundingBox();
-            Box render = new Box(
-               mining.getX() + render1.minX,
-               mining.getY() + render1.minY,
-               mining.getZ() + render1.minZ,
-               mining.getX() + render1.maxX,
-               mining.getY() + render1.maxY,
-               mining.getZ() + render1.maxZ
-            );
-            Vec3d center = render.getCenter();
-            float total = this.isDataPacketMine(data) ? 1.0F : ((Double)this.speedConfig.get()).floatValue();
-            float scale = data.getState().isAir()
-               ? 1.0F
-               : MathHelper.clamp((data.getBlockDamage() + (data.getBlockDamage() - data.getLastDamage()) * event.tickDelta) / total, 0.0F, 1.0F);
-            double dx = (render1.maxX - render1.minX) / 2.0;
-            double dy = (render1.maxY - render1.minY) / 2.0;
-            double dz = (render1.maxZ - render1.minZ) / 2.0;
-            Box scaled = new Box(center, center).expand(dx * scale, dy * scale, dz * scale);
-            event.renderer
-               .box(
-                  scaled.minX,
-                  scaled.minY,
-                  scaled.minZ,
-                  scaled.maxX,
-                  scaled.maxY,
-                  scaled.maxZ,
-                  new SettingColor(boxColor),
-                  new SettingColor(lineColor),
-                  (ShapeMode)this.shapeMode.get(),
-                  0
-               );
+            this.renderMiningEntry(event, set.getKey(), set.getValue().getFactor());
          }
 
          this.fadeList.entrySet().removeIf(e -> e.getValue().getFactor() == 0.0);
       }
    }
 
-   private void startManualMine(BlockPos pos, Direction direction) {
-      this.clickMine(new MlepMine.MiningData(pos, direction));
+   /** Blocks waiting their turn, drawn in the order they will actually be mined. */
+   private void renderPendingQueue(Render3DEvent event) {
+      if (!(Boolean)this.queueConfig.get() || this.pendingQueue.isEmpty()) return;
+
+      SettingColor base = (SettingColor)this.queueColor.get();
+      Vec3d previous = this.chainAnchor();
+
+      for (int i = 0; i < this.pendingQueue.size(); i++) {
+         Vec3d center = this.pendingQueue.get(i).getPos().toCenterPos();
+
+         // Rank you can see: the next one in line is the biggest and brightest,
+         // each one behind it a little smaller and dimmer. Four steps is plenty,
+         // past that they all just read as "later".
+         int rank = Math.min(i, 4);
+         double half = (0.62 - 0.06 * rank) / 2.0;
+         float dim = 1.0F - 0.13F * rank;
+
+         if ((Boolean)this.queueChain.get() && previous != null) {
+            event.renderer
+               .line(
+                  previous.x,
+                  previous.y,
+                  previous.z,
+                  center.x,
+                  center.y,
+                  center.z,
+                  this.shade(base, Math.round(90.0F * dim)),
+                  this.shade(base, Math.round(220.0F * dim))
+               );
+         }
+
+         this.drawBox(
+            event,
+            new Box(center, center).expand(half, half, half),
+            base,
+            Math.round(90.0F * dim),
+            Math.round(255.0F * dim),
+            (ShapeMode)this.shapeMode.get()
+         );
+
+         previous = center;
+      }
+   }
+
+   /** Where the chain starts: whatever is being broken right now, if anything is. */
+   private Vec3d chainAnchor() {
+      if (this.miningQueue == null) return null;
+
+      for (MlepMine.MiningData data : this.miningQueue) {
+         if (!data.getState().isAir()) return data.getPos().toCenterPos();
+      }
+
+      return null;
+   }
+
+   private void renderMiningEntry(Render3DEvent event, MlepMine.MiningData data, float factor) {
+      if (factor <= 0.0F || this.mc.world == null) return;
+
+      BlockPos pos = data.getPos();
+      VoxelShape outlineShape = data.getState().getOutlineShape(this.mc.world, pos);
+      Box local = (outlineShape.isEmpty() ? VoxelShapes.fullCube() : outlineShape).getBoundingBox();
+      Box full = new Box(
+         pos.getX() + local.minX,
+         pos.getY() + local.minY,
+         pos.getZ() + local.minZ,
+         pos.getX() + local.maxX,
+         pos.getY() + local.maxY,
+         pos.getZ() + local.maxZ
+      );
+
+      boolean done = data.getState().isAir() || data.getBlockDamage() >= 0.95F;
+      SettingColor base = done ? (SettingColor)this.colorDoneConfig.get() : (SettingColor)this.colorConfig.get();
+
+      // The whole block, faintly. The progress box starts as a dot in the middle
+      // of it, so on its own it never showed which block was about to go.
+      if ((Boolean)this.outlineConfig.get()) {
+         this.drawBox(event, full, base, 0, Math.round(55.0F * factor), ShapeMode.Lines);
+      }
+
+      float total = this.isDataPacketMine(data) ? 1.0F : ((Double)this.speedConfig.get()).floatValue();
+      float scale = data.getState().isAir()
+         ? 1.0F
+         : MathHelper.clamp((data.getBlockDamage() + (data.getBlockDamage() - data.getLastDamage()) * event.tickDelta) / total, 0.0F, 1.0F);
+      if (this.styleConfig.get() == MlepMine.RenderStyle.CLASSIC) {
+         Vec3d center = full.getCenter();
+         Box grown = new Box(center, center)
+            .expand(
+               (full.maxX - full.minX) / 2.0 * scale,
+               (full.maxY - full.minY) / 2.0 * scale,
+               (full.maxZ - full.minZ) / 2.0 * scale
+            );
+         this.drawBox(event, grown, base, Math.round(40.0F * factor), Math.round(100.0F * factor), (ShapeMode)this.shapeMode.get());
+         return;
+      }
+
+      float breath = this.styleConfig.get() == MlepMine.RenderStyle.PULSE ? this.breath() : 1.0F;
+
+      // Progress as a level rising inside the block rather than a box swelling
+      // out of its middle. Two things fall out of that: a height is readable from
+      // the side, where a box growing in every direction at once is not, and the
+      // bright line sitting on the level gives the eye something crisp to land on
+      // instead of a soft cube.
+      double level = full.minY + (full.maxY - full.minY) * scale;
+      this.drawBox(
+         event,
+         new Box(full.minX, full.minY, full.minZ, full.maxX, level, full.maxZ),
+         base,
+         Math.round(60.0F * factor * breath),
+         0,
+         ShapeMode.Sides
+      );
+      this.drawBox(
+         event,
+         new Box(full.minX, level, full.minZ, full.maxX, level, full.maxZ),
+         base,
+         0,
+         Math.round(230.0F * factor * breath),
+         ShapeMode.Lines
+      );
+   }
+
+   /**
+    * Runs 0.55 to 1.0 and back, once every pulse-rate second.
+    *
+    * <p>No cast on the way into {@code sin}. The argument is the epoch in
+    * seconds turned into radians, ten billion of them, and a float at that size
+    * steps in units of a thousand radians: the angle would sit frozen for two
+    * minutes and then jump. {@code MathHelper.sin} takes a double and indexes its
+    * table through a long, which carries the value with room to spare.
+    */
+   private float breath() {
+      double phase = System.currentTimeMillis() / 1000.0 * (Double)this.pulseRate.get();
+      return 0.775F + 0.225F * MathHelper.sin(phase * Math.PI * 2.0);
+   }
+
+   /**
+    * One box in the module's colours.
+    *
+    * <p>Alphas are written for a fully opaque colour and then scaled by the alpha
+    * actually set in the menu, so turning a colour down there dims every shell of
+    * the halo with it instead of leaving the glow at full strength.
+    */
+   private void drawBox(Render3DEvent event, Box box, SettingColor base, int sideAlpha, int lineAlpha, ShapeMode mode) {
+      event.renderer.box(box, this.shade(base, sideAlpha), this.shade(base, lineAlpha), mode, 0);
+   }
+
+   private meteordevelopment.meteorclient.utils.render.color.Color shade(SettingColor base, int alpha) {
+      return new meteordevelopment.meteorclient.utils.render.color.Color(
+         base.r, base.g, base.b, MathHelper.clamp(alpha * base.a / 255, 0, 255)
+      );
+   }
+
+   @EventHandler
+   private void onRenderQueueNumbers(Render2DEvent event) {
+      if (this.mc.player == null || this.mc.world == null) return;
+      if (this.modeConfig.get() != MlepMine.SpeedmineMode.PACKET) return;
+      if (!(Boolean)this.render.get() || !(Boolean)this.queueConfig.get() || !(Boolean)this.queueNumbers.get()) return;
+      if (this.pendingQueue.isEmpty()) return;
+
+      SettingColor base = (SettingColor)this.queueColor.get();
+
+      for (int i = 0; i < this.pendingQueue.size(); i++) {
+         BlockPos pos = this.pendingQueue.get(i).getPos();
+         org.joml.Vector3d screen = new org.joml.Vector3d(pos.getX() + 0.5, pos.getY() + 0.85, pos.getZ() + 0.5);
+         if (!NametagUtils.to2D(screen, 1.0)) continue;
+
+         String text = Integer.toString(i + 1);
+         int width = this.mc.textRenderer.getWidth(text);
+
+         NametagUtils.begin(screen, event.drawContext);
+         event.drawContext
+            .fill(-width / 2 - 2, -1, width / 2 + 2, 9, new meteordevelopment.meteorclient.utils.render.color.Color(0, 0, 0, 150).getPacked());
+         // Full alpha on purpose: the queue colour is deliberately faint for the
+         // boxes, and a rank you cannot read is worth nothing.
+         event.drawContext
+            .drawText(
+               this.mc.textRenderer,
+               text,
+               -width / 2,
+               0,
+               new meteordevelopment.meteorclient.utils.render.color.Color(base.r, base.g, base.b, 255).getPacked(),
+               true
+            );
+         NametagUtils.end(event.drawContext);
+      }
    }
 
    private MlepMine.FirstOutQueue<MlepMine.MiningData> ensureMiningQueue() {
+      int max = (Boolean)this.doubleBreakConfig.get() ? 2 : 1;
+
+      // The capacity used to be frozen at activation. Unticking double-break on a
+      // running module left the two slot queue in place, so two blocks kept going
+      // out together until the next reload.
       if (this.miningQueue == null) {
-         this.miningQueue = new MlepMine.FirstOutQueue<>((Boolean)this.doubleBreakConfig.get() ? 2 : 1);
+         this.miningQueue = new MlepMine.FirstOutQueue<>(max);
+      } else {
+         this.miningQueue.setMaxSize(max);
       }
 
       return this.miningQueue;
    }
 
    public void clickMine(MlepMine.MiningData miningData) {
-      // With the queue on, a click that arrives while something is still solid
-      // goes to the backlog instead of evicting it. Clicking a block already
-      // waiting takes it back out — the same gesture serves as undo.
-      if ((Boolean)this.queueConfig.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET) {
-         if (this.pendingQueue.removeIf(d -> d.getPos().equals(miningData.getPos()))) {
-            return;
-         }
+      this.clickMine(miningData, true);
+   }
 
-         if (this.hasSolidMiningEntry()) {
-            if (this.isMiningBlock(miningData.getPos())) return;
-            if (miningData.getState().isAir()) return;
-            if (this.pendingQueue.size() >= PENDING_QUEUE_LIMIT) return;
+   /**
+    * @param fresh whether this is a real press rather than one of the repeats a
+    *              held button produces every tick
+    */
+   public void clickMine(MlepMine.MiningData miningData, boolean fresh) {
+      BlockPos pos = miningData.getPos();
+      boolean queued = (Boolean)this.queueConfig.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET;
 
-            this.pendingQueue.add(miningData);
-            return;
-         }
+      // Clicking a waiting block again takes it back out, and only a real press
+      // may do that. A held button repeats the event every tick and Baritone
+      // never releases at all, so a repeat allowed to remove would empty the
+      // queue as fast as it filled it — and in a tunnel, where Baritone
+      // alternates head block and feet block, it would take out the one it
+      // queued a tick earlier and then swing at nothing.
+      // A press forgets whatever the previous one dropped.
+      if (fresh) this.droppedByPress = null;
+
+      if (queued && fresh && this.pendingQueue.removeIf(d -> d.getPos().equals(pos))) {
+         this.droppedByPress = pos.toImmutable();
+         return;
       }
 
+      // The rest of the press that dropped it must not hand it straight back. A
+      // human click lasts two or three ticks: the first removed the block, and
+      // the repeats behind it found it in neither list and put it back at the end
+      // of the line, so the gesture stopped removing and started reordering.
+      if (pos.equals(this.droppedByPress)) return;
+
+      // Already ours. A repeat has nothing to add.
+      if (this.isMiningBlock(pos)) return;
+      if (this.pendingQueue.stream().anyMatch(d -> d.getPos().equals(pos))) return;
+      if (miningData.getState().isAir()) return;
+
+      // Anything already waiting has to be served first. Testing only for a block
+      // still being broken left a hole between two blocks — and the 280 ms grim
+      // delay makes that hole wide — through which a fresh click went straight to
+      // the front, so the last block clicked was mined second while the ones
+      // queued before it kept waiting.
+      if (queued && (this.hasSolidMiningEntry() || !this.pendingQueue.isEmpty())) {
+         if (this.pendingQueue.size() >= PENDING_QUEUE_LIMIT) return;
+
+         this.pendingQueue.add(miningData);
+         return;
+      }
+
+      // One door for every start, the same 280 ms the backlog already waited. A
+      // direct click walked straight past it, which mattered little while repeats
+      // were being swallowed and matters a lot now that they retry: a held button
+      // on a block that keeps failing would fire a START every tick, twenty a
+      // second, which is precisely the shape a break-rate check is watching for.
+      if (this.isBlockDelayGrim()) {
+         this.parkNext(miningData, queued);
+         return;
+      }
+
+      // Repeats reach this on purpose. A block the 500 ms attempt timeout gave up
+      // on is in neither list any more, and this is what puts it back: holding the
+      // button retries it, which is what holding the button has always meant.
       int maxQueueSize = (Boolean) this.doubleBreakConfig.get() ? 2 : 1;
       if (this.ensureMiningQueue().size() <= maxQueueSize) {
          this.queueMiningData(miningData);
       }
+   }
+
+   /**
+    * Holds a block until the grim door opens.
+    *
+    * <p>With the queue off there is room for exactly one, and the newest click
+    * takes it — which is what clicking a second block has always meant without
+    * the queue, only now it costs a fraction of a second instead of a packet.
+    */
+   private void parkNext(MlepMine.MiningData data, boolean queued) {
+      if (!queued) {
+         this.pendingQueue.clear();
+      } else if (this.pendingQueue.size() >= PENDING_QUEUE_LIMIT) {
+         return;
+      }
+
+      this.pendingQueue.add(data);
+   }
+
+   /**
+    * True for a block this module refuses to touch, leaving the normal client
+    * break to handle it.
+    *
+    * <p>The held item decides, not the best tool in the hotbar: vanilla breaks
+    * with what is selected, and the module's own swap has not run at this point.
+    */
+   private boolean leaveToVanilla(BlockState state, BlockPos pos) {
+      if (state.isAir()) return false;
+      if (this.vanillaBlocks.get().contains(state.getBlock())) return true;
+
+      return (Boolean)this.vanillaOneShot.get()
+         && state.calcBlockBreakingDelta(this.mc.player, this.mc.world, pos) >= 1.0F;
    }
 
    /** True while any queued entry still has a block left to break. */
@@ -857,11 +1218,20 @@ public class MlepMine extends Module {
     * by the existing 500 ms attempt timeout, so this cannot deadlock.
     */
    private void promoteFromQueue() {
-      if (!(Boolean)this.queueConfig.get() || this.pendingQueue.isEmpty()) return;
+      // No test on the queue setting any more: with it off, this list still holds
+      // the one block a click parked while the grim door was shut, and something
+      // has to let it through.
+      if (this.pendingQueue.isEmpty()) return;
       if (this.modeConfig.get() != MlepMine.SpeedmineMode.PACKET) return;
       if (this.mc.player == null || this.mc.world == null) return;
       if (this.mc.player.isUsingItem() && !(Boolean)this.multitaskConfig.get()) return;
-      if (this.hasSolidMiningEntry() || this.isBlockDelayGrim()) return;
+      if (this.isBlockDelayGrim()) return;
+
+      // One block at a time is the whole point of the queue. Without it, the list
+      // holds nothing but the click the door made wait, and that click is owed
+      // only the door: double-break exists to run two at once, and waiting for an
+      // empty queue here would quietly cancel it for 280 ms after every break.
+      if ((Boolean)this.queueConfig.get() && this.hasSolidMiningEntry()) return;
 
       double range = (Double)this.rangeConfig.get();
       double rangeSq = range * range;
@@ -1460,10 +1830,24 @@ public class MlepMine extends Module {
    }
 
    private class FirstOutQueue<T> extends ArrayList<T> {
-      private final int maxSize;
+      private int maxSize;
 
       public FirstOutQueue(int maxSize) {
          this.maxSize = maxSize;
+      }
+
+      public void setMaxSize(int maxSize) {
+         this.maxSize = maxSize;
+
+         // Shrinking on the fly: send the abort and stop following the extra
+         // blocks. The server keeps its own open break position either way, so
+         // this tidies the client side, nothing more.
+         while (this.size() > maxSize) {
+            T evicted = this.remove(this.size() - 1);
+            if (evicted instanceof MlepMine.MiningData data) {
+               MlepMine.this.abortMining(data);
+            }
+         }
       }
 
       @Override
@@ -1492,6 +1876,8 @@ public class MlepMine extends Module {
    public class MiningData {
       private boolean attemptedBreak;
       private long breakTime;
+      private long airSince;
+      private boolean rehold;
       private final BlockPos pos;
       private final Direction direction;
       private float lastDamage;
@@ -1512,6 +1898,29 @@ public class MlepMine extends Module {
 
       public void resetBreakTime() {
          this.breakTime = System.currentTimeMillis();
+      }
+
+      /** First moment this spot was seen empty. Zero while it still holds a block. */
+      public void markAir(long now) {
+         if (this.airSince == 0L) {
+            this.airSince = now;
+            this.rehold = true;
+         }
+      }
+
+      public void markSolid() {
+         this.airSince = 0L;
+      }
+
+      /** True once per clear-and-refill, for the caller that has to take the tool back. */
+      public boolean consumeRehold() {
+         boolean pending = this.rehold;
+         this.rehold = false;
+         return pending;
+      }
+
+      public boolean airedOut(long now, long window) {
+         return this.airSince != 0L && now - this.airSince >= window;
       }
 
       public boolean hasAttemptedBreak() {
@@ -1601,6 +2010,12 @@ public class MlepMine extends Module {
       public int hashCode() {
          return this.pos.hashCode();
       }
+   }
+
+   public enum RenderStyle {
+      CLASSIC,
+      FILL,
+      PULSE;
    }
 
    public enum SpeedmineMode {
