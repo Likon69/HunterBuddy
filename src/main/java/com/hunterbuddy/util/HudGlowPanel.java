@@ -169,6 +169,56 @@ public final class HudGlowPanel {
         }
     }
 
+    /**
+     * The same halo, round.
+     *
+     * <p>A rectangular glow around a disc shows four corners of colour hanging off
+     * nothing. Same settings, same layer maths, same severity: only the shape
+     * changes, drawn from a radial sprite the caller supplies so this utility
+     * keeps knowing nothing about any one HUD's assets.
+     *
+     * <p>Drawn inline rather than posted, because the shape batch flushes at the
+     * end of the element: a texture queued behind it would land on top of the very
+     * panel it is meant to sit behind.
+     */
+    public void drawRound(HudRenderer renderer, net.minecraft.util.Identifier disc,
+                          double x, double y, double diameter, Severity severity) {
+        double pad = padding.get();
+        double cx = x + diameter / 2.0;
+        double cy = y + diameter / 2.0;
+
+        if (glow.get()) {
+            SettingColor tint = glowFollowsState.get() ? colorFor(severity) : glowColor.get();
+            int layers = glowLayers.get();
+            double spread = glowSpread.get();
+
+            double boost = glowIntensifies.get()
+                ? switch (severity) {
+                    case OK -> 0.55;
+                    case WARN -> 1.0;
+                    case CRITICAL -> 1.6;
+                }
+                : 1.0;
+
+            int base = (int) (glowAlpha.get() * boost);
+
+            for (int i = layers; i >= 1; i--) {
+                double expansion = spread * i * (glowIntensifies.get() ? Math.max(0.6, boost) : 1.0);
+                double t = (double) (i - 1) / layers;
+                int alpha = Math.max(4, Math.min(255, (int) (base * (1.0 - t * t))));
+                double r = diameter / 2.0 + pad + expansion;
+
+                renderer.texture(disc, cx - r, cy - r, r * 2.0, r * 2.0,
+                    new Color(tint.r, tint.g, tint.b, alpha));
+            }
+        }
+
+        if (background.get()) {
+            double r = diameter / 2.0 + pad;
+            renderer.texture(disc, cx - r, cy - r, r * 2.0, r * 2.0, backgroundColor.get());
+        }
+    }
+
     private SettingColor colorFor(Severity severity) {
         return switch (severity) {
             case OK -> okColor.get();
