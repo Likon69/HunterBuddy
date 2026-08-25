@@ -6,6 +6,7 @@
     "MlepScaffoldMixin",
     "InGameHudMixin",
     "InputMixin",
+    "AuraMoveFixMixin",
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",
     "HandledScreenMixin",
