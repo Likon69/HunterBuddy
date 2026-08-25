@@ -43,6 +43,7 @@ import com.hunterbuddy.modules.FireworkVector;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
 import com.hunterbuddy.modules.MlepAirPlace;
+import com.hunterbuddy.modules.KillAuraPlus;
 import com.hunterbuddy.modules.MlepMine;
 import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.logistics.PearlLoader;
@@ -160,6 +161,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new WaypointFollower());
         Modules.get().add(new TrailFollower());
         Modules.get().add(new MlepMine());
+        Modules.get().add(new KillAuraPlus());
         Modules.get().add(new MlepScaffold());
         Modules.get().add(new Replenish());
         Modules.get().add(new StashFinder());
