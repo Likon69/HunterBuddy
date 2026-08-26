@@ -26,14 +26,12 @@ import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.CaveAirESP;
-import com.hunterbuddy.modules.ChunkProfiler;
 import com.hunterbuddy.modules.ChunkRadar;
 import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
 import com.hunterbuddy.modules.ClientSideTime;
 import com.hunterbuddy.modules.ContainerTooltips;
 import com.hunterbuddy.modules.ControlFly;
 import com.hunterbuddy.modules.DisconnectSound;
-import com.hunterbuddy.modules.InvFix2b2t;
 import com.hunterbuddy.modules.ElytraAutoFly;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
@@ -135,7 +133,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(com.hunterbuddy.hud.SessionTimelineHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.SpeedSpectrumHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.DimensionBannerHud.INFO);
-        Hud.get().register(com.hunterbuddy.hud.ChunkProfilerHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.ChunkRadarHud.INFO);
 
         // HunterBuddy modules
@@ -150,7 +147,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new NoHurtCam());
         Modules.get().add(new NoJumpDelay());
         Modules.get().add(new OldChunkNotifier());
-        Modules.get().add(new ChunkProfiler());
         Modules.get().add(new ChunkRadar());
         Modules.get().add(new ElytraBounce());
         Modules.get().add(new ElytraRecast());
@@ -197,7 +193,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ContainerTooltips());
         Modules.get().add(new Phase());
         Modules.get().add(new DisconnectSound());
-        Modules.get().add(new InvFix2b2t());
         Modules.get().add(new LoreLocator());
         Modules.get().add(new VisualRangeNotifier());
         Commands.add(new SetInput());
