@@ -37,7 +37,6 @@ import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
 import com.hunterbuddy.modules.EntityView;
-import com.hunterbuddy.modules.FireworkVector;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
 import com.hunterbuddy.modules.MlepAirPlace;
@@ -185,7 +184,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new com.hunterbuddy.modules.Shader());
         Modules.get().add(new RocketBoost());
-        Modules.get().add(new FireworkVector());
         Modules.get().add(new com.hunterbuddy.modules.FuturePacketMine());
         Modules.get().add(new com.hunterbuddy.modules.FutureNuker());
         Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
