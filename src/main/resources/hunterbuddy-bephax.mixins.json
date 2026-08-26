@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.hunterbuddy.bephax.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "BepEntityMixin",
+    "BepGlideMixin",
+    "BepPlayerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

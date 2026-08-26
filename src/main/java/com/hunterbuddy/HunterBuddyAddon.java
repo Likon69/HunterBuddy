@@ -171,6 +171,9 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new Pitch40());
         Modules.get().add(new Pitch40Classic());
         Modules.get().add(new RocketFly());
+        Modules.get().add(new com.hunterbuddy.bephax.BepBoost());
+        Modules.get().add(new com.hunterbuddy.bephax.BepControl());
+        Modules.get().add(new com.hunterbuddy.bephax.BepRocketFly());
         Modules.get().add(new YawLock());
         Modules.get().add(new AreaLoader());
         Modules.get().add(new MlepAirPlace());
