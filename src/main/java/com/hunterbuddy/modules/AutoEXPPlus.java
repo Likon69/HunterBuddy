@@ -18,9 +18,11 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.component.type.AttributeModifierSlot;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.Hand;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 public class AutoEXPPlus extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -121,48 +123,56 @@ public class AutoEXPPlus extends Module {
         .build()
     );
 
-    private final Setting<Integer> throwDelay = sgThrow.add(new IntSetting.Builder()
-        .name("throw-delay")
-        .description("Minimum ticks between two bottles. At zero the module throws twenty a second, and a bottle takes longer than that to fly, break and have its orbs reach you.")
-        .defaultValue(2)
-        .range(0, 40)
-        .sliderRange(0, 20)
-        .build()
-    );
-
     private final Setting<Boolean> avoidOverthrow = sgThrow.add(new BoolSetting.Builder()
         .name("avoid-overthrow")
-        .description("Stop throwing once the bottles already in the air can finish the item. Every throw is counted at the most it could ever repair, so the item still fills up, and what used to land after it was full stays in your inventory instead.")
+        .description("Keep no more owed in the air than the item still has room for, and stop overlapping throws over ninety percent, where a bottle too many is a bottle wasted. Off, the module throws one every tick until the server says the item is full, which is a good twenty bottles later.")
         .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Integer> overthrowTimeout = sgThrow.add(new IntSetting.Builder()
-        .name("overthrow-timeout")
-        .description("Ticks with no repair coming back before the bottles in the air are written off. They went to another mending item, or broke somewhere their orbs could not follow.")
-        .defaultValue(40)
-        .range(5, 200)
-        .sliderRange(10, 100)
-        .visible(avoidOverthrow::get)
         .build()
     );
 
     private static final int CHEST_INDEX = SlotUtils.ARMOR_START + EquipmentSlot.CHEST.getEntitySlotId();
 
-    // Eleven experience points at two durability each: the most a single bottle can
-    // ever be worth. Booking a throw at its maximum is what keeps the module from
-    // promising itself more than it threw and stopping short of the threshold.
+    // A bottle spawns 3 + rand(5) + rand(5) experience, and mending turns each point
+    // into two durability: six at worst, twenty-two at best. Twenty-two is the figure
+    // to reckon with, because it is the one that cannot be exceeded -- a bottle held
+    // back on that count was never needed.
     private static final int MAX_REPAIR_PER_BOTTLE = 22;
+
+    // A bottle that has not paid up by now never will. Its orbs went to another
+    // mending item, or they broke somewhere they could not follow you back from.
+    private static final int FLIGHT_TICKS = 20;
+
+    // Above this much durability the throws stop overlapping: one bottle, wait for
+    // its answer, next bottle. The last tenth is where an extra bottle in the air is
+    // most likely to arrive at an item that is already full, and there is little
+    // enough left that going one at a time costs a second, not a minute.
+    private static final int SLOW_ABOVE = 90;
+
+    // Bottles allowed to come back with nothing at all behind them before the module
+    // stops trusting the ground under it.
+    private static final int PROBE_AFTER = 3;
+
+    // And how long it leaves between the single bottles it sends after that, to find
+    // out whether the orbs can reach you again.
+    private static final int PROBE_EVERY = 40;
 
     private int repairingI;
     private int swapTimer;
-    private int throwTimer;
 
-    // What has been thrown for and not yet seen come back, in durability.
-    private int pledged;
-    private int pledgeSlot;
+    // One entry per bottle in the air, the two lists side by side: how long ago it
+    // left the hand, and how much durability it can still owe.
+    private final IntArrayList flying = new IntArrayList();
+    private final IntArrayList owed = new IntArrayList();
+
+    private int trackedSlot;
+    private Item trackedItem;
+    private int trackedMax;
     private int lastDamage;
-    private int quietTicks;
+
+    // Bottles that ran out of time without a single point of durability behind them,
+    // and ticks since the last one left, so the probe does not fire every second.
+    private int unpaid;
+    private int sinceThrow;
 
     public AutoEXPPlus() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-exp-plus", "Automatically repairs your armor and tools in pvp.");
@@ -172,16 +182,32 @@ public class AutoEXPPlus extends Module {
     public void onActivate() {
         repairingI = -1;
         swapTimer = 0;
-        forgetPledge();
+        flying.clear();
+        owed.clear();
+        unpaid = 0;
+        sinceThrow = PROBE_EVERY;
+        trackedSlot = -1;
+        trackedItem = null;
+        trackedMax = 0;
+        lastDamage = 0;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null) return;
 
-        if (throwTimer > 0) throwTimer--;
-        if (swapTimer > 0) swapTimer--;
-        else if (elytraRotationActive() && rotateElytra()) return;
+        age();
+        if (sinceThrow < PROBE_EVERY) sinceThrow++;
+
+        // Nothing goes out while an elytra is changing hands. The bottles already in
+        // the air will mend whatever ends up in the chest slot, and the ones thrown
+        // now would arrive with the inventory still moving under them.
+        if (swapTimer > 0) {
+            swapTimer--;
+            return;
+        }
+
+        if (elytraRotationActive() && rotateElytra()) return;
 
         if (repairingI == -1) {
             if (mode.get() != Mode.Hands) {
@@ -260,8 +286,9 @@ public class AutoEXPPlus extends Module {
                     }
                 });
 
-                throwTimer = throwDelay.get();
-                pledged += MAX_REPAIR_PER_BOTTLE;
+                flying.add(0);
+                owed.add(MAX_REPAIR_PER_BOTTLE);
+                sinceThrow = 0;
             }
         }
     }
@@ -269,63 +296,135 @@ public class AutoEXPPlus extends Module {
     // Throwing
 
     /**
-     * Keeps count of what is already in the air.
+     * Ages the bottles in the air and writes off the ones that will never answer.
+     *
+     * <p>Runs every tick and not only while something is being repaired: bottles
+     * outlive the item they were thrown for, and an elytra swap in between must
+     * not make the module forget what it already sent.
+     */
+    private void age() {
+        for (int i = flying.size() - 1; i >= 0; i--) {
+            int age = flying.getInt(i) + 1;
+
+            if (age < FLIGHT_TICKS) {
+                flying.set(i, age);
+                continue;
+            }
+
+            // Out of time still owing every point it was ever worth: nothing of it
+            // came back at all. That is the shape of a bottle whose orbs are sitting
+            // where it broke, too far behind to follow.
+            if (owed.getInt(i) == MAX_REPAIR_PER_BOTTLE) unpaid++;
+
+            flying.removeInt(i);
+            owed.removeInt(i);
+        }
+    }
+
+    /**
+     * Pays the bottles in the air down with the durability the server sends back.
      *
      * <p>A bottle is not a repair. It is an entity that has to fly, break, spawn
-     * orbs, and have those orbs travel back to you -- ten to twenty ticks, during
-     * which the item on the client still reads exactly as damaged as it was. Throw
-     * one every tick and there are fifteen in the air for an item that needed
-     * three: the item does fill up, and everything landing after it is full goes
-     * into your levels instead. That is the waste, and the elytra rotation shows it
-     * worst, because filling an elytra to ninety-eight percent is the longest job
-     * the module ever runs and so has the most in flight when it ends.
+     * orbs, and have those orbs travel back to you and be picked up two ticks
+     * apart -- half a second at best, during which the item on the client still
+     * reads exactly as damaged as it was. Throw one every tick and twenty are in
+     * the air for an item that needed six.
      *
-     * <p>So each throw is booked at the most a bottle can ever be worth, and every
-     * durability point the server gives back pays that debt down.
+     * <p>So a throw is booked as a debt of twenty-two, the most a bottle can ever
+     * be worth, and every point that lands pays that debt down. Booking the debt
+     * and waiting for a whole bottle's worth to write it off, the way this used to,
+     * is what made the module crawl: an average bottle is worth fourteen, so the
+     * debt was never settled, the bottle sat in the air until it timed out, and for
+     * those twenty ticks the module thought it had twenty-two points coming that it
+     * had already been paid. Paying by the point instead means the room in the item
+     * reopens as the orbs actually arrive.
      */
     private void observe(ItemStack repairing) {
         int damage = repairing.getDamage();
 
-        if (pledgeSlot != repairingI) {
-            pledgeSlot = repairingI;
-            pledged = 0;
-            quietTicks = 0;
+        // The slot is not the item. Put a fresher pickaxe in the slot the module was watching
+        // and the damage drops by three hundred in one tick without a single orb having
+        // arrived; read as repair it would clear every debt at once and let the next tick
+        // throw a full load at an item that never asked for one. So the item itself is
+        // watched, and a different one starts the reading over rather than paying anything.
+        if (trackedSlot != repairingI || repairing.getItem() != trackedItem || repairing.getMaxDamage() != trackedMax) {
+            trackedSlot = repairingI;
+            trackedItem = repairing.getItem();
+            trackedMax = repairing.getMaxDamage();
         }
-        else if (damage < lastDamage) {
-            pledged = Math.max(0, pledged - (lastDamage - damage));
-            quietTicks = 0;
-        }
-        else if (pledged > 0 && ++quietTicks >= overthrowTimeout.get()) {
-            // Nothing back for two seconds. Mending picks one damaged item at
-            // random among the ones you wear and hold, so the orbs may well have
-            // gone to the chestplate; holding the debt any longer only stops the
-            // repair that was actually asked for.
-            pledged = 0;
-            quietTicks = 0;
-        }
+        else if (damage < lastDamage) credit(lastDamage - damage);
 
         lastDamage = damage;
     }
 
+    /** Puts durability that has landed against the oldest debts first: they left first. */
+    private void credit(int repaired) {
+        unpaid = 0;
+
+        // No more than what is actually out there can have come from out there. Mending also
+        // pays from orbs you walked over, and from a second bottle thrower, and this is what
+        // keeps that from writing off flights that are still owed.
+        repaired = Math.min(repaired, promised());
+
+        for (int i = 0; i < owed.size() && repaired > 0; i++) {
+            int take = Math.min(repaired, owed.getInt(i));
+
+            owed.set(i, owed.getInt(i) - take);
+            repaired -= take;
+        }
+
+        // A bottle with nothing left to give is not standing in the way any more.
+        for (int i = owed.size() - 1; i >= 0; i--) {
+            if (owed.getInt(i) == 0) {
+                owed.removeInt(i);
+                flying.removeInt(i);
+            }
+        }
+    }
+
+    /** Durability the bottles in the air can still be worth, all of them at their best. */
+    private int promised() {
+        int total = 0;
+
+        for (int i = 0; i < owed.size(); i++) total += owed.getInt(i);
+
+        return total;
+    }
+
+    /** True while a bottle is out there that has not repaired a single point yet. */
+    private boolean awaitingAnswer() {
+        for (int i = 0; i < owed.size(); i++) {
+            if (owed.getInt(i) == MAX_REPAIR_PER_BOTTLE) return true;
+        }
+
+        return false;
+    }
+
     private boolean worthThrowing(ItemStack repairing, double targetPercent) {
-        if (throwTimer > 0) return false;
         if (!avoidOverthrow.get()) return true;
 
-        return repairing.getDamage() - targetDamage(repairing, targetPercent) > pledged;
+        // Three bottles that came back with nothing at all: the orbs are spawning
+        // where the bottle broke and staying there -- under an elytra at speed, over
+        // a drop, behind a wall. One bottle every two seconds from here, purely to
+        // find out when that stops being true. The first point that lands clears the
+        // count and the pace comes straight back.
+        if (unpaid >= PROBE_AFTER && (awaitingAnswer() || sinceThrow < PROBE_EVERY)) return false;
+
+        // Near the top the item can no longer absorb a bad guess, so the throws stop
+        // overlapping: one bottle, wait until it answers, then the next. Below that
+        // line the debt below is what holds the pace.
+        if (durabilityPercent(repairing) >= SLOW_ABOVE && awaitingAnswer()) return false;
+
+        // What is owed, at the most it could still be worth, against what is left to
+        // fill. One more bottle only goes out if even the best case leaves the item
+        // short.
+        return promised() < repairing.getDamage() - targetDamage(repairing, targetPercent);
     }
 
     /** The damage value the item is being repaired down to. */
     private int targetDamage(ItemStack stack, double percent) {
         if (stack.getMaxDamage() <= 0) return 0;
         return (int) Math.floor(stack.getMaxDamage() * (1.0 - percent / 100.0));
-    }
-
-    private void forgetPledge() {
-        throwTimer = 0;
-        pledged = 0;
-        pledgeSlot = -1;
-        lastDamage = 0;
-        quietTicks = 0;
     }
 
     private boolean needsRepair(ItemStack itemStack, double threshold) {
@@ -371,8 +470,10 @@ public class AutoEXPPlus extends Module {
 
         repairingI = -1;
         swapTimer = swapDelay.get();
-        // Another elytra in the slot is another debt.
-        forgetPledge();
+        // Another elytra, read from scratch. The debts stay: those orbs will mend
+        // whatever is in the chest slot when they arrive.
+        trackedSlot = -1;
+        trackedItem = null;
 
         if (notifySwap.get()) {
             info("Now wearing an elytra at %.1f%%, %d damaged left.", candidatePercent, countRotationCandidates());
