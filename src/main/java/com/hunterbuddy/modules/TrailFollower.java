@@ -258,6 +258,49 @@ public class TrailFollower extends Module
         .build()
     );
 
+    public final Setting<SearchBehavior> searchBehavior = sgAdvanced.add(new EnumSetting.Builder<SearchBehavior>()
+        .name("search-behavior")
+        .description("What to search with once the flight back to the last chunk is over. SPIRAL orbits that chunk in a widening ring. SWEEP holds the heading the trail was on and weaves either side of it, so the search still travels. STRAIGHT just holds that heading.")
+        .defaultValue(SearchBehavior.SPIRAL)
+        .build()
+    );
+
+    public final Setting<Double> sweepAngle = sgAdvanced.add(new DoubleSetting.Builder()
+        .name("sweep-angle")
+        .description("How far either side of the heading the sweep starts out. It opens towards 90 degrees the longer nothing arrives, which costs progress along the heading and gives a slow chunk the time to catch up.")
+        .defaultValue(35.0)
+        .min(10.0)
+        .sliderRange(10.0, 90.0)
+        .visible(() -> searchBehavior.get() == SearchBehavior.SWEEP)
+        .build()
+    );
+
+    public final Setting<Boolean> reverseLock = sgAdvanced.add(new BoolSetting.Builder()
+        .name("reverse-lock")
+        .description("Ignore chunks that arrive far behind the heading you committed to. A server that is behind delivers ground you already flew over, and taking it as trail turns the module round to follow itself back.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Double> reverseLockAngle = sgAdvanced.add(new DoubleSetting.Builder()
+        .name("reverse-lock-angle")
+        .description("Chunks further than this off the committed heading still count as the trail being alive, but are never flown at and never become the anchor.")
+        .defaultValue(110.0)
+        .min(60.0)
+        .sliderRange(60.0, 180.0)
+        .visible(reverseLock::get)
+        .build()
+    );
+
+    public final Setting<Double> maxTurnRate = sgAdvanced.add(new DoubleSetting.Builder()
+        .name("max-turn-rate")
+        .description("Degrees per second the followed heading may swing. One lag burst landing half a chunk column off to the side would otherwise turn the whole route within a tick.")
+        .defaultValue(45.0)
+        .min(5.0)
+        .sliderRange(5.0, 180.0)
+        .build()
+    );
+
     public final Setting<Double> trailTimeout = sgAdvanced.add(new DoubleSetting.Builder()
         .name("trail-timeout")
         .description("The amount of MS without a chunk found to stop following the trail.")
@@ -381,6 +424,10 @@ public class TrailFollower extends Module
         circleEnteredAt = 0L;
         circleAngle = 0.0;
         ticksInCircle = 0;
+        desiredYaw = targetYaw;
+        committedYaw = 0.0;
+        hasCommittedYaw = false;
+        sweepPhase = 0.0;
     }
 
     /**
@@ -554,7 +601,7 @@ public class TrailFollower extends Module
                 {
                     trail.add(targetPos);
                 }
-                targetYaw = initialYaw;
+                targetYaw = desiredYaw = initialYaw;
             }
             else
             {
@@ -610,6 +657,14 @@ public class TrailFollower extends Module
     }
 
     private double targetYaw;
+
+    // What the trail is asking for, before max-turn-rate has had its say; what we are actually
+    // flying, kept so that a chunk landing behind us can be recognised as behind us; and where
+    // the sweep is in its weave.
+    private double desiredYaw;
+    private double committedYaw;
+    private boolean hasCommittedYaw;
+    private double sweepPhase;
 
     private int baritoneSetGoalTicks = 0;
 
@@ -683,8 +738,45 @@ public class TrailFollower extends Module
                     state = SearchState.CIRCLE;
                     circleEnteredAt = now;
                     ticksInCircle = 0;
+                    sweepPhase = 0.0;
                     circleAngle = getActualYaw(mc.player.getYaw());
                     log("Back at the last chunk, spiralling out for the rest of the trail.");
+                }
+            }
+            else if (searchBehavior.get() != SearchBehavior.SPIRAL)
+            {
+                // The spiral buys its coverage with ground: every block of the ring is a block
+                // not spent going forward, and a trail that has simply not loaded yet is being
+                // orbited instead of flown along. The sweep keeps the heading the trail was on
+                // and weaves either side of it, so the search travels. The weave opens out the
+                // longer nothing arrives -- wider is slower along the heading, which is exactly
+                // the room a late chunk needs to catch up -- and STRAIGHT is the case that never
+                // weaves at all.
+                ticksInCircle++;
+
+                if (searchBehavior.get() == SearchBehavior.SWEEP)
+                {
+                    sweepPhase += circlingDegPerTick.get();
+
+                    // Measured from the last chunk that steered us, not from the start of the
+                    // sweep: the flight back to the anchor is already time spent starving, and
+                    // counting the sweep alone left the weave shut for its first five seconds
+                    // and wide open only at the instant the trail was abandoned.
+                    double starved = Math.max(0.0, now - lastFoundTrailTime - chunkFoundTimeout.get());
+                    double window = Math.max(1000.0, trailTimeout.get() - chunkFoundTimeout.get());
+                    double amplitude = sweepAngle.get() + (90.0 - sweepAngle.get()) * Math.min(1.0, starved / window);
+
+                    targetYaw = committedYaw + amplitude * Math.sin(Math.toRadians(sweepPhase));
+
+                    if (mc.player.age % 100 == 0)
+                    {
+                        long left = (long) ((trailTimeout.get() - (now - Math.max(circleEnteredAt, lastFoundTrailTime))) / 1000);
+                        log("Sweeping " + (int) amplitude + " degrees either side of the trail heading, abandoning trail in " + left + " seconds.");
+                    }
+                }
+                else
+                {
+                    targetYaw = committedYaw;
                 }
             }
             else
@@ -716,6 +808,24 @@ public class TrailFollower extends Module
                     log("Spiralling at " + (int) radius + " blocks from the last chunk, abandoning trail in " + left + " seconds.");
                 }
             }
+        }
+
+        // The heading the trail asks for is not the heading we fly. Chunks do not arrive at an
+        // even rate: one lag spike delivers a whole column at once, and if half of it landed off
+        // to the side the aim would swing the entire route within a tick. So in FOLLOW the flown
+        // heading walks towards the wanted one and no faster than max-turn-rate. The search
+        // states are exempt -- their heading is a search pattern, not a trail reading, and they
+        // write it every tick anyway.
+        if (followingTrail && state == SearchState.FOLLOW)
+        {
+            targetYaw = maxTurnRate.get() > 0.0
+                ? approachYaw(targetYaw, desiredYaw, maxTurnRate.get() / 20.0)
+                : desiredYaw;
+
+            // Whatever we are flying while the trail is under us is what a late chunk will be
+            // judged against once it is not.
+            committedYaw = targetYaw;
+            hasCommittedYaw = true;
         }
 
         double recenter = recenterCorrection();
@@ -758,7 +868,10 @@ public class TrailFollower extends Module
                                 double calculatedYaw = Rotations.getYaw(predictedPos);
                                 double decayedWeight = getDecayedInitialWeight();
 
-                                targetYaw = decayedWeight > 0.01
+                                // Wanted, not flown: writing the heading straight in here would
+                                // step round max-turn-rate, and the goal would then be planned
+                                // down a line the rest of the module never agreed to.
+                                desiredYaw = decayedWeight > 0.01
                                     ? blendYaw(calculatedYaw, initialYaw, decayedWeight)
                                     : calculatedYaw;
 
@@ -864,6 +977,10 @@ public class TrailFollower extends Module
             {
                 log("Trail found, starting to follow.");
                 followingTrail = true;
+                // Nothing has read a heading off this trail yet, so the wanted heading is the
+                // one we are already flying. Left at whatever resetTrail put there, the walk
+                // towards it would drag the route round to face it.
+                desiredYaw = targetYaw;
                 lastFoundTrailTime = System.currentTimeMillis();
                 chunksFoundSinceStart = possibleTrail.size();
                 lastChunkPos = possibleTrail.getLast();
@@ -888,6 +1005,32 @@ public class TrailFollower extends Module
         double chunkDistance = horizontalDistance(pos, mc.player.getEntityPos());
         boolean aimable = chunkDistance >= minAimDistance.get();
 
+        // A chunk that lands far behind the committed heading is the server catching up on
+        // ground we already flew over, not the trail doubling back. Dropped before the clocks
+        // below are touched, and deliberately: counting it as the trail being alive would also
+        // postpone the search and the abandon, so a server delivering behind us would keep us
+        // flying straight ahead for as long as it kept doing it. Nothing usable arriving is
+        // starvation, whatever else is arriving.
+        //
+        // Only while following, for the same reason max-trail-deviation above is: the whole
+        // point of returning and spiralling is to go looking behind and beside us, and a
+        // heading committed to before we lost the trail has no authority over what we find
+        // once we have. The cache entry goes back too -- a chunk refused here is refused for
+        // this heading, not for the rest of the flight, and leaving it marked seen would hide
+        // it from the search that is about to want it.
+        if (reverseLock.get() && hasCommittedYaw && state == SearchState.FOLLOW
+            && Math.abs(angleDifference(committedYaw, chunkAngle)) > reverseLockAngle.get())
+        {
+            if (debug.get())
+            {
+                HunterBuddyAddon.LOG.info("[HB][TF] chunk dropped, {} deg behind the committed heading",
+                    (int) Math.abs(angleDifference(committedYaw, chunkAngle)));
+            }
+
+            seenChunksCache.invalidate(chunkLong);
+            return;
+        }
+
         lastFoundTrailTime = System.currentTimeMillis();
         chunksFoundSinceStart++;
         lastChunkPos = pos;
@@ -905,7 +1048,7 @@ public class TrailFollower extends Module
         if (state != SearchState.FOLLOW)
         {
             state = SearchState.FOLLOW;
-            targetYaw = Rotations.getYaw(pos);
+            targetYaw = desiredYaw = Rotations.getYaw(pos);
             log("Trail picked up again, following.");
         }
 
@@ -959,7 +1102,7 @@ public class TrailFollower extends Module
             }
 
             double decayedWeight = getDecayedInitialWeight();
-            targetYaw = decayedWeight > 0.01
+            desiredYaw = decayedWeight > 0.01
                 ? blendYaw(calculatedYaw, initialYaw, decayedWeight)
                 : calculatedYaw;
 
@@ -967,7 +1110,7 @@ public class TrailFollower extends Module
             {
                 HunterBuddyAddon.LOG.info("[HB][TF] aim trail={} found={} calcYaw={} initYaw={} weight={} -> yaw={}",
                     trail.size(), chunksFoundSinceStart, (int) calculatedYaw, (int) initialYaw,
-                    String.format("%.2f", decayedWeight), (int) targetYaw);
+                    String.format("%.2f", decayedWeight), (int) desiredYaw);
             }
         }
     }
@@ -1069,6 +1212,13 @@ public class TrailFollower extends Module
     }
 
     /** Interpolates between two headings the short way round, so 350 and 10 meet at 0, not 180. */
+    /** Walks one heading towards another by at most maxStep degrees, the short way round. */
+    private double approachYaw(double current, double target, double maxStep)
+    {
+        double diff = angleDifference(target, current);
+        return Math.abs(diff) <= maxStep ? target : current + Math.copySign(maxStep, diff);
+    }
+
     private double blendYaw(double yaw1, double yaw2, double weight)
     {
         yaw1 = (yaw1 % 360.0 + 360.0) % 360.0;
@@ -1115,6 +1265,13 @@ public class TrailFollower extends Module
         DISABLE,
         FLY_TOWARDS_YAW,
         DISCONNECT
+    }
+
+    public enum SearchBehavior
+    {
+        SPIRAL,
+        SWEEP,
+        STRAIGHT
     }
 
     private enum SearchState
