@@ -42,6 +42,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
@@ -467,6 +468,7 @@ public class EntityView extends Module {
     private final List<LivingEntity> tagged = new ArrayList<>();
     private final List<ItemEntity> droppedItems = new ArrayList<>();
     private final List<BlockPos> portalBlocks = new ArrayList<>();
+    private final List<Box> portalFrames = new ArrayList<>();
     private final List<LivingEntity> previouslyTagged = new ArrayList<>();
     /** Of those, the ones that still qualify. The rest are on their way out. */
     private final IntOpenHashSet activeIds = new IntOpenHashSet();
@@ -536,6 +538,7 @@ public class EntityView extends Module {
             // last contents keep being drawn against a world that is gone.
             droppedItems.clear();
             portalBlocks.clear();
+            portalFrames.clear();
             return;
         }
 
@@ -763,38 +766,92 @@ public class EntityView extends Module {
                 }
             }
         }
+
+        groupPortals();
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (!portals.get() || mc.player == null || portalBlocks.isEmpty()) return;
+        if (!portals.get() || mc.player == null || portalFrames.isEmpty()) return;
 
-        for (BlockPos pos : portalBlocks) {
-            event.renderer.box(new Box(pos), portalSideColor.get(), portalLineColor.get(), ShapeMode.Both, 0);
+        // One box for the whole portal rather than one per block. Per block, the
+        // faces between two neighbours are drawn twice -- their fill stacks and
+        // their edges turn the frame into a grid instead of an outline.
+        for (Box frame : portalFrames) {
+            event.renderer.box(frame, portalSideColor.get(), portalLineColor.get(), ShapeMode.Both, 0);
         }
 
         if (!portalTracer.get()) return;
 
-        // The nearest block of the nearest portal is close enough to aim at: a
-        // portal is two blocks wide, and pointing at its corner rather than its
-        // middle is not a distinction you can see from fifty blocks away.
-        Vec3d eye = mc.player.getEyePos();
-        BlockPos nearest = null;
+        // Aimed at the middle of the portal, not at whichever of its blocks happens
+        // to be nearest: the nearest one changes as you move around it, and the line
+        // was jumping from block to block of the same portal.
+        Vec3d origin = new Vec3d(RenderUtils.center.x, RenderUtils.center.y, RenderUtils.center.z);
+        Box nearest = null;
         double best = Double.MAX_VALUE;
 
-        for (BlockPos pos : portalBlocks) {
-            double distance = pos.getSquaredDistance(eye);
+        for (Box frame : portalFrames) {
+            double distance = frame.getCenter().squaredDistanceTo(origin);
 
             if (distance < best) {
                 best = distance;
-                nearest = pos;
+                nearest = frame;
             }
         }
 
         if (nearest == null) return;
 
-        Vec3d target = Vec3d.ofCenter(nearest);
-        event.renderer.line(eye.x, eye.y, eye.z, target.x, target.y, target.z, portalTracerColor.get());
+        Vec3d target = nearest.getCenter();
+
+        // From the camera's own centre, which is where every tracer in the client
+        // starts. Drawn from the player's eyes instead, the line begins at the exact
+        // point you are looking from: it shifts against the interpolated camera on
+        // every frame you move, and vanishes into the near plane when you stand
+        // still, since there is then nothing between the eye and the start of it.
+        event.renderer.line(origin.x, origin.y, origin.z, target.x, target.y, target.z, portalTracerColor.get());
+    }
+
+    /**
+     * Groups the loose portal blocks into portals.
+     *
+     * <p>A portal is a slab of blocks, and everything downstream wants the slab
+     * rather than its parts: one box to outline, one centre to aim at. Flood filled
+     * over the six neighbours, on a list that holds a handful of entries at most --
+     * portals are rare and small, so the cost is nothing.
+     */
+    private void groupPortals() {
+        portalFrames.clear();
+        if (portalBlocks.isEmpty()) return;
+
+        Set<BlockPos> remaining = new java.util.HashSet<>(portalBlocks);
+        java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
+
+        while (!remaining.isEmpty()) {
+            BlockPos seed = remaining.iterator().next();
+            remaining.remove(seed);
+            queue.add(seed);
+
+            int minX = seed.getX(), minY = seed.getY(), minZ = seed.getZ();
+            int maxX = minX, maxY = minY, maxZ = minZ;
+
+            while (!queue.isEmpty()) {
+                BlockPos at = queue.poll();
+
+                minX = Math.min(minX, at.getX());
+                minY = Math.min(minY, at.getY());
+                minZ = Math.min(minZ, at.getZ());
+                maxX = Math.max(maxX, at.getX());
+                maxY = Math.max(maxY, at.getY());
+                maxZ = Math.max(maxZ, at.getZ());
+
+                for (Direction side : Direction.values()) {
+                    BlockPos next = at.offset(side);
+                    if (remaining.remove(next)) queue.add(next);
+                }
+            }
+
+            portalFrames.add(new Box(minX, minY, minZ, maxX + 1.0, maxY + 1.0, maxZ + 1.0));
+        }
     }
 
     /**
