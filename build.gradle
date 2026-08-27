@@ -37,9 +37,9 @@ dependencies {
     modImplementation files("libs/LambdaEvents-2.4.2.jar")
     modImplementation "com.google.code.gson:gson:2.10.1"
     // Xaero mods — bundled locally (same versions as mlep references).
-    modImplementation files("libs/XaeroPlus-2.32.0+fabric-1.21.11.jar")
-    modImplementation files("libs/xaeros-minimap-fabric-1.21.11-26.1.0.jar")
-    modImplementation files("libs/xaeros-worldmap-fabric-1.21.11-1.41.0.jar")
+    modImplementation files("libs/XaeroPlus-2.33.1+fabric-1.21.11-WM1.41.2-MM26.1.4.jar")
+    modImplementation files("libs/xaerominimap-fabric-1.21.11-26.1.4.jar")
+    modImplementation files("libs/xaeroworldmap-fabric-1.21.11-1.41.2.jar")
 }
 
 loom {
