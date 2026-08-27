@@ -4,6 +4,7 @@ import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.util.InventoryManager;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
+import com.hunterbuddy.util.GrimBreakBalance;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -43,6 +44,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket.Action;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
@@ -253,6 +255,26 @@ public class MlepMine extends Module {
                .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimNewConfig.get())
                .build()
       );
+   private final Setting<Boolean> grimBalanceConfig = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("grim-balance")
+                     .description("Times every start against a copy of the anticheat's own break balances instead of holding all of them for a fixed 280 ms. After a pause the balance is empty and two or three blocks go straight through; over a long run the two come out the same, because the buffer only repays a tenth at a time.")
+                  .defaultValue(true)
+               .visible(this.grimConfig::get)
+               .build()
+      );
+   private final Setting<Integer> grimBudget = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
+                        .name("grim-budget")
+                     .description("How much of the anticheat's thousand-millisecond buffer to spend. What is left is the margin jitter eats: it measures the delays as the packets land, this measures them as they leave, and a lag spike bunches a whole run of them together.")
+                  .defaultValue(700)
+                  .min(0)
+                  .sliderRange(0, 1000)
+               .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimBalanceConfig.get())
+               .build()
+      );
    private final Setting<Keybind> autoMineKey = this.sgAutoMine
       .add(
          new meteordevelopment.meteorclient.settings.KeybindSetting.Builder()
@@ -438,6 +460,20 @@ public class MlepMine extends Module {
    /** Block the press currently under way took out of the queue, if it took one. */
    private BlockPos droppedByPress;
    private long lastBreak;
+
+   /**
+    * The anticheat's own arithmetic, run on the packets as they leave.
+    *
+    * <p>It is fed from {@link #onPacketOutbound}, not from the places that build the
+    * bursts, so it counts every digging packet this client sends while the module is
+    * on -- the ones vanilla sends for a block broken by hand included, which the
+    * server counts too.
+    */
+   private final GrimBreakBalance grimBalance = new GrimBreakBalance(this::breakDamageAt);
+
+   /** Last time the break balance was reported as over budget, so it is said once. */
+   private long lastBalanceWarning;
+   private static final long BALANCE_WARNING_MS = 10000L;
    private boolean instantTogglePressed = false;
    private boolean autoMineTogglePressed = false;
    private PlayerEntity currentTarget = null;
@@ -579,6 +615,11 @@ public class MlepMine extends Module {
       this.lastAutoMineTime = 0L;
       this.lastAntiCrawlBlock = null;
       this.lastAntiCrawlTime = 0L;
+
+      // The anticheat starts a fresh player object on the next join, so carrying
+      // the old balances over would price the first blocks there against a buffer
+      // nobody is holding any more.
+      this.grimBalance.reset();
       this.currentTarget = null;
    }
 
@@ -842,6 +883,8 @@ public class MlepMine extends Module {
 
    @EventHandler
    public void onPacketOutbound(Send event) {
+      this.feedGrimBalance(event);
+
       if (event.packet instanceof PlayerActionC2SPacket packet
          && packet.getAction() == Action.STOP_DESTROY_BLOCK
          && this.modeConfig.get() == MlepMine.SpeedmineMode.DAMAGE
@@ -875,6 +918,56 @@ public class MlepMine extends Module {
                }
             }
          }
+      }
+   }
+
+   /**
+    * Hands the anticheat mirror every digging packet on its way out.
+    *
+    * <p>Reading the wire rather than the call sites is deliberate. The bursts are
+    * built in three places and the swing that follows them in a fourth, and the
+    * check counts what arrives, not what any of those meant to send.
+    */
+   private void feedGrimBalance(Send event) {
+      if (event.isCancelled()) return;
+      if (!(Boolean)this.grimConfig.get() || !(Boolean)this.grimBalanceConfig.get()) return;
+
+      long now = System.currentTimeMillis();
+
+      if (event.packet instanceof PlayerActionC2SPacket packet) {
+         if (packet.getAction() == Action.START_DESTROY_BLOCK) {
+            this.grimBalance.onStart(packet.getPos(), now);
+         } else if (packet.getAction() == Action.STOP_DESTROY_BLOCK) {
+            this.grimBalance.onFinish(packet.getPos(), now);
+            this.reportBalance(packet.getPos());
+         }
+      } else if (event.packet instanceof PlayerMoveC2SPacket || event.packet instanceof HandSwingC2SPacket) {
+         // The check re-reads the block being broken on every one of these and keeps
+         // the best speed it ever saw, which is how a tool picked up mid-block is
+         // credited. A mirror that ignored them would price every block at whatever
+         // the hand held when the start went out.
+         this.grimBalance.onFlying();
+      }
+   }
+
+   /**
+    * Says where the two balances stand, once a finish has been priced.
+    *
+    * <p>The break balance is the one worth a warning: no wait brings it down, so a
+    * run of hard blocks walks it up to nine times what one of them is predicted to
+    * cost and leaves it there. Under the flag that is free; over it, every further
+    * break is measured from a buffer that is already full.
+    */
+   private void reportBalance(BlockPos pos) {
+      long now = System.currentTimeMillis();
+
+      if (this.grimBalance.breakBalance() > (Integer)this.grimBudget.get() && now - this.lastBalanceWarning >= BALANCE_WARNING_MS) {
+         this.lastBalanceWarning = now;
+         this.warning(
+            "Break balance at %.0f of the anticheat's %.0f. Waiting will not bring it down -- only easier blocks will.",
+            this.grimBalance.breakBalance(),
+            GrimBreakBalance.FLAG
+         );
       }
    }
 
@@ -1566,8 +1659,48 @@ public class MlepMine extends Module {
       this.swingOnce();
    }
 
+   /**
+    * Whether a start has to wait.
+    *
+    * <p>The fixed door underneath is what the anticheat's delay balance costs in the
+    * worst case: hold every start for 280 ms and the balance decays on every one of
+    * them, so it never climbs and never flags. It also never spends. The mirror
+    * spends it: after a pause the buffer is empty and the first blocks go through
+    * with no wait at all, which is what mining a stash looks like -- a few blocks,
+    * then flying, then a few more.
+    *
+    * <p>Only the delay balance is a door. The other one is not payable by waiting --
+    * nothing brings it down but another finish -- so it is watched and reported in
+    * {@link #reportBalance} rather than waited on, because a door that could never
+    * open would simply stop the module.
+    */
    public boolean isBlockDelayGrim() {
-      return System.currentTimeMillis() - this.lastBreak <= 280L && (Boolean)this.grimConfig.get();
+      if (!(Boolean)this.grimConfig.get()) return false;
+
+      if (!(Boolean)this.grimBalanceConfig.get()) {
+         return System.currentTimeMillis() - this.lastBreak <= 280L;
+      }
+
+      return !this.grimBalance.canStart((Integer)this.grimBudget.get(), System.currentTimeMillis());
+   }
+
+   /**
+    * Damage per tick the server will measure on a block, as this client computes it.
+    *
+    * <p>{@link #calcBlockBreakingDelta} is the right number rather than an
+    * approximation of it: it already walks the hotbar for the tool the swap is about
+    * to hold, and the anticheat reads the item in the hand at that same moment.
+    */
+   private double breakDamageAt(BlockPos pos) {
+      if (this.mc.player == null || this.mc.world == null) return 0.0;
+
+      BlockState state = this.mc.world.getBlockState(pos);
+
+      // Air has no hardness, and dividing by it is the whole point: a spot the
+      // server has already cleared is predicted to take no time at all.
+      if (state.isAir()) return Double.POSITIVE_INFINITY;
+
+      return this.calcBlockBreakingDelta(state, this.mc.world, pos);
    }
 
    private boolean isDataPacketMine(MlepMine.MiningData data) {
