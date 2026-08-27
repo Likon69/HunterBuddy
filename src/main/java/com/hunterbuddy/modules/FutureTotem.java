@@ -74,7 +74,7 @@ public class FutureTotem extends Module {
     private boolean warnedFull;
 
     public FutureTotem() {
-        super(HunterBuddyAddon.UTILITY_CATEGORY, "future-totem",
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "f-totem",
             "Keeps a totem in your off hand, replaced the moment it is used.");
     }
 

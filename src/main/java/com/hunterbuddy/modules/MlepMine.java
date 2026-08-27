@@ -194,7 +194,7 @@ public class MlepMine extends Module {
                            .player
                            .sendMessage(
                               Text.literal(
-                                 "\u00a77[\u00a7bMlepMine\u00a77] \u00a7aPersistent mode enabled! Module cannot be disabled until you turn this off or disconnect."
+                                 "\u00a77[\u00a7bh-mine\u00a77] \u00a7aPersistent mode enabled! Module cannot be disabled until you turn this off or disconnect."
                               ),
                               false
                            );
@@ -279,6 +279,15 @@ public class MlepMine extends Module {
                .visible(this.autoMine::get)
             .build()
       );
+   private final Setting<MlepMine.Swing> swing = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.EnumSetting.Builder<MlepMine.Swing>()
+                     .name("swing")
+                  .description("Which arm animation to play while mining. NONE is what the module has always done: the bursts carry their own bare swing packets and the end-of-bar break carries none at all, which leaves a tick that breaks a block without an animation on it -- a shape an anticheat looks for, and one that reads from outside as blocks popping while you stand still. MINER swings every tick a block is being worked, which is exactly vanilla's own rate. HAMMER swings once on each tick that sends a dig: one clean blow per block.")
+               .defaultValue(MlepMine.Swing.NONE)
+            .build()
+      );
+
    private final Setting<Boolean> strictDirection = this.sgAutoMine
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -466,7 +475,7 @@ public class MlepMine extends Module {
    private InventoryManager inventoryManager;
 
    public MlepMine() {
-      super(HunterBuddyAddon.UTILITY_CATEGORY, "mlep-mine", "Mines blocks faster");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "h-mine", "Mines blocks faster");
    }
 
    public Setting<Double> getSpeedConfig() {
@@ -484,7 +493,7 @@ public class MlepMine extends Module {
                .player
                .sendMessage(
                   Text.literal(
-                     "\u00a77[\u00a7bMlepMine\u00a77] \u00a7cCannot disable while Persistent mode is active! Disable Persistent first or disconnect from server."
+                     "\u00a77[\u00a7bh-mine\u00a77] \u00a7cCannot disable while Persistent mode is active! Disable Persistent first or disconnect from server."
                   ),
                   false
                );
@@ -575,6 +584,12 @@ public class MlepMine extends Module {
 
    @EventHandler
    public void onPlayerTick(Pre event) {
+      // Cleared here and nowhere else. Read at the end of the tick, they would
+      // survive every early return -- and a swing left over from the tick you
+      // started eating on is the one shape worth avoiding.
+      this.workedThisTick = false;
+      this.swungThisTick = false;
+
       if (!this.mc.player.isCreative() && !this.mc.player.isSpectator()) {
          if (!((Keybind)this.autoMineKey.get()).isPressed() || this.mc.currentScreen != null) {
             this.autoMineTogglePressed = false;
@@ -583,7 +598,7 @@ public class MlepMine extends Module {
             this.autoMine.set(!(Boolean)this.autoMine.get());
             if (this.mc.player != null) {
                String status = this.autoMine.get() ? "\u00a7aenabled" : "\u00a7cdisabled";
-               this.mc.player.sendMessage(Text.literal("\u00a77[\u00a7bMlepMine\u00a77] \u00a7fAuto-mine " + status), false);
+               this.mc.player.sendMessage(Text.literal("\u00a77[\u00a7bh-mine\u00a77] \u00a7fAuto-mine " + status), false);
             }
          }
 
@@ -596,7 +611,7 @@ public class MlepMine extends Module {
             this.droppedByPress = null;
             if (this.mc.player != null) {
                this.mc.player
-                  .sendMessage(Text.literal("\u00a77[\u00a7bMlepMine\u00a77] \u00a7fQueue cleared (" + dropped + " block(s))"), false);
+                  .sendMessage(Text.literal("\u00a77[\u00a7bh-mine\u00a77] \u00a7fQueue cleared (" + dropped + " block(s))"), false);
             }
          }
 
@@ -611,7 +626,7 @@ public class MlepMine extends Module {
 
             if (this.mc.player != null) {
                String status = this.instantConfig.get() ? "\u00a7aenabled" : "\u00a7cdisabled";
-               this.mc.player.sendMessage(Text.literal("\u00a77[\u00a7bMlepMine\u00a77] \u00a7fInstant mining " + status), false);
+               this.mc.player.sendMessage(Text.literal("\u00a77[\u00a7bh-mine\u00a77] \u00a7fInstant mining " + status), false);
             }
          }
 
@@ -709,6 +724,7 @@ public class MlepMine extends Module {
                   if (!this.isDataPacketMine(data) || !data.getState().isAir() && (!data.hasAttemptedBreak() || !data.passedAttemptedBreakTime(500L))) {
                      float damageDelta = this.calcBlockBreakingDelta(data.getState(), this.mc.world, data.getPos());
                      data.damage(damageDelta);
+                     this.workedThisTick = true;
                      if (this.isDataPacketMine(data) && data.getBlockDamage() >= 1.0F && data.getSlot() != -1) {
                         if (this.mc.player.isUsingItem() && !(Boolean)this.multitaskConfig.get()) {
                            return;
@@ -779,6 +795,10 @@ public class MlepMine extends Module {
             // the tool back between every pair of blocks and take it again a
             // millisecond later, two slot packets per block for nothing.
             this.releaseTool();
+
+            // Last, so it sees the whole tick: one swing whatever the number of
+            // blocks that were worked in it.
+            this.swingWhileWorking();
          }
       }
    }
@@ -809,7 +829,13 @@ public class MlepMine extends Module {
 
          if (blockState.getHardness(this.mc.world, event.blockPos) != -1.0F && !blockState.isAir()) {
             this.clickMine(new MlepMine.MiningData(event.blockPos, event.direction), fresh);
-            this.mc.player.swingHand(Hand.MAIN_HAND);
+
+            // Through the latch rather than around it. This handler runs after the
+            // tick event, so it is the last of the three to have a chance to swing,
+            // and swinging unconditionally here is what doubled the animation on
+            // every tick of a held button. With no animation mode chosen nothing
+            // else ever takes the latch, so this still swings exactly as it did.
+            this.swingOnce();
          }
       }
    }
@@ -1286,9 +1312,20 @@ public class MlepMine extends Module {
 
       float breakDelta = this.calcBlockBreakingDelta(data.getState(), this.mc.world, data.getPos());
       boolean isInstantBreak = breakDelta >= 1.0F;
+      boolean afterInstant = this.lastWasInstant;
+      this.lastWasInstant = isInstantBreak;
+
       if ((Boolean)this.grimNewConfig.get()) {
          if (!(Boolean)this.miningFix.get()) {
-            this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+            // The head stop exists to let the anticheat's delay balance decay, and
+            // it costs a finish on a position that was never started -- which is
+            // flagged, except where the previous block could be broken in one blow.
+            // Sent only inside that exemption, it keeps the decay and loses the
+            // flag; outside it, the burst starts straight away.
+            if (afterInstant) {
+               this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+            }
+
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.START_DESTROY_BLOCK, data.getPos(), data.getDirection()));
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.ABORT_DESTROY_BLOCK, data.getPos(), data.getDirection()));
          } else {
@@ -1296,7 +1333,16 @@ public class MlepMine extends Module {
          }
 
          this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
-         this.mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+
+         // The first of the three becomes a real swing when an animation is asked
+         // for: a bare packet is seen by everyone except you, which is the wrong
+         // way round for the block that starts under your own crosshair.
+         if (this.swing.get() == MlepMine.Swing.NONE || this.swungThisTick) {
+            this.mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+         } else {
+            this.swingOnce();
+         }
+
          if (!isInstantBreak) {
             this.mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
             this.mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
@@ -1494,9 +1540,30 @@ public class MlepMine extends Module {
       }
    }
 
-   private void stopMiningInternal(MlepMine.MiningData data) {
-      this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
-      this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.ABORT_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+    private void stopMiningInternal(MlepMine.MiningData data) {
+      Direction face = this.sendDirection(data);
+
+      this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), face));
+
+      // No cancel behind it. On the server this one was a no-op -- the stop above
+      // either destroyed the block or armed the delayed destroy, which an abort
+      // does not touch -- while on the wire it was a second cancel on a position
+      // already cancelled by the burst, which is the exact shape a break check
+      // looks for. One packet fewer, one flag fewer, per block.
+      this.swingForDig();
+   }
+
+   /**
+    * The arm, on a tick that sends a dig.
+    *
+    * <p>Both modes go through the full swing rather than the bare packet: the bare
+    * one is seen by everybody except you, which is the wrong way round for
+    * something whose purpose is to look ordinary.
+    */
+   private void swingForDig() {
+      if (this.swing.get() != MlepMine.Swing.HAMMER) return;
+
+      this.swingOnce();
    }
 
    public boolean isBlockDelayGrim() {
@@ -1772,6 +1839,67 @@ public class MlepMine extends Module {
             || state.isOf(Blocks.ANCIENT_DEBRIS)
             || state.isOf(Blocks.RESPAWN_ANCHOR)
          : false;
+   }
+
+   /** Whether the block before this one could be taken in a single blow. */
+   private boolean lastWasInstant;
+
+   /** Set while a block is under the tool this tick, read once at the end of it. */
+   private boolean workedThisTick;
+
+   /**
+    * Whether an arm animation has already gone out this tick.
+    *
+    * <p>Three places can send one -- the held button, a burst, the end of a bar --
+    * and vanilla sends exactly one per tick while mining. Two is not twice as
+    * ordinary, it is a signature: this is what keeps them to one.
+    */
+   private boolean swungThisTick;
+
+   /** Swings unless something already did this tick. */
+   private void swingOnce() {
+      if (this.swungThisTick || this.mc.player == null) return;
+
+      this.swungThisTick = true;
+      this.mc.player.swingHand(Hand.MAIN_HAND);
+   }
+
+   /**
+    * The steady beat of someone mining, for MINER.
+    *
+    * <p>Runs at the end of the tick event so it sees the whole of it, and takes
+    * the latch as it goes. The click handler fires later in the same tick -- the
+    * tick event is posted at the head of the client tick, input is read after it
+    * -- so it is that one which has to stand down, not this one.
+    */
+   private void swingWhileWorking() {
+      if (!this.workedThisTick) return;
+      if (this.swing.get() != MlepMine.Swing.MINER) return;
+
+      this.swingOnce();
+   }
+
+   public enum Swing {
+      NONE,
+      MINER,
+      HAMMER
+   }
+
+   /**
+    * The face to send with a dig, worked out now rather than remembered.
+    *
+    * <p>The face that came with the click is the face you were on when you clicked.
+    * Move around the block while the bar fills -- which is what mining a wall does
+    * -- and it stops matching where your eye is, and the server's own check that
+    * the eye is on the right side of that face plane no longer passes. Recomputed
+    * at the moment the packet leaves, it always does.
+    */
+   private Direction sendDirection(MlepMine.MiningData data) {
+      if (this.mc.player == null) return data.getDirection();
+
+      Direction now = this.getInteractDirection(data.getPos());
+
+      return now == null ? data.getDirection() : now;
    }
 
    private Direction getInteractDirection(BlockPos pos) {
