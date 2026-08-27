@@ -984,8 +984,16 @@ public class ChunkRadar extends Module {
 
             int[] counts = scan(chunk);
             Kind kind = classify(counts, pos, readable(chunk));
-            seen.put(key, kind);
-            trim(seen, Math.max(4096, memory.get() * 4));
+
+            // Everything but UNREAD. That one is not an answer about the ground, it
+            // is an answer about the delivery -- a chunk that arrived without the
+            // section the rule reads. Filed in the map it would never be looked at
+            // again, and on a trail running at four per cent density every hit
+            // counts. Left out, the next delivery of the same chunk is read afresh.
+            if (kind != Kind.UNREAD) {
+                seen.put(key, kind);
+                trim(seen, Math.max(4096, memory.get() * 4));
+            }
 
             // The lists are checked as well as the seen map: that map is trimmed
             // after a few thousand chunks, so a chunk met again after a turn-round
@@ -1067,6 +1075,7 @@ public class ChunkRadar extends Module {
         if (++courseTimer >= COURSE_SAMPLE_TICKS) {
             courseTimer = 0;
             sampleCourse();
+            writePosition();
             if (!dense) checkCrossing();
         }
 
@@ -3929,14 +3938,23 @@ public class ChunkRadar extends Module {
 
     // Log
 
+    /**
+     * One row per classified chunk, modern ones included.
+     *
+     * <p>They used to be dropped as noise. They are not: the density gate divides
+     * hits by everything that arrived, so without them the one number that decides
+     * whether the radar speaks at all cannot be recomputed from the file. A flight
+     * costs a few thousand extra rows and buys a log that can be replayed.
+     */
     private void writeChunk(ChunkPos pos, Kind kind, int[] counts) {
-        if (kind == Kind.NONE) return;
-
         int others = 0;
         int otherMax = 0;
 
+        // Counted exactly as classify counts them -- deepslate excluded and given
+        // its own column. The two used to disagree, which made every offline
+        // calibration read one thing while the rule read another.
         for (int i = 0; i < MARKER_COUNT; i++) {
-            if (i == COPPER || i == TUFF || counts[i] == 0) continue;
+            if (i == COPPER || i == TUFF || i == DEEPSLATE_HIGH || counts[i] == 0) continue;
             others++;
             otherMax = Math.max(otherMax, counts[i]);
         }
@@ -3949,6 +3967,7 @@ public class ChunkRadar extends Module {
             kind.name().toLowerCase(Locale.ROOT),
             Integer.toString(counts[COPPER]),
             Integer.toString(counts[TUFF]),
+            Integer.toString(counts[DEEPSLATE_HIGH]),
             Integer.toString(others),
             Integer.toString(otherMax),
             fitted ? String.format(Locale.ROOT, "%.2f", along(pos.x, pos.z)) : "",
@@ -3958,6 +3977,30 @@ public class ChunkRadar extends Module {
             "",
             "",
             ""));
+    }
+
+    /**
+     * Your own position, once a second.
+     *
+     * <p>The crossing rule and the drift both read your course, and the course was
+     * the one thing the file never held: a replay could re-classify every chunk
+     * and still not know where you were standing when it happened.
+     */
+    private void writePosition() {
+        if (mc.player == null) return;
+
+        ChunkPos pos = mc.player.getChunkPos();
+
+        write(String.join(",",
+            "pos",
+            Long.toString(System.currentTimeMillis()),
+            Integer.toString(pos.x),
+            Integer.toString(pos.z),
+            "", "", "", "", "", "", "", "",
+            aligned ? "1" : "0",
+            String.format(Locale.ROOT, "%.2f", MathHelper.wrapDegrees(mc.player.getYaw())),
+            fitted ? String.format(Locale.ROOT, "%.2f", drift()) : "",
+            String.format(Locale.ROOT, "%.1f", mc.player.getEntityPos().y)));
     }
 
     private void writeEvent(String title, String message) {
@@ -3977,7 +4020,7 @@ public class ChunkRadar extends Module {
             Integer.toString(pos.x),
             Integer.toString(pos.z),
             title.toLowerCase(Locale.ROOT).replace(' ', '_'),
-            "", "", "", "", "", "", "",
+            "", "", "", "", "", "", "", "",
             aligned ? "1" : "0",
             fitted ? String.format(Locale.ROOT, "%.2f", heading()) : "",
             fitted ? String.format(Locale.ROOT, "%.2f", drift()) : "",
@@ -4017,7 +4060,7 @@ public class ChunkRadar extends Module {
                     // other's columns empty rather than borrowing them: a heading
                     // stored under "lateral" is the kind of thing that reads fine
                     // for a week and then quietly ruins an analysis.
-                    writer.write("kind,epoch_ms,cx,cz,class,copper,tuff,others,other_max,along,lateral,inlier,aligned,heading,drift,detail"
+                    writer.write("kind,epoch_ms,cx,cz,class,copper,tuff,deepslate,others,other_max,along,lateral,inlier,aligned,heading,drift,detail"
                         + System.lineSeparator());
                 }
             }
