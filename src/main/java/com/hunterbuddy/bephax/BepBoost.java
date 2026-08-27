@@ -75,7 +75,7 @@ public class BepBoost extends Module {
             new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
                 .name("require-input")
                 .description(
-                    "Only boost while you are holding a movement key. Off by default because plain elytra gliding needs no key held - turning this on would stop the boost entirely for a normal glider. BepControl's stationary hover is already handled separately."
+                    "Only boost while you are holding a movement key. Off by default because plain elytra gliding needs no key held - turning this on would stop the boost entirely for a normal glider."
                 )
                 .defaultValue(false)
                 .build()
