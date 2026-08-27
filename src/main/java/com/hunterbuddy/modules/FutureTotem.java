@@ -8,6 +8,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.ScreenHandler;
@@ -96,6 +97,15 @@ public class FutureTotem extends Module {
             reset();
             return;
         }
+
+        // Your own inventory is playerScreenHandler too, so the check above lets it
+        // through -- and the module then clicks slots on the same ticks you are
+        // clicking them yourself, which reads as an inventory that refuses to let
+        // anything be moved. Only slot-carrying screens count: the pause menu and
+        // the chat box have no slots to fight over, and standing down for them
+        // would leave you unarmed for no reason. A swap already under way still
+        // finishes, or its item would stay stuck to the pointer.
+        if (mc.currentScreen instanceof HandledScreen<?> && fromSlot == -1) return;
 
         ScreenHandler handler = mc.player.playerScreenHandler;
         ItemStack cursor = handler.getCursorStack();
