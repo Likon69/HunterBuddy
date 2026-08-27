@@ -125,6 +125,59 @@ public final class TrailStore {
         return new File(new File(MeteorClient.FOLDER, "hunterbuddy"), "trails.json");
     }
 
+    /** Where the last copy taken before a wholesale delete sits. */
+    public static File backupFile() {
+        return new File(new File(MeteorClient.FOLDER, "hunterbuddy"), "trails.json.bak");
+    }
+
+    public static boolean hasBackup() {
+        return backupFile().exists();
+    }
+
+    /**
+     * Copies the file aside before something that cannot be undone.
+     *
+     * <p>One level deep and overwritten each time: this is a filet against a
+     * mistyped command, not a history. False means the copy was attempted and
+     * failed, which is the only case a caller must stop for; nothing to copy is
+     * a success, since an empty memory has nothing to lose.
+     */
+    public boolean backup() {
+        File file = file();
+        if (!file.exists()) return true;
+
+        try {
+            file.getParentFile().mkdirs();
+            java.nio.file.Files.copy(file.toPath(), backupFile().toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            HunterBuddyAddon.LOG.error("TrailStore: could not back trails.json up", e);
+            return false;
+        }
+    }
+
+    /**
+     * Puts the copy back and rereads it.
+     *
+     * <p>The copy is left where it is: restoring twice by mistake is harmless,
+     * and losing the only copy to a restore that went to the wrong world is not.
+     */
+    public boolean restore() {
+        File backup = backupFile();
+        if (!backup.exists()) return false;
+
+        try {
+            java.nio.file.Files.copy(backup.toPath(), file().toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            forceReload();
+            return true;
+        } catch (IOException | RuntimeException e) {
+            HunterBuddyAddon.LOG.error("TrailStore: could not restore trails.json", e);
+            return false;
+        }
+    }
+
     /** Reads the file once per session; later calls are cheap unless {@link #forceReload} is used. */
     public void load() {
         if (loaded) return;

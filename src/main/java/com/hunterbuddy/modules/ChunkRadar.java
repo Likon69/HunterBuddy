@@ -3,6 +3,11 @@ package com.hunterbuddy.modules;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.util.HuntFeed;
 import com.hunterbuddy.util.TrailStore;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
+import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
@@ -162,6 +167,22 @@ public class ChunkRadar extends Module {
         sgGeneral.add(new meteordevelopment.meteorclient.settings.KeybindSetting.Builder()
             .name("align-key")
             .description("Turns you onto the line, once per press. Not a lock: the mouse is yours again the instant you touch it, and holding the key changes nothing. It picks whichever of the line's two directions you are already closer to facing, so it never spins you round.")
+            .defaultValue(meteordevelopment.meteorclient.utils.misc.Keybind.none())
+            .build()
+        );
+
+    private final Setting<meteordevelopment.meteorclient.utils.misc.Keybind> releaseKey =
+        sgGeneral.add(new meteordevelopment.meteorclient.settings.KeybindSetting.Builder()
+            .name("release-key")
+            .description("Lets go of the line you are following, once per press. Nothing is forgotten: the entry and its waypoints stay, and if the chunks still arriving rebuild the same line it will be picked up again -- which is the right answer, because a trail that reacquires itself in five hits was really there.")
+            .defaultValue(meteordevelopment.meteorclient.utils.misc.Keybind.none())
+            .build()
+        );
+
+    private final Setting<meteordevelopment.meteorclient.utils.misc.Keybind> clearMarksKey =
+        sgGeneral.add(new meteordevelopment.meteorclient.settings.KeybindSetting.Builder()
+            .name("clear-marks-key")
+            .description("Wipes what is drawn -- hit plates, zone plates, near misses, stored chunks -- without touching the line, the memory or the waypoints. For when a dense region has tiled the screen and you cannot read it any more.")
             .defaultValue(meteordevelopment.meteorclient.utils.misc.Keybind.none())
             .build()
         );
@@ -670,6 +691,12 @@ public class ChunkRadar extends Module {
     private boolean resumePending;
     private boolean denseNow;
     private boolean alignPressed;
+    private boolean releasePressed;
+    private boolean clearMarksPressed;
+
+    /** How long the wholesale delete stays primed once asked for. */
+    private static final long CLEAR_ARM_MS = 10_000L;
+    private long clearArmedAt;
     private float alignTarget = Float.NaN;
     private static final float ALIGN_STEP_DEGREES = 15.0F;
     private final List<ChunkPos> nearMisses = new ArrayList<>();
@@ -923,6 +950,8 @@ public class ChunkRadar extends Module {
 
         // Rotation runs everywhere: in the Nether it aims at the guide line.
         handleAlignKey();
+        handleReleaseKey();
+        handleClearMarksKey();
         stepAlign();
 
         if (!live()) return;
@@ -1754,6 +1783,350 @@ public class ChunkRadar extends Module {
      * are already closer to facing, which is what stops it spinning you round when
      * you are flying the trail backwards.
      */
+    /**
+     * The buttons that go with the module in the list.
+     *
+     * <p>Laid out by what each one costs, because that is the only thing worth
+     * knowing before clicking: the first row is undone by flying on, the second
+     * costs one trail, the third costs markers, and the last is the only thing
+     * here that flying again does not bring back -- so it is the only one that has
+     * to be clicked twice, and it leaves a copy behind.
+     *
+     * <p>Each button answers in its own label rather than in the chat: the panel
+     * is where you clicked, so it is where the result belongs.
+     */
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        WVerticalList list = theme.verticalList();
+
+        int remembered = store.all().size();
+        list.add(theme.label(remembered == 0
+            ? "No trails remembered."
+            : remembered + " trail(s) remembered" + (current == null ? "." : ", following one of them.")));
+
+        // Costs nothing: the memory is untouched and the ground can be flown again.
+        WHorizontalList flight = list.add(theme.horizontalList()).widget();
+
+        WButton release = flight.add(theme.button("Let go of line")).widget();
+        release.action = () -> release.set(releaseByHand() ? "Let go" : "No line");
+
+        WButton marks = flight.add(theme.button("Clear marks")).widget();
+        marks.action = () -> {
+            int wiped = clearMarks();
+            marks.set(wiped == 0 ? "Nothing drawn" : "Cleared " + wiped);
+        };
+
+        WButton reread = flight.add(theme.button("Reread ground")).widget();
+        reread.action = () -> reread.set("Rereading " + reread() + " chunk(s)");
+
+        // Costs one trail, and says which so a slip shows up at once.
+        WButton forgetOne = list.add(theme.button("Forget the trail being followed")).widget();
+        forgetOne.action = () -> {
+            TrailStore.Trail trail = forgetCurrent();
+            forgetOne.set(trail == null
+                ? "Not following one"
+                : String.format(Locale.ROOT, "Forgot heading %.0f", trail.heading));
+        };
+
+        // Costs markers. Hits and sightings come back on the next pass; zones do
+        // not exist anywhere else, which is why they are a separate button.
+        WHorizontalList waypoints = list.add(theme.horizontalList()).widget();
+
+        WButton hitMarkers = waypoints.add(theme.button("Clear hit markers")).widget();
+        hitMarkers.action = () -> hitMarkers.set("Removed " + clearWaypoints(false));
+
+        WButton zoneMarkers = waypoints.add(theme.button("Clear zone markers")).widget();
+        zoneMarkers.action = () -> zoneMarkers.set("Removed " + clearWaypoints(true));
+
+        // The only thing here flying again does not undo.
+        WHorizontalList memory = list.add(theme.horizontalList()).widget();
+
+        WButton forgetAll = memory.add(theme.button("Forget all trails")).widget();
+        forgetAll.action = () -> {
+            List<TrailStore.Trail> all = List.copyOf(store.all());
+
+            if (all.isEmpty()) {
+                forgetAll.set("Nothing to forget");
+                return;
+            }
+
+            long now = System.currentTimeMillis();
+
+            if (now - clearArmedAt > CLEAR_ARM_MS) {
+                clearArmedAt = now;
+                forgetAll.set("Click again to forget " + all.size());
+                return;
+            }
+
+            clearArmedAt = 0L;
+
+            // A copy that was attempted and failed is a reason to stop, not to
+            // carry on without one.
+            if (!store.backup()) {
+                forgetAll.set("Could not copy; nothing forgotten");
+                return;
+            }
+
+            boolean kept = TrailStore.hasBackup();
+
+            for (TrailStore.Trail trail : all) forgetTrail(trail);
+
+            forgetAll.set(kept ? "Forgot " + all.size() + ", copy kept" : "Forgot " + all.size());
+        };
+
+        WButton restore = memory.add(theme.button("Restore copy")).widget();
+        restore.action = () -> {
+            if (!TrailStore.hasBackup()) {
+                restore.set("No copy");
+                return;
+            }
+
+            restore.set(restoreTrails() ? "Restored " + store.all().size() : "Restore failed");
+        };
+
+        return list;
+    }
+
+    private void handleReleaseKey() {
+        if (mc.currentScreen != null || !releaseKey.get().isPressed()) {
+            releasePressed = false;
+            return;
+        }
+
+        if (releasePressed) return;
+        releasePressed = true;
+
+        if (!releaseByHand()) warning("No line to let go of.");
+    }
+
+    private void handleClearMarksKey() {
+        if (mc.currentScreen != null || !clearMarksKey.get().isPressed()) {
+            clearMarksPressed = false;
+            return;
+        }
+
+        if (clearMarksPressed) return;
+        clearMarksPressed = true;
+
+        int wiped = clearMarks();
+        info(wiped == 0 ? "Nothing drawn to clear." : "Cleared " + wiped + " mark(s) from the screen.");
+    }
+
+    /**
+     * Lets go of the line under your hand, keeping everything it taught us.
+     *
+     * <p>Deliberately not a ban on the trail: if the chunks still arriving rebuild
+     * the same alignment, it comes back, and a trail that reacquires itself in
+     * five hits over thirty chunks was really there. The drift guard exists for
+     * the case where the line was wrong; this is the case where you simply want
+     * to fly somewhere else.
+     *
+     * <p>One thing to know: a trail already in the file can also be picked back up
+     * on the next portal, the same way it would after a disconnect. Letting go is
+     * not forgetting -- for that there is a separate word.
+     */
+    public boolean releaseByHand() {
+        if (!hasLine() && !acquired) return false;
+
+        releaseLine("dropped by hand", false);
+        line.clear();
+        pool.clear();
+
+        return true;
+    }
+
+    /**
+     * Forgets the trail being followed, entry and waypoints together.
+     *
+     * <p>The listing exists for the trails you are not on; this is the one you are
+     * looking at, and having to find its number in a list to drop it is how the
+     * wrong number gets typed. Returns what was forgotten so the caller can say
+     * which one it was -- a heading and a length are enough to notice a mistake
+     * immediately, which is the whole guard here.
+     */
+    public TrailStore.Trail forgetCurrent() {
+        TrailStore.Trail trail = current;
+        if (trail == null) return null;
+
+        forgetTrail(trail);
+        releaseByHand();
+
+        return trail;
+    }
+
+    /**
+     * Reads the copy back and puts the markers with it.
+     *
+     * <p>The delete took the waypoints too, and nothing else ever puts those back
+     * when they are permanent -- the temporary ones are replaced at the next
+     * sweep, the permanent ones are not. Left missing, the sweep reads a start
+     * marker that is gone as the gesture that means "forget this trail", and the
+     * whole restored file is dropped again within ten seconds.
+     */
+    public boolean restoreTrails() {
+        if (!store.restore()) return false;
+
+        String dimension = dim();
+
+        for (TrailStore.Trail trail : store.forDimension(dimension)) {
+            if (trail.startWaypoint == null) continue;
+
+            putWaypoint(dimension, trail.startWaypoint, "T", 4, trail.startX, trail.startZ, temporaryWaypoints.get());
+
+            if (trail.endWaypoint != null) {
+                putWaypoint(dimension, trail.endWaypoint, "E", 4, trail.endX, trail.endZ, temporaryWaypoints.get());
+            }
+        }
+
+        flushWaypointSaves();
+        SupportMods.xaeroMinimap.requestWaypointsRefresh();
+
+        return true;
+    }
+
+    /** Wipes what is drawn and nothing else. Returns how many marks went. */
+    public int clearMarks() {
+        int count = hitMarks.size() + zoneMarks.size() + nearMisses.size() + stored.size();
+
+        hitMarks.clear();
+        zoneMarks.clear();
+        nearMisses.clear();
+        stored.clear();
+
+        return count;
+    }
+
+    /**
+     * Forgets which chunks have already been classified, so they are read again.
+     *
+     * <p>The map is what makes a second pass over the same ground cost nothing. It
+     * is also what makes a setting changed mid-flight -- include-1-19-upgraded
+     * above all -- apply only to ground you have not seen yet. Emptying it is the
+     * cheap way to re-ask the question, and until now the only way was to toggle
+     * the module, which throws away the line, the course and the open log with it.
+     */
+    public int reread() {
+        seen.clear();
+
+        // Emptying the map is not asking the question again: nothing re-delivers a
+        // chunk the server has already sent, so standing still after changing a
+        // setting would show exactly what it showed before. The chunks the client
+        // still holds go back in the queue instead. The lists guard against
+        // duplicates on their own, and the map they were checked against is empty.
+        if (mc.world == null || mc.player == null) return 0;
+
+        int radius = mc.options.getClampedViewDistance();
+        ChunkPos me = mc.player.getChunkPos();
+        int requeued = 0;
+
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                int cx = me.x + dx;
+                int cz = me.z + dz;
+
+                if (!mc.world.getChunkManager().isChunkLoaded(cx, cz)) continue;
+
+                arrivals.addLast(new ChunkPos(cx, cz));
+                requeued++;
+            }
+        }
+
+        return requeued;
+    }
+
+    /**
+     * Removes the markers the radar itself placed, by name, in this dimension.
+     *
+     * <p>Never by pattern: only the exact shapes this module writes, so a waypoint
+     * you placed by hand cannot be caught in it however it is named. The trail
+     * pairs are left out -- those are the memory's own handles, and deleting one
+     * is the gesture that forgets a trail.
+     *
+     * <p>Zones are asked for separately because they are the one kind that is not
+     * reproducible: a hit or a sighting comes back the next time you fly over it,
+     * a zone lives only as its marker. Their positions go to the log on the way
+     * out, which is where coordinates are allowed to live.
+     */
+    public int clearWaypoints(boolean zones) {
+        MinimapWorld world = waypointWorld();
+        if (world == null) return 0;
+
+        List<String> doomed = new ArrayList<>();
+
+        for (WaypointSet set : world.getIterableWaypointSets()) {
+            for (Waypoint existing : set.getWaypoints()) {
+                String name = existing.getName();
+                if (name == null) continue;
+
+                boolean isZone = isZoneName(name);
+
+                if (zones ? isZone : isHitName(name) || isSightingName(name)) {
+                    // The only copy of where a zone was, and the reason it is
+                    // written whether or not the log is switched on: everything
+                    // else here comes back on the next pass, a zone does not.
+                    if (isZone) {
+                        writeEvent("Zone waypoint removed",
+                            String.format(Locale.ROOT, "%s at %d %d", name, existing.getX(), existing.getZ()), true);
+                    }
+
+                    doomed.add(name);
+                }
+            }
+        }
+
+        if (doomed.isEmpty()) return 0;
+
+        // Queues the world for saving, which is what makes the removal survive a
+        // restart when the markers are permanent.
+        waypointSet(dim());
+
+        for (String name : doomed) dropWaypoint(dim(), name);
+
+        SupportMods.xaeroMinimap.requestWaypointsRefresh();
+        flushWaypointSaves();
+
+        return doomed.size();
+    }
+
+    /**
+     * The exact shapes this module writes, and nothing that merely looks like one.
+     *
+     * <p>A prefix test would have taken a waypoint of your own called "Old base"
+     * with it. The tag is a hex word from {@link #tag}, so requiring it is enough
+     * to make a collision impossible in practice.
+     */
+    private static boolean isHitName(String name) {
+        return name.startsWith("Old ") && isTag(name.substring(4));
+    }
+
+    private static boolean isZoneName(String name) {
+        return name.startsWith("Zone 1.12 ") && isTag(name.substring(10));
+    }
+
+    private static boolean isSightingName(String name) {
+        String[] parts = name.split(" ");
+        if (parts.length != 3 || !parts[0].equals("Sighting")) return false;
+
+        try {
+            Integer.parseInt(parts[1]);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+
+        return isTag(parts[2]);
+    }
+
+    private static boolean isTag(String text) {
+        if (text.isEmpty() || text.length() > 8) return false;
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c < '0' || c > '9') && (c < 'A' || c > 'F')) return false;
+        }
+
+        return true;
+    }
+
     private void handleAlignKey() {
         if (mc.currentScreen != null || !alignKey.get().isPressed()) {
             alignPressed = false;
@@ -2085,6 +2458,10 @@ public class ChunkRadar extends Module {
      * one's.
      */
     private void releaseLine(String why) {
+        releaseLine(why, true);
+    }
+
+    private void releaseLine(String why, boolean announce) {
         archiveLine();
         current = null;
         released = fitted;
@@ -2104,8 +2481,13 @@ public class ChunkRadar extends Module {
         String message = "Line released: " + why + ". Watching for a new alignment.";
         info(message);
         writeEvent("Line released", message);
-        HuntFeed.get().publish(HuntFeed.Type.OLD_CHUNK, message,
-            hideCoordinates.get() || mc.player == null ? null : mc.player.getBlockPos());
+
+        // Only what happened on its own is worth a notification. A release you
+        // asked for is already known to the one person the feed would tell.
+        if (announce) {
+            HuntFeed.get().publish(HuntFeed.Type.OLD_CHUNK, message,
+                hideCoordinates.get() || mc.player == null ? null : mc.player.getBlockPos());
+        }
     }
 
     /**
@@ -3579,6 +3961,14 @@ public class ChunkRadar extends Module {
     }
 
     private void writeEvent(String title, String message) {
+        writeEvent(title, message, false);
+    }
+
+    /**
+     * @param force write even with the log switched off -- for the handful of
+     *              lines that are the only copy of something about to be deleted.
+     */
+    private void writeEvent(String title, String message, boolean force) {
         ChunkPos pos = mc.player == null ? new ChunkPos(0, 0) : mc.player.getChunkPos();
 
         write(String.join(",",
@@ -3591,7 +3981,7 @@ public class ChunkRadar extends Module {
             aligned ? "1" : "0",
             fitted ? String.format(Locale.ROOT, "%.2f", heading()) : "",
             fitted ? String.format(Locale.ROOT, "%.2f", drift()) : "",
-            message.replace(',', ';')));
+            message.replace(',', ';')), force);
 
         // Events are rare and the lines worth most; they do not wait for the
         // fiftieth chunk row to reach the disk.
@@ -3610,7 +4000,11 @@ public class ChunkRadar extends Module {
     }
 
     private void write(String line) {
-        if (!log.get()) return;
+        write(line, false);
+    }
+
+    private void write(String line, boolean force) {
+        if (!force && !log.get()) return;
 
         try {
             if (writer == null) {

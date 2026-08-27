@@ -18,8 +18,19 @@ import java.util.Locale;
  * line pasted into a chat window is a line someone else can fly to, and a listing
  * is exactly the shape that gets pasted. A heading, a length and an age are
  * enough to know which entry you mean.
+ *
+ * <p>The gestures live on the module's own panel, where the result can be read
+ * on the button that was clicked. What stays here is what a panel does badly:
+ * reading the list, and naming one entry out of it by number. Emptying the file
+ * is kept as well, because it is the one thing flying again does not undo -- and
+ * here as there it has to be asked for twice and leaves a copy behind.
  */
 public class Trails extends Command {
+    /** How long a primed clear stays primed. */
+    private static final long ARM_MS = 10_000L;
+
+    private long armedAt;
+
     public Trails() {
         super("trails", "List, forget or clear the trails chunk-radar remembers.", new String[0]);
     }
@@ -30,35 +41,83 @@ public class Trails extends Command {
 
         builder.then(literal("list").executes(context -> list()));
 
+        builder.then(literal("restore").executes(context -> {
+            ChunkRadar radar = ChunkRadar.get();
+            if (radar == null) return failed();
+
+            if (!TrailStore.hasBackup()) {
+                this.warning("No copy to restore. One is only made when you clear.", new Object[0]);
+                return 1;
+            }
+
+            if (!radar.restoreTrails()) {
+                this.warning("Could not restore the copy; see the log.", new Object[0]);
+                return 1;
+            }
+
+            this.info("Restored %d trail(s) from the copy. Their waypoints come back as you fly past them.",
+                new Object[]{radar.trails().all().size()});
+            return 1;
+        }));
+
         builder.then(literal("clear").executes(context -> {
             ChunkRadar radar = ChunkRadar.get();
             if (radar == null) return failed();
 
             List<TrailStore.Trail> all = List.copyOf(radar.trails().all());
+
+            if (all.isEmpty()) {
+                this.info("No trails remembered.", new Object[0]);
+                return 1;
+            }
+
+            long now = System.currentTimeMillis();
+
+            // Asked twice, because this is the one thing flying again does not undo.
+            if (now - armedAt > ARM_MS) {
+                armedAt = now;
+                this.warning("This forgets %d trail(s) and their waypoints. Repeat within 10 seconds to confirm.",
+                    new Object[]{all.size()});
+                return 1;
+            }
+
+            armedAt = 0L;
+
+            if (!radar.trails().backup()) {
+                this.warning("Could not copy trails.json aside; nothing was forgotten.", new Object[0]);
+                return 1;
+            }
+
+            boolean copied = TrailStore.hasBackup();
+
             for (TrailStore.Trail trail : all) radar.forgetTrail(trail);
 
-            this.info("Forgot %d trail(s).", new Object[]{all.size()});
+            this.info(copied
+                    ? "Forgot %d trail(s). A copy was kept: .trails restore puts them back."
+                    : "Forgot %d trail(s).",
+                new Object[]{all.size()});
             return 1;
         }));
 
-        builder.then(literal("forget").then(argument("index", IntegerArgumentType.integer(1))
-            .executes(context -> {
-                ChunkRadar radar = ChunkRadar.get();
-                if (radar == null) return failed();
+        builder.then(literal("forget")
+            .then(argument("index", IntegerArgumentType.integer(1))
+                .executes(context -> {
+                    ChunkRadar radar = ChunkRadar.get();
+                    if (radar == null) return failed();
 
-                List<TrailStore.Trail> all = List.copyOf(radar.trails().all());
-                int index = IntegerArgumentType.getInteger(context, "index");
+                    List<TrailStore.Trail> all = List.copyOf(radar.trails().all());
+                    int index = IntegerArgumentType.getInteger(context, "index");
 
-                if (index > all.size()) {
-                    this.warning("There is no trail %d; the list has %d.", new Object[]{index, all.size()});
+                    if (index > all.size()) {
+                        this.warning("There is no trail %d; the list has %d.", new Object[]{index, all.size()});
+                        return 1;
+                    }
+
+                    TrailStore.Trail trail = all.get(index - 1);
+                    radar.forgetTrail(trail);
+                    this.info("Forgot trail %d, heading %.0f.", new Object[]{index, trail.heading});
                     return 1;
-                }
-
-                TrailStore.Trail trail = all.get(index - 1);
-                radar.forgetTrail(trail);
-                this.info("Forgot trail %d, heading %.0f.", new Object[]{index, trail.heading});
-                return 1;
-            })));
+                })));
     }
 
     private int list() {
