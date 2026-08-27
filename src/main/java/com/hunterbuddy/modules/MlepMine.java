@@ -8,6 +8,7 @@ import com.hunterbuddy.util.GrimBreakBalance;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -275,6 +276,15 @@ public class MlepMine extends Module {
                .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimBalanceConfig.get())
                .build()
       );
+   private final Setting<Boolean> grimBalanceLog = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("grim-balance-log")
+                     .description("Writes a line per block to the log: what the block was predicted to cost, where the two balances stand, and how long the server took to confirm the break after the closing stop went out.")
+                  .defaultValue(false)
+               .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimBalanceConfig.get())
+               .build()
+      );
    private final Setting<Keybind> autoMineKey = this.sgAutoMine
       .add(
          new meteordevelopment.meteorclient.settings.KeybindSetting.Builder()
@@ -474,6 +484,19 @@ public class MlepMine extends Module {
    /** Last time the break balance was reported as over budget, so it is said once. */
    private long lastBalanceWarning;
    private static final long BALANCE_WARNING_MS = 10000L;
+
+   /**
+    * When the closing stop went out for a position, for the log line at its break.
+    *
+    * <p>The delay between that stop and the server's block update is the one number
+    * that says whether a break sent short of a full bar is being granted or waited
+    * out, and it can only be measured from here.
+    */
+   private final LinkedHashMap<BlockPos, Long> stopSentAt = new LinkedHashMap<>() {
+      protected boolean removeEldestEntry(Map.Entry<BlockPos, Long> eldest) {
+         return this.size() > 32;
+      }
+   };
    private boolean instantTogglePressed = false;
    private boolean autoMineTogglePressed = false;
    private PlayerEntity currentTarget = null;
@@ -620,6 +643,7 @@ public class MlepMine extends Module {
       // the old balances over would price the first blocks there against a buffer
       // nobody is holding any more.
       this.grimBalance.reset();
+      this.stopSentAt.clear();
       this.currentTarget = null;
    }
 
@@ -961,6 +985,24 @@ public class MlepMine extends Module {
    private void reportBalance(BlockPos pos) {
       long now = System.currentTimeMillis();
 
+      if ((Boolean)this.grimBalanceLog.get()) {
+         HunterBuddyAddon.LOG
+            .info(
+               String.format(
+                  "h-mine: finish at %d %d %d, predicted %.0f ms, measured %.0f ms, diff %.0f -- delay balance %.0f, break balance %.0f, flag at %.0f",
+                  pos.getX(),
+                  pos.getY(),
+                  pos.getZ(),
+                  this.grimBalance.lastPredicted(),
+                  this.grimBalance.lastReal(),
+                  this.grimBalance.lastDiff(),
+                  this.grimBalance.delayBalance(),
+                  this.grimBalance.breakBalance(),
+                  GrimBreakBalance.FLAG
+               )
+            );
+      }
+
       if (this.grimBalance.breakBalance() > (Integer)this.grimBudget.get() && now - this.lastBalanceWarning >= BALANCE_WARNING_MS) {
          this.lastBalanceWarning = now;
          this.warning(
@@ -973,6 +1015,20 @@ public class MlepMine extends Module {
 
    private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
       if (packet.getState().isAir()) {
+         Long sentAt = this.stopSentAt.remove(packet.getPos());
+         if (sentAt != null && (Boolean)this.grimBalanceLog.get()) {
+            HunterBuddyAddon.LOG
+               .info(
+                  String.format(
+                     "h-mine: server confirmed %d %d %d gone %d ms after the closing stop",
+                     packet.getPos().getX(),
+                     packet.getPos().getY(),
+                     packet.getPos().getZ(),
+                     System.currentTimeMillis() - sentAt
+                  )
+               );
+         }
+
          for (MlepMine.MiningData data : this.miningQueue) {
             if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
                data.setAttemptedBreak(false);
@@ -1477,6 +1533,12 @@ public class MlepMine extends Module {
          // away from breaking.
          this.stopMiningInternal(data);
          this.lastBreak = System.currentTimeMillis();
+
+         // Only while the log is on: this map exists to time the server's answer,
+         // and nothing else reads it.
+         if ((Boolean)this.grimBalanceLog.get()) {
+            this.stopSentAt.put(data.getPos().toImmutable(), this.lastBreak);
+         }
       }
    }
 
