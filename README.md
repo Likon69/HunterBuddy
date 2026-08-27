@@ -1,6 +1,6 @@
 # HunterBuddy
 
-Private Meteor Client addon for hunting, flight, inventory logistics, and utility tools.
+Private Meteor Client addon for hunting, flight, visuals, inventory logistics, and utility tools.
 
 Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
 
@@ -8,35 +8,51 @@ Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, M
 
 Only modules registered by `HunterBuddyAddon` are listed below. Source files that are present but deliberately not registered are not documented as available modules.
 
-### Hunt (23)
+### Hunt (21)
 
 Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissance.
 
 | Meteor name | Description |
 |---|---|
-| `angle-calculator` | Locks yaw toward a target coordinate. |
-| `auto-portal` | Automates portal-related travel actions. |
-| `cave-air` | Detects portal-shaped disturbances in cave air. |
-| `chest-tracker` | Tracks scanned container contents; includes browser, Discord webhook, and JSON storage. |
-| `container-tooltips` | Shows contents of tracked containers and item-frame shulkers. |
-| `control-fly` | Elytra flight control using WASD. |
-| `elytra-auto-fly` | Cycles between a `Pitch40Classic` climb and manual-pitch descent. |
-| `ElytraBounce` | Elytra flight module with additional controls. |
-| `ElytraRecast` | Attempts flight recovery after landing or dropping too low. |
-| `flow-esp` | Detects chunk activity from fluid-spread changes. |
-| `ItemSearchBar` | Searches and highlights items in inventories and containers. |
-| `old-chunk-notifier` | Notifies, optionally by Discord webhook, when an old-chunk cluster is detected. |
-| `phase` | Phase module. |
-| `Pitch40` | Pitch40 helper synchronized with Meteor ElytraFly. |
-| `pitch40-classic` | Standalone classic `+40/-40` pitch oscillation with optional fireworks. |
-| `RocketFly` | Maintains level flight with fireworks and pitch control. |
-| `area-loader` | Walks a rectangle, spiral, or zigzag chunk-loading route. |
-| `sign-render` | Renders sign text through walls. |
+| `angle-calculator` | Continuously locks your view toward a target coordinate to travel straight along it (highway trails). |
+| `arealoader` | Loads chunks along a rectangle, spiral, zigzag, or circle route; routes can be saved and resumed. |
+| `auto-portal` | Builds a nether portal frame, lights it, and optionally paths the player into it via Baritone. |
+| `BepBoost` | Reports the highest velocity the server accepts while a firework is lit, instead of the one vanilla would build up to. Never lights fireworks itself — pair it with a flight module. |
+| `BepRocketFly` | Holds a target altitude on timed fireworks; its Firework Boost group rides each firework window, alternating climb and dive legs to keep speed on any heading. |
+| `chest-tracker` | Records the contents of containers you open, with a browser screen and JSON storage. |
+| `chunk-radar` | Follows the 1.12 trail from the blocks in each arriving chunk, fits a line through the hits, and calls out when it is acquired, lost, turning, or thick enough to be a stash. Remembers trails between sessions. Overworld only. |
+| `control-fly` | Elytra flight control using the WASD keys. |
+| `elytra-auto-fly` | Flight cycle driving `pitch40-classic`: climb, then manual-pitch descent, looped. |
+| `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer, and portal-trap avoidance. |
+| `ElytraRecast` | Flight recovery fallback: watches for lost flight or a low altitude and relaunches. |
+| `old-chunk-notifier` | Sends a webhook message, optionally pinging you, when an old chunk is detected. |
+| `phase` | Phases the player through solid blocks. |
+| `Pitch40` | Pitch40 helper: syncs bounds with Meteor's ElytraFly and auto-enables on reconnect. |
+| `pitch40-classic` | Standalone +40/-40 pitch oscillation with its own firework logic; does not use Meteor's ElytraFly. |
+| `RocketFly` | Maintains level flight with fireworks and smooth pitch control. |
 | `stash-finder` | Detects stashes; chunks identified as Woodland Mansions are ignored. |
-| `TrailFollower` | Follows detected trails in all dimensions. |
-| `VanityESP` | ESP for decorative items and selected special blocks. |
-| `visual-range-notifier` | Notifies when players enter visual range or selected items are dropped nearby. |
+| `TrailFollower` | Follows detected trails in all dimensions, with a rate-limited heading and a choice of search patterns (spiral, sweep, straight) when the trail is lost. |
+| `visual-range-notifier` | Notifies when players enter visual range or selected items appear on the ground; optional Discord webhook alerts. |
 | `waypoint-follower` | Follows Xaero waypoints with multi-dimensional travel support. |
+| `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
+
+### Visuals (11)
+
+ESP, overlays, and render helpers.
+
+| Meteor name | Description |
+|---|---|
+| `cave-air` | Detects portal-shaped disturbances in cave air. |
+| `container-tooltips` | Shows container contents when looking at tracked containers or shulkers in item frames. |
+| `entity-view` | Rescales mobs and players, shows their gear above them through walls, names dropped items on the ground, and outlines nether portals with a tracer to the nearest one. |
+| `flow-esp` | Detects chunk activity from fluid-spread analysis. |
+| `ItemSearchBar` | Searches and highlights items in inventories and containers. |
+| `LoreLocator` | Highlights inventory slots holding rare, unique, or anomalous items. |
+| `rotation-detector` | Finds horizontally placed blocks that only generate vertically in nature. |
+| `shader` | Entity glow/outline shader. |
+| `sign-render` | Renders sign text through walls, clustered to stay readable. |
+| `SpawnerDetector` | Finds spawners a player has already visited, and whether the loot is still there. |
+| `VanityESP` | Unified ESP for decorative items and selected special blocks. |
 
 ### Logistics (6)
 
@@ -45,73 +61,96 @@ Restocking, inventory handling, and stash transfer tools.
 | Meteor name | Description |
 |---|---|
 | `AutoFlyingRegear` | Creates a temporary platform and restocks rockets or elytras from an ender chest. |
-| `ElytraSwap` | Replaces a low-durability elytra. |
+| `ElytraSwap` | Swaps out an elytra when it reaches low durability. |
 | `PearlLoader` | Anti-AFK loop with pearl-loading support. |
-| `replenish` | Replenishes items with shift-click packets. |
-| `shulker-overview` | Shows the most common item icon on shulkers in inventory screens. |
+| `replenish` | Replenishes hotbar items using shift-click packets. |
+| `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
 | `stash-mover` | Moves items between selected input and output stash areas using pearl loading. |
 
-StashMover commands use the configured Meteor command prefix:
+### Utility (14)
+
+| Meteor name | Description |
+|---|---|
+| `auto-exp-plus` | Repairs armor and tools with experience bottles, restocking bottles into a chosen hotbar slot. |
+| `auto-log-plus` | Additional logout triggers. |
+| `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
+| `disconnect-sound` | Plays a sound when the disconnect screen appears (e.g. when kicked). |
+| `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
+| `ghost-container` | Adds a button that closes a container screen without sending the close packet, leaving it open server-side. |
+| `h-air-place` | Places a block in air where your crosshair is pointing. |
+| `h-mine` | Fast block mining, with a configurable swing animation. |
+| `h-scaffold` | Places blocks beneath you as you move. |
+| `kill-aura-plus` | Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage. |
+| `NoHurtCam` | Removes the hurt-camera tilt and shake. |
+| `NoJumpDelay` | Removes the delay between jumps. |
+| `rocket-boost` | Extends each firework's boost window with a fixed or automatically computed speed multiplier; can trace every boosted tick to a CSV for tuning. |
+| `unfocused-fps` | Limits FPS while the game window is unfocused. |
+
+## Commands (6)
+
+Commands use the configured Meteor command prefix.
 
 | Command | Description |
 |---|---|
-| `setinput` | Select the input area with two left-clicked corners. |
-| `setoutput` | Select the output area with two left-clicked corners. |
-| `stashstatus` | Shows the selected areas and current StashMover status. |
-| `setclear` | Clears both selected areas. |
+| `setinput` | Select the StashMover input area with two left-clicked corners. |
+| `setoutput` | Select the StashMover output area with two left-clicked corners. |
+| `stashstatus` | Show the selected areas and current StashMover status. |
+| `setclear` | Clear both StashMover selections. |
+| `arealoaderreset` | Delete every AreaLoader saved route, not just the selected one. |
+| `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-### Utility (12)
-
-| Meteor name | Description |
-|---|---|
-| `auto-exp-plus` | Repairs armor and tools with experience bottles. |
-| `auto-log-plus` | Adds logout triggers. |
-| `client-side-time` | Changes the displayed client-side time only. |
-| `ghost-container` | Closes a container screen without sending its close packet. |
-| `mlep-air-place` | Places a block in air at the crosshair target. |
-| `mlep-mine` | Fast block-mining module. |
-| `mlep-scaffold` | Places blocks beneath the player. |
-| `NoHurtCam` | Removes the hurt-camera effect. |
-| `NoJumpDelay` | Removes the delay between jumps. |
-| `rotation-detector` | Finds horizontal blocks that normally generate vertically. |
-| `unfocused-fps` | Limits FPS while Minecraft is unfocused. |
-| `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
-
-### Lab (1)
-
-Experimental modules. Their behavior is not guaranteed across servers or anti-cheat versions.
-
-| Meteor name | Description |
-|---|---|
-| `BoatFlyLab` | Experimental boat-flight behavior; the module declares singleplayer-only use. |
-
-### Future (3)
-
-Ports from external references. Experimental and not guaranteed across servers or anti-cheat versions.
-
-| Meteor name | Description |
-|---|---|
-| `shader` | Applies an entity outline shader. |
-| `lambda-packet-mine` | Port of lambda's PacketMine: targeted block-mining with rebreak mode, queue, double-break, break radius, flatten, and render settings. |
-| `lambda-nuker` | Port of lambda's Nuker: configurable flatten modes, dimensions, on-ground requirement, floor fill, fluid fill, and Baritone selection. |
-
-## HUD elements (11)
+## HUD elements (25)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
 | HUD name | Description |
 |---|---|
-| `DimensionCoords` | Coordinates with Overworld/Nether conversion. |
-| `DubCounter` | Counts nearby containers and estimates storage slots. |
-| `ElytraHelperHud` | Detailed elytra, rocket, speed, distance, and module status panel. |
-| `ElytraStatus` | Compact elytra, rockets, pitch, durability, and speed line. |
+| `ChunkRadar` | Top-down view of the 1.12 trail the chunk-radar module is following. |
+| `DimensionBanner` | A heraldic banner per dimension, crossfading at portals. |
+| `DimensionCoords` | Coordinates for both Overworld and Nether. |
+| `DubCounter` | Counts all containers in render distance. |
+| `elytra-helper` | Central flight panel: elytra durability, flight time estimates, session stats, and hunt module status. |
+| `ElytraStatus` | Compact one-line elytra status: speed, pitch, rockets, durability. |
 | `EntityList` | Lists nearby entities. |
-| `item-counter` | Counts configured inventory items. |
+| `FindsTicker` | Recent finds and sightings as a fading feed. |
+| `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
+| `item-counter` | Selected items and their inventory counts. |
 | `MobInfo` | Tracks mob spawns and density. |
-| `movement-status` | Shows sneak and sprint status. |
-| `SpeedKMH` | Displays movement speed in km/h. |
-| `SystemStats` | Displays RAM and process CPU usage with history graphs. |
-| `TimerSpeed` | Displays Meteor Timer's active multiplier. |
+| `movement-status` | Current sneaking and sprinting status. |
+| `Odometer` | Session distance on mechanical drums, lifetime total below. |
+| `PingMeter` | Ping with sparkline, jitter, and keepalive freshness. |
+| `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
+| `RegearStatus` | AutoFlyingRegear phase, supplies, and mending progress. |
+| `SessionTimeline` | The session as coloured activity segments with find markers. |
+| `SpeedKMH` | Movement speed in km/h. |
+| `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
+| `SpiralCoverage` | AreaLoader coverage for any mode: flown legs, current leg, planned turns. |
+| `SystemStats` | RAM and CPU usage with line graphs. |
+| `ThreatBoard` | Players in range: distance, approach vector, gear summary. |
+| `TimerSpeed` | Meteor Timer's current multiplier. |
+| `TpsCardiogram` | Server TPS as a scrolling cardiogram, flatlining on lag. |
+| `Travel` | Distance, ETA, and speed toward a named waypoint, checked against elytra range. |
+
+## Module interactions
+
+- `BepBoost` and `BepRocketFly` work as a pair: `BepRocketFly`'s `firework-boost` setting toggles `BepBoost` itself. `BepBoost` can also run alone under another flight module — it never lights fireworks.
+- `elytra-auto-fly` drives `pitch40-classic`; enable the cycle module, not both by hand.
+- `Pitch40` synchronizes its bounds with Meteor's own ElytraFly.
+- `ElytraRecast` is a watchdog meant to run alongside a flight module, not a flight module itself.
+- Run one flight controller at a time (`control-fly`, `ElytraBounce`, `elytra-auto-fly`, `pitch40-classic`, `RocketFly`, `BepRocketFly`), and one boost module at a time (`rocket-boost` or `BepBoost`).
+- `stash-mover` is configured entirely through the `setinput` / `setoutput` / `stashstatus` / `setclear` commands.
+- The `trails` command manages the memory the `chunk-radar` module builds.
+
+## Dependencies
+
+- **Xaero's Minimap / World Map (with XaeroPlus)** — compile-time libs under `libs/`; must be installed at runtime for `waypoint-follower`, chunk-radar's waypoint marks, and the `Travel` HUD.
+- **Baritone (Meteor fork)** — compile-only, optional at runtime; used by `auto-portal` pathing and some regear/travel helpers when present.
+
+## Files and network
+
+- `chunk-radar` persists its trail memory to `hunterbuddy/trails.json` (plus a backup) under the Meteor folder; `rocket-boost` can append a per-tick trace to `hunterbuddy/rocketboost-trace.csv` when its trace setting is on.
+- `chest-tracker`, AreaLoader routes, and the lifetime odometer stats are also stored as JSON.
+- `old-chunk-notifier` and `visual-range-notifier` post to a Discord webhook if one is configured.
 
 ## Build
 
@@ -121,7 +160,7 @@ Java 21 is required. Use the included Gradle wrapper:
 .\gradlew.bat build
 ```
 
-The built addon JAR is written to `build/libs/hunterbuddy-0.1.0.jar`.
+The built addon JAR is written to `build/libs/hunterbuddy-1.0.0.jar`.
 
 ## Project notes
 
