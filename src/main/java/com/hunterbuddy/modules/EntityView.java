@@ -10,6 +10,8 @@ import com.hunterbuddy.HunterBuddyAddon;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
+import meteordevelopment.meteorclient.events.render.Render3DEvent;
+import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.Renderer2D;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
@@ -33,11 +35,18 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.block.Blocks;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.chunk.Chunk;
+import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.RaycastContext;
 import org.joml.Vector3d;
 
@@ -85,6 +94,140 @@ public class EntityView extends Module {
     private final SettingGroup sgPlayer = settings.createGroup("Player Scale");
     private final SettingGroup sgTags   = settings.createGroup("Gear Tags");
     private final SettingGroup sgDepth  = settings.createGroup("Tag Depth");
+    private final SettingGroup sgItems  = settings.createGroup("Dropped Items");
+    private final SettingGroup sgPortal = settings.createGroup("Portals");
+
+    // ── Portals ───────────────────────────────────────────────────────────────
+
+    private final Setting<Boolean> portals = sgPortal.add(new BoolSetting.Builder()
+        .name("portals")
+        .description("Outline nether portals through the ground. A lit portal is the one thing on a stash floor that cannot be hidden and cannot be moved, so it is worth seeing before the base around it.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Double> portalRange = sgPortal.add(new DoubleSetting.Builder()
+        .name("portal-range")
+        .description("How far out portals are looked for, in blocks. Only loaded chunks are searched, so this cannot see further than the server has sent you.")
+        .defaultValue(64.0)
+        .min(16.0)
+        .sliderRange(16.0, 256.0)
+        .visible(portals::get)
+        .build()
+    );
+
+    private final Setting<Boolean> portalTracer = sgPortal.add(new BoolSetting.Builder()
+        .name("portal-tracer")
+        .description("Draw a line to the nearest portal. It starts at eye level rather than at your feet, so it stays readable while you fly.")
+        .defaultValue(true)
+        .visible(portals::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> portalSideColor = sgPortal.add(new ColorSetting.Builder()
+        .name("portal-side-color")
+        .description("Fill of the portal outline.")
+        .defaultValue(new SettingColor(160, 60, 220, 40))
+        .visible(portals::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> portalLineColor = sgPortal.add(new ColorSetting.Builder()
+        .name("portal-line-color")
+        .description("Edges of the portal outline.")
+        .defaultValue(new SettingColor(200, 110, 255, 220))
+        .visible(portals::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> portalTracerColor = sgPortal.add(new ColorSetting.Builder()
+        .name("portal-tracer-color")
+        .description("Colour of the line to the nearest portal.")
+        .defaultValue(new SettingColor(200, 110, 255, 160))
+        .visible(() -> portals.get() && portalTracer.get())
+        .build()
+    );
+
+    // ── Dropped items ─────────────────────────────────────────────────────────
+
+    private final Setting<Boolean> itemNames = sgItems.add(new BoolSetting.Builder()
+        .name("item-names")
+        .description("Write the name of every dropped item above it. Vanilla only shows one when you are close enough to almost touch it, which is no use for reading a floor at a glance -- what was dropped, and how much of it, is most of what a stash is.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Double> itemScale = sgItems.add(new DoubleSetting.Builder()
+        .name("item-scale")
+        .description("Size of that name.")
+        .defaultValue(1.0)
+        .min(0.1)
+        .sliderRange(0.25, 3.0)
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<Boolean> itemCounts = sgItems.add(new BoolSetting.Builder()
+        .name("item-counts")
+        .description("Add the stack size after the name, when there is more than one.")
+        .defaultValue(true)
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<Double> itemRange = sgItems.add(new DoubleSetting.Builder()
+        .name("item-range")
+        .description("How far a dropped item is still named.")
+        .defaultValue(48.0)
+        .min(1.0)
+        .sliderRange(8.0, 128.0)
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<Integer> itemMaxCount = sgItems.add(new IntSetting.Builder()
+        .name("item-max-count")
+        .description("Most names drawn at once, nearest first. A stash floor holds hundreds of stacks, and drawing all of them costs frames for a screen nobody can read.")
+        .defaultValue(64)
+        .min(1)
+        .sliderRange(8, 256)
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<Double> itemHeight = sgItems.add(new DoubleSetting.Builder()
+        .name("item-height")
+        .description("How far above the item the name sits, in blocks.")
+        .defaultValue(0.5)
+        .min(-1.0)
+        .sliderRange(0.0, 2.0)
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> itemColor = sgItems.add(new ColorSetting.Builder()
+        .name("item-color")
+        .description("Colour of the name.")
+        .defaultValue(new SettingColor(255, 255, 255, 255))
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<Boolean> itemBackground = sgItems.add(new BoolSetting.Builder()
+        .name("item-background")
+        .description("Draw a plate behind the name so it stays readable over bright ground.")
+        .defaultValue(true)
+        .visible(itemNames::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> itemBackgroundColor = sgItems.add(new ColorSetting.Builder()
+        .name("item-background-color")
+        .description("Colour of that plate. Its own rather than the gear tags' one, so the two groups can be read against different ground without fighting each other.")
+        .defaultValue(new SettingColor(0, 0, 0, 130))
+        .visible(() -> itemNames.get() && itemBackground.get())
+        .build()
+    );
 
     // ── Scale ─────────────────────────────────────────────────────────────────
 
@@ -322,6 +465,8 @@ public class EntityView extends Module {
 
     /** Entities to draw: the ones that qualify, plus the ones still shrinking out. */
     private final List<LivingEntity> tagged = new ArrayList<>();
+    private final List<ItemEntity> droppedItems = new ArrayList<>();
+    private final List<BlockPos> portalBlocks = new ArrayList<>();
     private final List<LivingEntity> previouslyTagged = new ArrayList<>();
     /** Of those, the ones that still qualify. The rest are on their way out. */
     private final IntOpenHashSet activeIds = new IntOpenHashSet();
@@ -380,7 +525,31 @@ public class EntityView extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (!gearTags.get() || mc.world == null || mc.player == null || mc.gameRenderer == null) {
+        if (mc.world == null || mc.player == null || mc.gameRenderer == null) {
+            tagged.clear();
+            activeIds.clear();
+            occludedIds.clear();
+            textEnabledIds.clear();
+            appearProgress.clear();
+
+            // Cleared here too, or a disconnect leaves both lists frozen and their
+            // last contents keep being drawn against a world that is gone.
+            droppedItems.clear();
+            portalBlocks.clear();
+            return;
+        }
+
+        Vec3d camera = mc.gameRenderer.getCamera().getCameraPos();
+
+        // In front of the gate below, not behind it: naming what is on the floor
+        // and outlining portals have nothing to do with wanting gear tags, and
+        // collecting them there meant they were never collected at all with tags
+        // off -- or, worse, frozen at their last contents when tags were switched
+        // off mid-flight.
+        collectItems(camera);
+        collectPortals(camera);
+
+        if (!gearTags.get()) {
             tagged.clear();
             activeIds.clear();
             occludedIds.clear();
@@ -394,7 +563,6 @@ public class EntityView extends Module {
         tagged.clear();
         activeIds.clear();
 
-        Vec3d camera = mc.gameRenderer.getCamera().getCameraPos();
         double maxDistSq = range.get() * range.get();
 
         for (Entity entity : mc.world.getEntities()) {
@@ -481,13 +649,23 @@ public class EntityView extends Module {
 
     @EventHandler
     private void onRender2D(Render2DEvent event) {
-        if (!gearTags.get() || mc.world == null || mc.gameRenderer == null) {
+        if (mc.world == null || mc.gameRenderer == null) {
+            appearProgress.clear();
+            return;
+        }
+
+        boolean shadow = Config.get().customFont.get();
+
+        // Before the early return below: naming what is on the floor has nothing to
+        // do with whether gear tags are wanted.
+        drawItemNames(event, event.tickDelta, shadow);
+
+        if (!gearTags.get()) {
             appearProgress.clear();
             return;
         }
 
         float step = advanceAppearClock();
-        boolean shadow = Config.get().customFont.get();
         Vec3d camera = mc.gameRenderer.getCamera().getCameraPos();
 
         layoutCount = 0;
@@ -538,6 +716,163 @@ public class EntityView extends Module {
      * Measures one tag and projects it to screen. Nothing is drawn yet: the
      * declutter pass needs every tag's bounds before any of them is committed.
      */
+    /**
+     * Every portal block within range, found through the section palettes.
+     *
+     * <p>A block search over a 128-block cube is two million reads a tick, which is
+     * not affordable. Sections carry the list of block states they contain, so
+     * asking each one whether it holds portal at all rejects almost everything for
+     * the price of a palette walk; only the handful that answer yes are read block
+     * by block.
+     */
+    private void collectPortals(Vec3d camera) {
+        portalBlocks.clear();
+        if (!portals.get()) return;
+
+        double range = portalRange.get();
+        double maxDistSq = range * range;
+        int chunkRadius = (int) Math.ceil(range / 16.0);
+        ChunkPos centre = new ChunkPos(BlockPos.ofFloored(camera));
+
+        for (int cx = centre.x - chunkRadius; cx <= centre.x + chunkRadius; cx++) {
+            for (int cz = centre.z - chunkRadius; cz <= centre.z + chunkRadius; cz++) {
+                if (!mc.world.getChunkManager().isChunkLoaded(cx, cz)) continue;
+
+                Chunk chunk = mc.world.getChunk(cx, cz);
+                ChunkSection[] sections = chunk.getSectionArray();
+
+                for (int i = 0; i < sections.length; i++) {
+                    ChunkSection section = sections[i];
+                    if (section == null || section.isEmpty()) continue;
+                    if (!section.hasAny(state -> state.isOf(Blocks.NETHER_PORTAL))) continue;
+
+                    int baseY = chunk.sectionIndexToCoord(i) << 4;
+
+                    for (int x = 0; x < 16; x++) {
+                        for (int y = 0; y < 16; y++) {
+                            for (int z = 0; z < 16; z++) {
+                                if (!section.getBlockState(x, y, z).isOf(Blocks.NETHER_PORTAL)) continue;
+
+                                BlockPos pos = new BlockPos((cx << 4) + x, baseY + y, (cz << 4) + z);
+                                if (pos.getSquaredDistance(camera) > maxDistSq) continue;
+
+                                portalBlocks.add(pos);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @EventHandler
+    private void onRender3D(Render3DEvent event) {
+        if (!portals.get() || mc.player == null || portalBlocks.isEmpty()) return;
+
+        for (BlockPos pos : portalBlocks) {
+            event.renderer.box(new Box(pos), portalSideColor.get(), portalLineColor.get(), ShapeMode.Both, 0);
+        }
+
+        if (!portalTracer.get()) return;
+
+        // The nearest block of the nearest portal is close enough to aim at: a
+        // portal is two blocks wide, and pointing at its corner rather than its
+        // middle is not a distinction you can see from fifty blocks away.
+        Vec3d eye = mc.player.getEyePos();
+        BlockPos nearest = null;
+        double best = Double.MAX_VALUE;
+
+        for (BlockPos pos : portalBlocks) {
+            double distance = pos.getSquaredDistance(eye);
+
+            if (distance < best) {
+                best = distance;
+                nearest = pos;
+            }
+        }
+
+        if (nearest == null) return;
+
+        Vec3d target = Vec3d.ofCenter(nearest);
+        event.renderer.line(eye.x, eye.y, eye.z, target.x, target.y, target.z, portalTracerColor.get());
+    }
+
+    /**
+     * The dropped items worth naming this tick.
+     *
+     * <p>Gathered on the tick rather than the frame, like everything else here: a
+     * stash floor holds hundreds of stacks and walking the entity list at frame
+     * rate to find them costs more than drawing them.
+     */
+    private void collectItems(Vec3d camera) {
+        droppedItems.clear();
+        if (!itemNames.get()) return;
+
+        double maxDistSq = itemRange.get() * itemRange.get();
+
+        for (Entity entity : mc.world.getEntities()) {
+            if (!(entity instanceof ItemEntity item)) continue;
+            if (!item.isAlive() || item.getStack().isEmpty()) continue;
+            if (item.squaredDistanceTo(camera) > maxDistSq) continue;
+
+            droppedItems.add(item);
+        }
+
+        droppedItems.sort(Comparator.comparingDouble(e -> e.squaredDistanceTo(camera)));
+
+        if (droppedItems.size() > itemMaxCount.get()) {
+            droppedItems.subList(itemMaxCount.get(), droppedItems.size()).clear();
+        }
+    }
+
+    /**
+     * Names the dropped items, one line each.
+     *
+     * <p>Nothing of the gear-tag machinery applies: no icons, so no queued draw to
+     * flush around, and no appear animation -- an item on the floor is either
+     * there or it is not. Drawn far to near so a nearer name lands on top.
+     */
+    private void drawItemNames(Render2DEvent event, float tickDelta, boolean shadow) {
+        if (droppedItems.isEmpty()) return;
+
+        TextRenderer text = TextRenderer.get();
+        double scale = itemScale.get();
+
+        for (int i = droppedItems.size() - 1; i >= 0; i--) {
+            ItemEntity item = droppedItems.get(i);
+            ItemStack stack = item.getStack();
+            if (stack.isEmpty()) continue;
+
+            String label = stack.getName().getString();
+            if (itemCounts.get() && stack.getCount() > 1) label = label + " x" + stack.getCount();
+
+            Utils.set(pos, item, tickDelta);
+            pos.add(0.0, itemHeight.get(), 0.0);
+
+            if (!NametagUtils.to2D(pos, scale)) continue;
+
+            NametagUtils.begin(pos, event.drawContext);
+
+            text.begin(1.0, false, true);
+            double width = text.getWidth(label);
+            double height = text.getHeight();
+            text.end();
+
+            if (itemBackground.get()) {
+                Renderer2D.COLOR.begin();
+                Renderer2D.COLOR.quad(-width / 2.0 - 2.0, -height - 1.0, width + 4.0, height + 2.0,
+                    itemBackgroundColor.get());
+                Renderer2D.COLOR.render();
+            }
+
+            text.begin(1.0, false, true);
+            text.render(label, -width / 2.0, -height, itemColor.get(), shadow);
+            text.end();
+
+            NametagUtils.end(event.drawContext);
+        }
+    }
+
     private void project(LivingEntity entity, Vec3d camera, float tickDelta, boolean shadow, float step) {
         int id = entity.getId();
 
