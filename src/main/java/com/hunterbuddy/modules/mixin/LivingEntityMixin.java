@@ -83,7 +83,20 @@ public abstract class LivingEntityMixin {
       at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/LivingEntity;getPitch()F")
    )
    private float mlep$wrapGlidingPitch(LivingEntity entity, Operation<Float> original) {
+      if (entity != MeteorClient.mc.player) {
+         return (Float)original.call(new Object[]{entity});
+      }
+
+      // Both rotation systems are asked here, and here only. BepGlideMixin used to
+      // wrap this very instruction as well, which put two wrappers from two mixin
+      // configs on one call with nothing to order them by -- and elytra bounce,
+      // whose gliding latch lives in this same mixin, stopped working the day that
+      // second wrapper arrived.
       Float pitch = RotationUtils.getInstance().getMovementPitch();
-      return entity == MeteorClient.mc.player && pitch != null ? pitch : (Float)original.call(new Object[]{entity});
+      if (pitch == null) {
+         pitch = com.hunterbuddy.bephax.BepRotations.getInstance().getMovementPitch();
+      }
+
+      return pitch != null ? pitch : (Float)original.call(new Object[]{entity});
    }
 }
