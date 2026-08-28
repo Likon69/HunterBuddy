@@ -1064,7 +1064,7 @@ public class MlepMine extends Module {
          }
 
          for (Entry<MlepMine.MiningData, MlepMine.Animation> set : this.fadeList.entrySet()) {
-            this.renderMiningEntry(event, set.getKey(), set.getValue().getFactor());
+            this.renderMiningEntry(event, set.getKey(), set.getValue().getFactor(), set.getValue().since());
          }
 
          this.fadeList.entrySet().removeIf(e -> e.getValue().getFactor() == 0.0);
@@ -1126,7 +1126,7 @@ public class MlepMine extends Module {
       return null;
    }
 
-   private void renderMiningEntry(Render3DEvent event, MlepMine.MiningData data, float factor) {
+   private void renderMiningEntry(Render3DEvent event, MlepMine.MiningData data, float factor, long since) {
       if (factor <= 0.0F || this.mc.world == null) return;
 
       BlockPos pos = data.getPos();
@@ -1166,44 +1166,83 @@ public class MlepMine extends Module {
          return;
       }
 
-      float breath = this.styleConfig.get() == MlepMine.RenderStyle.PULSE ? this.breath() : 1.0F;
-
       // Progress as a level rising inside the block rather than a box swelling
       // out of its middle. Two things fall out of that: a height is readable from
       // the side, where a box growing in every direction at once is not, and the
       // bright line sitting on the level gives the eye something crisp to land on
       // instead of a soft cube.
+      //
+      // Pulse is the same shape drawn somewhere else entirely. Fill lays the
+      // level down at a flat alpha of 60 in the colour set in the menu; Pulse
+      // swings that from half to nearly twice, and washes the colour towards
+      // white as it rises. Both halves matter: an alpha that breathes on its own
+      // is a difference you have to hunt for, whatever its amplitude, and it was
+      // reported twice as no difference at all. The line does not breathe -- it
+      // is where the eye reads progress, and a marker that dims is one that has
+      // to be read twice.
+
+      boolean pulsing = this.styleConfig.get() == MlepMine.RenderStyle.PULSE;
+      float beat = pulsing ? this.breath(since) : 0.0F;
+
       double level = full.minY + (full.maxY - full.minY) * scale;
-      this.drawBox(
+      this.drawFill(
          event,
          new Box(full.minX, full.minY, full.minZ, full.maxX, level, full.maxZ),
          base,
-         Math.round(60.0F * factor * breath),
-         0,
-         ShapeMode.Sides
+         pulsing ? 30.0F + 110.0F * beat : 60.0F,
+         pulsing ? 0.7F * beat : 0.0F,
+         factor
       );
       this.drawBox(
          event,
          new Box(full.minX, level, full.minZ, full.maxX, level, full.maxZ),
          base,
          0,
-         Math.round(230.0F * factor * breath),
+         Math.round(230.0F * factor),
          ShapeMode.Lines
       );
    }
 
    /**
-    * Runs 0.55 to 1.0 and back, once every pulse-rate second.
+    * Runs 0 to 1 and back, once every pulse-rate second, counted from {@code since}.
     *
-    * <p>No cast on the way into {@code sin}. The argument is the epoch in
-    * seconds turned into radians, ten billion of them, and a float at that size
-    * steps in units of a thousand radians: the angle would sit frozen for two
-    * minutes and then jump. {@code MathHelper.sin} takes a double and indexes its
-    * table through a long, which carries the value with room to spare.
+    * <p>Timed from the block rather than from the clock, which is what makes the
+    * slider mean anything. On the wall clock every block picked the phase up
+    * wherever it happened to be: a block that lives a fifth of a second showed one
+    * arbitrary brightness and no motion, and turning the rate up or down only drew
+    * a different arbitrary brightness. From zero it always starts dark and climbs,
+    * so even the shortest block shows the beginning of a breath -- and how far it
+    * gets through one is exactly what the rate sets.
+    *
+    * <p>Cosine, not sine, for that reason: sine starts halfway up.
+    *
+    * <p>The epoch is no longer the argument, so the old precision trap is gone
+    * with it. A few seconds turned into radians is a small number, and
+    * {@code MathHelper.cos} takes a double and indexes its table through a long.
     */
-   private float breath() {
-      double phase = System.currentTimeMillis() / 1000.0 * (Double)this.pulseRate.get();
-      return 0.775F + 0.225F * MathHelper.sin(phase * Math.PI * 2.0);
+   private float breath(long since) {
+      double phase = (System.currentTimeMillis() - since) / 1000.0 * (Double)this.pulseRate.get();
+      return 0.5F - 0.5F * MathHelper.cos(phase * Math.PI * 2.0);
+   }
+
+   /**
+    * The level inside the block, in a colour of its own.
+    *
+    * <p>Apart from {@link #drawBox} because the breath moves the colour and not
+    * only its alpha, and washing a colour towards white is not something a shade
+    * of it can do.
+    */
+   private void drawFill(Render3DEvent event, Box box, SettingColor base, float alpha, float whiten, float factor) {
+      meteordevelopment.meteorclient.utils.render.color.Color side =
+         new meteordevelopment.meteorclient.utils.render.color.Color(
+            base.r + Math.round((255 - base.r) * whiten),
+            base.g + Math.round((255 - base.g) * whiten),
+            base.b + Math.round((255 - base.b) * whiten),
+            MathHelper.clamp(Math.round(alpha * factor) * base.a / 255, 0, 255)
+         );
+
+      event.renderer
+         .box(box, side, new meteordevelopment.meteorclient.utils.render.color.Color(0, 0, 0, 0), ShapeMode.Sides, 0);
    }
 
    /**
@@ -2144,6 +2183,11 @@ public class MlepMine extends Module {
             this.state = state;
             this.time = System.currentTimeMillis();
          }
+      }
+
+      /** When this entry appeared, or last changed state: the breath is timed from here. */
+      public long since() {
+         return this.time;
       }
 
       public float getFactor() {
