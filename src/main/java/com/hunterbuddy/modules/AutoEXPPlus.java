@@ -68,6 +68,13 @@ public class AutoEXPPlus extends Module {
         .build()
     );
 
+    private final Setting<Boolean> slowFinish = sgGeneral.add(new BoolSetting.Builder()
+        .name("slow-finish")
+        .description("Repairs all the way to full instead of stopping at max-threshold, and eases off at the end: full speed up to 90 percent, then one bottle a second the rest of the way. The last tenth is where the waste is -- a bottle every tick there buys almost nothing, because the orbs from the ones already thrown are still on their way in.")
+        .defaultValue(false)
+        .build()
+    );
+
     private final Setting<Boolean> ignoreElytra = sgGeneral.add(new BoolSetting.Builder()
         .name("ignore-elytra")
         .description("Ignore elytra when repairing. Has no effect while auto-swap-elytra is on.")
@@ -125,6 +132,15 @@ public class AutoEXPPlus extends Module {
     private int repairingI;
     private int swapTimer;
 
+    /** Ticks left before the next bottle while the slow finish is holding it back. */
+    private int slowTimer;
+
+    /** Durability above which slow-finish stops throwing every tick, in percent. */
+    private static final double SLOW_ABOVE = 90.0;
+
+    /** One bottle a second once past that. */
+    private static final int SLOW_INTERVAL = 20;
+
     public AutoEXPPlus() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-exp-plus", "Automatically repairs your armor and tools in pvp.");
     }
@@ -133,6 +149,7 @@ public class AutoEXPPlus extends Module {
     public void onActivate() {
         repairingI = -1;
         swapTimer = 0;
+        slowTimer = 0;
     }
 
     @EventHandler
@@ -187,12 +204,35 @@ public class AutoEXPPlus extends Module {
                 // elytra finished while the swap is still waiting for the rest.
                 target = swapAt.get();
             }
+            else if (slowFinish.get()) {
+                // Full, not max-threshold: the point of easing off at the end is to
+                // reach the end. Tested on the damage itself rather than through
+                // needsRepair, which reads "at or below the threshold" and would call
+                // an undamaged item repairable forever at a hundred percent.
+                if (repairing.getDamage() == 0) {
+                    repairingI = -1;
+                    slowTimer = 0;
+                    return;
+                }
+
+                target = 100.0;
+            }
             else if (!needsRepair(repairing, maxThreshold.get())) {
                 repairingI = -1;
                 return;
             }
             else {
                 target = maxThreshold.get();
+            }
+
+            // The last tenth, one bottle at a time.
+            if (slowFinish.get() && durability(repairing) > SLOW_ABOVE) {
+                if (slowTimer > 0) {
+                    slowTimer--;
+                    return;
+                }
+
+                slowTimer = SLOW_INTERVAL;
             }
 
             FindItemResult exp = InvUtils.find(Items.EXPERIENCE_BOTTLE);
@@ -221,7 +261,13 @@ public class AutoEXPPlus extends Module {
 
     private boolean needsRepair(ItemStack itemStack, double threshold) {
         if (itemStack.isEmpty() || !Utils.hasEnchantments(itemStack, Enchantments.MENDING)) return false;
-        return (itemStack.getMaxDamage() - itemStack.getDamage()) / (double) itemStack.getMaxDamage() * 100 <= threshold;
+        return durability(itemStack) <= threshold;
+    }
+
+    /** What is left of an item, in percent. */
+    private double durability(ItemStack itemStack) {
+        if (itemStack.isEmpty() || itemStack.getMaxDamage() == 0) return 100.0;
+        return (itemStack.getMaxDamage() - itemStack.getDamage()) / (double) itemStack.getMaxDamage() * 100;
     }
 
     // Elytra rotation
