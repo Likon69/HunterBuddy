@@ -507,14 +507,14 @@ public class ElytraBounce extends Module {
          }
 
          if (this.enabled()) {
-            // Sprinting all the time while gliding makes some anticheats rubberband
-            // (Meteor Bounce does the same): sprint only on ground while gliding so
-            // the jump keeps its sprint boost, sprint normally otherwise.
-            if (this.mc.player.isGliding()) {
-               this.mc.player.setSprinting(this.mc.player.isOnGround());
-            } else {
-               this.mc.player.setSprinting(true);
-            }
+            // Held on, gliding or not, which is what the reference does. Dropping it
+            // the instant the glide started -- Meteor's pattern, kept until now --
+            // put a STOP_SPRINTING inside every one of the two-tick windows the
+            // server granted, and the grant died at the end of all of them. That is
+            // not proof, because the module cut the sprint on the grant itself and
+            // the two cannot be told apart from the outside; it is the only thing
+            // this client said in that window, and the reference never says it.
+            this.mc.player.setSprinting(true);
          }
 
          if ((Boolean)this.bounce.get()) {
