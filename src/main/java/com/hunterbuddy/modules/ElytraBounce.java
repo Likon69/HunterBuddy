@@ -5,6 +5,7 @@ import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.mixin.accessors.LivingEntityAccessor;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
+import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.modules.regear.util.Utils;
 import java.util.List;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
@@ -285,6 +286,8 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onReceivePacket(Receive event) {
+      this.probeReceive(event.packet);
+
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
          // Rubberband (Meteor-style): stop gliding client side, release the latch and
          // pause for a few ticks before restarting the takeoff cycle cleanly.
@@ -306,6 +309,8 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onSendPacket(meteordevelopment.meteorclient.events.packets.PacketEvent.Send event) {
+      this.probeSend(event.packet);
+
       if (this.flushingPackets) {
          return;
       }
@@ -379,6 +384,7 @@ public class ElytraBounce extends Module {
    }
 
    public void onActivate() {
+      BounceProbe.get().start();
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
          this.startSprinting = this.mc.player.isSprinting();
          this.tempPath = null;
@@ -458,6 +464,7 @@ public class ElytraBounce extends Module {
    }
 
    public void onDeactivate() {
+      BounceProbe.get().stop();
       this.prevGliding = false;
       this.realGliding = false;
       this.fakeLagTicks = 0;
@@ -485,6 +492,7 @@ public class ElytraBounce extends Module {
    private void onTick(Pre event) {
       this.tickFakeLag();
       this.updateJumpKey();
+      this.probeTick();
       if (this.rubberBandCooldown > 0) {
          this.rubberBandCooldown--;
          return;
@@ -680,6 +688,92 @@ public class ElytraBounce extends Module {
          this.jumpKeyDown = false;
       } else {
          this.jumpKeyDown = !previous;
+      }
+   }
+
+   /**
+    * The state of the player at the top of a tick, before anything acts on it.
+    *
+    * <p>Written after the jump key has been decided and before the game moves, so a line and
+    * the packets stamped with the same tick read in the order they happened.
+    */
+   private void probeTick() {
+      BounceProbe probe = BounceProbe.get();
+      if (!probe.isRecording() || this.mc.player == null) return;
+
+      probe.nextTick();
+      probe.line(
+         "TICK",
+         String.format(
+            java.util.Locale.ROOT,
+            "onGround=%b flag7=%b key=%b sprint=%b pos=%.2f,%.2f,%.2f vel=%.3f,%.3f,%.3f pitch=%.1f yaw=%.1f",
+            this.mc.player.isOnGround(),
+            this.mc.player.isGliding(),
+            this.jumpKeyDown,
+            this.mc.player.isSprinting(),
+            this.mc.player.getX(),
+            this.mc.player.getY(),
+            this.mc.player.getZ(),
+            this.mc.player.getVelocity().x,
+            this.mc.player.getVelocity().y,
+            this.mc.player.getVelocity().z,
+            this.mc.player.getPitch(),
+            this.mc.player.getYaw()
+         )
+      );
+   }
+
+   private void probeSend(net.minecraft.network.packet.Packet<?> packet) {
+      BounceProbe probe = BounceProbe.get();
+      if (!probe.isRecording()) return;
+
+      if (packet instanceof ClientCommandC2SPacket command) {
+         probe.line("OUT-CMD", command.getMode().toString());
+      } else if (packet instanceof net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket move) {
+         probe.line(
+            "OUT-MOVE",
+            String.format(
+               java.util.Locale.ROOT,
+               "onGround=%b y=%.3f",
+               move.isOnGround(),
+               move.getY(this.mc.player == null ? 0.0 : this.mc.player.getY())
+            )
+         );
+      } else if (packet instanceof net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket input) {
+         probe.line("OUT-INPUT", "jump=" + input.input().jump());
+      } else if (packet instanceof net.minecraft.network.packet.c2s.common.CommonPongC2SPacket pong) {
+         probe.line("OUT-PONG", Integer.toString(pong.getParameter()));
+      }
+   }
+
+   private void probeReceive(net.minecraft.network.packet.Packet<?> packet) {
+      BounceProbe probe = BounceProbe.get();
+      if (!probe.isRecording()) return;
+
+      if (packet instanceof net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket tracker) {
+         if (this.mc.player == null || tracker.id() != this.mc.player.getId()) return;
+
+         // Index zero on Entity is the shared flag byte, and 0x80 in it is the gliding bit:
+         // this is the server answering a takeoff, and the only thing that ever turns the
+         // client's own flag back off.
+         for (net.minecraft.entity.data.DataTracker.SerializedEntry<?> entry : tracker.trackedValues()) {
+            if (entry.id() == 0 && entry.value() instanceof Byte flags) {
+               probe.line("IN-META", "glide=" + ((flags & 0x80) != 0));
+            }
+         }
+      } else if (packet instanceof PlayerPositionLookS2CPacket look) {
+         probe.line(
+            "IN-TP",
+            String.format(
+               java.util.Locale.ROOT,
+               "x=%.2f y=%.2f z=%.2f",
+               look.change().position().x,
+               look.change().position().y,
+               look.change().position().z
+            )
+         );
+      } else if (packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping) {
+         probe.line("IN-PING", Integer.toString(ping.getParameter()));
       }
    }
 
