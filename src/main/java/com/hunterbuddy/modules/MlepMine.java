@@ -481,9 +481,8 @@ public class MlepMine extends Module {
     */
    private final GrimBreakBalance grimBalance = new GrimBreakBalance(this::breakDamageAt);
 
-   /** Last time the break balance was reported as over budget, so it is said once. */
-   private long lastBalanceWarning;
-   private static final long BALANCE_WARNING_MS = 10000L;
+   /** Whether the break balance was over budget at the last finish, so it is said once. */
+   private boolean balanceWasOverBudget;
 
    /**
     * When the closing stop went out for a position, for the log line at its break.
@@ -644,6 +643,7 @@ public class MlepMine extends Module {
       // nobody is holding any more.
       this.grimBalance.reset();
       this.stopSentAt.clear();
+      this.balanceWasOverBudget = false;
       this.currentTarget = null;
    }
 
@@ -983,8 +983,6 @@ public class MlepMine extends Module {
     * break is measured from a buffer that is already full.
     */
    private void reportBalance(BlockPos pos) {
-      long now = System.currentTimeMillis();
-
       if ((Boolean)this.grimBalanceLog.get()) {
          HunterBuddyAddon.LOG
             .info(
@@ -1003,14 +1001,21 @@ public class MlepMine extends Module {
             );
       }
 
-      if (this.grimBalance.breakBalance() > (Integer)this.grimBudget.get() && now - this.lastBalanceWarning >= BALANCE_WARNING_MS) {
-         this.lastBalanceWarning = now;
+      // Said once per crossing, and only while the log is on. It used to be said
+      // every ten seconds regardless, which on obsidian is every ten seconds
+      // forever: the balance sits pinned at the ceiling there, so a warning on a
+      // timer is a warning that never stops.
+      boolean over = this.grimBalance.breakBalance() > (Integer)this.grimBudget.get();
+
+      if (over && !this.balanceWasOverBudget && (Boolean)this.grimBalanceLog.get()) {
          this.warning(
             "Break balance at %.0f of the anticheat's %.0f. Waiting will not bring it down -- only easier blocks will.",
             this.grimBalance.breakBalance(),
             GrimBreakBalance.FLAG
          );
       }
+
+      this.balanceWasOverBudget = over;
    }
 
    private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
