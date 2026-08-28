@@ -254,6 +254,9 @@ public class ElytraBounce extends Module {
    // has actually been set (server accepted the glide), then latch it through ground
    // touches so gliding physics (low friction) is kept between bounces.
    private boolean prevGliding = false;
+
+   /** True while the module is holding the jump key down for the player. */
+   private boolean jumpKeyDown = false;
    // Mirror of the real (unforced) gliding flag, updated by modifyIsGliding().
    private boolean realGliding = false;
    // Lambda-style fake lag for 1x2 tunnel bounce: outgoing packets and incoming pings
@@ -481,6 +484,7 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onTick(Pre event) {
       this.tickFakeLag();
+      this.updateJumpKey();
       if (this.rubberBandCooldown > 0) {
          this.rubberBandCooldown--;
          return;
@@ -580,15 +584,6 @@ public class ElytraBounce extends Module {
                   return;
                }
 
-               if (!(Boolean)this.fakeFly.get()
-                  && this.mc.player.isOnGround()
-                  && (
-                     !(Boolean)this.motionYBoost.get()
-                        || meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() < (Double)this.speed.get()
-                  )) {
-                  this.mc.player.jump();
-               }
-
                if ((Boolean)this.lockYaw.get()) {
                   this.mc.player.setYaw(((Double)this.yaw.get()).floatValue());
                }
@@ -609,18 +604,18 @@ public class ElytraBounce extends Module {
 
             if ((Boolean)this.fakeFly.get()) {
                this.doGrimEflyStuff();
-            } else if (!this.realGliding
-               && !this.mc.player.isOnGround()
-               && !this.mc.player.isTouchingWater()
-               && !this.mc.player.hasVehicle()
-               && net.minecraft.entity.LivingEntity.canGlideWith(this.mc.player.getEquippedStack(EquipmentSlot.CHEST), EquipmentSlot.CHEST)) {
-               // Vanilla 1.21.2+ takeoff: the client predicts the glide locally AND
-               // sends the packet (see Meteor Bounce.recastElytra). Only sent while the
-               // real gliding flag is off (Lambda's minimize-packets behaviour).
-               this.sendStartFlyingPacket();
-               this.mc.player.startGliding();
-               this.realGliding = true;
             }
+
+            // Nothing else here on purpose. Sending the takeoff from this tick used
+            // to be the whole point, and it is exactly what kept it from working:
+            // the packet went out one tick after leaving the ground, and the check
+            // that guards this cancels any takeoff that arrives while the last two
+            // ground flags are still set -- outright, before the server ever sees
+            // it. It also arrived before the input packet that releases the jump,
+            // which reads as a takeoff with the key already held. The forced key
+            // does it instead: held on the ground, tapped in the air, and vanilla
+            // sends the same packet on the rising edge, two ticks up, in the one
+            // shape those checks accept.
          }
       }
    }
@@ -647,17 +642,55 @@ public class ElytraBounce extends Module {
     * client from the server and get flagged by Grim.
     */
    public boolean modifyIsGliding(boolean original) {
-      this.realGliding = original;
-      if (this.prevGliding) {
-         return true;
-      }
+      this.realGliding = this.prevGliding = original;
 
-      this.prevGliding = original;
+      // Passed through as it comes. Holding it true across ground contact kept the
+      // glide physics running between bounces on the client, but the server drops
+      // the flag the instant you touch anything, so the two were flying different
+      // players -- and the one the server flies is the one that gets stood back up.
+      // The reference does not latch it either; it jumps instead.
       return original;
    }
 
    public boolean isFreePitchEnabled() {
       return this.enabled() && (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && (Boolean)this.freePitch.get();
+   }
+
+   /**
+    * Holds the jump key for the player, which is how the bounce is actually flown.
+    *
+    * <p>On the ground the key is held, so the player jumps. In the air, before the
+    * elytra is out, it is tapped -- held one tick, released the next -- because it
+    * is the press that deploys, and a key left down is not a press. Once gliding it
+    * is let go. The takeoff that follows is vanilla's own, sent by the client as any
+    * jump would be, which is the difference between a bounce the server agrees with
+    * and one it answers by standing you back up.
+    */
+   private void updateJumpKey() {
+      boolean previous = this.jumpKeyDown;
+      if (this.mc.player == null || !this.enabled() || !this.shouldAutoJump()) {
+         this.jumpKeyDown = false;
+      } else if (this.mc.player.isOnGround()) {
+         // The speed gate motion-y-boost used to carry on the module's own jump,
+         // moved to where the jump is decided now: stop taking off once the run is
+         // already fast enough, and let the speed carry.
+         this.jumpKeyDown = !(Boolean)this.motionYBoost.get()
+            || meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() < (Double)this.speed.get();
+      } else if (this.realGliding) {
+         this.jumpKeyDown = false;
+      } else {
+         this.jumpKeyDown = !previous;
+      }
+   }
+
+   /** Read by KeyBindingMixin: whether jump is down as far as the game is concerned. */
+   public boolean isJumpKeyForcedDown() {
+      return this.jumpKeyDown;
+   }
+
+   /** Fake fly does its own jumping, so the key is left alone there. */
+   public boolean shouldAutoJump() {
+      return (Boolean)this.bounce.get() && !(Boolean)this.fakeFly.get();
    }
 
    public boolean isFakeFlyEnabled() {

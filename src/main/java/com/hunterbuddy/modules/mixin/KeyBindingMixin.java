@@ -23,8 +23,12 @@ public abstract class KeyBindingMixin {
     public void hunterBuddy$isPressed(CallbackInfoReturnable<Boolean> cir) {
         if (Modules.get() != null) {
             this.efly = this.efly == null ? (ElytraBounce) Modules.get().get(ElytraBounce.class) : this.efly;
-            if (this.efly != null && this.efly.isActive() && this.efly.enabled() && this.id.equals("key.forward")) {
-                cir.setReturnValue(true);
+            if (this.efly != null && this.efly.isActive() && this.efly.enabled()) {
+                if (this.id.equals("key.forward")) {
+                    cir.setReturnValue(true);
+                } else if (this.id.equals("key.jump") && this.efly.shouldAutoJump()) {
+                    cir.setReturnValue(this.efly.isJumpKeyForcedDown());
+                }
             }
         }
     }
