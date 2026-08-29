@@ -70,7 +70,7 @@ public class AutoEXPPlus extends Module {
 
     private final Setting<Boolean> slowFinish = sgGeneral.add(new BoolSetting.Builder()
         .name("slow-finish")
-        .description("Repairs all the way to full instead of stopping at max-threshold, and eases off at the end: full speed up to 90 percent, then one bottle a second the rest of the way. The last tenth is where the waste is -- a bottle every tick there buys almost nothing, because the orbs from the ones already thrown are still on their way in.")
+        .description("Full speed up to 75 percent, then one bottle a second the rest of the way, until the item is full or the elytra goes off to be swapped. The last stretch is where the waste is -- a bottle every tick there buys almost nothing, because the orbs from the ones already thrown are still on their way in.")
         .defaultValue(false)
         .build()
     );
@@ -135,8 +135,8 @@ public class AutoEXPPlus extends Module {
     /** Ticks left before the next bottle while the slow finish is holding it back. */
     private int slowTimer;
 
-    /** Durability above which slow-finish stops throwing every tick, in percent. */
-    private static final double SLOW_ABOVE = 90.0;
+    /** Durability at which slow-finish stops throwing every tick, in percent. */
+    private static final double SLOW_ABOVE = 75.0;
 
     /** One bottle a second once past that. */
     private static final int SLOW_INTERVAL = 20;
@@ -225,8 +225,11 @@ public class AutoEXPPlus extends Module {
                 target = maxThreshold.get();
             }
 
-            // The last tenth, one bottle at a time.
-            if (slowFinish.get() && durability(repairing) > SLOW_ABOVE) {
+            // Full speed under seventy-five percent, one at a time past it, whatever
+            // brought us here. This sits on the throw itself rather than in the
+            // choosing above, because the elytra rotation reaches it by its own
+            // branch and would otherwise keep its old rate.
+            if (slowFinish.get() && durabilityPercent(repairing) >= SLOW_ABOVE) {
                 if (slowTimer > 0) {
                     slowTimer--;
                     return;
@@ -261,13 +264,7 @@ public class AutoEXPPlus extends Module {
 
     private boolean needsRepair(ItemStack itemStack, double threshold) {
         if (itemStack.isEmpty() || !Utils.hasEnchantments(itemStack, Enchantments.MENDING)) return false;
-        return durability(itemStack) <= threshold;
-    }
-
-    /** What is left of an item, in percent. */
-    private double durability(ItemStack itemStack) {
-        if (itemStack.isEmpty() || itemStack.getMaxDamage() == 0) return 100.0;
-        return (itemStack.getMaxDamage() - itemStack.getDamage()) / (double) itemStack.getMaxDamage() * 100;
+        return durabilityPercent(itemStack) <= threshold;
     }
 
     // Elytra rotation
