@@ -6,6 +6,10 @@ import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.mixin.accessors.LivingEntityAccessor;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.util.BounceProbe;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import com.hunterbuddy.modules.regear.util.Utils;
 import java.util.List;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
@@ -384,7 +388,6 @@ public class ElytraBounce extends Module {
    }
 
    public void onActivate() {
-      BounceProbe.get().start();
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
          this.startSprinting = this.mc.player.isSprinting();
          this.tempPath = null;
@@ -946,5 +949,39 @@ public class ElytraBounce extends Module {
             }
          }
       }
+   }
+
+   /**
+    * The button that starts and stops the probe.
+    *
+    * <p>Off unless asked for, and it used to start itself every time the module came
+    * on, which wrote a file nobody had asked for on every flight. What it records is
+    * only worth having when something is being chased: a line per tick and one per
+    * digging, movement, input, metadata and teleport packet, in the order they
+    * crossed the wire, which is the only way a two-tick disagreement with the server
+    * can be read at all.
+    *
+    * <p>The file is bounce-probe.log in the game folder, emptied at every start so a
+    * run stands on its own, and it keeps recording until it is stopped here or the
+    * module is switched off.
+    */
+   public WWidget getWidget(GuiTheme theme) {
+      WVerticalList list = theme.verticalList();
+
+      BounceProbe probe = BounceProbe.get();
+      list.add(theme.label(probe.isRecording() ? "Recording to bounce-probe.log." : "Probe idle."));
+
+      WButton toggle = list.add(theme.button(probe.isRecording() ? "Stop the probe log" : "Start the probe log")).widget();
+      toggle.action = () -> {
+         if (probe.isRecording()) {
+            probe.stop();
+            toggle.set("Start the probe log");
+         } else {
+            probe.start();
+            toggle.set(probe.isRecording() ? "Stop the probe log" : "Could not open the file");
+         }
+      };
+
+      return list;
    }
 }
