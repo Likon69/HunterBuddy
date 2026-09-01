@@ -84,7 +84,7 @@ public class MlepAirPlace extends Module {
     private boolean wasPressed = false;
 
     public MlepAirPlace() {
-        super(HunterBuddyAddon.UTILITY_CATEGORY, "h-air-place", "Places a block in air where your crosshair is pointing.");
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "mlep-air-place", "Places a block in air where your crosshair is pointing.");
     }
 
     @Override

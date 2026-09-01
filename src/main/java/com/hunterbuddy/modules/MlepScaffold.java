@@ -223,7 +223,7 @@ public class MlepScaffold extends Module {
    private int regearHotbarSlot = -1;
 
    public MlepScaffold() {
-      super(HunterBuddyAddon.UTILITY_CATEGORY, "h-scaffold", "Places blocks under you using GrimAC bypass.");
+      super(HunterBuddyAddon.UTILITY_CATEGORY, "mlep-scaffold", "Places blocks under you using GrimAC bypass.");
    }
 
    public void onActivate() {
@@ -514,12 +514,10 @@ public class MlepScaffold extends Module {
    }
 
    private int getRegearBlocksPerTick() {
-      double velocity = Math.abs(this.mc.player.getVelocity().y);
-      if (velocity > 0.45) {
-         return 3;
-      }
-
-      return velocity > 0.25 ? 2 : 1;
+      // One block a tick, whatever the fall speed: the landing needs the one
+      // under the feet, and the bursts of three left a little tower to clean
+      // up after every regear.
+      return 1;
    }
 
    private FindItemResult findRegearBlock() {

@@ -56,6 +56,7 @@ public class ElytraTakeoff {
    private int groundTicks = 0;
    private boolean jumpedThisAttempt = false;
    private boolean boosted = false;
+   private int jumpTapTicks = 0;
    private int rocketSlot = -1;
    private Listener listener;
 
@@ -85,6 +86,7 @@ public class ElytraTakeoff {
       this.groundTicks = 0;
       this.jumpedThisAttempt = false;
       this.boosted = false;
+      this.jumpTapTicks = 0;
       RotationUtils.getInstance().clearRotations();
       this.releaseJump();
       Utils.setPressed(mc.options.sneakKey, false);
@@ -123,7 +125,17 @@ public class ElytraTakeoff {
             }
             break;
          case DEPLOYING:
-            Utils.holdJump(mc);
+            // A held jump never opens the wings: vanilla deploys on a fresh
+            // press while falling, and that vanilla path is the one form of
+            // START_FALL_FLYING the server never argues with. The taps are
+            // scheduled by the deploy attempts below; between them the key
+            // stays up so every press is a real edge.
+            if (this.jumpTapTicks > 0) {
+               this.jumpTapTicks--;
+               Utils.holdJump(mc);
+            } else {
+               this.releaseJump();
+            }
             break;
          default:
             break;
@@ -179,6 +191,7 @@ public class ElytraTakeoff {
       this.groundTicks = 0;
       this.jumpedThisAttempt = false;
       this.boosted = false;
+      this.jumpTapTicks = 0;
       this.attempts++;
       this.releaseJump();
       if (this.listener != null) {
@@ -253,7 +266,10 @@ public class ElytraTakeoff {
          return;
       }
 
-      if (!this.boosted && this.phaseTicks >= 2) {
+      // On the very first tick of confirmed glide: from the ground the window
+      // between wings out and feet back down is a handful of ticks, and the
+      // rocket has to be inside it.
+      if (!this.boosted && this.phaseTicks >= 1) {
          if (this.useFirework(mc)) {
             this.boosted = true;
             this.phaseTicks = 0;
@@ -334,11 +350,13 @@ public class ElytraTakeoff {
    }
 
    private void deployElytra(MinecraftClient mc) {
-      if (mc.getNetworkHandler() != null) {
-         mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, Mode.START_FALL_FLYING));
-      }
-
-      mc.player.startGliding();
+      // One tap of the real jump key, nothing else. The client then sends its
+      // own START_FALL_FLYING with the state the server expects. The packet
+      // this used to send by hand is exactly the form that gets cancelled in
+      // the window after a jump — invisible from a sky-high platform where
+      // the glide has room to be retried, fatal at ground level, where every
+      // takeoff died within a tick of "Elytra gliding".
+      this.jumpTapTicks = 1;
    }
 
    private boolean useFirework(MinecraftClient mc) {

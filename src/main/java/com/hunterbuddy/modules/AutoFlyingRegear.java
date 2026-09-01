@@ -863,20 +863,35 @@ public class AutoFlyingRegear extends Module {
       } else {
          int minHeightForScaffold = buildLimit - (Integer)this.targetYOffset.get() - 50;
          if (playerY < minHeightForScaffold) {
-            if (this.stateTickCounter % 40 == 0 && (Boolean)this.debugMessages.get()) {
-               this.info(
-                  "Player at Y=" + playerY + " is below valid scaffold range (min: " + minHeightForScaffold + "). Waiting...",
-                  new Object[0]
-               );
-            }
+            // The idle phase has already announced "will scaffold at current
+            // position" for exactly this case; waiting here for a height a fall
+            // can only move away from was a two-hundred-block free fall onto
+            // the ground. Below the band the drop places where it is, the way
+            // the Nether branch always has.
+            canStartScaffold = this.hasSpaceBelow() && !this.mc.player.isOnGround() && yVelocity < 0.02;
+         } else {
+            canStartScaffold = playerY <= activationHeight
+               && this.hasSpaceBelow()
+               && !this.mc.player.isOnGround()
+               && yVelocity < 0.02;
+         }
+      }
 
-            return;
+      // The drop starts with the glide's forward speed still on the player,
+      // and a block placed straight below is behind him by the time he falls
+      // to its level -- the 22:26 log showed three obsidian hung in the air
+      // along the curve before one finally caught him. Hold the scaffold until
+      // the air drag has eaten the forward speed; only then does "straight
+      // below" stay below, and one block is enough.
+      Vec3d dropVelocity = this.mc.player.getVelocity();
+      double dropHSpeed = Math.hypot(dropVelocity.x, dropVelocity.z);
+      if (canStartScaffold && dropHSpeed > 0.08) {
+         if (this.stateTickCounter % 20 == 0 && (Boolean)this.debugMessages.get()) {
+            this.info("Waiting out forward momentum before scaffolding (h-speed: "
+               + String.format("%.2f", dropHSpeed) + " b/t)", new Object[0]);
          }
 
-         canStartScaffold = playerY <= activationHeight
-            && this.hasSpaceBelow()
-            && !this.mc.player.isOnGround()
-            && yVelocity < 0.02;
+         return;
       }
 
       if (!canStartScaffold || this.mlepScaffold == null) {
@@ -1431,11 +1446,9 @@ public class AutoFlyingRegear extends Module {
    }
 
    private int getMaxWallBuildPhase() {
-      if (!(Boolean)this.encapsule.get()) {
-         return 0;
-      }
-
-      return 2;
+      // One layer of wall and nothing over the head, whatever the encapsule box
+      // says: the second layer and the roof were ordered out on 2026-08-31.
+      return 0;
    }
 
    private boolean advanceWallBuildPhase() {

@@ -82,6 +82,13 @@ public class AutoEXPPlus extends Module {
         .build()
     );
 
+    private final Setting<Boolean> turnOffWhenDone = sgGeneral.add(new BoolSetting.Builder()
+        .name("turn-off-when-done")
+        .description("Turn the module off once nothing is left to repair: no target is chosen, and with the rotation on, no elytra the rotation would still pick up waits in the inventory. An elytra above swap-below is left alone by the rotation, so it does not hold the module open either.")
+        .defaultValue(false)
+        .build()
+    );
+
     private final Setting<Boolean> autoSwapElytra = sgElytra.add(new BoolSetting.Builder()
         .name("auto-swap-elytra")
         .description("Once the worn elytra is repaired, store it and wear the most damaged elytra from your inventory, so a whole stock gets repaired one after another. Needs mending on both and a mode that covers armor.")
@@ -132,6 +139,16 @@ public class AutoEXPPlus extends Module {
     private int repairingI;
     private int swapTimer;
 
+    /** Consecutive ticks with nothing to do, for turn-off-when-done. */
+    private int idleTicks;
+
+    /**
+     * Three seconds of confirmed idleness before the module lets go. A single
+     * quiet tick is not "done" -- it is also what the middle of a swap looks
+     * like, one elytra stored and the next not yet chosen.
+     */
+    private static final int DONE_TICKS = 60;
+
     /** Ticks left before the next bottle while the slow finish is holding it back. */
     private int slowTimer;
 
@@ -150,6 +167,7 @@ public class AutoEXPPlus extends Module {
         repairingI = -1;
         swapTimer = 0;
         slowTimer = 0;
+        idleTicks = 0;
     }
 
     @EventHandler
@@ -187,6 +205,24 @@ public class AutoEXPPlus extends Module {
                         break;
                     }
                 }
+            }
+        }
+
+        // Done means the module would do nothing from here on: no target chosen,
+        // and with the rotation running, no damaged elytra left in the inventory
+        // to be worn next. A pending swap is not done -- its candidate is still
+        // counted -- and a damaged worn elytra picks itself as target above.
+        if (turnOffWhenDone.get()) {
+            boolean done = repairingI == -1
+                && (!elytraRotationActive() || countRotationCandidates() == 0);
+
+            if (!done) {
+                idleTicks = 0;
+            }
+            else if (++idleTicks >= DONE_TICKS) {
+                info("Nothing left to repair, turning off.");
+                toggle();
+                return;
             }
         }
 
