@@ -24,7 +24,6 @@ import xaero.map.gui.IRightClickableElement;
 import xaero.map.gui.dropdown.rightclick.RightClickOption;
 import xaero.map.mods.SupportMods;
 import xaero.map.world.MapWorld;
-import xaeroplus.settings.Settings;
 import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
@@ -57,7 +56,12 @@ public abstract class MixinGuiMapWaypointFollower implements IRightClickableElem
       if (waypointFollower != null) {
          options.add(new RightClickOption("Add Hunt Waypoint", options.size(), this) {
             public void onAction(Screen screen) {
-               MixinGuiMapWaypointFollower.this.createWaypointFromRightClick(waypointFollower);
+               MixinGuiMapWaypointFollower.this.createWaypointFromRightClick(waypointFollower, false);
+            }
+         });
+         options.add(new RightClickOption("Add Route Mark", options.size(), this) {
+            public void onAction(Screen screen) {
+               MixinGuiMapWaypointFollower.this.createWaypointFromRightClick(waypointFollower, true);
             }
          });
       }
@@ -72,12 +76,21 @@ public abstract class MixinGuiMapWaypointFollower implements IRightClickableElem
             if (focused == null || !focused.getClass().getName().contains("TextField")) {
                WaypointFollower waypointFollower = (WaypointFollower)Modules.get().get(WaypointFollower.class);
                if (waypointFollower != null) {
-                  if (code == waypointFollower.getAddWaypointKeyCode()) {
+                  // Meteor fires no keybind with a screen open, so the fill is
+                  // triggered from here, where the map is certain to be open.
+                  if (code != -1 && code == waypointFollower.getSeedRouteKeyCode()) {
+                     waypointFollower.seedRouteFromMap();
+                     cir.setReturnValue(true);
+                     return;
+                  }
+
+                  boolean routeMark = code == waypointFollower.getAddRouteKeyCode();
+                  if (routeMark || code == waypointFollower.getAddWaypointKeyCode()) {
                      this.rightClickX = this.mouseBlockPosX;
                      this.rightClickY = this.mouseBlockPosY;
                      this.rightClickZ = this.mouseBlockPosZ;
                      this.rightClickCoordinateScale = this.mouseBlockCoordinateScale;
-                     this.createWaypointFromRightClick(waypointFollower);
+                     this.createWaypointFromRightClick(waypointFollower, routeMark);
                      cir.setReturnValue(true);
                   }
                }
@@ -86,9 +99,9 @@ public abstract class MixinGuiMapWaypointFollower implements IRightClickableElem
       }
    }
 
-   private void createWaypointFromRightClick(WaypointFollower waypointFollower) {
+   private void createWaypointFromRightClick(WaypointFollower waypointFollower, boolean routeMark) {
       try {
-         this.createWaypoint(this.rightClickX, this.rightClickZ, waypointFollower);
+         this.createWaypoint(this.rightClickX, this.rightClickZ, waypointFollower, routeMark);
       } catch (Exception e) {
          if (waypointFollower.shouldShowChatMessages()) {
             waypointFollower.error("Error creating waypoint: " + e.getMessage(), new Object[0]);
@@ -96,7 +109,7 @@ public abstract class MixinGuiMapWaypointFollower implements IRightClickableElem
       }
    }
 
-   private void createWaypoint(int x, int z, WaypointFollower waypointFollower) {
+   private void createWaypoint(int x, int z, WaypointFollower waypointFollower, boolean routeMark) {
       try {
          MinimapSession minimapSession = (MinimapSession)BuiltInHudModules.MINIMAP.getCurrentSession();
          if (minimapSession == null) {
@@ -110,45 +123,62 @@ public abstract class MixinGuiMapWaypointFollower implements IRightClickableElem
          RegistryKey<World> viewedDimension = this.getViewedDimension();
          int finalX = x;
          int finalZ = z;
-         MinimapWorld targetMinimapWorld = minimapSession.getWorldManager().getCurrentWorld();
-         boolean preferOverworldWaypoints = false;
+         MinimapWorld targetMinimapWorld;
+         Dimension storageDim;
 
-         try {
-            preferOverworldWaypoints = Settings.REGISTRY.owAutoWaypointDimension.get();
-         } catch (Exception var16) {
-         }
+         if (viewedDimension == World.END) {
+            targetMinimapWorld = minimapSession.getWorldManager().getCurrentWorld();
+            storageDim = Dimension.End;
+         } else {
+            // Always the overworld waypoint world, in overworld coordinates,
+            // whatever the map's dimension dropdown says. The follower reads
+            // that world and that frame and nothing else; and this world is
+            // asked for by name rather than searched in the dropdown's own
+            // container, because with "Nether" selected that container holds
+            // no overworld -- the search used to fail and the point, already
+            // multiplied by eight, landed in the Nether world eight times too far.
+            // Resolved, never created: XaeroPlus's own lookup registers a new
+            // world when the selected container has no overworld, and that is
+            // where the second "Overworld" in the list came from.
+            targetMinimapWorld = WaypointFollower.resolveOverworldWaypointWorld();
 
-         if (preferOverworldWaypoints && viewedDimension == World.NETHER) {
-            finalX = x * 8;
-            finalZ = z * 8;
-            MinimapWorldRootContainer rootContainer = minimapSession.getWorldManager().getCurrentRootContainer();
+            if (targetMinimapWorld == null) {
+               MinimapWorldRootContainer rootContainer = minimapSession.getWorldManager().getCurrentRootContainer();
 
-            for (MinimapWorld world : rootContainer.getWorlds()) {
-               try {
-                  String dimPath = world.getDimId().getValue().getPath();
-                  if ("overworld".equals(dimPath)) {
-                     targetMinimapWorld = world;
-                     break;
+               for (MinimapWorld world : rootContainer.getWorlds()) {
+                  try {
+                     if ("overworld".equals(world.getDimId().getValue().getPath())) {
+                        targetMinimapWorld = world;
+                        break;
+                     }
+                  } catch (Exception ignored) {
                   }
-               } catch (Exception var18) {
                }
             }
+
+            if (viewedDimension == World.NETHER) {
+               finalX = x * 8;
+               finalZ = z * 8;
+            }
+
+            storageDim = Dimension.Overworld;
          }
 
          if (targetMinimapWorld == null) {
-            if (waypointFollower.shouldShowChatMessages()) {
-               waypointFollower.error("MinimapWorld is null", new Object[0]);
-            }
-
+            waypointFollower.error("Could not find the overworld waypoint world; nothing placed. Select Overworld in the map's waypoint dimension and try again.", new Object[0]);
             return;
          }
 
-         Dimension storageDim = preferOverworldWaypoints && viewedDimension == World.NETHER
-            ? Dimension.Overworld
-            : this.getDimensionFromRegistryKey(viewedDimension);
          int y = this.getNormalizedY(storageDim);
-         String waypointName = waypointFollower.getWaypointPrefix() + waypointFollower.getWaypointCount();
-         Waypoint huntWaypoint = new Waypoint(finalX, y, finalZ, waypointName, "HW", WaypointColor.AQUA, WaypointPurpose.NORMAL, false);
+         // A route mark is a control point for seed-route, not a destination:
+         // its own prefix, its own numbering from one, and it is never handed
+         // to the follower's tracking below.
+         String waypointName = routeMark
+            ? waypointFollower.getRoutePrefix() + waypointFollower.getNextRouteNumber()
+            : waypointFollower.getWaypointPrefix() + waypointFollower.getWaypointCount();
+         Waypoint huntWaypoint = new Waypoint(finalX, y, finalZ, waypointName,
+            routeMark ? "RT" : "HW",
+            routeMark ? WaypointColor.YELLOW : WaypointColor.AQUA, WaypointPurpose.NORMAL, false);
          WaypointSet currentSet = targetMinimapWorld.getCurrentWaypointSet();
          if (currentSet == null) {
             if (waypointFollower.shouldShowChatMessages()) {
@@ -169,7 +199,7 @@ public abstract class MixinGuiMapWaypointFollower implements IRightClickableElem
          }
 
          SupportMods.xaeroMinimap.requestWaypointsRefresh();
-         if (waypointFollower.isActive()) {
+         if (!routeMark && waypointFollower.isActive()) {
             waypointFollower.addWaypointToTrack(finalX, y, finalZ);
          }
 

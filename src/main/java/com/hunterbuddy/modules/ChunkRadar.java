@@ -337,12 +337,20 @@ public class ChunkRadar extends Module {
         .build()
     );
 
+    private final Setting<Boolean> zoneAlerts = sgAlerts.add(new BoolSetting.Builder()
+        .name("zone-alerts")
+        .description("Call out and mark the squares where someone stopped and built in 1.12. Untick it and zones go completely quiet: no chat, no webhook, no blue waypoint.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Integer> zoneHits = sgAlerts.add(new IntSetting.Builder()
         .name("zone-hits")
         .description("Hits inside a five by five square that mean someone stopped and built there in 1.12. The rarest of the four events and the one worth a phone buzzing.")
         .defaultValue(9)
         .min(4)
         .sliderRange(4, 25)
+        .visible(zoneAlerts::get)
         .build()
     );
 
@@ -620,6 +628,12 @@ public class ChunkRadar extends Module {
     /** Two fitted lines within this many degrees of each other count as the same trail. */
     private static final double SAME_LINE_DEGREES = 10.0;
 
+    /** A second zone within this many chunks of one already marked is the same place. */
+    private static final int ZONE_SPACING = 32;
+
+    /** In the Nether, any trail within this many chunks of you may be the one being flown. */
+    private static final double GUIDE_NEAR_CHUNKS = 64.0;
+
     /** A crossing needs this much, and no more: the loaded band cannot offer more. */
     private static final int CROSS_MIN_HITS = 4;
     private static final int CROSS_MIN_SPREAD = 12;
@@ -685,6 +699,17 @@ public class ChunkRadar extends Module {
 
     /** The stored entry the live line is writing into, or null before one is acquired. */
     private TrailStore.Trail current;
+
+    /**
+     * The trail whose guide was flown in the Nether, kept across the surfacing.
+     *
+     * <p>Surfacing a long hop along the guide puts you far past the entry's
+     * recorded span, where its line -- however good -- is off by the lever arm,
+     * and the adoption test reads the very road the guide led you down as a
+     * different one. The continuity of the flight is evidence the geometry
+     * cannot carry, so it is carried here. Consumed by the next acquisition.
+     */
+    private String guidedTrailId;
     private String lastDimension;
     private long lastSweepMs;
     private boolean cleanupPending;
@@ -861,6 +886,7 @@ public class ChunkRadar extends Module {
 
     private void reset() {
         current = null;
+        guidedTrailId = null;
         lastDimension = null;
         lastSweepMs = 0L;
         arrivals.clear();
@@ -1706,8 +1732,10 @@ public class ChunkRadar extends Module {
         // plain stretch of trail clears that on its own, over and over, along the
         // same line. There is no threshold that saves it, so it does not run.
         if (include119.get()) return;
+        if (!zoneAlerts.get()) return;
 
         int count = 0;
+        int ring = 0;
         int offCorridor = 0;
         int minX = Integer.MAX_VALUE;
         int maxX = Integer.MIN_VALUE;
@@ -1717,7 +1745,15 @@ public class ChunkRadar extends Module {
         // Both lists: a zone is a thing on the ground, and whether a hit happens to
         // belong to the line being followed says nothing about that.
         for (ChunkPos pos : hits()) {
-            if (Math.abs(pos.x - centre.x) > 2 || Math.abs(pos.z - centre.z) > 2) continue;
+            int adx = Math.abs(pos.x - centre.x);
+            int adz = Math.abs(pos.z - centre.z);
+            if (adx > 4 || adz > 4) continue;
+
+            if (adx > 2 || adz > 2) {
+                ring++;
+                continue;
+            }
+
             count++;
             minX = Math.min(minX, pos.x);
             maxX = Math.max(maxX, pos.x);
@@ -1727,7 +1763,22 @@ public class ChunkRadar extends Module {
         }
 
         if (count < zoneHits.get()) return;
+
+        // A zone is a dense square in sparse ground. When the ring around the
+        // square is as thick as the square itself, this is simply an old region
+        // -- the density gate sees those too, but only after a few seconds of
+        // chunks, and those few seconds used to fire three or four zones at the
+        // edge of every pocket.
+        if (ring >= zoneHits.get()) return;
+
         if (onHighwayOrSpawn()) return;
+
+        // Not on the trail being followed either. A big cluster runs to
+        // seventeen chunks and two wide, which clears nine-in-five-by-five and
+        // the width test on its own -- one permanent blue marker per cluster,
+        // the whole way down a road already marked at both ends.
+        if (acquired && fitted
+            && Math.abs(lateral(centre.x, centre.z)) <= forkDistance.get() * DRIFT_MULTIPLIER) return;
 
         // Dense is not enough: a thick stretch of trail, two chunks wide, puts nine
         // hits in a five by five square on its own. A zone is wide as well —
@@ -1735,6 +1786,15 @@ public class ChunkRadar extends Module {
         // square footprint when there is not.
         boolean wide = fitted ? offCorridor >= 3 : (maxX - minX >= 2 && maxZ - minZ >= 2);
         if (!wide) return;
+
+        // One zone per place, not one per five-by-five cell: a single cluster
+        // spans two or three cells, and used to be announced once for each --
+        // three blue markers a hundred blocks apart for one spot.
+        for (ChunkPos mark : zoneMarks) {
+            int dx = mark.x - centre.x;
+            int dz = mark.z - centre.z;
+            if (dx * dx + dz * dz < ZONE_SPACING * ZONE_SPACING) return;
+        }
 
         long zone = ChunkPos.toLong(Math.floorDiv(centre.x, 5), Math.floorDiv(centre.z, 5));
         if (!announcedZones.add(zone)) return;
@@ -2271,6 +2331,15 @@ public class ChunkRadar extends Module {
         if (crossing.spread < CROSS_MIN_SPREAD) return;
         if (crossing.residual > maxResidual.get()) return;
 
+        // The trail being followed is not a sighting. Its own loose hits -- the
+        // wide side of a cluster, a fork -- fit a line a chunk or two beside
+        // the live one, and as that side-line creeps along with you it keys
+        // afresh every few hundred chunks: a marker dropped on the road you
+        // were already flying, again and again, all night.
+        if (acquired && fitted
+            && Math.abs(lateral(crossing.originX, crossing.originZ)) <= forkDistance.get() * DRIFT_MULTIPLIER
+            && between(crossing.heading(), heading()) <= switchDegrees.get()) return;
+
         long key = geometryKey(crossing);
         if (!announcedCrossings.add(key)) return;
         if (onHighwayOrSpawn()) return;
@@ -2345,6 +2414,11 @@ public class ChunkRadar extends Module {
 
     private void flushSightings() {
         if (pendingSightings.isEmpty()) return;
+
+        // Checked here as well as at acquisition: a sighting can sit out its
+        // twenty seconds while the line it belongs to is already the one being
+        // followed, and firing it then marks the trail under your own feet.
+        if (acquired && fitted) pendingSightings.removeIf(this::isSameAsLive);
 
         long now = System.currentTimeMillis();
         List<Sighting> due = new ArrayList<>();
@@ -2536,15 +2610,21 @@ public class ChunkRadar extends Module {
             dirZ = trail.dirZ;
             current = trail;
 
+            // Owned before it is fitted: fit() only reads the line once it is
+            // acquired, and unowned it fits the pool -- which is empty on
+            // connecting. The resumed chunks were never fitted at all, so every
+            // resume failed in silence: no line, no start and end markers, and
+            // none of the guards that measure against the line being followed.
+            acquired = true;
             fit();
             if (!aligned) {
                 line.clear();
                 current = null;
                 fitted = false;
+                acquired = false;
                 continue;
             }
 
-            acquired = true;
             released = false;
             announcedHeading = spread >= headingSpread.get() ? heading() : Double.NaN;
             info("Trail resumed from memory: heading %.1f degrees, %d hits.", heading(), line.size());
@@ -2923,7 +3003,9 @@ public class ChunkRadar extends Module {
         // The overworld, which is the only place this module marks anything, and
         // the stored dimension string is carried so the file stays readable the
         // day that changes.
-        MinimapWorld world = WaypointAPI.getMinimapWorld(World.OVERWORLD);
+        // Resolved through the follower's lookup rather than XaeroPlus's, which
+        // registers a new "Overworld" when the selected container has none.
+        MinimapWorld world = WaypointFollower.resolveOverworldWaypointWorld();
         if (world == null) world = session.getWorldManager().getCurrentWorld();
         return world;
     }
@@ -3028,11 +3110,31 @@ public class ChunkRadar extends Module {
         String dimension = dim();
         TrailStore.Trail found = null;
 
-        for (TrailStore.Trail trail : store.forDimension(dimension)) {
-            if (Math.abs(trail.lateral(originX, originZ)) > forkDistance.get() * DRIFT_MULTIPLIER) continue;
-            if (between(trail.heading, heading()) > switchDegrees.get()) continue;
-            found = trail;
-            break;
+        // The trail whose guide was just flown claims the line first, and by
+        // its name rather than its geometry. Surfacing forty thousand blocks
+        // along the guide puts you far past the entry's span, where the lateral
+        // test below reads the very road you were led down as a different one
+        // -- a fresh entry every hop, and a chord that never grows past a
+        // window. Only the heading still gets a say: surfacing onto a genuine
+        // crossing road must not weld it to the one below.
+        String guided = guidedTrailId;
+        guidedTrailId = null;
+
+        if (guided != null) {
+            for (TrailStore.Trail trail : store.forDimension(dimension)) {
+                if (!trail.id.equals(guided)) continue;
+                if (between(trail.heading, heading()) <= switchDegrees.get()) found = trail;
+                break;
+            }
+        }
+
+        if (found == null) {
+            for (TrailStore.Trail trail : store.forDimension(dimension)) {
+                if (Math.abs(trail.lateral(originX, originZ)) > forkDistance.get() * DRIFT_MULTIPLIER) continue;
+                if (between(trail.heading, heading()) > switchDegrees.get()) continue;
+                found = trail;
+                break;
+            }
         }
 
         current = found != null ? found : store.create(dimension);
@@ -3090,11 +3192,12 @@ public class ChunkRadar extends Module {
         // hit, and the two overlap on the tick a line is picked up.
         if (!placeStart && current.hits == line.size()) return;
 
-        current.originX = originX;
-        current.originZ = originZ;
-        current.dirX = dirX;
-        current.dirZ = dirZ;
-        current.heading = heading();
+        // Whether the line still runs the way the entry records, read before the
+        // entry is overwritten. A fresh entry has no way yet and agrees with
+        // anything.
+        boolean sameWay = current.endWaypoint == null
+            || Math.abs(MathHelper.wrapDegrees((float) (heading() - current.heading))) <= switchDegrees.get();
+
         current.hits = line.size();
         current.lastSeen = System.currentTimeMillis();
         if (current.firstSeen == 0L) current.firstSeen = current.lastSeen;
@@ -3120,9 +3223,63 @@ public class ChunkRadar extends Module {
 
         if (first == null || last == null) return;
 
+        // The start anchor is pinned where the trail was first acquired --
+        // written once, when the entry has no marker yet, and never again. It
+        // used to be rewritten from the window's oldest chunk on every adoption
+        // and every rename, so a road followed for twenty thousand chunks kept
+        // an anchor pair barely a window apart, and the chord the Nether guide
+        // rides never grew straighter than the last few hundred chunks.
+        if (current.startWaypoint == null) {
+            current.startX = (first.x << 4) + 8;
+            current.startZ = (first.z << 4) + 8;
+        }
+
+        // The far end only ever advances, and only while the line still runs
+        // the trail's own way. Flown backwards, the window's far edge sits
+        // behind the recorded end, and moving the anchor there would be a
+        // retreat dressed up as growth.
+        double candidateEnd = along(last.x, last.z);
+        double recordedEnd = along((current.endX - 8) / 16.0, (current.endZ - 8) / 16.0);
+
+        if (current.endWaypoint == null || (sameWay && candidateEnd > recordedEnd)) {
+            current.endX = (last.x << 4) + 8;
+            current.endZ = (last.z << 4) + 8;
+        }
+
+        // The stored geometry is the chord between the two anchors once they
+        // are far enough apart to trust, and the live fit before that. The fit
+        // only ever sees the window, and a window's heading wobbles a fraction
+        // of a degree -- ridden over a long Nether hop, that fraction is the
+        // whole error. The chord spans everything the entry has ever covered,
+        // and every reader of the entry -- the guide, the resume, the adoption
+        // test, the memory drawn on the map -- gets the same straighter answer.
+        double sx = (current.startX - 8) / 16.0;
+        double sz = (current.startZ - 8) / 16.0;
+        double ex = (current.endX - 8) / 16.0;
+        double ez = (current.endZ - 8) / 16.0;
+        double ax = ex - sx;
+        double az = ez - sz;
+        double anchorSpan = Math.hypot(ax, az);
+
+        if (anchorSpan >= headingSpread.get()) {
+            current.originX = sx;
+            current.originZ = sz;
+            current.dirX = ax / anchorSpan;
+            current.dirZ = az / anchorSpan;
+        } else {
+            current.originX = originX;
+            current.originZ = originZ;
+            current.dirX = dirX;
+            current.dirZ = dirZ;
+        }
+
+        current.heading = MathHelper.wrapDegrees(
+            (float) (Math.toDegrees(Math.atan2(current.dirZ, current.dirX)) - 90.0));
+
         // The name carries the heading, and the heading moves as the fit settles.
         // Without dropping the old one first, every degree of correction left
-        // another orphan on the map under a name nothing would ever look for again.
+        // another orphan on the map under a name nothing would ever look for
+        // again. A rename moves the label and nothing else: the anchors stay.
         int cap = (int) Math.round(current.heading);
         String startName = "Trail " + cap + " " + current.id;
         String endName = startName + " end";
@@ -3133,33 +3290,26 @@ public class ChunkRadar extends Module {
             }
 
             current.startWaypoint = startName;
-            current.startX = (first.x << 4) + 8;
-            current.startZ = (first.z << 4) + 8;
             putWaypoint(current.dimension, startName, "T", 4, current.startX, current.startZ,
                 temporaryWaypoints.get());
         }
 
-        // The far end moves as the trail grows; the near end never does.
         if (current.endWaypoint != null && !endName.equals(current.endWaypoint)) {
             dropWaypoint(current.dimension, current.endWaypoint);
         }
 
         current.endWaypoint = endName;
-        current.endX = (last.x << 4) + 8;
-        current.endZ = (last.z << 4) + 8;
         putWaypoint(current.dimension, endName, "E", 4, current.endX, current.endZ, temporaryWaypoints.get());
 
         // Taken from the two ends themselves, never from the chunk list.
         //
         // That list is windowed to memory, so on a trail longer than the window
         // its earliest entry is not the trail's beginning — it is simply the
-        // oldest chunk still held. Measured on a 875 chunk trail with a 500 chunk
-        // window, the stored extent began six kilometres past its own start
-        // waypoint, which would have made the memory undrawable over the first
-        // third of it and unresumable there. The two ends do not move: the start
-        // is set once at acquisition, the end follows the far edge.
-        double startAlong = along((current.startX - 8) / 16.0, (current.startZ - 8) / 16.0);
-        double endAlong = along((current.endX - 8) / 16.0, (current.endZ - 8) / 16.0);
+        // oldest chunk still held. Measured in the entry's own frame, so that
+        // the resume test and the drawn memory read the same segment the
+        // anchors describe.
+        double startAlong = (sx - current.originX) * current.dirX + (sz - current.originZ) * current.dirZ;
+        double endAlong = (ex - current.originX) * current.dirX + (ez - current.originZ) * current.dirZ;
         current.spanMin = Math.min(startAlong, endAlong);
         current.spanMax = Math.max(startAlong, endAlong);
 
@@ -3216,11 +3366,23 @@ public class ChunkRadar extends Module {
         // Deleting one marker is a gesture; every marker vanishing at once is an
         // accident somewhere else. Searching all the sets should already have made
         // that impossible, and this is what stands behind it if it is not.
-        // One or a hundred: the memory is never emptied wholesale. With a single
-        // trail in the file the old form of this guard protected nothing, which is
-        // precisely the case it had to cover.
+        // One or a hundred: the memory is never emptied wholesale. And an
+        // accident is undone, not merely survived: the markers are put back
+        // where the file says they were, instead of warning every ten seconds
+        // for fourteen hours over a map with no start and no end on it. With a
+        // single trail in the file this also means deleting its marker cannot
+        // forget it -- the panel button and .trails forget are the way there.
         if (!marked.isEmpty() && doomed.size() == marked.size()) {
-            HunterBuddyAddon.LOG.warn("ChunkRadar: every trail waypoint went missing at once, keeping the memory");
+            HunterBuddyAddon.LOG.warn("ChunkRadar: every trail waypoint went missing at once, putting them back");
+
+            for (TrailStore.Trail trail : doomed) {
+                putWaypoint(dimension, trail.startWaypoint, "T", 4, trail.startX, trail.startZ, false);
+                if (trail.endWaypoint != null) {
+                    putWaypoint(dimension, trail.endWaypoint, "E", 4, trail.endX, trail.endZ, false);
+                }
+            }
+
+            SupportMods.xaeroMinimap.requestWaypointsRefresh();
             return;
         }
 
@@ -3699,24 +3861,97 @@ public class ChunkRadar extends Module {
         // eighth is applied once, in netherBlockAt, so there is a single place
         // where the two worlds meet and a single place to get it wrong.
         //
-        if (fitted) return new double[]{originX, originZ, dirX, dirZ};
+        if (fitted) {
+            if (!live() && current != null) guidedTrailId = current.id;
+
+            // The same line the overworld draws, through the same local origin
+            // -- the fit sits on the trail where you are, and the guide must
+            // agree with it at the portal. The chord only lends its heading:
+            // taken whole, its origin is kilometres back and the lever arm put
+            // the guide beside the road at the very spot the two dimensions
+            // were compared. Oriented by the live direction so ahead stays
+            // ahead.
+            double[] chord = anchorChord(current);
+            if (chord != null) {
+                double gx = chord[2];
+                double gz = chord[3];
+
+                if (gx * dirX + gz * dirZ < 0.0) {
+                    gx = -gx;
+                    gz = -gz;
+                }
+
+                return new double[]{originX, originZ, gx, gz};
+            }
+
+            return new double[]{originX, originZ, dirX, dirZ};
+        }
 
         TrailStore.Trail best = null;
         double bestOff = Double.MAX_VALUE;
+        TrailStore.Trail freshest = null;
+        long freshestSeen = Long.MIN_VALUE;
         // Your Nether position as the overworld chunk index it answers to.
         double[] me = playerIndex(8.0);
         double cx = me[0];
         double cz = me[1];
 
+        // The freshest trail within reach, not the nearest line. A night of
+        // losing and re-finding the same road leaves several entries on it, and
+        // the short ones carry headings degrees out -- their infinite lines pass
+        // closest to you exactly where they are most wrong, and the guide drawn
+        // from one of them sits a constant few dozen blocks beside the road the
+        // whole way down. The entry written to most recently is the road being
+        // flown; the nearest line is only the answer when nothing nearby is.
         for (TrailStore.Trail trail : store.forDimension(OVERWORLD)) {
             double off = Math.abs(trail.lateral(cx, cz));
-            if (off >= bestOff) continue;
-            bestOff = off;
-            best = trail;
+
+            if (off < bestOff) {
+                bestOff = off;
+                best = trail;
+            }
+
+            if (off <= GUIDE_NEAR_CHUNKS && trail.lastSeen > freshestSeen) {
+                freshestSeen = trail.lastSeen;
+                freshest = trail;
+            }
         }
 
+        if (freshest != null) best = freshest;
         if (best == null) return null;
-        return new double[]{best.originX, best.originZ, best.dirX, best.dirZ};
+
+        if (!live()) guidedTrailId = best.id;
+
+        double[] chord = anchorChord(best);
+        return chord != null ? chord : new double[]{best.originX, best.originZ, best.dirX, best.dirZ};
+    }
+
+    /**
+     * The guide taken from the trail's two end markers instead of the fit.
+     *
+     * <p>The fit only ever holds the last few hundred chunks -- everything
+     * further back has been forgotten -- so its heading carries a wobble of a
+     * fraction of a degree. Above ground that wobble is invisible: the next
+     * cluster corrects it before it has cost twenty blocks. Below there is no
+     * next cluster, the angle is ridden exactly as it stood at the portal, and
+     * a quarter of a degree held through a nether hop surfaces a hundred
+     * blocks off the trail. The two markers span the whole road end to end --
+     * the start never moves, the end follows the far edge -- and the straight
+     * line between them is the best heading the file has to offer.
+     */
+    private double[] anchorChord(TrailStore.Trail trail) {
+        if (trail == null || trail.startWaypoint == null || trail.endWaypoint == null) return null;
+
+        double sx = (trail.startX - 8) / 16.0;
+        double sz = (trail.startZ - 8) / 16.0;
+        double dx = (trail.endX - 8) / 16.0 - sx;
+        double dz = (trail.endZ - 8) / 16.0 - sz;
+        double length = Math.hypot(dx, dz);
+
+        // Under this the chord is as noisy as the fit it would replace.
+        if (length < headingSpread.get()) return null;
+
+        return new double[]{sx, sz, dx / length, dz / length};
     }
 
     /** Where you are in the guide's own frame: distance along it, in overworld chunks. */
