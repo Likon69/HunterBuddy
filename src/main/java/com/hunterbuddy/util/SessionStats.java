@@ -17,6 +17,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
+import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -69,6 +70,23 @@ public final class SessionStats {
 
     private double lastX = Double.NaN;
     private double lastZ = Double.NaN;
+
+    /**
+     * Set when a {@link PlayerPositionLookS2CPacket} lands, cleared on the next tick's reading.
+     *
+     * <p>A Grim setback arrives as exactly this packet: the server snapping us back after our
+     * own flight went further than it allows. That snap is small enough to sail under the
+     * hundred-block teleport guard below, and without this flag it read as ordinary travel — the
+     * illegal advance counted once when it happened, the correction counted again snapping back,
+     * so every setback added its own round trip to the odometer on top of nothing gained. A plain
+     * resync does the same thing on a smaller scale, so every packet of this type gets the same
+     * treatment rather than trying to tell the two apart.
+     *
+     * <p>Written from the netty thread — packets arrive there, the same crossing
+     * {@link com.hunterbuddy.modules.RocketBoost} guards with its own volatile flag — and read
+     * from the main thread on the following tick.
+     */
+    private volatile boolean positionCorrected = false;
 
     private String lastWorld = "";
 
@@ -206,6 +224,7 @@ public final class SessionStats {
         containerDirty = false;
         lastX = Double.NaN;
         lastZ = Double.NaN;
+        positionCorrected = false;
     }
 
     @EventHandler
@@ -231,6 +250,15 @@ public final class SessionStats {
 
         if (stack.isOf(Items.FIREWORK_ROCKET)) rocketsUsed++;
         else if (stack.isOf(Items.EXPERIENCE_BOTTLE)) xpBottlesUsed++;
+    }
+
+    /**
+     * Notices the server forcing our position, so the tick after it doesn't read the snap as
+     * distance. See {@link #positionCorrected} for why.
+     */
+    @EventHandler
+    private void onPacketReceive(PacketEvent.Receive event) {
+        if (event.packet instanceof PlayerPositionLookS2CPacket) positionCorrected = true;
     }
 
     /**
@@ -369,7 +397,13 @@ public final class SessionStats {
         double x = MeteorClient.mc.player.getX();
         double z = MeteorClient.mc.player.getZ();
 
-        if (!Double.isNaN(lastX)) {
+        // A position the server just forced on us is a correction, not a step we took - counting
+        // it would double up every Grim setback, once for the illegal advance and again for the
+        // snap back. Skipping it here just re-bases the reading, the same as the NaN case below.
+        boolean corrected = positionCorrected;
+        positionCorrected = false;
+
+        if (!corrected && !Double.isNaN(lastX)) {
             double step = Math.sqrt((x - lastX) * (x - lastX) + (z - lastZ) * (z - lastZ));
             // Same teleport guard the other odometers use: a hundred-block step in one tick is
             // a portal or a setback, not distance travelled.
