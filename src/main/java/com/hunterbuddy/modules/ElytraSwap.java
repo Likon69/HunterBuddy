@@ -208,12 +208,9 @@ public class ElytraSwap extends Module {
          this.stageTimer = 0;
       } else if ((Boolean)this.notifySwap.get()) {
          this.warning(
-            "No better elytra found (equipped: "
-               + String.format("%.1f", this.getDurabilityPercent(equipped))
-               + "%, threshold: "
-               + minPercent
-               + "%)",
-            new Object[0]
+            "No better elytra found (equipped: %.1f%%, threshold: %.0f%%)",
+            this.getDurabilityPercent(equipped),
+            minPercent
          );
          this.cooldownTimer = (Integer)this.swapCooldown.get();
       }
@@ -287,10 +284,8 @@ public class ElytraSwap extends Module {
                ItemStack newChest = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
                if ((Boolean)this.notifySwap.get() && this.isElytra(newChest)) {
                   this.info(
-                     "Swapped to elytra at "
-                        + String.format("%.1f", this.getDurabilityPercent(newChest))
-                        + "% durability",
-                     new Object[0]
+                     "Swapped to elytra at %.1f%% durability",
+                     this.getDurabilityPercent(newChest)
                   );
                }
 
