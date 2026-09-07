@@ -157,6 +157,15 @@ public class MlepMine extends Module {
                .visible(() -> this.queueConfig.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
             .build()
       );
+   private final Setting<Boolean> queueThroughConfig = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("queue-through")
+                     .description("Clicking the block being mined queues the first free block behind it along your crosshair instead of doing nothing, so a whole row can be lined up before the front one breaks. A click on a block still waiting in the queue takes it back out, same as always. One block per click; two clicks on consecutive ticks read as one held press, not two.")
+                  .defaultValue(false)
+               .visible(() -> this.queueConfig.get() && this.modeConfig.get() == MlepMine.SpeedmineMode.PACKET)
+            .build()
+      );
    private final Setting<SettingColor> queueColor = this.sgRender
       .add(
          new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
@@ -449,6 +458,13 @@ public class MlepMine extends Module {
     */
    private final List<MlepMine.MiningData> pendingQueue = new ArrayList<>();
    private static final int PENDING_QUEUE_LIMIT = 16;
+   /**
+    * How many blocks deep {@link #queueThrough} walks before giving up on
+    * that click. One more than {@link #PENDING_QUEUE_LIMIT}: the walk skips
+    * every block already queued, so a full backlog alone would eat the whole
+    * depth and leave nothing for the one new block the click is for.
+    */
+   private static final int QUEUE_THROUGH_MAX_DEPTH = PENDING_QUEUE_LIMIT + 1;
    private boolean queueClearPressed;
 
    /**
@@ -1344,9 +1360,19 @@ public class MlepMine extends Module {
       // of the line, so the gesture stopped removing and started reordering.
       if (pos.equals(this.droppedByPress)) return;
 
-      // Already ours. A repeat has nothing to add.
-      if (this.isMiningBlock(pos)) return;
-      if (this.pendingQueue.stream().anyMatch(d -> d.getPos().equals(pos))) return;
+      // Already ours. A repeat has nothing to add — but a fresh click on the
+      // block being mined is BepHax's queue-through: it means "keep going",
+      // so it extends the line instead of doing nothing. A queued block never
+      // reaches this as a fresh click: the removeIf above already took it out
+      // on the way here, which is the cancel gesture the queue has always
+      // had — queue-through only ever fires off the front of the line, not a
+      // block still waiting behind it.
+      boolean alreadyOurs = this.isMiningBlock(pos)
+         || this.pendingQueue.stream().anyMatch(d -> d.getPos().equals(pos));
+      if (alreadyOurs) {
+         if (fresh && queued && this.queueThroughConfig.get()) this.queueThrough(pos, miningData.getDirection());
+         return;
+      }
       if (miningData.getState().isAir()) return;
 
       // Anything already waiting has to be served first. Testing only for a block
@@ -1395,6 +1421,47 @@ public class MlepMine extends Module {
       }
 
       this.pendingQueue.add(data);
+   }
+
+   /**
+    * BepHax's queue-through: a click landing on the block currently being
+    * mined builds the line one block deeper instead of doing nothing, so
+    * clicking the same tunnel face repeatedly queues it out click by click —
+    * {@code fresh} keeps a held button from drilling the whole queue on its
+    * own. Only reached off the front of the line: a click on a block still
+    * waiting behind it takes that block back out instead, same as it always
+    * has (see the call site in {@link #clickMine}).
+    *
+    * <p>Walks straight back from the clicked face — the opposite of the
+    * direction the ray that hit it came from — skipping air and anything
+    * already spoken for, until it reaches the first block this module would
+    * actually take. That block is handed to the ordinary click path rather
+    * than queued directly here, so every existing rule — the backlog limit,
+    * the grim delay door, the vanilla block skip — still applies to it same
+    * as a real click would.
+    */
+   private void queueThrough(BlockPos from, Direction hitFace) {
+      Direction step = hitFace.getOpposite();
+      BlockPos candidate = from;
+
+      for (int i = 0; i < QUEUE_THROUGH_MAX_DEPTH; i++) {
+         candidate = candidate.offset(step);
+         BlockPos here = candidate;
+
+         if (this.isMiningBlock(here)) continue;
+         if (this.pendingQueue.stream().anyMatch(d -> d.getPos().equals(here))) continue;
+
+         BlockState state = this.mc.world.getBlockState(candidate);
+         if (state.isAir()) continue;
+         // A block this module won't touch at all ends the walk rather than
+         // being skipped over — vanilla-only and unbreakable blocks are a
+         // wall for this line, not a single missing brick in it.
+         if (this.leaveToVanilla(state, candidate)) return;
+         if (state.getHardness(this.mc.world, candidate) == -1.0F) return;
+
+         this.clickMine(new MlepMine.MiningData(candidate, hitFace), true);
+         return;
+      }
    }
 
    /**
