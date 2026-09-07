@@ -29,6 +29,8 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
 import meteordevelopment.meteorclient.systems.modules.player.AutoEat;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
+import com.hunterbuddy.util.LifetimeStats;
+import com.hunterbuddy.util.SessionStats;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -48,6 +50,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.slot.Slot;
@@ -82,6 +85,20 @@ public class AutoFlyingRegear extends Module {
          new Builder().name("min-elytras").description("Minimum number of valid elytras to trigger regear").defaultValue(2)
             .min(1)
             .max(10)
+            .build()
+      );
+   private final Setting<Integer> minGaps = this.sgTriggers
+      .add(
+         new Builder().name("min-gaps").description("Regear when fewer enchanted golden apples than this are carried. 0 = never for that reason.").defaultValue(0)
+            .min(0)
+            .sliderMax(64)
+            .build()
+      );
+   private final Setting<Integer> minTotems = this.sgTriggers
+      .add(
+         new Builder().name("min-totems").description("Regear when fewer totems of undying than this are carried (offhand included). 0 = never for that reason.").defaultValue(0)
+            .min(0)
+            .sliderMax(16)
             .build()
       );
    private final Setting<Integer> goalElytras = this.sgTriggers
@@ -161,6 +178,16 @@ public class AutoFlyingRegear extends Module {
             .sliderRange(5, 30)
             .build()
       );
+   private final Setting<Integer> lavaWaitMaxSeconds = this.sgPlatform
+      .add(
+         new Builder().name("lava-wait-max-seconds")
+                  .description("How long to keep flying over lava or unloaded ground before regearing anyway. 0 = drop immediately.")
+               .defaultValue(60)
+            .min(0)
+            .max(600)
+            .sliderRange(0, 300)
+            .build()
+      );
    private final Setting<Integer> eChestHotbarSlot = this.sgHotbar
       .add(
          new Builder().name("ender-chest-slot").description("Hotbar slot for ender chest (0-8)").defaultValue(7)
@@ -187,6 +214,20 @@ public class AutoFlyingRegear extends Module {
          new Builder().name("rocket-slot").description("Hotbar slot for firework rockets (0-8)").defaultValue(4)
             .range(0, 8)
             .sliderRange(0, 8)
+            .build()
+      );
+   private final Setting<Integer> goalGaps = this.sgRestock
+      .add(
+         new Builder().name("goal-gaps").description("Enchanted golden apples to carry after a regear, pulled from any shulker in the ender chest that holds some, before the rockets fill what is left. 0 = leave them alone.").defaultValue(32)
+            .min(0)
+            .sliderMax(128)
+            .build()
+      );
+   private final Setting<Integer> goalTotems = this.sgRestock
+      .add(
+         new Builder().name("goal-totems").description("Totems of undying to carry after a regear, same way; one goes to the offhand if it is empty. 0 = leave them alone.").defaultValue(4)
+            .min(0)
+            .sliderMax(27)
             .build()
       );
    private final Setting<Boolean> autoReEnable = this.sgRestock
@@ -272,6 +313,68 @@ public class AutoFlyingRegear extends Module {
    private BlockPos shulkerPlacePos = null;
    private BlockPos echestPos = null;
    private boolean processingElytras = true;
+   /** Which extra kind is being restocked between the elytras and the rockets, {@link Extra#NONE} outside that. */
+   private Extra extra = Extra.NONE;
+
+   /** The restocks that come between the elytras and the rockets: the rockets fill whatever room is left, so these go first. */
+   private enum Extra {
+      NONE,
+      GAP,
+      TOTEM
+   }
+
+   /** One regear, from the decision to land to the takeoff, as the HUD and the counters see it. */
+   public static final class Run {
+      public final long startedMs = System.currentTimeMillis();
+      /** Zero while the run is still going. */
+      public long endedMs;
+      public AutoFlyingRegear.ElytraMode mode;
+      /** "complete", "takeoff failed: …" or "aborted"; null while running. */
+      public String outcome;
+      /** How long the flight went on over lava before this run could start. */
+      public int lavaWaitSeconds;
+      public int rocketsBefore;
+      public int elytrasBefore;
+      public int gapsBefore;
+      public int totemsBefore;
+      public int bottlesBefore;
+      public int rocketsAfter;
+      public int elytrasAfter;
+      public int gapsAfter;
+      public int totemsAfter;
+      public int bottlesAfter;
+      public int shulkersTaken;
+
+      public long durationMs() {
+         return (this.endedMs == 0L ? System.currentTimeMillis() : this.endedMs) - this.startedMs;
+      }
+   }
+
+   /** The regear as a line of stations, for the HUD; which ones exist depends on the settings. */
+   public enum Step {
+      LAND,
+      BOX,
+      CHEST,
+      ELYTRA,
+      GAPS,
+      TOTEMS,
+      ROCKETS,
+      MEND,
+      CLEAR,
+      FLY
+   }
+
+   private AutoFlyingRegear.Run currentRun;
+   private AutoFlyingRegear.Run lastRun;
+   private int sessionRegears;
+   private long sessionRegearMs;
+   private String lastEvent = "";
+   private long lastEventMs;
+   /** Set by the takeoff, read when the machine reaches COMPLETE, so one place closes the run. */
+   private String pendingOutcome;
+   /** SessionStats' spent-rocket count and the time it was read, re-based at activation and after every regear: the HUD's consumption rate. */
+   private int rocketRateBaseUsed;
+   private long rocketRateBaseMs;
 
    /**
     * Whether AutoEXPPlus was already running before the repair phase turned it on.
@@ -304,6 +407,7 @@ public class AutoFlyingRegear extends Module {
    private float savedYaw = 0.0F;
    private float savedPitch = 0.0F;
    private boolean hadBaritoneGoal = false;
+   private int lavaPostponeTicks = 0;
    private String savedBaritoneCommand = null;
    private int startupDelayTicks = 0;
    private boolean startupComplete = false;
@@ -324,6 +428,9 @@ public class AutoFlyingRegear extends Module {
    private static final double ROTATION_ALIGN_EPS = 3.0;
    private static final double ROTATION_TURN_SPEED = 120.0;
    private static final int TAKEOFF_TIMEOUT_TICKS = 280;
+   // Sideways blocks travelled per block of fall above which the first scaffold
+   // block would land behind the player instead of under him.
+   private static final double DROP_MAX_DRIFT_PER_BLOCK = 0.45;
 
    public AutoFlyingRegear() {
       super(HunterBuddyAddon.LOGISTICS_CATEGORY, "AutoFlyingRegear", "Automatically creates a platform and restocks rockets/elytras from ender chest");
@@ -331,6 +438,10 @@ public class AutoFlyingRegear extends Module {
 
    public void onActivate() {
       this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+      this.currentRun = null;
+      this.pendingOutcome = null;
+      this.rocketRateBaseUsed = SessionStats.get().rocketsUsed();
+      this.rocketRateBaseMs = System.currentTimeMillis();
       this.stateBeforeEating = null;
       this.timer = 0;
       this.platformCenter = null;
@@ -341,6 +452,7 @@ public class AutoFlyingRegear extends Module {
       this.shulkerPlacePos = null;
       this.echestPos = null;
       this.processingElytras = true;
+      this.extra = AutoFlyingRegear.Extra.NONE;
       this.transferSlotIndex = 0;
       this.transferStep = 0;
       this.savedChestplate = ItemStack.EMPTY;
@@ -356,6 +468,7 @@ public class AutoFlyingRegear extends Module {
       this.clearingProgress = 0;
       this.savedPitch = 0.0F;
       this.hadBaritoneGoal = false;
+      this.lavaPostponeTicks = 0;
       this.savedBaritoneCommand = null;
       this.reEnableStage = 0;
       this.takeoff.cancel();
@@ -395,6 +508,7 @@ public class AutoFlyingRegear extends Module {
    }
 
    public void onDeactivate() {
+      this.endRun("aborted");
       this.reEnableFlightModules();
       if (!this.savedChestplate.isEmpty() && (Boolean)this.swapToChestplate.get()) {
         this.restoreChestplate();
@@ -429,6 +543,7 @@ public class AutoFlyingRegear extends Module {
       this.cleanupBlocks.clear();
       this.cleanupBlockIndex = 0;
       this.cleanupInitialized = false;
+      this.lavaPostponeTicks = 0;
    }
 
    private boolean isAutoEating() {
@@ -505,6 +620,7 @@ public class AutoFlyingRegear extends Module {
                   case TAKING_OFF:
                   default:
                      if ((Boolean)this.debugMessages.get()) {
+                        this.event("timeout in " + this.getPhaseLabel().toLowerCase(java.util.Locale.ROOT) + ", forcing on");
                         this.error("Unexpected state timeout in " + this.state + " after 30 seconds. Force completing...", new Object[0]);
                      }
 
@@ -680,6 +796,38 @@ public class AutoFlyingRegear extends Module {
          }
       } else {
          if (this.shouldTriggerRegear()) {
+            // Never start a regear over lava: isReplaceable() is true for fluids, so
+            // the drop and the scaffold would take a lava lake for open air and build
+            // the box inside it. Keep the flight going until solid ground or water
+            // shows up below, for at most lava-wait-max-seconds.
+            AutoFlyingRegear.GroundScan ground = this.scanGroundBelow();
+            if (ground.kind() == AutoFlyingRegear.GroundKind.LAVA || ground.kind() == AutoFlyingRegear.GroundKind.UNKNOWN) {
+               int lavaWaitMaxTicks = (Integer)this.lavaWaitMaxSeconds.get() * 20;
+               if (this.lavaPostponeTicks < lavaWaitMaxTicks) {
+                  if (this.lavaPostponeTicks == 0) {
+                     this.event("lava below, waiting for ground");
+                  }
+
+                  if (this.lavaPostponeTicks % 400 == 0 && (Boolean)this.debugMessages.get()) {
+                     this.info(
+                        "Low on supplies but lava/unknown ground below - keeping the flight going until solid ground shows up",
+                        new Object[0]
+                     );
+                  }
+
+                  this.lavaPostponeTicks++;
+                  return;
+               }
+
+               if ((Boolean)this.debugMessages.get()) {
+                  this.warning(
+                     "Waited " + (Integer)this.lavaWaitMaxSeconds.get() + "s over lava/unknown ground - regearing anyway", new Object[0]
+                  );
+               }
+            }
+
+            this.beginRun();
+            this.lavaPostponeTicks = 0;
             if ((Boolean)this.debugMessages.get()) {
                this.info("Low on supplies - initiating AutoFlyingRegear sequence", new Object[0]);
             }
@@ -793,6 +941,10 @@ public class AutoFlyingRegear extends Module {
             }
          );
          if (chestplate.found()) {
+            if ((Boolean)this.debugMessages.get()) {
+               this.info("Chestplate from slot " + chestplate.slot() + " to the chest, the elytra goes to slot " + chestplate.slot(), new Object[0]);
+            }
+
             InvUtils.move().from(chestplate.slot()).toArmor(2);
             if ((Boolean)this.debugMessages.get()) {
                this.info("Swapped to chestplate for safe landing", new Object[0]);
@@ -880,15 +1032,27 @@ public class AutoFlyingRegear extends Module {
       // The drop starts with the glide's forward speed still on the player,
       // and a block placed straight below is behind him by the time he falls
       // to its level -- the 22:26 log showed three obsidian hung in the air
-      // along the curve before one finally caught him. Hold the scaffold until
-      // the air drag has eaten the forward speed; only then does "straight
-      // below" stay below, and one block is enough.
+      // along the curve before one finally caught him. Waiting for the speed
+      // itself to die (the old 0.08 b/t gate) took some seven seconds, longer
+      // than the free fall to the ground, so the block was never placed in the
+      // air at all. What decides whether a block catches him is the sideways
+      // distance covered per block of fall: once that is under about half a
+      // block, a column aimed one block ahead (driftCompensatedLandingPos) is
+      // under his feet when he gets there. At free-fall speed that takes ticks,
+      // not seconds.
       Vec3d dropVelocity = this.mc.player.getVelocity();
       double dropHSpeed = Math.hypot(dropVelocity.x, dropVelocity.z);
-      if (canStartScaffold && dropHSpeed > 0.08) {
+      double driftPerBlock = dropHSpeed * this.ticksPerBlockOfFall();
+      boolean driftTooHigh = driftPerBlock > DROP_MAX_DRIFT_PER_BLOCK;
+      // Lava is "replaceable" too, so hasSpaceBelow() cannot tell it from air,
+      // and the drift wait would let the player sink into a lake. With lava
+      // close under the feet the block goes down now, above the lava, drift or not.
+      AutoFlyingRegear.GroundScan dropGround = this.scanGroundBelow();
+      boolean lavaClose = dropGround.kind() == AutoFlyingRegear.GroundKind.LAVA && dropGround.distance() <= 8;
+      if (canStartScaffold && driftTooHigh && !lavaClose) {
          if (this.stateTickCounter % 20 == 0 && (Boolean)this.debugMessages.get()) {
-            this.info("Waiting out forward momentum before scaffolding (h-speed: "
-               + String.format("%.2f", dropHSpeed) + " b/t)", new Object[0]);
+            this.info("Waiting out forward momentum (drift " + String.format("%.2f", driftPerBlock)
+               + " blocks per block of fall)", new Object[0]);
          }
 
          return;
@@ -900,6 +1064,10 @@ public class AutoFlyingRegear extends Module {
 
       if (!this.prepareScaffoldBlocks()) {
          return;
+      }
+
+      if (lavaClose && driftTooHigh && (Boolean)this.debugMessages.get()) {
+         this.info("Lava " + dropGround.distance() + " blocks below - scaffolding immediately", new Object[0]);
       }
 
       this.mlepScaffold.setRegearHotbarSlot((Integer)this.obsidianHotbarSlot.get());
@@ -914,7 +1082,10 @@ public class AutoFlyingRegear extends Module {
 
    private void handleActiveScaffold(boolean isNether) {
       this.scaffoldWaitTicks++;
-      BlockPos checkPos = this.mc.player.getBlockPos().down();
+      // Aim the fallback block, and the "did it land" check, at the column the
+      // player will be over when he has fallen one more block, so the platform
+      // centre is the block that actually caught him.
+      BlockPos checkPos = this.driftCompensatedLandingPos();
       int playerY = (int)Math.floor(this.mc.player.getY());
 
       if (!this.mc.world.getBlockState(checkPos).isReplaceable()) {
@@ -985,6 +1156,59 @@ public class AutoFlyingRegear extends Module {
       BlockPos playerPos = this.mc.player.getBlockPos();
       return this.mc.world.getBlockState(playerPos.down()).isReplaceable()
          && this.mc.world.getBlockState(playerPos.down(2)).isReplaceable();
+   }
+
+   /**
+    * How many ticks the player needs to fall one block at his current speed.
+    * The descent is taken as at least 0.1 b/t so a hover at the top of the
+    * drop never divides by zero or predicts an endless glide.
+    */
+   private double ticksPerBlockOfFall() {
+      double vy = Math.min(-0.1, this.mc.player.getVelocity().y);
+      return 1.0 / -vy;
+   }
+
+   /**
+    * The block under the column the player will occupy after falling one more
+    * block: straight below his feet, shifted by the sideways distance covered
+    * in that time, at most one block in x and z. A block placed here is under
+    * him when he reaches its level; one placed straight below is behind him.
+    */
+   private BlockPos driftCompensatedLandingPos() {
+      Vec3d velocity = this.mc.player.getVelocity();
+      double ticks = this.ticksPerBlockOfFall();
+      int dx = MathHelper.clamp((int)Math.round(velocity.x * ticks), -1, 1);
+      int dz = MathHelper.clamp((int)Math.round(velocity.z * ticks), -1, 1);
+      return this.mc.player.getBlockPos().add(dx, -1, dz);
+   }
+
+   /**
+    * Looks straight down from the player's feet for the first block that is not
+    * open air. Fluids are checked before solids because lava and water report
+    * isReplaceable() and would otherwise pass for empty space. Reaching the
+    * bottom of the world without a hit means the column is unloaded or void.
+    */
+   private AutoFlyingRegear.GroundScan scanGroundBelow() {
+      BlockPos feet = this.mc.player.getBlockPos();
+      int bottomY = this.mc.world.getBottomY();
+
+      for (int y = feet.getY() - 1; y >= bottomY; y--) {
+         BlockPos probe = new BlockPos(feet.getX(), y, feet.getZ());
+         BlockState state = this.mc.world.getBlockState(probe);
+         int distance = feet.getY() - y;
+         if (!state.getFluidState().isEmpty()) {
+            AutoFlyingRegear.GroundKind kind = state.getFluidState().isIn(FluidTags.LAVA)
+               ? AutoFlyingRegear.GroundKind.LAVA
+               : AutoFlyingRegear.GroundKind.WATER;
+            return new AutoFlyingRegear.GroundScan(kind, distance);
+         }
+
+         if (!state.isReplaceable()) {
+            return new AutoFlyingRegear.GroundScan(AutoFlyingRegear.GroundKind.SOLID, distance);
+         }
+      }
+
+      return new AutoFlyingRegear.GroundScan(AutoFlyingRegear.GroundKind.UNKNOWN, feet.getY() - bottomY);
    }
 
    private void handleCenteringOnPlatform() {
@@ -1165,6 +1389,7 @@ public class AutoFlyingRegear extends Module {
             }
 
             if (this.placementAttempts >= 6) {
+               this.event("block skipped at " + pos.toShortString());
                if ((Boolean)this.debugMessages.get()) {
                   this.warning("Failed to place block after 6 attempts at " + pos.toShortString() + ", skipping", new Object[0]);
                }
@@ -1336,6 +1561,7 @@ public class AutoFlyingRegear extends Module {
             }
 
             if (this.placementAttempts >= 10) {
+               this.event("block skipped at " + pos.toShortString());
                if ((Boolean)this.debugMessages.get()) {
                   this.warning("Failed to place block after 10 attempts at " + pos.toShortString() + ", skipping", new Object[0]);
                }
@@ -1446,9 +1672,9 @@ public class AutoFlyingRegear extends Module {
    }
 
    private int getMaxWallBuildPhase() {
-      // One layer of wall and nothing over the head, whatever the encapsule box
-      // says: the second layer and the roof were ordered out on 2026-08-31.
-      return 0;
+      // The encapsule setting decides how far the box goes: the phases are wall
+      // layer 1, wall layer 2 and the roof (see collectMissingWallPhaseBlocks).
+      return (Boolean)this.encapsule.get() ? 2 : 0;
    }
 
    private boolean advanceWallBuildPhase() {
@@ -1631,7 +1857,7 @@ public class AutoFlyingRegear extends Module {
 
                this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
             } else {
-               InvUtils.move().from(eChestSlot).to(targetHotbarSlot);
+               this.moveStack(eChestSlot, targetHotbarSlot);
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Moving ender chest to hotbar slot " + targetHotbarSlot, new Object[0]);
                }
@@ -1745,7 +1971,7 @@ public class AutoFlyingRegear extends Module {
    private void handleTakingShulker() {
       if (this.mc.currentScreen instanceof GenericContainerScreen screen) {
          GenericContainerScreenHandler var16 = (GenericContainerScreenHandler)screen.getScreenHandler();
-         String targetType = this.processingElytras ? "elytra" : "rocket";
+         String targetType = this.restockLabel();
          int syncId = var16.syncId;
          if (this.transferStep == 0) {
             this.shulkerEnderSlot = -1;
@@ -1767,7 +1993,7 @@ public class AutoFlyingRegear extends Module {
                               hasTargetItem = true;
                               break;
                            }
-                        } else if (!this.processingElytras && item == Items.FIREWORK_ROCKET) {
+                        } else if (!this.processingElytras && item == this.restockItem()) {
                            hasTargetItem = true;
                            break;
                         }
@@ -1799,13 +2025,14 @@ public class AutoFlyingRegear extends Module {
 
                this.mc.player.closeHandledScreen();
                if (this.processingElytras) {
-                  this.processingElytras = false;
-                  this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
+                  this.afterElytras();
+               } else if (this.extra != AutoFlyingRegear.Extra.NONE) {
+                  this.nextExtra();
                } else {
                   this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+                  this.timer = (Integer)this.containerOpenDelay.get();
                }
 
-               this.timer = (Integer)this.containerOpenDelay.get();
                return;
             }
 
@@ -1824,6 +2051,11 @@ public class AutoFlyingRegear extends Module {
                return;
             }
 
+            if (this.currentRun != null) {
+               this.currentRun.shulkersTaken++;
+            }
+
+            this.event("took " + targetType + " shulker " + (this.currentRun == null ? "" : "#" + this.currentRun.shulkersTaken));
             if ((Boolean)this.debugMessages.get()) {
                this.info("Took " + targetType + " shulker from ender chest", new Object[0]);
             }
@@ -1858,7 +2090,7 @@ public class AutoFlyingRegear extends Module {
          this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
          this.timer = (Integer)this.containerOpenDelay.get();
       } else {
-         String targetType = this.processingElytras ? "elytra" : "rocket";
+         String targetType = this.restockLabel();
          if ((Boolean)this.debugMessages.get()) {
             this.info(targetType + " shulker confirmed in hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
          }
@@ -2138,7 +2370,7 @@ public class AutoFlyingRegear extends Module {
    private void handleTransferringItems() {
       if (this.mc.currentScreen instanceof HandledScreen<?> screen) {
          int var13 = this.mc.player.currentScreenHandler.syncId;
-         String itemType = this.processingElytras ? "elytras" : "rockets";
+         String itemType = this.restockLabel() + "s";
 
          // REPAIR takes bottles where REPLACE takes elytras. The swap-in-place machinery
          // below is left completely alone: it is still what REPLACE runs, and mending has no
@@ -2162,6 +2394,18 @@ public class AutoFlyingRegear extends Module {
                return;
             }
          } else {
+            if (this.extra != AutoFlyingRegear.Extra.NONE && this.countItem(this.restockItem()) >= this.extraGoal()) {
+               if ((Boolean)this.debugMessages.get()) {
+                  this.info("Reached goal of " + this.extraGoal() + " " + itemType + ", stopping transfer", new Object[0]);
+               }
+
+               this.mc.player.closeHandledScreen();
+               this.state = AutoFlyingRegear.FlyingRegearState.BREAKING_SHULKER;
+               this.timer = (Integer)this.breakDelay.get();
+               this.transferStep = 0;
+               return;
+            }
+
             int emptySlots = 0;
 
             for (int i = 0; i < 36; i++) {
@@ -2172,7 +2416,7 @@ public class AutoFlyingRegear extends Module {
 
             if (emptySlots <= 1) {
                if ((Boolean)this.debugMessages.get()) {
-                  this.info("Inventory nearly full (only " + emptySlots + " empty slots), stopping rocket transfer", new Object[0]);
+                  this.info("Inventory nearly full (only " + emptySlots + " empty slots), stopping " + itemType + " transfer", new Object[0]);
                }
 
                this.mc.player.closeHandledScreen();
@@ -2262,10 +2506,10 @@ public class AutoFlyingRegear extends Module {
                         return;
                      }
                   }
-               } else if (!this.processingElytras && item == Items.FIREWORK_ROCKET) {
+               } else if (!this.processingElytras && item == this.restockItem()) {
                   this.mc.interactionManager.clickSlot(var13, this.transferSlotIndex, 0, SlotActionType.QUICK_MOVE, this.mc.player);
                   if ((Boolean)this.debugMessages.get()) {
-                     this.info("Transferred rockets from shulker slot " + this.transferSlotIndex, new Object[0]);
+                     this.info("Transferred " + itemType + " from shulker slot " + this.transferSlotIndex, new Object[0]);
                   }
 
                   this.timer = (Integer)this.clickDelay.get();
@@ -2430,7 +2674,7 @@ public class AutoFlyingRegear extends Module {
                   this.info("Shulker found in slot " + i + ", moving to hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
                }
 
-               InvUtils.move().from(i).to((Integer)this.shulkerHotbarSlot.get());
+               this.moveStack(i, (Integer)this.shulkerHotbarSlot.get());
                this.timer = (Integer)this.clickDelay.get() * 2;
                this.shulkerPickupAttempts = 0;
                IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
@@ -2587,7 +2831,7 @@ public class AutoFlyingRegear extends Module {
                         this.info("Shulker found in slot " + i + ", moving to hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
                      }
 
-                     InvUtils.move().from(i).to((Integer)this.shulkerHotbarSlot.get());
+                     this.moveStack(i, (Integer)this.shulkerHotbarSlot.get());
                      this.timer = (Integer)this.clickDelay.get() * 2;
                      return;
                   }
@@ -2666,13 +2910,11 @@ public class AutoFlyingRegear extends Module {
             return;
          }
 
-         this.processingElytras = false;
          if ((Boolean)this.debugMessages.get()) {
-            this.info("Elytra restocking complete, now getting rockets", new Object[0]);
+            this.info("Elytra restocking complete", new Object[0]);
          }
 
-         this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
-         this.timer = (Integer)this.containerOpenDelay.get();
+         this.afterElytras();
       } else {
          int emptySlots = 0;
 
@@ -2682,7 +2924,20 @@ public class AutoFlyingRegear extends Module {
             }
          }
 
-         if (emptySlots > 1) {
+         if (this.extra != AutoFlyingRegear.Extra.NONE) {
+            // One extra kind at a time: on to the next kind, or the rockets, once this one is
+            // covered or the inventory is nearly full; otherwise another shulker of the same kind.
+            if (this.countItem(this.restockItem()) >= this.extraGoal() || emptySlots <= 1) {
+               this.nextExtra();
+            } else {
+               if ((Boolean)this.debugMessages.get()) {
+                  this.info("Still short of " + this.restockLabel() + "s, looking for more shulkers", new Object[0]);
+               }
+
+               this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
+               this.timer = (Integer)this.containerOpenDelay.get();
+            }
+         } else if (emptySlots > 1) {
             if ((Boolean)this.debugMessages.get()) {
                this.info("Still have " + emptySlots + " empty slots, looking for more rocket shulkers", new Object[0]);
             }
@@ -2861,13 +3116,12 @@ public class AutoFlyingRegear extends Module {
       this.repairLastDurability = -1;
       this.repairLastBottles = -1;
       this.repairStallTicks = 0;
+      this.event("mending done: " + reason);
       if ((Boolean)this.debugMessages.get()) {
-         this.info("Elytra mending done (" + reason + "), now getting rockets", new Object[0]);
+         this.info("Elytra mending done (" + reason + ")", new Object[0]);
       }
 
-      this.processingElytras = false;
-      this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
-      this.timer = (Integer)this.containerOpenDelay.get();
+      this.afterElytras();
    }
 
    /** Returns AutoEXPPlus to the state it was in, and only if this module changed it. */
@@ -2928,8 +3182,15 @@ public class AutoFlyingRegear extends Module {
          return invSlot;
       }
 
-      InvUtils.move().from(invSlot).toHotbar(selected);
-      return selected;
+      // Not the selected slot: that is whatever was being held, the sword KillAuraPlus keeps
+      // there as often as not, and it would end up buried in the inventory where the aura cannot
+      // see it. The shulker slot is this module's own and free by now, every shulker being back
+      // in the ender chest.
+      int hold = (Integer)this.shulkerHotbarSlot.get();
+      this.moveStack(invSlot, hold);
+      ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(hold);
+      this.mc.getNetworkHandler().sendPacket(new net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket(hold));
+      return hold;
    }
 
    private int countExperienceBottles() {
@@ -2999,6 +3260,7 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handleRestoringElytra() {
+      this.totemToOffhand();
       if ((Boolean)this.swapToChestplate.get() && !this.savedChestplate.isEmpty()) {
          this.restoreChestplate();
          if ((Boolean)this.debugMessages.get()) {
@@ -3269,6 +3531,7 @@ public class AutoFlyingRegear extends Module {
       }
 
       this.enableFlightModulesForTakeoff();
+      this.pendingOutcome = flightConfirmed ? "complete" : "takeoff failed" + (reason == null ? "" : ": " + reason);
 
       if ((Boolean)this.debugMessages.get()) {
          if (flightConfirmed) {
@@ -3290,6 +3553,7 @@ public class AutoFlyingRegear extends Module {
 
    private void handleComplete() {
       if (this.stateTickCounter == 1) {
+         this.endRun(this.pendingOutcome != null ? this.pendingOutcome : "complete");
          if ((Boolean)this.debugMessages.get()) {
             this.info("AutoFlyingRegear complete! Rockets: " + this.countRockets() + " Elytras: " + this.countValidElytras(), new Object[0]);
          }
@@ -3376,6 +3640,7 @@ public class AutoFlyingRegear extends Module {
          this.pendingBlocks.clear();
          this.platformCenter = null;
          this.processingElytras = true;
+         this.extra = AutoFlyingRegear.Extra.NONE;
          this.timer = 0;
          this.shulkerEnderSlot = -1;
          this.transferStep = 0;
@@ -3383,6 +3648,7 @@ public class AutoFlyingRegear extends Module {
          this.placementAttempts = 0;
          this.stateTickCounter = 0;
          this.hadBaritoneGoal = false;
+         this.lavaPostponeTicks = 0;
          this.savedBaritoneCommand = null;
          this.reEnableStage = 0;
          this.processedShulkers.clear();
@@ -3401,9 +3667,131 @@ public class AutoFlyingRegear extends Module {
 
          int rockets = this.countRockets();
          int validElytras = this.countValidElytras();
-         return rockets < (Integer)this.minRockets.get() || validElytras < (Integer)this.minElytras.get();
+         if (rockets < (Integer)this.minRockets.get() || validElytras < (Integer)this.minElytras.get()) {
+            return true;
+         }
+
+         boolean shortOfGaps = (Integer)this.minGaps.get() > 0 && this.countItem(Items.ENCHANTED_GOLDEN_APPLE) < (Integer)this.minGaps.get();
+         boolean shortOfTotems = (Integer)this.minTotems.get() > 0 && this.countItem(Items.TOTEM_OF_UNDYING) < (Integer)this.minTotems.get();
+         return shortOfGaps || shortOfTotems;
       } else {
          return false;
+      }
+   }
+
+   /** The item the current restock pass is after. */
+   private Item restockItem() {
+      if (this.processingElytras) {
+         return Items.ELYTRA;
+      }
+
+      return switch (this.extra) {
+         case GAP -> Items.ENCHANTED_GOLDEN_APPLE;
+         case TOTEM -> Items.TOTEM_OF_UNDYING;
+         default -> Items.FIREWORK_ROCKET;
+      };
+   }
+
+   /** Its name in messages and in the processed-shulker ids. */
+   private String restockLabel() {
+      if (this.processingElytras) {
+         return "elytra";
+      }
+
+      return switch (this.extra) {
+         case GAP -> "golden apple";
+         case TOTEM -> "totem";
+         default -> "rocket";
+      };
+   }
+
+   private int extraGoal() {
+      return switch (this.extra) {
+         case GAP -> (Integer)this.goalGaps.get();
+         case TOTEM -> (Integer)this.goalTotems.get();
+         default -> 0;
+      };
+   }
+
+   private boolean extraWanted(Extra kind) {
+      int goal = kind == Extra.GAP ? (Integer)this.goalGaps.get() : (Integer)this.goalTotems.get();
+      Item item = kind == Extra.GAP ? Items.ENCHANTED_GOLDEN_APPLE : Items.TOTEM_OF_UNDYING;
+      return goal > 0 && this.countItem(item) < goal;
+   }
+
+   /** The elytra pass is over: on to the extras that are wanted, then the rockets. */
+   private void afterElytras() {
+      this.processingElytras = false;
+      this.extra = Extra.NONE;
+      this.nextExtra();
+   }
+
+   /** Moves on to the next extra kind still short of its goal, or to the rockets, and reopens the ender chest. */
+   private void nextExtra() {
+      Extra next = this.extra == Extra.NONE ? Extra.GAP : this.extra == Extra.GAP ? Extra.TOTEM : null;
+      while (next != null && !this.extraWanted(next)) {
+         next = next == Extra.GAP ? Extra.TOTEM : null;
+      }
+
+      this.extra = next == null ? Extra.NONE : next;
+      this.event("now getting " + this.restockLabel() + "s");
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Now getting " + this.restockLabel() + "s", new Object[0]);
+      }
+
+      this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
+      this.timer = (Integer)this.containerOpenDelay.get();
+   }
+
+   /** How many of an item the inventory holds, offhand and armour included. */
+   private int countItem(Item item) {
+      if (this.mc.player == null) {
+         return 0;
+      }
+
+      int count = 0;
+
+      for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (stack.getItem() == item) {
+            count += stack.getCount();
+         }
+      }
+
+      return count;
+   }
+
+   /** One inventory move, with a debug line naming what goes where and what it displaces. */
+   private void moveStack(int from, int to) {
+      if ((Boolean)this.debugMessages.get()) {
+         ItemStack moving = this.mc.player.getInventory().getStack(from);
+         ItemStack displaced = this.mc.player.getInventory().getStack(to);
+         this.info(
+            "Moving " + moving.getName().getString() + " x" + moving.getCount() + " from slot " + from + " to slot " + to
+               + (displaced.isEmpty() ? "" : " (" + displaced.getName().getString() + " goes to slot " + from + ")"),
+            new Object[0]
+         );
+      }
+
+      InvUtils.move().from(from).to(to);
+   }
+
+   /** Puts a totem in the offhand when totems were part of the restock and the offhand is empty. */
+   private void totemToOffhand() {
+      if ((Integer)this.goalTotems.get() <= 0 || !this.mc.player.getOffHandStack().isEmpty()) {
+         return;
+      }
+
+      for (int i = 0; i < 36; i++) {
+         if (this.mc.player.getInventory().getStack(i).getItem() == Items.TOTEM_OF_UNDYING) {
+            if ((Boolean)this.debugMessages.get()) {
+               this.info("Totem from slot " + i + " to the offhand", new Object[0]);
+            }
+
+            this.event("totem to the offhand");
+            InvUtils.move().from(i).toOffhand();
+            return;
+         }
       }
    }
 
@@ -3469,7 +3857,7 @@ public class AutoFlyingRegear extends Module {
             }
 
             if (bestRocketSlot != -1) {
-               InvUtils.move().from(bestRocketSlot).to(targetSlot);
+               this.moveStack(bestRocketSlot, targetSlot);
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Moved rockets from slot " + bestRocketSlot + " to hotbar slot " + targetSlot, new Object[0]);
                }
@@ -3540,6 +3928,10 @@ public class AutoFlyingRegear extends Module {
          for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
             ItemStack stack = this.mc.player.getInventory().getStack(i);
             if (stack.getItem() == Items.ELYTRA) {
+               if ((Boolean)this.debugMessages.get()) {
+                  this.info("Elytra from slot " + i + " to the chest, the chestplate goes to slot " + i, new Object[0]);
+               }
+
                InvUtils.move().from(i).toArmor(2);
                this.savedChestplate = ItemStack.EMPTY;
                return;
@@ -3576,7 +3968,7 @@ public class AutoFlyingRegear extends Module {
       }
 
       if (blocks.slot() != targetHotbarSlot) {
-         InvUtils.move().from(blocks.slot()).to(targetHotbarSlot);
+         this.moveStack(blocks.slot(), targetHotbarSlot);
          this.timer = (Integer)this.clickDelay.get();
          return false;
       }
@@ -3879,6 +4271,195 @@ public class AutoFlyingRegear extends Module {
       }
    }
 
+   private void beginRun() {
+      AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
+      run.mode = this.elytraMode.get();
+      run.lavaWaitSeconds = this.lavaPostponeTicks / 20;
+      run.rocketsBefore = this.countRockets();
+      run.elytrasBefore = this.countValidElytras();
+      run.gapsBefore = this.countItem(Items.ENCHANTED_GOLDEN_APPLE);
+      run.totemsBefore = this.countItem(Items.TOTEM_OF_UNDYING);
+      run.bottlesBefore = this.countExperienceBottles();
+      this.currentRun = run;
+      this.pendingOutcome = null;
+      this.event(run.lavaWaitSeconds > 0 ? "landing after " + run.lavaWaitSeconds + "s over lava" : "landing to regear");
+   }
+
+   /** Closes the running regear, if there is one, under the given outcome; counts it for the session and for good. */
+   private void endRun(String outcome) {
+      AutoFlyingRegear.Run run = this.currentRun;
+      if (run == null) {
+         return;
+      }
+
+      run.endedMs = System.currentTimeMillis();
+      run.outcome = outcome;
+      if (this.mc.player != null) {
+         run.rocketsAfter = this.countRockets();
+         run.elytrasAfter = this.countValidElytras();
+         run.gapsAfter = this.countItem(Items.ENCHANTED_GOLDEN_APPLE);
+         run.totemsAfter = this.countItem(Items.TOTEM_OF_UNDYING);
+         run.bottlesAfter = this.countExperienceBottles();
+      }
+
+      this.currentRun = null;
+      this.lastRun = run;
+      this.pendingOutcome = null;
+      this.sessionRegears++;
+      this.sessionRegearMs += run.durationMs();
+      LifetimeStats.get().addRegear(run.durationMs() / 1000L);
+      this.rocketRateBaseUsed = SessionStats.get().rocketsUsed();
+      this.rocketRateBaseMs = run.endedMs;
+      this.event("regear " + outcome + " in " + run.durationMs() / 1000L + "s");
+   }
+
+   /** The last thing worth a glance, for the HUD's event line. */
+   private void event(String text) {
+      this.lastEvent = text;
+      this.lastEventMs = System.currentTimeMillis();
+   }
+
+   public AutoFlyingRegear.Run hudCurrentRun() {
+      return this.currentRun;
+   }
+
+   public AutoFlyingRegear.Run hudLastRun() {
+      return this.lastRun;
+   }
+
+   public int hudSessionRegears() {
+      return this.sessionRegears;
+   }
+
+   public long hudAverageRunMs() {
+      return this.sessionRegears == 0 ? 0L : this.sessionRegearMs / this.sessionRegears;
+   }
+
+   public String hudLastEvent() {
+      return this.lastEvent;
+   }
+
+   public long hudLastEventMs() {
+      return this.lastEventMs;
+   }
+
+   /** True while supplies are low but the flight goes on because there is lava or nothing known below. */
+   public boolean hudWaitingForGround() {
+      return this.state == AutoFlyingRegear.FlyingRegearState.IDLE && this.lavaPostponeTicks > 0;
+   }
+
+   public int hudLavaWaitSeconds() {
+      return this.lavaPostponeTicks / 20;
+   }
+
+   public int hudGapCount() {
+      return this.mc.player == null ? 0 : this.countItem(Items.ENCHANTED_GOLDEN_APPLE);
+   }
+
+   public int hudTotemCount() {
+      return this.mc.player == null ? 0 : this.countItem(Items.TOTEM_OF_UNDYING);
+   }
+
+   public int hudMinRockets() {
+      return (Integer)this.minRockets.get();
+   }
+
+   public int hudGoalElytras() {
+      return (Integer)this.goalElytras.get();
+   }
+
+   public int hudGoalGaps() {
+      return (Integer)this.goalGaps.get();
+   }
+
+   public int hudGoalTotems() {
+      return (Integer)this.goalTotems.get();
+   }
+
+   /**
+    * Rockets spent per minute since the last regear (or since activation), or -1 while there is
+    * too little to go on: under two minutes, or under three rockets.
+    */
+   public double hudRocketsPerMinute() {
+      long elapsed = System.currentTimeMillis() - this.rocketRateBaseMs;
+      int used = SessionStats.get().rocketsUsed() - this.rocketRateBaseUsed;
+      if (this.rocketRateBaseMs == 0L || elapsed < 120_000L || used < 3) {
+         return -1.0;
+      }
+
+      return used / (elapsed / 60000.0);
+   }
+
+   /** Whether the settings give this station a place on the line at all. */
+   public boolean hudStepEnabled(AutoFlyingRegear.Step step) {
+      return switch (step) {
+         case GAPS -> (Integer)this.goalGaps.get() > 0;
+         case TOTEMS -> (Integer)this.goalTotems.get() > 0;
+         case MEND -> this.elytraMode.get() == AutoFlyingRegear.ElytraMode.REPAIR;
+         default -> true;
+      };
+   }
+
+   /** The station the machine is at, null when idle. */
+   public AutoFlyingRegear.Step hudStep() {
+      if (this.state == null) {
+         return null;
+      }
+
+      return switch (this.state) {
+         case IDLE, COMPLETE -> null;
+         case SWAP_TO_CHESTPLATE, DISABLING_MODULES, DROPPING, CENTERING_ON_PLATFORM -> AutoFlyingRegear.Step.LAND;
+         case CREATING_INITIAL_PLATFORM, CREATING_WALLS, CLEARING_ECHEST_AREA -> AutoFlyingRegear.Step.BOX;
+         case ROTATING_FOR_ECHEST, PLACING_ECHEST, WAIT_ECHEST_PLACE -> AutoFlyingRegear.Step.CHEST;
+         case OPENING_ECHEST, OPENING_ECHEST_RETURN, TAKING_SHULKER, WAIT_SHULKER_TAKEN, POSITIONING_FOR_SHULKER,
+              ROTATING_FOR_SHULKER, PLACING_SHULKER, WAIT_SHULKER_PLACE, OPENING_SHULKER, TRANSFERRING_ITEMS,
+              BREAKING_SHULKER, WAIT_SHULKER_BREAK, WAIT_SHULKER_PICKUP, RETURNING_SHULKER, CHECK_NEXT_SHULKER -> this.restockStep();
+         case REPAIRING_ELYTRA -> AutoFlyingRegear.Step.MEND;
+         case BREAKING_ECHEST, WAIT_ECHEST_BREAK, RESTORING_ELYTRA, CLEANUP -> AutoFlyingRegear.Step.CLEAR;
+         case TAKING_OFF -> AutoFlyingRegear.Step.FLY;
+      };
+   }
+
+   private AutoFlyingRegear.Step restockStep() {
+      if (this.processingElytras) {
+         return AutoFlyingRegear.Step.ELYTRA;
+      }
+
+      return switch (this.extra) {
+         case GAP -> AutoFlyingRegear.Step.GAPS;
+         case TOTEM -> AutoFlyingRegear.Step.TOTEMS;
+         default -> AutoFlyingRegear.Step.ROCKETS;
+      };
+   }
+
+   /** The station and its progress in a few capitals, for the HUD's big line. */
+   public String hudPhaseDetail() {
+      AutoFlyingRegear.Step step = this.hudStep();
+      if (step == null) {
+         return "READY";
+      }
+
+      return switch (step) {
+         case LAND -> this.state == AutoFlyingRegear.FlyingRegearState.DROPPING ? "DROPPING" : "LANDING";
+         case BOX -> "BUILDING BOX";
+         case CHEST -> "ENDER CHEST";
+         case ELYTRA -> this.elytraMode.get() == AutoFlyingRegear.ElytraMode.REPAIR
+            ? "XP BOTTLES " + this.countExperienceBottles() + "/" + this.xpBottlesToTake.get()
+            : "ELYTRAS " + this.countValidElytras() + "/" + this.goalElytras.get();
+         case GAPS -> "GAPS " + this.countItem(Items.ENCHANTED_GOLDEN_APPLE) + "/" + this.goalGaps.get();
+         case TOTEMS -> "TOTEMS " + this.countItem(Items.TOTEM_OF_UNDYING) + "/" + this.goalTotems.get();
+         case ROCKETS -> "ROCKETS " + this.countRockets();
+         case MEND -> {
+            int pct = this.getRepairPercent();
+            yield pct < 0 ? "MENDING" : "MENDING " + pct + "%";
+         }
+         case CLEAR -> this.state == AutoFlyingRegear.FlyingRegearState.CLEANUP && !this.cleanupBlocks.isEmpty()
+            ? "CLEANUP " + Math.min(this.cleanupBlockIndex + 1, this.cleanupBlocks.size()) + "/" + this.cleanupBlocks.size()
+            : "CLEARING";
+         case FLY -> "TAKEOFF";
+      };
+   }
+
    public String getInfoString() {
       int rockets = this.countRockets();
       int elytras = this.countValidElytras();
@@ -3953,6 +4534,18 @@ public class AutoFlyingRegear extends Module {
       if (held.getItem() != Items.ELYTRA || held.getMaxDamage() <= 0) return -1;
 
       return (held.getMaxDamage() - held.getDamage()) * 100 / held.getMaxDamage();
+   }
+
+   /** What the straight-down scan found under the player's feet. */
+   private enum GroundKind {
+      SOLID,
+      LAVA,
+      WATER,
+      UNKNOWN;
+   }
+
+   /** Result of scanGroundBelow(): the kind of ground and how many blocks below the feet it starts. */
+   private record GroundScan(AutoFlyingRegear.GroundKind kind, int distance) {
    }
 
    private enum FlyingRegearState {
