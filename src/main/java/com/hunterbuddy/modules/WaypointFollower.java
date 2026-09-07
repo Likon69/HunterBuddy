@@ -75,6 +75,10 @@ public class WaypointFollower extends Module {
     private boolean isInEnd = false;
     private int currentWaypointIndex = 0;
     private BlockPos currentBaritoneTarget = null;
+    /** Attempts made at re-giving {@link #currentBaritoneTarget}; reset whenever the target changes. */
+    private int baritoneRestartAttempts = 0;
+    /** Ticks left before another re-give attempt at {@link #currentBaritoneTarget} may fire. */
+    private int baritoneRestartCooldown = 0;
     private boolean isPaused = false;
     private int waypointsCompletedThisSession = 0;
     private double totalDistanceTraveled = 0.0;
@@ -122,6 +126,15 @@ public class WaypointFollower extends Module {
 
     /** How long recorded breadcrumbs may wait in memory before a disk save. */
     private static final long SEED_SAVE_MS = 15_000L;
+
+    /**
+     * Ticks between two attempts at re-giving Baritone the goal it dropped, and how many of those
+     * attempts a single waypoint gets before this gives up on it — a spot Baritone cannot actually
+     * land near (walled in, no safe block anywhere close) would otherwise be retried forever.
+     * [proposé], to calibrate once this has been seen firing.
+     */
+    private static final int BARITONE_RESTART_DELAY_TICKS = 100;
+    private static final int BARITONE_RESTART_MAX_ATTEMPTS = 3;
 
     // ---- Read by the HUDs. Computed on the tick, never per frame, so three
     // elements asking the same questions cost one answer. ----
@@ -536,6 +549,8 @@ public class WaypointFollower extends Module {
     private void stopBaritone() {
         BaritoneHelper.stopAllPathing();
         this.currentBaritoneTarget = null;
+        this.baritoneRestartAttempts = 0;
+        this.baritoneRestartCooldown = 0;
     }
 
     private void clearAllFollowWaypointsAction() {
@@ -1230,7 +1245,34 @@ public class WaypointFollower extends Module {
 
             int goalX = this.toNetherCoord(nextWaypoint.getX());
             int goalZ = this.toNetherCoord(nextWaypoint.getZ());
-            boolean needsNewGoal = this.currentBaritoneTarget == null || !this.currentBaritoneTarget.equals(nextWaypoint);
+            boolean sameTarget = this.currentBaritoneTarget != null && this.currentBaritoneTarget.equals(nextWaypoint);
+            boolean needsNewGoal = !sameTarget;
+
+            if (!sameTarget) {
+                // A genuinely new waypoint: this is not a retry of the last one, so it gets a full
+                // fresh cap rather than inheriting whatever the previous spot used up.
+                this.baritoneRestartAttempts = 0;
+                this.baritoneRestartCooldown = 0;
+            } else if (this.baritoneRestartCooldown > 0) {
+                this.baritoneRestartCooldown--;
+            } else if (!baritoneInstance.getElytraProcess().isActive()
+                    && mc.player != null && mc.player.isOnGround()
+                    && this.rocketCount > 0
+                    && this.baritoneRestartAttempts < BARITONE_RESTART_MAX_ATTEMPTS) {
+                // Baritone dropped this goal on its own (a crash, an emergency landing, a manual
+                // #stop, a dimension change tearing the process down) without the waypoint itself
+                // changing, so the check above never re-fires. Left alone, any such drop simply
+                // ends the flight — the bot stands there with fireworks left and nowhere to go,
+                // and there will be others. Only when actually grounded, so this never fights a
+                // Baritone that is still mid-air and just between ticks of its own bookkeeping.
+                needsNewGoal = true;
+                this.baritoneRestartAttempts++;
+                this.baritoneRestartCooldown = BARITONE_RESTART_DELAY_TICKS;
+                if (this.showChatMessages.get()) {
+                    this.info("Baritone's elytra process is gone and I'm grounded with rockets left "
+                        + "- giving it the goal again (" + this.baritoneRestartAttempts + "/" + BARITONE_RESTART_MAX_ATTEMPTS + ")");
+                }
+            }
 
             if (needsNewGoal) {
                 this.currentBaritoneTarget = nextWaypoint;
