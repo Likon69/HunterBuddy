@@ -119,6 +119,8 @@ public class ElytraSwap extends Module {
    private int lastHurtTime = 0;
    private boolean needsChestplateSwap = false;
    private int chestplateSwapStage = 0;
+   private int chestplateStageTimer = 0;
+   private int chestplateSwapFailures = 0;
    private int chestplateSlot = -1;
    private ItemStack storedElytra = ItemStack.EMPTY;
 
@@ -148,6 +150,8 @@ public class ElytraSwap extends Module {
       this.lastHurtTime = 0;
       this.needsChestplateSwap = false;
       this.chestplateSwapStage = 0;
+      this.chestplateStageTimer = 0;
+      this.chestplateSwapFailures = 0;
       this.chestplateSlot = -1;
       this.storedElytra = ItemStack.EMPTY;
    }
@@ -341,7 +345,8 @@ public class ElytraSwap extends Module {
                   this.chestplateSlot = bestChestplate;
                   this.needsChestplateSwap = true;
                   this.chestplateSwapStage = 1;
-                  this.stageTimer = 0;
+                  this.chestplateStageTimer = 0;
+                  this.chestplateSwapFailures = 0;
                   this.protectionActive = true;
                   this.protectionTimer = (Integer)this.hitProtectionDuration.get();
                   if ((Boolean)this.notifySwap.get()) {
@@ -370,7 +375,8 @@ public class ElytraSwap extends Module {
                         this.chestplateSlot = elytraSlot;
                         this.needsChestplateSwap = true;
                         this.chestplateSwapStage = 1;
-                        this.stageTimer = 0;
+                        this.chestplateStageTimer = 0;
+                        this.chestplateSwapFailures = 0;
                         if ((Boolean)this.notifySwap.get()) {
                            this.info("Protection period ended, swapping back to elytra.", new Object[0]);
                         }
@@ -389,8 +395,8 @@ public class ElytraSwap extends Module {
    }
 
    private void processChestplateSwap() {
-      this.stageTimer++;
-      if (this.stageTimer >= (Integer)this.stageDelay.get()) {
+      this.chestplateStageTimer++;
+      if (this.chestplateStageTimer >= (Integer)this.stageDelay.get()) {
          switch (this.chestplateSwapStage) {
             case 1:
                if (this.chestplateSlot >= 9) {
@@ -409,13 +415,32 @@ public class ElytraSwap extends Module {
                }
 
                this.chestplateSwapStage = 2;
-               this.stageTimer = 0;
+               this.chestplateStageTimer = 0;
                break;
             case 2:
                ItemStack toEquip = this.mc.player.getInventory().getStack(this.chestplateSlot);
                if (!this.isChestplateItem(toEquip)) {
                   this.needsChestplateSwap = false;
                   this.chestplateSwapStage = 0;
+                  this.chestplateSwapFailures++;
+                  if ((Boolean)this.notifySwap.get()) {
+                     this.warning("Chestplate swap failed - item not in hotbar slot (attempt %d)", this.chestplateSwapFailures);
+                  }
+                  // Whatever moved the item out from under this (another module's own hotbar
+                  // shuffling, a desync) leaves protectionActive stuck true forever with nothing
+                  // retrying it, unless something forces the issue -- handleCombatProtection
+                  // re-enters this same attempt every tick since protectionTimer is already at or
+                  // past zero, so a few failures in a row means retrying is not the fix. Giving up
+                  // and dropping protection is: the player keeps whatever is currently equipped
+                  // rather than being stuck mid-swap indefinitely.
+                  if (this.chestplateSwapFailures >= 5) {
+                     this.protectionActive = false;
+                     this.storedElytra = ItemStack.EMPTY;
+                     this.chestplateSwapFailures = 0;
+                     if ((Boolean)this.notifySwap.get()) {
+                        this.warning("Giving up on the chestplate swap after %d failed attempts.", 5);
+                     }
+                  }
                   return;
                }
 
@@ -424,12 +449,13 @@ public class ElytraSwap extends Module {
                this.mc.player.swingHand(Hand.MAIN_HAND);
                InvUtils.swapBack();
                this.chestplateSwapStage = 3;
-               this.stageTimer = 0;
+               this.chestplateStageTimer = 0;
                break;
             case 3:
                this.needsChestplateSwap = false;
                this.chestplateSwapStage = 0;
-               this.stageTimer = 0;
+               this.chestplateStageTimer = 0;
+               this.chestplateSwapFailures = 0;
                this.chestplateSlot = -1;
                ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
                if (chestItem.getItem().equals(Items.ELYTRA)) {
