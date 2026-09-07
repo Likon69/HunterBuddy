@@ -67,10 +67,14 @@ public abstract class LivingEntityMixin {
       if (MeteorClient.mc.player != null
          && MeteorClient.mc.player.getBrain().equals(this.getBrain())
          && eflyModule != null
-         && eflyModule.enabled()
-         && !eflyModule.isFakeFlyEnabled()) {
+         && eflyModule.enabled()) {
          // Injecting at RETURN gives us the real flag value; the module latches it
-         // (Lambda-style) instead of blindly forcing true.
+         // (Lambda-style) instead of blindly forcing true. Runs in fakefly too,
+         // on purpose: the hook doesn't touch the return value there either
+         // way (modifyIsGliding passes it through unchanged outside plain
+         // bounce), but it's the only thing that keeps realGliding current —
+         // gating it out in fakefly used to leave the tap alternating every
+         // tick in flight instead of holding released through the glide.
          boolean modified = eflyModule.modifyIsGliding(cir.getReturnValueZ());
          if (modified != cir.getReturnValueZ()) {
             cir.setReturnValue(modified);
