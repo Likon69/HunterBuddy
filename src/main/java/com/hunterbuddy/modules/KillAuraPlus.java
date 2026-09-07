@@ -127,6 +127,14 @@ public class KillAuraPlus extends Module {
         .build()
     );
 
+    private final Setting<Boolean> fetchFromInventory = sgGeneral.add(new BoolSetting.Builder()
+        .name("fetch-from-inventory")
+        .description("When no hotbar slot holds a weapon but the inventory does (a regear moved it, say), bring the best one back: into an empty hotbar slot, else the slot you are holding, whose item takes the weapon's old place.")
+        .defaultValue(true)
+        .visible(autoSwitch::get)
+        .build()
+    );
+
     private final Setting<Boolean> swapBack = sgGeneral.add(new BoolSetting.Builder()
         .name("swap-back")
         .description("Return to the slot you were holding once there is nothing left to attack.")
@@ -193,6 +201,13 @@ public class KillAuraPlus extends Module {
     private final Setting<Boolean> pauseOnLag = sgGeneral.add(new BoolSetting.Builder()
         .name("pause-on-lag")
         .description("Stop while the server has not sent a tick for a second. Swinging into a freeze lands everything at once when it comes back.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> pauseGliding = sgGeneral.add(new BoolSetting.Builder()
+        .name("pause-while-gliding")
+        .description("Stop while you are gliding on an elytra. Whatever put you in the air -- Baritone, WaypointFollower, or your own hand -- a swing turn takes the rotation away from the heading and a hit costs the speed.")
         .defaultValue(true)
         .build()
     );
@@ -502,6 +517,7 @@ public class KillAuraPlus extends Module {
     private int ourSlot = -1;
     private long handsOffUntil;
     private boolean swapped;
+    private long nextFetchMs;
     private long nextHitMs;
     private long lastHitMs;
     private double orbitAngle;
@@ -612,6 +628,10 @@ public class KillAuraPlus extends Module {
         if (autoSwitch.get() && now >= handsOffUntil && charged()) {
             int slot = bestSlot(target);
 
+            if (slot == -1 && fetchFromInventory.get()) {
+                fetchWeapon(target, selected, now);
+            }
+
             if (slot != -1 && slot != selected) {
                 if (!swapped) {
                     previousSlot = selected;
@@ -690,6 +710,7 @@ public class KillAuraPlus extends Module {
         if (!mc.player.isAlive() || mc.player.isSpectator()) return false;
         if (minHealth.get() > 0 && mc.player.getHealth() <= minHealth.get()) return false;
         if (mc.currentScreen != null) return false;
+        if (pauseGliding.get() && mc.player.isGliding()) return false;
         if (onlyOnClick.get() && !mc.options.attackKey.isPressed()) return false;
         if (pauseMining.get() && mc.interactionManager != null && mc.interactionManager.isBreakingBlock()) return false;
         if (pauseEating.get() && mc.player.isUsingItem()) return false;
@@ -856,6 +877,41 @@ public class KillAuraPlus extends Module {
         }
 
         return best;
+    }
+
+    /**
+     * Brings the best weapon in the main inventory into the hotbar when the hotbar has none.
+     * Throttled to one attempt every two seconds: the move is three inventory clicks the server
+     * has to answer before {@link #bestSlot} can see the weapon. Nothing is done with an item on
+     * the cursor, or with an empty weapon list, where anything at all would count as a weapon.
+     */
+    private void fetchWeapon(Entity target, int selected, long now) {
+        if (now < nextFetchMs || weapons.get().isEmpty()) return;
+        if (!mc.player.currentScreenHandler.getCursorStack().isEmpty()) return;
+
+        int bestInv = -1;
+        float bestDamage = 0.0f;
+        for (int i = 9; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty() || !isWeapon(stack)) continue;
+            float damage = damageTo(target, stack);
+            if (damage > bestDamage) {
+                bestDamage = damage;
+                bestInv = i;
+            }
+        }
+        if (bestInv == -1) return;
+
+        int dest = selected;
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) {
+                dest = i;
+                break;
+            }
+        }
+        InvUtils.move().from(bestInv).toHotbar(dest);
+        nextFetchMs = now + 2000;
+        info("Weapon brought back from inventory slot %d to hotbar slot %d.", bestInv, dest);
     }
 
     /**
