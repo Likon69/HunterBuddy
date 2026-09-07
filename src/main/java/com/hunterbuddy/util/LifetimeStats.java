@@ -39,6 +39,10 @@ public final class LifetimeStats {
 
         /** Added later: an older file has no such key and Gson leaves it at zero. */
         public long flightSeconds;
+
+        /** Regears completed, and the time they took, added 2026-09-07; same zero default. */
+        public int regears;
+        public long regearSeconds;
     }
 
     private Data data = new Data();
@@ -86,6 +90,24 @@ public final class LifetimeStats {
     public synchronized long totalFlightSeconds() {
         long s = SessionStats.get().flightSeconds();
         return data.flightSeconds + (s >= foldedFlightSeconds ? s - foldedFlightSeconds : s);
+    }
+
+    public synchronized int totalRegears() {
+        return data.regears;
+    }
+
+    public synchronized long totalRegearSeconds() {
+        return data.regearSeconds;
+    }
+
+    /**
+     * One regear just finished. Counted at once rather than folded from SessionStats: a regear is
+     * an event, not a running total there. Written to disk on the spot, a few times a night at most.
+     */
+    public synchronized void addRegear(long seconds) {
+        data.regears++;
+        data.regearSeconds += Math.max(0L, seconds);
+        save();
     }
 
     public synchronized int totalStashes() {
