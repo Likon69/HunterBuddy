@@ -99,7 +99,7 @@ Commands use the configured Meteor command prefix.
 | `arealoaderreset` | Delete every AreaLoader saved route, not just the selected one. |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-## HUD elements (25)
+## HUD elements (28)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
@@ -113,6 +113,9 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `ElytraStatus` | Compact one-line elytra status: speed, pitch, rockets, durability. |
 | `EntityList` | Lists nearby entities. |
 | `FindsTicker` | Recent finds and sightings as a fading feed. |
+| `FollowerCockpit` | The waypoint follower's state, or its problem, plus route, consumables and session. |
+| `FollowerHeading` | A heading tape for the waypoint follower: the target as a sliding diamond, the next turns as ghosts. |
+| `FollowerRoute` | The follower's route as a line of milestones: reach halo on the current one, +N for the rest. |
 | `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
 | `item-counter` | Selected items and their inventory counts. |
 | `MobInfo` | Tracks mob spawns and density. |
