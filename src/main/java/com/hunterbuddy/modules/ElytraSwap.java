@@ -111,9 +111,6 @@ public class ElytraSwap extends Module {
    private int swapStage = 0;
    private int stageTimer = 0;
    private int targetSlot = -1;
-   private int newElytraOriginalSlot = -1;
-   private int hotbarSlotUsed = -1;
-   private ItemStack hotbarOriginalItem = ItemStack.EMPTY;
    private boolean protectionActive = false;
    private int protectionTimer = 0;
    private int lastHurtTime = 0;
@@ -142,9 +139,6 @@ public class ElytraSwap extends Module {
       this.swapStage = 0;
       this.stageTimer = 0;
       this.targetSlot = -1;
-      this.newElytraOriginalSlot = -1;
-      this.hotbarSlotUsed = -1;
-      this.hotbarOriginalItem = ItemStack.EMPTY;
       this.protectionActive = false;
       this.protectionTimer = 0;
       this.lastHurtTime = 0;
@@ -220,92 +214,46 @@ public class ElytraSwap extends Module {
       }
    }
 
+   /**
+    * Two stages. The first is one three-click move of the fresh elytra straight into the chest
+    * slot, the same call the regear uses to swap its chestplate in: the fresh one goes on and the
+    * worn one lands in the very slot the fresh one came from. Nothing passes through the hotbar,
+    * so nothing there is displaced. The old way parked the fresh elytra in the first hotbar slot
+    * without a totem or an apple in it, right-clicked it, and only then tried to sort the hotbar
+    * out again; any interruption in between (a hit, a container opening, a toggle) left the worn
+    * elytra sitting where the sword had been and the sword buried in the inventory. The second
+    * stage only reads back what the chest slot holds.
+    */
    private void processSwapStages() {
       this.stageTimer++;
       if (this.stageTimer >= (Integer)this.stageDelay.get()) {
          switch (this.swapStage) {
             case 1:
-               this.newElytraOriginalSlot = this.targetSlot;
-               if (this.targetSlot >= 9) {
-                  int hotbarSlot = -1;
-                  if (this.hotbarSlotUsed != -1 && this.hotbarSlotUsed < 9) {
-                     hotbarSlot = this.hotbarSlotUsed;
-                  } else {
-                     for (int i = 0; i < 9; i++) {
-                        ItemStack stack = this.mc.player.getInventory().getStack(i);
-                        if (stack.isEmpty() || !this.isEssentialItem(stack)) {
-                           hotbarSlot = i;
-                           break;
-                        }
-                     }
-
-                     if (hotbarSlot == -1) {
-                        hotbarSlot = 0;
-                     }
-                  }
-
-                  this.hotbarOriginalItem = this.mc.player.getInventory().getStack(hotbarSlot).copy();
-                  this.hotbarSlotUsed = hotbarSlot;
-                  InvUtils.move().from(this.targetSlot).toHotbar(hotbarSlot);
-                  this.targetSlot = hotbarSlot;
-                  this.swapStage = 2;
-                  this.stageTimer = 0;
-               } else {
-                  this.hotbarSlotUsed = this.targetSlot;
-                  this.hotbarOriginalItem = ItemStack.EMPTY;
-                  this.swapStage = 2;
-                  this.stageTimer = 0;
-               }
-               break;
-            case 2:
                ItemStack toEquip = this.mc.player.getInventory().getStack(this.targetSlot);
                if (!this.isElytra(toEquip)) {
                   if ((Boolean)this.notifySwap.get()) {
-                     this.warning("Elytra swap failed - item not in hotbar slot", new Object[0]);
+                     this.warning("Elytra swap failed - the fresh elytra is no longer in slot %d", this.targetSlot);
                   }
 
                   this.resetSwapState();
                   return;
                }
 
-               InvUtils.swap(this.targetSlot, true);
-               this.mc.interactionManager.interactItem(this.mc.player, Hand.MAIN_HAND);
-               this.mc.player.swingHand(Hand.MAIN_HAND);
-               InvUtils.swapBack();
-               this.swapStage = 3;
+               InvUtils.move().from(this.targetSlot).toArmor(2);
+               this.swapStage = 2;
                this.stageTimer = 0;
                break;
-            case 3:
-               if (this.newElytraOriginalSlot >= 9) {
-                  InvUtils.move().fromHotbar(this.targetSlot).to(this.newElytraOriginalSlot);
-                  if (!this.hotbarOriginalItem.isEmpty()) {
-                     this.swapStage = 4;
-                     this.stageTimer = 0;
-                     return;
-                  }
-               }
-
+            case 2:
                ItemStack newChest = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-               if ((Boolean)this.notifySwap.get() && this.isElytra(newChest)) {
-                  this.info(
-                     "Swapped to elytra at %.1f%% durability",
-                     this.getDurabilityPercent(newChest)
-                  );
-               }
-
-               this.finishSwap();
-               break;
-            case 4:
-               if (this.stageTimer < 3) {
-                  this.stageTimer++;
-                  return;
-               }
-
-               for (int i = 9; i < 36; i++) {
-                  ItemStack stack = this.mc.player.getInventory().getStack(i);
-                  if (ItemStack.areItemsEqual(stack, this.hotbarOriginalItem)) {
-                     InvUtils.move().from(i).toHotbar(this.hotbarSlotUsed);
-                     break;
+               if ((Boolean)this.notifySwap.get()) {
+                  if (this.isElytra(newChest) && this.getDurabilityPercent(newChest) > (Integer)this.durabilityThreshold.get()) {
+                     this.info(
+                        "Swapped to elytra at %.1f%% durability, worn one left in slot %d",
+                        this.getDurabilityPercent(newChest),
+                        this.targetSlot
+                     );
+                  } else {
+                     this.warning("Elytra swap failed - the chest slot did not take the fresh elytra", new Object[0]);
                   }
                }
 
@@ -319,9 +267,6 @@ public class ElytraSwap extends Module {
       this.swapStage = 0;
       this.stageTimer = 0;
       this.targetSlot = -1;
-      this.newElytraOriginalSlot = -1;
-      this.hotbarSlotUsed = -1;
-      this.hotbarOriginalItem = ItemStack.EMPTY;
       this.cooldownTimer = (Integer)this.swapCooldown.get();
    }
 
