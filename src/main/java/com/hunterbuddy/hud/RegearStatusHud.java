@@ -22,31 +22,41 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 
 /**
- * The regear as a journey: where it is on the line, what it is carrying, how many times it has
- * done this and when it will have to again.
+ * The regear as a journey: an identity badge on the far left saying what it is, a big line
+ * saying where it is on the line and whether it is stuck, a metro spine drawing the whole route
+ * with the current station lit, and — at the full density — the stocks it is carrying with what
+ * this run added, the counters, and the last event.
  *
- * <p>A regear is minutes of unattended work with a dozen ways to stall, and the question from
- * the other side of the room is not the raw state name but "how far along, and is it stuck".
- * So the big line says the station and its progress; a metro line under it draws the whole
- * journey with the current station lit; then the stocks with what this run has added, the
- * counters (this session, all time, last and average duration, and the estimated time to the
- * next one from the rate rockets are actually being spent), and the last thing that happened.
+ * <p>Two knobs shape it. {@code density} chooses how many rows exist; {@code size} scales the
+ * whole thing — every node, rail, bar, gap and icon, and the base text scale — so the entire
+ * element, metro line and all, shrinks or grows as one. {@code text-scale} is a fine trim on the
+ * text on top of that.
  *
- * <p>Idle, it folds to one muted line with the counters, or to nothing, as you prefer.
+ * <p>The mode is never a trailing data word: it lives in the leading badge (a drawn elytra plus
+ * an R/P tag, and an xp bottle under REPAIR), or — idle — as a labelled tail on the ledger line.
  * Everything drawn here is read from the module's own accounting; nothing is recomputed.
  */
 public class RegearStatusHud extends HudElement {
     public static final HudElementInfo<RegearStatusHud> INFO = new HudElementInfo<>(
         HunterBuddyAddon.HUD_GROUP, "RegearStatus",
-        "The regear's station on its line, stocks and gains, counters, next-regear estimate and last event.",
+        "The regear's identity badge, its station on its line, stocks and gains, counters, next-regear estimate and last event.",
         RegearStatusHud::new);
+
+    /** How many rows the panel carries while a regear is running. */
+    public enum Density {
+        MINIMAL,
+        COMPACT,
+        FULL
+    }
 
     /** What the element shows while no regear is running. */
     public enum IdleView {
         HIDDEN,
-        COMPACT,
+        LEDGER,
         FULL
     }
 
@@ -54,25 +64,40 @@ public class RegearStatusHud extends HudElement {
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
 
+    private final Setting<Density> density = sgGeneral.add(new EnumSetting.Builder<Density>()
+        .name("density")
+        .description("MINIMAL is the badge and the big line only; COMPACT adds the metro spine and one merged status row; FULL adds the stocks, counters and event rows.")
+        .defaultValue(Density.COMPACT).build());
+
+    private final Setting<Double> size = sgGeneral.add(new DoubleSetting.Builder()
+        .name("size")
+        .description("Master scale for the whole element: every node, rail, bar, gap and icon, and the base text scale. The knob that makes the whole thing — metro line and bars included — smaller or larger as one.")
+        .defaultValue(1.0).min(0.6).max(2.0).sliderRange(0.6, 2.0).build());
+
     private final Setting<IdleView> idleView = sgGeneral.add(new EnumSetting.Builder<IdleView>()
         .name("idle-view")
-        .description("Between regears: HIDDEN draws nothing, COMPACT one muted line with the counters and the next-regear estimate, FULL the whole panel.")
-        .defaultValue(IdleView.COMPACT).build());
+        .description("Between regears: HIDDEN draws nothing, LEDGER one muted line with the counters, next-regear estimate and the mode as a labelled tail, FULL the whole panel.")
+        .defaultValue(IdleView.LEDGER).build());
 
-    private final Setting<Boolean> showLine = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-line").description("The metro line: one segment per station, the current one lit.")
+    private final Setting<Boolean> showSpineIcons = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-spine-icons")
+        .description("At FULL, draw the supply stations (elytra, gaps, totems, rockets, mend) as their item icon instead of a dot. Ignored below size 0.75, where every node is a dot.")
         .defaultValue(true).build());
 
     private final Setting<Boolean> showSupplies = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-supplies").description("Rockets, valid elytras, gaps, totems (and bottles under REPAIR), with what this regear added.")
+        .name("show-supplies").description("FULL: the stocks row — rockets, valid elytras, gaps, totems (and bottles under REPAIR), with what this regear added.")
         .defaultValue(true).build());
 
+    private final Setting<Boolean> showStockIcons = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-stock-icons").description("Draw an item icon before each stock. Off falls back to a short text label (rkt/ely/gap/tot/xp).")
+        .defaultValue(true).visible(showSupplies::get).build());
+
     private final Setting<Boolean> showCounters = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-counters").description("Regears this session and all time, last and average duration, estimated time to the next.")
+        .name("show-counters").description("FULL: regears this session and all time, current or last duration, average, and the estimated time to the next.")
         .defaultValue(true).build());
 
     private final Setting<Boolean> showEvents = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-events").description("The last thing the regear did or ran into, fading out after a while.")
+        .name("show-events").description("FULL: the last thing the regear did or ran into, fading out after a while.")
         .defaultValue(true).build());
 
     private final Setting<Integer> eventFade = sgGeneral.add(new IntSetting.Builder()
@@ -96,7 +121,7 @@ public class RegearStatusHud extends HudElement {
         .defaultValue(16).min(0).max(512).sliderRange(0, 128).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
-        .name("text-scale").description("Scale of the text.")
+        .name("text-scale").description("A fine trim on the text, multiplied on top of size (effective text scale = size × text-scale).")
         .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
 
     private final Setting<Boolean> textShadow = sgGeneral.add(new BoolSetting.Builder()
@@ -108,15 +133,15 @@ public class RegearStatusHud extends HudElement {
         .defaultValue(true).build());
 
     private final Setting<SettingColor> busyColor = sgColors.add(new ColorSetting.Builder()
-        .name("busy-color").description("The big line and the lit station during a regear.")
+        .name("busy-color").description("The big line and the lit station during a regear, and the REPLACE badge tag.")
         .defaultValue(new SettingColor(90, 200, 255, 255)).build());
 
     private final Setting<SettingColor> mendColor = sgColors.add(new ColorSetting.Builder()
-        .name("mend-color").description("The big line while mending, and the stations already passed.")
+        .name("mend-color").description("The big line while mending, the stations already passed, the progress fill and the warmth of a landing gain.")
         .defaultValue(new SettingColor(110, 240, 150, 255)).build());
 
     private final Setting<SettingColor> warnColor = sgColors.add(new ColorSetting.Builder()
-        .name("warn-color").description("Waiting over lava, stocks running low.")
+        .name("warn-color").description("Waiting over lava, stocks running low, a regear due soon.")
         .defaultValue(new SettingColor(255, 200, 80, 255)).build());
 
     private final Setting<SettingColor> badColor = sgColors.add(new ColorSetting.Builder()
@@ -128,7 +153,7 @@ public class RegearStatusHud extends HudElement {
         .defaultValue(new SettingColor(255, 255, 255, 255)).build());
 
     private final Setting<SettingColor> mutedColor = sgColors.add(new ColorSetting.Builder()
-        .name("muted-color").description("Labels, separators, the counters and the idle line.")
+        .name("muted-color").description("Labels, separators, the counters, the idle ledger and the upcoming stations.")
         .defaultValue(new SettingColor(150, 150, 150, 255)).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
@@ -137,10 +162,14 @@ public class RegearStatusHud extends HudElement {
     private long lastFrameNanos;
     private double animTime;
 
-    /** How much bigger the big line is than the rest. */
+    /** How much bigger the big line is than the rest, at COMPACT and FULL. */
     private static final double STATE_SCALE = 1.3;
     /** A phase that has not changed station for this long is drawn as stalled. */
     private static final long STALL_MS = 45_000L;
+    /** The worst-case big line, so its width never jitters as the phase text moves. */
+    private static final String STATE_TEMPLATE = "REGEAR #000 · XP BOTTLES 000/000";
+    /** Below this size the spine draws dots only, no sprites. */
+    private static final double SPINE_ICON_SIZE = 0.75;
 
     private AutoFlyingRegear.Step lastStep;
     private long stepSinceMs;
@@ -161,12 +190,7 @@ public class RegearStatusHud extends HudElement {
 
         if (!live) {
             if (isInEditor()) {
-                renderPanel(renderer, "REGEAR #4 · ROCKETS 178", busyColor.get(), 6, 3,
-                    new String[]{"rockets 178", "elytra 5", "gaps 32", "totems 4"},
-                    new Color[]{valueColor.get(), valueColor.get(), valueColor.get(), valueColor.get()},
-                    new String[]{"(+192)", "(+3)", "(+32)", "(+2)"},
-                    "#4 session · 27 total · last 2m14 · avg 2m05 · next ≈ 38 min",
-                    "took rocket shulker #2", 1.0f, HudGlowPanel.Severity.OK, 0.0f);
+                renderEditorDemo(renderer);
                 return;
             }
 
@@ -185,6 +209,36 @@ public class RegearStatusHud extends HudElement {
             stepSinceMs = now;
         }
 
+        if (!busy && !waiting) {
+            switch (idleView.get()) {
+                case HIDDEN -> {
+                    setSize(0.0, 0.0);
+                    return;
+                }
+                case LEDGER -> {
+                    renderLedger(renderer, regear, now);
+                    return;
+                }
+                case FULL -> {
+                    // Fall through to the full panel, drawn against the idle state.
+                }
+            }
+        }
+
+        renderPanel(renderer, regear, busy, waiting, step, now);
+    }
+
+    // ---------------------------------------------------------------- the panel
+
+    private void renderPanel(HudRenderer renderer, AutoFlyingRegear regear,
+                             boolean busy, boolean waiting, AutoFlyingRegear.Step step, long now) {
+        boolean shadow = textShadow.get();
+        double s = size.get();
+        double ts = s * textScale.get();
+        boolean anim = animations.get();
+        double inset = panel.padding();
+        Density d = density.get();
+
         int rockets = regear.getRocketCount();
         int elytras = regear.getValidElytraCount();
         int gaps = regear.hudGapCount();
@@ -192,178 +246,100 @@ public class RegearStatusHud extends HudElement {
         int bottles = regear.getBottleCount();
         boolean repair = regear.getElytraMode() == AutoFlyingRegear.ElytraMode.REPAIR;
 
-        if (!busy && !waiting) {
-            switch (idleView.get()) {
-                case HIDDEN -> {
-                    setSize(0.0, 0.0);
-                    return;
-                }
-                case COMPACT -> {
-                    renderCompact(renderer, regear, rockets, elytras, bottles, repair, now);
-                    return;
-                }
-                case FULL -> {
-                }
-            }
-        }
+        boolean stalled = busy && now - stepSinceMs > STALL_MS && step != AutoFlyingRegear.Step.MEND;
 
         // ---- the big line
         String stateText;
         SettingColor stateColor;
-        boolean stalled = busy && now - stepSinceMs > STALL_MS && step != AutoFlyingRegear.Step.MEND;
-
         if (waiting) {
-            stateText = "LOW · LAVA BELOW · WAITING " + regear.hudLavaWaitSeconds() + "s";
+            stateText = "LAVA BELOW · WAITING " + regear.hudLavaWaitSeconds() + "s";
             stateColor = warnColor.get();
         } else if (busy) {
-            int number = regear.hudSessionRegears() + 1;
-            stateText = "REGEAR #" + number + " · " + regear.hudPhaseDetail();
+            stateText = "REGEAR #" + (regear.hudSessionRegears() + 1) + " · " + regear.hudPhaseDetail();
             stateColor = stalled ? badColor.get() : step == AutoFlyingRegear.Step.MEND ? mendColor.get() : busyColor.get();
         } else {
             AutoFlyingRegear.Run last = regear.hudLastRun();
             boolean failed = last != null && last.outcome != null && !last.outcome.startsWith("complete");
-            stateText = "REGEAR · READY · " + (repair ? "REPAIR" : "REPLACE") + (failed ? " · LAST " + last.outcome.toUpperCase(Locale.ROOT) : "");
+            stateText = failed ? "REGEAR · " + last.outcome.toUpperCase(Locale.ROOT) : "REGEAR · READY";
             stateColor = failed ? badColor.get() : mutedColor.get();
         }
 
-        // ---- the line of stations
+        double stateMul = d == Density.MINIMAL ? 1.0 : STATE_SCALE;
+
+        // ---- geometry
+        double gap = 3.0 * s;
+        double badgeIcon = 13.0 * s;
+        double ico = 11.0 * s;
+        double lineH = renderer.textHeight(shadow, ts);
+        double stateH = renderer.textHeight(shadow, ts * stateMul);
+        double rowH = Math.max(lineH, ico);
+        double stateRowH = Math.max(stateH, badgeIcon);
+
+        boolean showSpine = d != Density.MINIMAL;
+        boolean spineIcons = d == Density.FULL && showSpineIcons.get() && s >= SPINE_ICON_SIZE;
+        boolean mergedRow = d == Density.COMPACT;
+        boolean stocksRow = d == Density.FULL && showSupplies.get();
+        boolean countersRow = d == Density.FULL && showCounters.get();
+        boolean eventRow = d == Density.FULL && showEvents.get();
+
+        // ---- stations
         List<AutoFlyingRegear.Step> stations = new ArrayList<>();
-        for (AutoFlyingRegear.Step s : AutoFlyingRegear.Step.values()) {
-            if (regear.hudStepEnabled(s)) stations.add(s);
+        for (AutoFlyingRegear.Step st : AutoFlyingRegear.Step.values()) {
+            if (regear.hudStepEnabled(st)) stations.add(st);
         }
         int current = step == null ? -1 : stations.indexOf(step);
 
-        // ---- the stocks and what this run has added
+        // ---- stocks and the run whose gains are still held
         AutoFlyingRegear.Run run = regear.hudCurrentRun();
         AutoFlyingRegear.Run gainsFrom = run != null ? run
             : regear.hudLastRun() != null && now - regear.hudLastRun().endedMs < gainsHold.get() * 1000L ? regear.hudLastRun() : null;
+        List<Stock> stocks = stocksRow ? buildStocks(regear, rockets, elytras, gaps, totems, bottles, repair, gainsFrom) : List.of();
 
-        List<String> stockText = new ArrayList<>();
-        List<Color> stockColor = new ArrayList<>();
-        List<String> gainText = new ArrayList<>();
+        // ---- width, majored throughout so nothing jitters as the numbers move
+        double badgeW = badgeWidth(renderer, repair, shadow, ts, badgeIcon, s);
+        double stateW = Math.max(renderer.textWidth(stateText, shadow, ts * stateMul),
+            renderer.textWidth(STATE_TEMPLATE, shadow, ts * stateMul));
+        double width = badgeW + gap + stateW;
 
-        stockText.add("rockets " + rockets);
-        stockColor.add(stockColor(rockets, lowRockets.get()));
-        gainText.add(gain(gainsFrom == null ? 0 : rockets - gainsFrom.rocketsBefore, gainsFrom != null));
-
-        stockText.add("elytra " + elytras);
-        stockColor.add(stockColor(elytras, lowElytras.get()));
-        gainText.add(gain(gainsFrom == null ? 0 : elytras - gainsFrom.elytrasBefore, gainsFrom != null));
-
-        if (regear.hudGoalGaps() > 0) {
-            stockText.add("gaps " + gaps);
-            stockColor.add(gaps == 0 ? warnColor.get() : valueColor.get());
-            gainText.add(gain(gainsFrom == null ? 0 : gaps - gainsFrom.gapsBefore, gainsFrom != null));
+        if (mergedRow) width = Math.max(width, mergedWidth(renderer, regear, rockets, elytras, gaps, totems, shadow, ts, ico, s));
+        if (stocksRow) width = Math.max(width, stocksWidth(renderer, stocks, shadow, ts, ico, s));
+        if (countersRow) width = Math.max(width, countersWidth(renderer, shadow, ts, ico, s));
+        if (eventRow) {
+            String event = regear.hudLastEvent();
+            width = Math.max(width, renderer.textWidth(event == null ? "" : event, shadow, ts));
         }
+        if (showSpine) width = Math.max(width, 72.0 * s);
 
-        if (regear.hudGoalTotems() > 0) {
-            stockText.add("totems " + totems);
-            stockColor.add(totems == 0 ? warnColor.get() : valueColor.get());
-            gainText.add(gain(gainsFrom == null ? 0 : totems - gainsFrom.totemsBefore, gainsFrom != null));
-        }
+        // ---- height
+        double labelH = renderer.textHeight(shadow, ts * 0.6);
+        double spineH = showSpine ? 12.0 * s + labelH + 1.0 * s : 0.0;
+        double height = stateRowH
+            + (showSpine ? gap + spineH : 0.0)
+            + (mergedRow ? gap + rowH : 0.0)
+            + (stocksRow ? gap + rowH : 0.0)
+            + (countersRow ? gap + rowH : 0.0)
+            + (eventRow ? gap + lineH : 0.0);
 
-        if (repair) {
-            stockText.add("xp " + bottles);
-            stockColor.add(stockColor(bottles, lowBottles.get()));
-            gainText.add(gain(gainsFrom == null ? 0 : bottles - gainsFrom.bottlesBefore, gainsFrom != null));
-        }
-
-        // ---- the counters
-        String counters = counters(regear, rockets, now);
-
-        // ---- the last event
-        float eventAge = (float) Math.min(1.0, (now - regear.hudLastEventMs()) / (eventFade.get() * 1000.0));
-        String event = regear.hudLastEvent();
-
+        // ---- severity
+        int secsNext = regear.hudSecondsToNextRegear();
+        boolean soon = secsNext >= 0 && secsNext < 300;
         HudGlowPanel.Severity severity = elytras == 0 || rockets == 0 || (repair && bottles == 0) || stalled
             ? HudGlowPanel.Severity.CRITICAL
-            : waiting || elytras < lowElytras.get() || rockets < lowRockets.get() || (repair && bottles < lowBottles.get())
+            : waiting || soon || elytras < lowElytras.get() || rockets < lowRockets.get() || (repair && bottles < lowBottles.get())
                 ? HudGlowPanel.Severity.WARN
                 : HudGlowPanel.Severity.OK;
-
-        renderPanel(renderer, stateText, stateColor, stations.size(), current,
-            stockText.toArray(new String[0]), stockColor.toArray(new Color[0]), gainText.toArray(new String[0]),
-            counters, event, 1.0f - eventAge, severity, stalled ? 1.0f : 0.0f);
-    }
-
-    /** The idle line: number, time since, estimate, mode. One line, muted, so it can stay on screen for hours. */
-    private void renderCompact(HudRenderer renderer, AutoFlyingRegear regear, int rockets, int elytras, int bottles,
-                               boolean repair, long now) {
-        boolean shadow = textShadow.get();
-        double scale = textScale.get();
-        double inset = panel.padding();
-        double height = renderer.textHeight(shadow, scale);
-
-        AutoFlyingRegear.Run last = regear.hudLastRun();
-        String ago = last == null ? "none yet" : formatSpan((now - last.endedMs) / 1000L) + " ago";
-        String text = String.format(Locale.ROOT, "regear · #%d session · %d total · %s · next %s · %s",
-            regear.hudSessionRegears(), LifetimeStats.get().totalRegears(), ago,
-            nextEstimate(regear, rockets), repair ? "REPAIR" : "REPLACE");
-
-        double width = Math.max(renderer.textWidth(text, shadow, scale),
-            renderer.textWidth("regear · #000 session · 0000 total · 00h00 ago · next ≈ 00h00 · REPLACE", shadow, scale));
-
-        HudGlowPanel.Severity severity = elytras == 0 || rockets == 0 || (repair && bottles == 0)
-            ? HudGlowPanel.Severity.CRITICAL
-            : elytras < lowElytras.get() || rockets < lowRockets.get() || (repair && bottles < lowBottles.get())
-                ? HudGlowPanel.Severity.WARN
-                : HudGlowPanel.Severity.OK;
-
-        panel.draw(renderer, this.x + inset, this.y + inset, width, height, severity);
-        SettingColor color = severity == HudGlowPanel.Severity.CRITICAL ? badColor.get()
-            : severity == HudGlowPanel.Severity.WARN ? warnColor.get() : mutedColor.get();
-        renderer.text(text, this.x + inset, this.y + inset, color, shadow, scale);
-        setSize(width + inset * 2.0, height + inset * 2.0);
-    }
-
-    /**
-     * Lays the panel out: big line, metro line, stocks, counters, event. Templates keep the width
-     * still while the numbers move; the panel goes under first, since nothing here sorts by depth.
-     */
-    private void renderPanel(HudRenderer renderer, String stateText, SettingColor stateColor,
-                             int stationCount, int currentStation,
-                             String[] stocks, Color[] stockColors, String[] gains,
-                             String counters, String event, float eventAlpha,
-                             HudGlowPanel.Severity severity, float stallPulse) {
-        boolean shadow = textShadow.get();
-        double scale = textScale.get();
-        boolean anim = animations.get();
-        double inset = panel.padding();
-        double stateHeight = renderer.textHeight(shadow, scale * STATE_SCALE);
-        double lineHeight = renderer.textHeight(shadow, scale);
-        double gap = 2.0 * scale;
-        double barHeight = 3.0 * scale;
-
-        double width = Math.max(renderer.textWidth(stateText, shadow, scale * STATE_SCALE),
-            renderer.textWidth("REGEAR #000 · XP BOTTLES 0000/0000", shadow, scale * STATE_SCALE));
-        if (showSupplies.get()) {
-            width = Math.max(width, stocksWidth(renderer, stocks, gains, shadow, scale));
-        }
-        if (showCounters.get()) {
-            width = Math.max(width, Math.max(renderer.textWidth(counters, shadow, scale),
-                renderer.textWidth("#000 session · 0000 total · last 00m00 · avg 00m00 · next ≈ 00h00", shadow, scale)));
-        }
-        boolean eventShown = showEvents.get() && event != null && !event.isEmpty() && eventAlpha > 0.02f;
-        if (showEvents.get()) {
-            width = Math.max(width, renderer.textWidth(eventShown ? event : "", shadow, scale));
-        }
-
-        double height = stateHeight
-            + (showLine.get() ? barHeight + gap * 2.0 : 0.0)
-            + (showSupplies.get() ? lineHeight + gap : 0.0)
-            + (showCounters.get() ? lineHeight + gap : 0.0)
-            + (showEvents.get() ? lineHeight + gap : 0.0);
 
         panel.draw(renderer, this.x + inset, this.y + inset, width, height, severity);
 
         double x0 = this.x + inset;
         double y = this.y + inset;
 
-        // The big line hops once when the station changes and flashes toward white; a stall
-        // breathes red on a slow beat, readable from across the room without being a strobe.
+        // ---- row: badge + big line
+        drawBadge(renderer, x0, y, stateRowH, repair, shadow, ts, badgeIcon, s);
+
         float fresh = anim ? pulse.freshness("state", stateText, 900L) : 0.0f;
         Color stateDraw = HudPulse.tint(HudPulse.Style.Lively, stateColor, new SettingColor(255, 255, 255, 255), fresh);
-        if (anim && stallPulse > 0.0f) {
+        if (anim && stalled) {
             double breathe = 0.5 + 0.5 * Math.sin(animTime * Math.PI * 2.0 / 1.2);
             stateDraw = new Color(
                 (int) (stateDraw.r + (255 - stateDraw.r) * 0.30 * breathe),
@@ -371,131 +347,528 @@ public class RegearStatusHud extends HudElement {
                 (int) (stateDraw.b + (255 - stateDraw.b) * 0.30 * breathe),
                 stateDraw.a);
         }
-        renderer.text(stateText, x0, y + HudPulse.bounce(HudPulse.Style.Lively, fresh, scale), stateDraw, shadow, scale * STATE_SCALE);
-        y += stateHeight;
+        double stateTextY = y + (stateRowH - stateH) / 2.0 + HudPulse.bounce(HudPulse.Style.Lively, fresh, ts);
+        renderer.text(stateText, x0 + badgeW + gap, stateTextY, stateDraw, shadow, ts * stateMul);
+        y += stateRowH;
 
-        if (showLine.get()) {
+        // ---- row: metro spine
+        if (showSpine) {
             y += gap;
-            drawLine(renderer, x0, y, width, barHeight, stationCount, currentStation, anim, scale);
-            y += barHeight + gap;
+            drawSpine(renderer, x0, y, width, stations, current, anim, s, ts, spineIcons, shadow);
+            y += spineH;
         }
 
-        if (showSupplies.get()) {
-            double x = x0;
-            for (int i = 0; i < stocks.length; i++) {
-                if (i > 0) {
-                    renderer.text(" · ", x, y, mutedColor.get(), shadow, scale);
-                    x += renderer.textWidth(" · ", shadow, scale);
-                }
+        // ---- row: merged status (COMPACT)
+        if (mergedRow) {
+            y += gap;
+            drawMerged(renderer, x0, y, rowH, regear, rockets, elytras, gaps, totems, anim, shadow, ts, ico, s);
+            y += rowH;
+        }
 
-                // A gain warms its reading for a moment, so the restock is visible as it lands.
-                Color c = HudPulse.tint(HudPulse.Style.Subtle, new SettingColor(stockColors[i].r, stockColors[i].g, stockColors[i].b, stockColors[i].a),
-                    mendColor.get(), anim ? pulse.freshness("stock" + i, stocks[i], 800L) : 0.0f);
-                renderer.text(stocks[i], x, y, c, shadow, scale);
-                x += renderer.textWidth(stocks[i], shadow, scale);
+        // ---- row: stocks (FULL)
+        if (stocksRow) {
+            y += gap;
+            drawStocks(renderer, x0, y, rowH, stocks, anim, shadow, ts, ico, s);
+            y += rowH;
+        }
 
-                if (!gains[i].isEmpty()) {
-                    String g = " " + gains[i];
-                    renderer.text(g, x, y, gains[i].startsWith("(-") ? warnColor.get() : mendColor.get(), shadow, scale);
-                    x += renderer.textWidth(g, shadow, scale);
-                }
+        // ---- row: counters (FULL)
+        if (countersRow) {
+            y += gap;
+            drawCounters(renderer, x0, y, rowH, regear, now, shadow, ts, ico, s);
+            y += rowH;
+        }
+
+        // ---- row: event (FULL)
+        if (eventRow) {
+            y += gap;
+            String event = regear.hudLastEvent();
+            float eventAge = (float) Math.min(1.0, (now - regear.hudLastEventMs()) / (eventFade.get() * 1000.0));
+            float alpha = 1.0f - eventAge;
+            if (event != null && !event.isEmpty() && alpha > 0.02f) {
+                SettingColor m = mutedColor.get();
+                renderer.text(event, x0, y, new Color(m.r, m.g, m.b, (int) (m.a * alpha)), shadow, ts);
             }
-            y += lineHeight + gap;
-        }
-
-        if (showCounters.get()) {
-            renderer.text(counters, x0, y, mutedColor.get(), shadow, scale);
-            y += lineHeight + gap;
-        }
-
-        if (eventShown) {
-            SettingColor m = mutedColor.get();
-            Color faded = new Color(m.r, m.g, m.b, (int) (m.a * Math.max(0.0f, Math.min(1.0f, eventAlpha))));
-            renderer.text(event, x0, y, faded, shadow, scale);
         }
 
         setSize(width + inset * 2.0, height + inset * 2.0);
     }
 
-    /**
-     * The metro line: one segment per station, passed ones in the mend green, the current one in
-     * the busy blue and breathing, the rest dim. Idle, the whole line is dim.
-     */
-    private void drawLine(HudRenderer renderer, double x, double y, double width, double height,
-                          int stations, int current, boolean anim, double scale) {
-        if (stations <= 0) return;
+    // ---------------------------------------------------------------- the ledger (idle)
 
-        double spacing = 2.0 * scale;
-        double segment = (width - spacing * (stations - 1)) / stations;
-        SettingColor done = mendColor.get();
-        SettingColor lit = busyColor.get();
+    /** One muted line: number, totals, last duration, next estimate, and the mode as a labelled tail. */
+    private void renderLedger(HudRenderer renderer, AutoFlyingRegear regear, long now) {
+        boolean shadow = textShadow.get();
+        double s = size.get();
+        double ts = s * textScale.get();
+        double ico = 11.0 * s;
+        double inset = panel.padding();
+        double lineH = renderer.textHeight(shadow, ts);
+        double rowH = Math.max(lineH, ico);
+
+        int rockets = regear.getRocketCount();
+        int elytras = regear.getValidElytraCount();
+        int bottles = regear.getBottleCount();
+        boolean repair = regear.getElytraMode() == AutoFlyingRegear.ElytraMode.REPAIR;
+
+        AutoFlyingRegear.Run last = regear.hudLastRun();
+        // Minute resolution on purpose: with seconds the "ago" ticked every frame, and since the
+        // panel now hugs its text (no fixed template) that would have jittered its right edge.
+        String lastText;
+        if (last == null) {
+            lastText = "none yet";
+        } else {
+            long agoS = (now - last.endedMs) / 1000L;
+            lastText = (agoS < 60 ? "<1m" : agoS < 3600 ? (agoS / 60) + "m"
+                : (agoS / 3600) + "h" + String.format(Locale.ROOT, "%02d", (agoS % 3600) / 60)) + " ago";
+        }
+
+        // Segment layout so the bound icon can sit inline; the tail says "mode X", never a bare word.
+        // The session counter is dropped until there has actually been one this session — "#0" read
+        // like the id of a regear that never happened.
+        int sessionCount = regear.hudSessionRegears();
+        String sessionPart = sessionCount > 0 ? "#" + sessionCount + " · " : "";
+        String head = String.format(Locale.ROOT, "regear · %s%d total · last %s · ",
+            sessionPart, LifetimeStats.get().totalRegears(), lastText);
+        // A colour with no number is useless, so a stock under its threshold is named and counted
+        // here — normally nothing, only what is actually low. Kept quiet when everything is fine.
+        StringBuilder low = new StringBuilder();
+        if (rockets < lowRockets.get()) low.append(" · rkt ").append(rockets);
+        if (elytras < lowElytras.get()) low.append(" · ely ").append(elytras);
+        if (repair && bottles < lowBottles.get()) low.append(" · xp ").append(bottles);
+        if (regear.hudGoalGaps() > 0 && regear.hudGapCount() < regear.hudGoalGaps()) low.append(" · gap ").append(regear.hudGapCount());
+        if (regear.hudGoalTotems() > 0 && regear.hudTotemCount() < regear.hudGoalTotems()) low.append(" · tot ").append(regear.hudTotemCount());
+        String tail = low + " · mode " + (repair ? "REPAIR" : "REPLACE");
+
+        // Hug the text: measure the "next" segment exactly as drawNext will draw it (actual time
+        // string, icon only when there is a bound), so nothing over-reserves and the idle line has
+        // no empty tail. The panel only nudges when the numbers actually change, never per frame.
+        String nextTime = nextTimeText(regear.hudSecondsToNextRegear());
+        boolean nextHasIcon = boundStack(regear.hudNextRegearBound()) != null;
+        double nextW = renderer.textWidth("next ", shadow, ts)
+            + (nextHasIcon ? ico + 2.0 * s : 0.0)
+            + renderer.textWidth(nextTime, shadow, ts);
+        double width = renderer.textWidth(head, shadow, ts) + nextW + renderer.textWidth(tail, shadow, ts);
+
+        boolean failed = last != null && last.outcome != null && !last.outcome.startsWith("complete");
+        int secsNext = regear.hudSecondsToNextRegear();
+        boolean soon = secsNext >= 0 && secsNext < 300;
+        HudGlowPanel.Severity severity = elytras == 0 || rockets == 0 || (repair && bottles == 0) || failed
+            ? HudGlowPanel.Severity.CRITICAL
+            : soon || elytras < lowElytras.get() || rockets < lowRockets.get() || (repair && bottles < lowBottles.get())
+                ? HudGlowPanel.Severity.WARN
+                : HudGlowPanel.Severity.OK;
+
+        panel.draw(renderer, this.x + inset, this.y + inset, width, rowH, severity);
+
+        SettingColor color = severity == HudGlowPanel.Severity.CRITICAL ? badColor.get()
+            : severity == HudGlowPanel.Severity.WARN ? warnColor.get() : mutedColor.get();
+
+        double x0 = this.x + inset;
+        double y = this.y + inset;
+        double textY = y + (rowH - lineH) / 2.0;
+        double centerY = y + rowH / 2.0;
+
+        renderer.text(head, x0, textY, color, shadow, ts);
+        double x = x0 + renderer.textWidth(head, shadow, ts);
+        x = drawNext(renderer, x, textY, centerY, regear, color, shadow, ts, ico, s);
+        renderer.text(tail, x, textY, color, shadow, ts);
+
+        setSize(width + inset * 2.0, rowH + inset * 2.0);
+    }
+
+    // ---------------------------------------------------------------- the badge
+
+    private double badgeWidth(HudRenderer renderer, boolean repair, boolean shadow, double ts, double badgeIcon, double s) {
+        double w = badgeIcon + 2.0 * s + renderer.textWidth("R", shadow, ts);
+        if (repair) w += 2.0 * s + badgeIcon * 0.85;
+        return w;
+    }
+
+    /** The identity mark: an elytra, a one-letter mode tag, and — under REPAIR — an xp bottle. */
+    private void drawBadge(HudRenderer renderer, double x0, double y, double rowH, boolean repair,
+                           boolean shadow, double ts, double badgeIcon, double s) {
+        double centerY = y + rowH / 2.0;
+        double x = x0;
+
+        postItem(renderer, Items.ELYTRA.getDefaultStack(), x, centerY - badgeIcon / 2.0, badgeIcon);
+        x += badgeIcon + 2.0 * s;
+
+        String tag = repair ? "P" : "R";
+        SettingColor tagColor = repair ? mendColor.get() : busyColor.get();
+        double tagH = renderer.textHeight(shadow, ts);
+        renderer.text(tag, x, centerY - tagH / 2.0, tagColor, shadow, ts);
+        x += renderer.textWidth("R", shadow, ts);
+
+        if (repair) {
+            x += 2.0 * s;
+            double xp = badgeIcon * 0.85;
+            postItem(renderer, Items.EXPERIENCE_BOTTLE.getDefaultStack(), x, centerY - xp / 2.0, xp);
+        }
+    }
+
+    // ---------------------------------------------------------------- the metro spine
+
+    /**
+     * The whole journey on one rail: passed stations in mend green, the current one lit and
+     * breathing, the rest dim; supply stations drawn as their item when asked and big enough.
+     */
+    private void drawSpine(HudRenderer renderer, double x0, double yTop, double width,
+                           List<AutoFlyingRegear.Step> stations, int current, boolean anim,
+                           double s, double ts, boolean icons, boolean shadow) {
+        int n = stations.size();
+        if (n <= 0) return;
+
+        double nodeMax = 6.0 * s;
+        double yc = yTop + nodeMax;
+        double pad = icons ? 7.0 * s : nodeMax;
+        double rail = 3.0 * s;
+
+        double[] nx = new double[n];
+        if (n == 1) {
+            nx[0] = x0 + width / 2.0;
+        } else {
+            for (int i = 0; i < n; i++) nx[i] = x0 + pad + i * (width - 2.0 * pad) / (n - 1);
+        }
+
         SettingColor dim = mutedColor.get();
+        SettingColor busy = busyColor.get();
+        SettingColor mend = mendColor.get();
+
+        // The rail, dim end to end, then the ridden stretch behind the current node in mend.
+        renderer.quad(nx[0], yc - rail / 2.0, nx[n - 1] - nx[0], rail, new Color(dim.r, dim.g, dim.b, (int) (dim.a * 0.35)));
+        if (current > 0) {
+            int c = Math.min(current, n - 1);
+            renderer.quad(nx[0], yc - rail / 2.0, nx[c] - nx[0], rail, new Color(mend.r, mend.g, mend.b, (int) (mend.a * 0.85)));
+        }
+
         double breathe = anim ? 0.65 + 0.35 * Math.sin(animTime * Math.PI * 2.0 / 1.6) : 1.0;
 
-        for (int i = 0; i < stations; i++) {
-            Color color;
-            if (current >= 0 && i < current) {
-                color = new Color(done.r, done.g, done.b, (int) (done.a * 0.85));
-            } else if (i == current) {
-                color = new Color(lit.r, lit.g, lit.b, (int) (lit.a * breathe));
+        for (int i = 0; i < n; i++) {
+            AutoFlyingRegear.Step st = stations.get(i);
+            boolean isCurrent = i == current;
+            boolean passed = current >= 0 && i < current;
+            ItemStack supply = icons ? supplyStack(st) : null;
+
+            if (supply != null) {
+                double isz = 2.0 * nodeMax * 0.9;
+                postItem(renderer, supply, nx[i] - isz / 2.0, yc - isz / 2.0, isz);
+                if (isCurrent) {
+                    ring(renderer, nx[i], yc, nodeMax, 1.5 * s, new Color(busy.r, busy.g, busy.b, (int) (busy.a * breathe)));
+                }
+            } else if (passed) {
+                disc(renderer, nx[i], yc, 3.0 * s, new Color(mend.r, mend.g, mend.b, (int) (mend.a * 0.85)));
+            } else if (isCurrent) {
+                disc(renderer, nx[i], yc, 4.5 * s, busy);
+                ring(renderer, nx[i], yc, nodeMax, 1.5 * s, new Color(busy.r, busy.g, busy.b, (int) (busy.a * breathe)));
             } else {
-                color = new Color(dim.r, dim.g, dim.b, (int) (dim.a * 0.35));
+                ring(renderer, nx[i], yc, 3.0 * s, Math.max(1.0, 1.0 * s), new Color(dim.r, dim.g, dim.b, (int) (dim.a * 0.5)));
             }
 
-            renderer.quad(x + i * (segment + spacing), y, segment, height, color);
+            if (st == AutoFlyingRegear.Step.LAND || st == AutoFlyingRegear.Step.FLY) {
+                String lbl = st == AutoFlyingRegear.Step.LAND ? "LAND" : "FLY";
+                double lts = ts * 0.6;
+                double lw = renderer.textWidth(lbl, shadow, lts);
+                renderer.text(lbl, nx[i] - lw / 2.0, yc + nodeMax + 1.0 * s,
+                    new Color(dim.r, dim.g, dim.b, (int) (dim.a * 0.8)), shadow, lts);
+            }
         }
     }
 
-    private double stocksWidth(HudRenderer renderer, String[] stocks, String[] gains, boolean shadow, double scale) {
+    private static ItemStack supplyStack(AutoFlyingRegear.Step st) {
+        return switch (st) {
+            case ELYTRA -> Items.ELYTRA.getDefaultStack();
+            case GAPS -> Items.ENCHANTED_GOLDEN_APPLE.getDefaultStack();
+            case TOTEMS -> Items.TOTEM_OF_UNDYING.getDefaultStack();
+            case ROCKETS -> Items.FIREWORK_ROCKET.getDefaultStack();
+            case MEND -> Items.EXPERIENCE_BOTTLE.getDefaultStack();
+            default -> null;
+        };
+    }
+
+    // ---------------------------------------------------------------- the merged status row (COMPACT)
+
+    private record Field(String label, String value, String template, SettingColor color) {}
+
+    private List<Field> mergedFields(AutoFlyingRegear regear, int rockets, int elytras, int gaps, int totems) {
+        List<Field> f = new ArrayList<>();
+        f.add(new Field("rkt ", String.valueOf(rockets), "0000", stockColor(rockets, lowRockets.get())));
+        f.add(new Field("ely ", String.valueOf(elytras), "00", stockColor(elytras, lowElytras.get())));
+        if (regear.hudGoalGaps() > 0) f.add(new Field("gap ", String.valueOf(gaps), "000", gaps == 0 ? warnColor.get() : valueColor.get()));
+        if (regear.hudGoalTotems() > 0) f.add(new Field("tot ", String.valueOf(totems), "00", totems == 0 ? warnColor.get() : valueColor.get()));
+        return f;
+    }
+
+    private double mergedWidth(HudRenderer renderer, AutoFlyingRegear regear, int rockets, int elytras, int gaps, int totems,
+                               boolean shadow, double ts, double ico, double s) {
+        List<Field> fields = mergedFields(regear, rockets, elytras, gaps, totems);
+        double sep = renderer.textWidth(" · ", shadow, ts);
         double w = 0.0;
-        for (int i = 0; i < stocks.length; i++) {
-            if (i > 0) w += renderer.textWidth(" · ", shadow, scale);
-            w += renderer.textWidth(stocks[i], shadow, scale);
-            if (!gains[i].isEmpty()) w += renderer.textWidth(" " + gains[i], shadow, scale);
+        for (Field f : fields) {
+            w += renderer.textWidth(f.label, shadow, ts)
+                + Math.max(renderer.textWidth(f.value, shadow, ts), renderer.textWidth(f.template, shadow, ts));
         }
-
-        // Worst case of the row as configured: four digits of rockets with a three-digit gain,
-        // two of elytra, three of gaps, two of totems, four of bottles.
-        double template = renderer.textWidth("rockets 0000 (+000) · elytra 00 (+0) · gaps 000 (+00) · totems 00 (+0) · xp 0000 (+000)", shadow, scale);
-        return Math.max(w, template);
+        w += fields.size() * sep;
+        return w + nextWidth(renderer, shadow, ts, ico, s);
     }
 
-    private String counters(AutoFlyingRegear regear, int rockets, long now) {
-        AutoFlyingRegear.Run last = regear.hudLastRun();
-        AutoFlyingRegear.Run run = regear.hudCurrentRun();
-        String lastText = run != null ? "now " + formatSpan(run.durationMs() / 1000L)
-            : last == null ? "last --" : "last " + formatSpan(last.durationMs() / 1000L);
-        String avg = regear.hudSessionRegears() == 0 ? "--" : formatSpan(regear.hudAverageRunMs() / 1000L);
+    private void drawMerged(HudRenderer renderer, double x0, double y, double rowH, AutoFlyingRegear regear,
+                            int rockets, int elytras, int gaps, int totems, boolean anim,
+                            boolean shadow, double ts, double ico, double s) {
+        double textY = y + (rowH - renderer.textHeight(shadow, ts)) / 2.0;
+        double centerY = y + rowH / 2.0;
+        List<Field> fields = mergedFields(regear, rockets, elytras, gaps, totems);
+        double x = x0;
 
-        return String.format(Locale.ROOT, "#%d session · %d total · %s · avg %s · next %s",
-            regear.hudSessionRegears(), LifetimeStats.get().totalRegears(), lastText, avg, nextEstimate(regear, rockets));
+        for (int i = 0; i < fields.size(); i++) {
+            Field f = fields.get(i);
+            if (i > 0) x = sep(renderer, x, textY, shadow, ts);
+            renderer.text(f.label, x, textY, mutedColor.get(), shadow, ts);
+            x += renderer.textWidth(f.label, shadow, ts);
+            float fresh = anim ? pulse.freshness("m" + f.label, f.value, 800L) : 0.0f;
+            renderer.text(f.value, x, textY, HudPulse.tint(HudPulse.Style.Subtle, f.color, mendColor.get(), fresh), shadow, ts);
+            x += renderer.textWidth(f.value, shadow, ts);
+        }
+
+        x = sep(renderer, x, textY, shadow, ts);
+        drawNext(renderer, x, textY, centerY, regear, mutedColor.get(), shadow, ts, ico, s);
+    }
+
+    // ---------------------------------------------------------------- the stocks row (FULL)
+
+    private record Stock(String label, ItemStack stack, String value, String template, SettingColor color, String gain) {}
+
+    private List<Stock> buildStocks(AutoFlyingRegear regear, int rockets, int elytras, int gaps, int totems, int bottles,
+                                    boolean repair, AutoFlyingRegear.Run gainsFrom) {
+        boolean g = gainsFrom != null;
+        // A finished run freezes its gain at what it actually added (after - before); only a run
+        // still in progress reads against the live count, because its *After fields are set at
+        // endRun. Reading the held gain against the live count made it drift as the player flew.
+        boolean ended = g && gainsFrom.endedMs != 0L;
+        List<Stock> list = new ArrayList<>();
+        list.add(new Stock("rkt", Items.FIREWORK_ROCKET.getDefaultStack(), String.valueOf(rockets), "0000",
+            stockColor(rockets, lowRockets.get()), gain(g ? (ended ? gainsFrom.rocketsAfter : rockets) - gainsFrom.rocketsBefore : 0, g)));
+        list.add(new Stock("ely", Items.ELYTRA.getDefaultStack(), String.valueOf(elytras), "00",
+            stockColor(elytras, lowElytras.get()), gain(g ? (ended ? gainsFrom.elytrasAfter : elytras) - gainsFrom.elytrasBefore : 0, g)));
+        if (regear.hudGoalGaps() > 0) {
+            list.add(new Stock("gap", Items.ENCHANTED_GOLDEN_APPLE.getDefaultStack(), String.valueOf(gaps), "000",
+                gaps == 0 ? warnColor.get() : valueColor.get(), gain(g ? (ended ? gainsFrom.gapsAfter : gaps) - gainsFrom.gapsBefore : 0, g)));
+        }
+        if (regear.hudGoalTotems() > 0) {
+            list.add(new Stock("tot", Items.TOTEM_OF_UNDYING.getDefaultStack(), String.valueOf(totems), "00",
+                totems == 0 ? warnColor.get() : valueColor.get(), gain(g ? (ended ? gainsFrom.totemsAfter : totems) - gainsFrom.totemsBefore : 0, g)));
+        }
+        if (repair) {
+            list.add(new Stock("xp", Items.EXPERIENCE_BOTTLE.getDefaultStack(), String.valueOf(bottles), "0000",
+                stockColor(bottles, lowBottles.get()), gain(g ? (ended ? gainsFrom.bottlesAfter : bottles) - gainsFrom.bottlesBefore : 0, g)));
+        }
+        return list;
+    }
+
+    private double stockLead(HudRenderer renderer, Stock st, boolean shadow, double ts, double ico, double s) {
+        return showStockIcons.get() ? ico + 2.0 * s : renderer.textWidth(st.label + " ", shadow, ts);
+    }
+
+    private double stocksWidth(HudRenderer renderer, List<Stock> stocks, boolean shadow, double ts, double ico, double s) {
+        double sep = renderer.textWidth(" · ", shadow, ts);
+        double gainReserve = renderer.textWidth(" (+0000)", shadow, ts);
+        double w = 0.0;
+        for (int i = 0; i < stocks.size(); i++) {
+            if (i > 0) w += sep;
+            Stock st = stocks.get(i);
+            w += stockLead(renderer, st, shadow, ts, ico, s)
+                + Math.max(renderer.textWidth(st.value, shadow, ts), renderer.textWidth(st.template, shadow, ts))
+                + gainReserve;
+        }
+        return w;
+    }
+
+    private void drawStocks(HudRenderer renderer, double x0, double y, double rowH, List<Stock> stocks, boolean anim,
+                            boolean shadow, double ts, double ico, double s) {
+        double textY = y + (rowH - renderer.textHeight(shadow, ts)) / 2.0;
+        double centerY = y + rowH / 2.0;
+        double x = x0;
+
+        for (int i = 0; i < stocks.size(); i++) {
+            Stock st = stocks.get(i);
+            if (i > 0) x = sep(renderer, x, textY, shadow, ts);
+
+            float fresh = anim ? pulse.freshness("stock" + st.label, st.value, 800L) : 0.0f;
+
+            if (showStockIcons.get()) {
+                double sz = anim ? ico * HudPulse.pop(fresh) : ico;
+                postItem(renderer, st.stack, x + (ico - sz) / 2.0, centerY - sz / 2.0, sz);
+                x += ico + 2.0 * s;
+            } else {
+                renderer.text(st.label + " ", x, textY, mutedColor.get(), shadow, ts);
+                x += renderer.textWidth(st.label + " ", shadow, ts);
+            }
+
+            renderer.text(st.value, x, textY, HudPulse.tint(HudPulse.Style.Subtle, st.color, mendColor.get(), fresh), shadow, ts);
+            x += renderer.textWidth(st.value, shadow, ts);
+
+            if (!st.gain.isEmpty()) {
+                String g = " " + st.gain;
+                renderer.text(g, x, textY, st.gain.startsWith("(-") ? warnColor.get() : mendColor.get(), shadow, ts);
+                x += renderer.textWidth(g, shadow, ts);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- the counters row (FULL)
+
+    private String countersHead(AutoFlyingRegear regear, long now) {
+        AutoFlyingRegear.Run run = regear.hudCurrentRun();
+        AutoFlyingRegear.Run last = regear.hudLastRun();
+        String nowLast = run != null ? "now " + formatSpan(run.durationMs() / 1000L)
+            : last == null ? "last --" : "last " + formatSpan(last.durationMs() / 1000L);
+        int sessionCount = regear.hudSessionRegears();
+        String avg = sessionCount == 0 ? "--" : formatSpan(regear.hudAverageRunMs() / 1000L);
+        String sessionPart = sessionCount > 0 ? "#" + sessionCount + " session · " : "";
+        return String.format(Locale.ROOT, "%s%d total · %s · avg %s · ",
+            sessionPart, LifetimeStats.get().totalRegears(), nowLast, avg);
+    }
+
+    private double countersWidth(HudRenderer renderer, boolean shadow, double ts, double ico, double s) {
+        double head = renderer.textWidth("#000 session · 0000 total · last 00m00 · avg 00m00 · ", shadow, ts);
+        return head + nextWidth(renderer, shadow, ts, ico, s);
+    }
+
+    private void drawCounters(HudRenderer renderer, double x0, double y, double rowH, AutoFlyingRegear regear, long now,
+                              boolean shadow, double ts, double ico, double s) {
+        double textY = y + (rowH - renderer.textHeight(shadow, ts)) / 2.0;
+        double centerY = y + rowH / 2.0;
+        String head = countersHead(regear, now);
+        renderer.text(head, x0, textY, mutedColor.get(), shadow, ts);
+        double x = x0 + renderer.textWidth(head, shadow, ts);
+        drawNext(renderer, x, textY, centerY, regear, mutedColor.get(), shadow, ts, ico, s);
+    }
+
+    // ---------------------------------------------------------------- the next-regear reading
+
+    private double nextWidth(HudRenderer renderer, boolean shadow, double ts, double ico, double s) {
+        return renderer.textWidth("next ", shadow, ts) + ico + 2.0 * s + renderer.textWidth("≈000h00", shadow, ts);
     }
 
     /**
-     * Time until rockets fall to the regear threshold at the rate they are actually being spent
-     * since the last regear. Quantised so the last digit does not spin; "--" until there is enough
-     * to go on.
+     * "next", the bound's item icon, and the time until the next forced regear. Muted, unless it
+     * is close, when the time turns to the warning colour.
      */
-    private static String nextEstimate(AutoFlyingRegear regear, int rockets) {
-        double perMinute = regear.hudRocketsPerMinute();
-        if (perMinute <= 0.0) return "--";
+    private double drawNext(HudRenderer renderer, double x, double textY, double centerY, AutoFlyingRegear regear,
+                            SettingColor labelColor, boolean shadow, double ts, double ico, double s) {
+        int secs = regear.hudSecondsToNextRegear();
+        AutoFlyingRegear.RegearBound bound = regear.hudNextRegearBound();
+        String time = nextTimeText(secs);
+        SettingColor timeColor = secs >= 0 && secs < 300 ? warnColor.get() : labelColor;
 
-        int left = rockets - regear.hudMinRockets();
-        if (left <= 0) return "now";
+        renderer.text("next ", x, textY, labelColor, shadow, ts);
+        x += renderer.textWidth("next ", shadow, ts);
 
-        int minutes = (int) Math.round(left / perMinute);
-        if (minutes >= 120) return String.format(Locale.ROOT, "≈ %dh%02d", minutes / 60, minutes % 60 / 5 * 5);
-        if (minutes >= 20) return "≈ " + (minutes / 5 * 5) + " min";
-        return "≈ " + Math.max(1, minutes) + " min";
+        ItemStack bs = boundStack(bound);
+        if (bs != null) {
+            postItem(renderer, bs, x, centerY - ico / 2.0, ico);
+            x += ico + 2.0 * s;
+        }
+
+        renderer.text(time, x, textY, timeColor, shadow, ts);
+        x += renderer.textWidth(time, shadow, ts);
+        return x;
     }
 
-    private Color stockColor(int value, int low) {
+    private static ItemStack boundStack(AutoFlyingRegear.RegearBound bound) {
+        return switch (bound) {
+            case ROCKETS -> Items.FIREWORK_ROCKET.getDefaultStack();
+            case GAPS -> Items.ENCHANTED_GOLDEN_APPLE.getDefaultStack();
+            case TOTEMS -> Items.TOTEM_OF_UNDYING.getDefaultStack();
+            case ELYTRA -> Items.ELYTRA.getDefaultStack();
+            case BOTTLES -> Items.EXPERIENCE_BOTTLE.getDefaultStack();
+            case UNKNOWN -> null;
+        };
+    }
+
+    /**
+     * Time to the next regear, quantised so the last digit does not spin: "now" at zero, "≈%dm"
+     * under two hours (to five minutes), "≈%dh%02d" beyond, "--" while it cannot be said.
+     */
+    private static String nextTimeText(int secs) {
+        if (secs < 0) return "--";
+        if (secs == 0) return "now";
+        int minutes = (int) Math.round(secs / 60.0);
+        if (minutes <= 0) minutes = 1;
+        if (minutes >= 120) return String.format(Locale.ROOT, "≈%dh%02d", minutes / 60, minutes % 60 / 5 * 5);
+        return "≈" + (minutes < 5 ? minutes : minutes / 5 * 5) + "m";
+    }
+
+    // ---------------------------------------------------------------- the editor placeholder
+
+    /** A representative full panel, so the element can be grabbed and placed with the follower off. */
+    private void renderEditorDemo(HudRenderer renderer) {
+        boolean shadow = textShadow.get();
+        double s = size.get();
+        double ts = s * textScale.get();
+        double inset = panel.padding();
+        double gap = 3.0 * s;
+        double badgeIcon = 13.0 * s;
+        double ico = 11.0 * s;
+        double lineH = renderer.textHeight(shadow, ts);
+        double rowH = Math.max(lineH, ico);
+        double stateH = renderer.textHeight(shadow, ts * STATE_SCALE);
+        double stateRowH = Math.max(stateH, badgeIcon);
+
+        String stateText = "REGEAR #4 · ROCKETS 178";
+        double badgeW = badgeWidth(renderer, false, shadow, ts, badgeIcon, s);
+        double stateW = Math.max(renderer.textWidth(stateText, shadow, ts * STATE_SCALE),
+            renderer.textWidth(STATE_TEMPLATE, shadow, ts * STATE_SCALE));
+        String merged = "rkt 178 · ely 5 · gap 32 · tot 4 · next ";
+
+        double labelH = renderer.textHeight(shadow, ts * 0.6);
+        double spineH = 12.0 * s + labelH + 1.0 * s;
+        double width = Math.max(badgeW + gap + stateW,
+            renderer.textWidth(merged, shadow, ts) + ico + 2.0 * s + renderer.textWidth("≈38m", shadow, ts));
+        width = Math.max(width, 72.0 * s);
+        double height = stateRowH + gap + spineH + gap + rowH;
+
+        panel.draw(renderer, this.x + inset, this.y + inset, width, height, HudGlowPanel.Severity.OK);
+
+        double x0 = this.x + inset;
+        double y = this.y + inset;
+
+        drawBadge(renderer, x0, y, stateRowH, false, shadow, ts, badgeIcon, s);
+        renderer.text(stateText, x0 + badgeW + gap, y + (stateRowH - stateH) / 2.0, busyColor.get(), shadow, ts * STATE_SCALE);
+        y += stateRowH + gap;
+
+        List<AutoFlyingRegear.Step> demo = List.of(
+            AutoFlyingRegear.Step.LAND, AutoFlyingRegear.Step.BOX, AutoFlyingRegear.Step.CHEST,
+            AutoFlyingRegear.Step.ELYTRA, AutoFlyingRegear.Step.ROCKETS, AutoFlyingRegear.Step.MEND,
+            AutoFlyingRegear.Step.CLEAR, AutoFlyingRegear.Step.FLY);
+        drawSpine(renderer, x0, y, width, demo, 4, animations.get(), s, ts, showSpineIcons.get() && s >= SPINE_ICON_SIZE, shadow);
+        y += spineH + gap;
+
+        double textY = y + (rowH - lineH) / 2.0;
+        double centerY = y + rowH / 2.0;
+        renderer.text(merged, x0, textY, mutedColor.get(), shadow, ts);
+        double x = x0 + renderer.textWidth(merged, shadow, ts);
+        postItem(renderer, Items.FIREWORK_ROCKET.getDefaultStack(), x, centerY - ico / 2.0, ico);
+        x += ico + 2.0 * s;
+        renderer.text("≈38m", x, textY, mutedColor.get(), shadow, ts);
+
+        setSize(width + inset * 2.0, height + inset * 2.0);
+    }
+
+    // ---------------------------------------------------------------- small shared pieces
+
+    private double sep(HudRenderer renderer, double x, double y, boolean shadow, double ts) {
+        renderer.text(" · ", x, y, mutedColor.get(), shadow, ts);
+        return x + renderer.textWidth(" · ", shadow, ts);
+    }
+
+    private SettingColor stockColor(int value, int low) {
         if (value == 0) return badColor.get();
         if (value < low) return warnColor.get();
         return valueColor.get();
     }
 
-    /** "(+n)" for a gain, "(-n)" for a loss (a mending run spends bottles), nothing when there is no run to compare with. */
+    /** "(+n)" for a gain, "(-n)" for a loss (a mending run spends bottles), nothing without a run to compare with. */
     private static String gain(int delta, boolean applicable) {
         if (!applicable || delta == 0) return "";
         return delta > 0 ? "(+" + delta + ")" : "(" + delta + ")";
@@ -506,5 +879,60 @@ public class RegearStatusHud extends HudElement {
         if (seconds < 60) return seconds + "s";
         if (seconds < 3600) return String.format(Locale.ROOT, "%dm%02d", seconds / 60, seconds % 60);
         return String.format(Locale.ROOT, "%dh%02d", seconds / 3600, seconds % 3600 / 60);
+    }
+
+    /** An item icon, posted so the panel's buffered quads cannot paint over it, at an integer position. */
+    private void postItem(HudRenderer renderer, ItemStack stack, double x, double y, double px) {
+        final int ix = (int) Math.round(x);
+        final int iy = (int) Math.round(y);
+        final float scale = (float) (px / 16.0);
+        renderer.post(() -> renderer.item(stack, ix, iy, scale, false));
+    }
+
+    // ---- primitives, cull-safe, shared with the follower HUDs
+
+    /** A filled disc: a fan of triangles from the centre. */
+    private void disc(HudRenderer renderer, double cx, double cy, double r, Color colour) {
+        int segments = 20;
+        double previousX = cx + r;
+        double previousY = cy;
+        for (int i = 1; i <= segments; i++) {
+            double angle = Math.PI * 2.0 * i / segments;
+            double px = cx + Math.cos(angle) * r;
+            double py = cy + Math.sin(angle) * r;
+            tri(renderer, cx, cy, previousX, previousY, px, py, colour);
+            previousX = px;
+            previousY = py;
+        }
+    }
+
+    /** A circle outline of the given thickness, two triangles per segment. */
+    private void ring(HudRenderer renderer, double cx, double cy, double r, double thickness, Color colour) {
+        int segments = 24;
+        double inner = Math.max(0.5, r - thickness);
+        double outerX = cx + r;
+        double outerY = cy;
+        double innerX = cx + inner;
+        double innerY = cy;
+        for (int i = 1; i <= segments; i++) {
+            double angle = Math.PI * 2.0 * i / segments;
+            double ox = cx + Math.cos(angle) * r;
+            double oy = cy + Math.sin(angle) * r;
+            double ix = cx + Math.cos(angle) * inner;
+            double iy = cy + Math.sin(angle) * inner;
+            tri(renderer, outerX, outerY, ox, oy, ix, iy, colour);
+            tri(renderer, outerX, outerY, ix, iy, innerX, innerY, colour);
+            outerX = ox;
+            outerY = oy;
+            innerX = ix;
+            innerY = iy;
+        }
+    }
+
+    /** A triangle wound so the signed area is negative in y-down screen space, past the UI cull. */
+    private void tri(HudRenderer renderer, double x1, double y1, double x2, double y2, double x3, double y3, Color colour) {
+        double cross = (x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1);
+        if (cross > 0.0) renderer.triangle(x1, y1, x3, y3, x2, y2, colour);
+        else renderer.triangle(x1, y1, x2, y2, x3, y3, colour);
     }
 }
