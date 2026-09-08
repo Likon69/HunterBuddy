@@ -178,16 +178,6 @@ public class AutoFlyingRegear extends Module {
             .sliderRange(5, 30)
             .build()
       );
-   private final Setting<Integer> lavaWaitMaxSeconds = this.sgPlatform
-      .add(
-         new Builder().name("lava-wait-max-seconds")
-                  .description("How long to keep flying over lava or unloaded ground before regearing anyway. 0 = drop immediately.")
-               .defaultValue(60)
-            .min(0)
-            .max(600)
-            .sliderRange(0, 300)
-            .build()
-      );
    private final Setting<Integer> eChestHotbarSlot = this.sgHotbar
       .add(
          new Builder().name("ender-chest-slot").description("Hotbar slot for ender chest (0-8)").defaultValue(7)
@@ -236,6 +226,14 @@ public class AutoFlyingRegear extends Module {
                      .name("auto-re-enable-flight")
                   .description("Automatically re-enable flight modules after restocking")
                .defaultValue(true)
+            .build()
+      );
+   private final Setting<AutoFlyingRegear.NetherTakeoff> netherTakeoff = this.sgRestock
+      .add(
+         new meteordevelopment.meteorclient.settings.EnumSetting.Builder<AutoFlyingRegear.NetherTakeoff>()
+                     .name("nether-takeoff")
+                  .description("BARITONE: in the Nether, when the flight module about to fly uses Baritone, the regear ends on the platform and Baritone takes off itself along its own path (needs elytraAutoJump on). SELF: the regear jumps and boosts on the old heading before handing over, as everywhere else.")
+               .defaultValue(AutoFlyingRegear.NetherTakeoff.BARITONE)
             .build()
       );
    private final Setting<Boolean> swapToChestplate = this.sgRestock
@@ -295,12 +293,28 @@ public class AutoFlyingRegear extends Module {
                .defaultValue(true)
             .build()
       );
-   private final Setting<SettingColor> platformColor = this.sgRender
+   private final Setting<ShapeMode> shapeMode = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.EnumSetting.Builder<ShapeMode>()
+                  .name("shape-mode")
+               .description("How the regear's blocks are drawn.")
+            .defaultValue(ShapeMode.Both)
+            .build()
+      );
+   private final Setting<SettingColor> sideColor = this.sgRender
       .add(
          new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
-                  .name("platform-color")
-               .description("Color of platform blocks")
-            .defaultValue(new SettingColor(255, 0, 0, 100))
+                  .name("side-color")
+               .description("Fill colour of the regear's blocks. Faint by default, like AutoPortal.")
+            .defaultValue(new SettingColor(100, 100, 255, 25))
+            .build()
+      );
+   private final Setting<SettingColor> lineColor = this.sgRender
+      .add(
+         new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
+                  .name("line-color")
+               .description("Outline colour of the regear's blocks.")
+            .defaultValue(new SettingColor(100, 100, 255, 200))
             .build()
       );
    private AutoFlyingRegear.FlyingRegearState state = AutoFlyingRegear.FlyingRegearState.IDLE;
@@ -315,6 +329,12 @@ public class AutoFlyingRegear extends Module {
    private boolean processingElytras = true;
    /** Which extra kind is being restocked between the elytras and the rockets, {@link Extra#NONE} outside that. */
    private Extra extra = Extra.NONE;
+
+   /** Who takes off after a Nether regear. */
+   public enum NetherTakeoff {
+      BARITONE,
+      SELF
+   }
 
    /** The restocks that come between the elytras and the rockets: the rockets fill whatever room is left, so these go first. */
    private enum Extra {
@@ -397,6 +417,8 @@ public class AutoFlyingRegear extends Module {
    private final int maxPlacementAttempts = 15;
    private int stateTickCounter = 0;
    private AutoFlyingRegear.FlyingRegearState lastState = AutoFlyingRegear.FlyingRegearState.IDLE;
+   /** Guards the once-only COMPLETE work; reset per regear, set the first time handleComplete runs. */
+   private boolean completeHandled;
    private final int maxStateTimeout = 600;
    private final Map<String, Module> flightModules = new HashMap<>();
    private final Set<String> disabledModules = new HashSet<>();
@@ -796,34 +818,25 @@ public class AutoFlyingRegear extends Module {
          }
       } else {
          if (this.shouldTriggerRegear()) {
-            // Never start a regear over lava: isReplaceable() is true for fluids, so
-            // the drop and the scaffold would take a lava lake for open air and build
-            // the box inside it. Keep the flight going until solid ground or water
-            // shows up below, for at most lava-wait-max-seconds.
+            // Never regear over lava, ever, and no time cap: the bot flies the Nether fine, so
+            // when there is lava (or unreadable ground) below we simply do not start the regear —
+            // Baritone keeps flying until real, solid (or water) ground is under us, and only then
+            // do we drop and build. Building a box on a lava lake was the wrong idea; it is gone.
             AutoFlyingRegear.GroundScan ground = this.scanGroundBelow();
             if (ground.kind() == AutoFlyingRegear.GroundKind.LAVA || ground.kind() == AutoFlyingRegear.GroundKind.UNKNOWN) {
-               int lavaWaitMaxTicks = (Integer)this.lavaWaitMaxSeconds.get() * 20;
-               if (this.lavaPostponeTicks < lavaWaitMaxTicks) {
-                  if (this.lavaPostponeTicks == 0) {
-                     this.event("lava below, waiting for ground");
-                  }
-
-                  if (this.lavaPostponeTicks % 400 == 0 && (Boolean)this.debugMessages.get()) {
-                     this.info(
-                        "Low on supplies but lava/unknown ground below - keeping the flight going until solid ground shows up",
-                        new Object[0]
-                     );
-                  }
-
-                  this.lavaPostponeTicks++;
-                  return;
+               if (this.lavaPostponeTicks == 0) {
+                  this.event("lava below, letting Baritone fly on to solid ground");
                }
 
-               if ((Boolean)this.debugMessages.get()) {
-                  this.warning(
-                     "Waited " + (Integer)this.lavaWaitMaxSeconds.get() + "s over lava/unknown ground - regearing anyway", new Object[0]
+               if (this.lavaPostponeTicks % 400 == 0 && (Boolean)this.debugMessages.get()) {
+                  this.info(
+                     "Low on supplies but lava/unknown ground below - letting the flight continue until solid ground is under us",
+                     new Object[0]
                   );
                }
+
+               this.lavaPostponeTicks++;
+               return;
             }
 
             this.beginRun();
@@ -978,11 +991,22 @@ public class AutoFlyingRegear extends Module {
       }
 
       if (this.stateTickCounter > 400) {
+         // Never force a platform onto lava, even as a timeout fallback. We only commit the regear
+         // over solid ground, so if there is lava directly below here the fall has drifted over a
+         // lake; keep falling toward the solid ground rather than laying a box on the lava.
+         if (this.mc.world.getBlockState(beneath).getFluidState().isIn(FluidTags.LAVA)) {
+            this.stateTickCounter = 0;
+            return;
+         }
+
          if ((Boolean)this.debugMessages.get()) {
             this.warning("Falling timeout - forcing platform creation", new Object[0]);
          }
 
-         this.finishScaffoldLanding(this.mc.player.getBlockPos(), "Falling timeout - forcing platform");
+         // The platform is the floor block, feet-1, like every other finishScaffoldLanding call
+         // (Detected solid ground, the scaffold hits). Passing the feet block here built the box one
+         // block too high on this fallback, which stacked a second roof over a box left from before.
+         this.finishScaffoldLanding(this.mc.player.getBlockPos().down(), "Falling timeout - forcing platform");
          return;
       }
 
@@ -1044,12 +1068,16 @@ public class AutoFlyingRegear extends Module {
       double dropHSpeed = Math.hypot(dropVelocity.x, dropVelocity.z);
       double driftPerBlock = dropHSpeed * this.ticksPerBlockOfFall();
       boolean driftTooHigh = driftPerBlock > DROP_MAX_DRIFT_PER_BLOCK;
-      // Lava is "replaceable" too, so hasSpaceBelow() cannot tell it from air,
-      // and the drift wait would let the player sink into a lake. With lava
-      // close under the feet the block goes down now, above the lava, drift or not.
+      // Never lay a platform over lava. The regear only ever commits over solid ground now
+      // (handleIdleState waits for it), so if lava is under us here we just hold and let the fall
+      // carry on to the solid ground the top of this method lands on, instead of building a box on
+      // a lake. The old "scaffold immediately over lava" is gone — that was the stupid part.
       AutoFlyingRegear.GroundScan dropGround = this.scanGroundBelow();
-      boolean lavaClose = dropGround.kind() == AutoFlyingRegear.GroundKind.LAVA && dropGround.distance() <= 8;
-      if (canStartScaffold && driftTooHigh && !lavaClose) {
+      if (dropGround.kind() == AutoFlyingRegear.GroundKind.LAVA) {
+         return;
+      }
+
+      if (canStartScaffold && driftTooHigh) {
          if (this.stateTickCounter % 20 == 0 && (Boolean)this.debugMessages.get()) {
             this.info("Waiting out forward momentum (drift " + String.format("%.2f", driftPerBlock)
                + " blocks per block of fall)", new Object[0]);
@@ -1064,10 +1092,6 @@ public class AutoFlyingRegear extends Module {
 
       if (!this.prepareScaffoldBlocks()) {
          return;
-      }
-
-      if (lavaClose && driftTooHigh && (Boolean)this.debugMessages.get()) {
-         this.info("Lava " + dropGround.distance() + " blocks below - scaffolding immediately", new Object[0]);
       }
 
       this.mlepScaffold.setRegearHotbarSlot((Integer)this.obsidianHotbarSlot.get());
@@ -1701,7 +1725,11 @@ public class AutoFlyingRegear extends Module {
          this.platformCenter.add(0, 1, 0),
          this.platformCenter.add(1, 1, 0),
          this.platformCenter.add(0, 1, 1),
-         this.platformCenter.add(1, 1, 1)
+         this.platformCenter.add(1, 1, 1),
+         // Directly above where the ender chest goes (platformCenter+(1,1,1)): a chest will not open
+         // with a solid block on top of it, and a regear built into terrain (a basalt delta, say)
+         // leaves one there. Clearing it before placing is what fixes the "Failed to open" loop.
+         this.platformCenter.add(1, 2, 1)
       };
       if (this.currentClearingPos != null) {
          BlockState blockState = this.mc.world.getBlockState(this.currentClearingPos);
@@ -1842,7 +1870,11 @@ public class AutoFlyingRegear extends Module {
             this.error("Failed to place ender chest after 15 attempts", new Object[0]);
          }
 
-         this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+         // Tear the box down and take off instead of dropping to IDLE. The box (walls + roof) is
+         // already standing here; going IDLE leaves it up, and with supplies still low and no
+         // cooldown the next regear at the same spot stacks a second box on it — the doubled roof.
+         this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+         this.timer = 0;
          this.placementAttempts = 0;
       } else {
          this.mc.options.sneakKey.setPressed(false);
@@ -1855,7 +1887,10 @@ public class AutoFlyingRegear extends Module {
                   this.error("No ender chest found in inventory!", new Object[0]);
                }
 
-               this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+               // Box already built; tear it down rather than leave it standing for the next regear
+               // to stack onto.
+               this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+               this.timer = 0;
             } else {
                this.moveStack(eChestSlot, targetHotbarSlot);
                if ((Boolean)this.debugMessages.get()) {
@@ -1875,7 +1910,10 @@ public class AutoFlyingRegear extends Module {
                   this.error("No solid ground for ender chest at " + this.echestPos, new Object[0]);
                }
 
-               this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+               // Box already built; tear it down rather than leave it standing for the next regear
+               // to stack onto.
+               this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+               this.timer = 0;
             } else if (this.placeBlockAtHotbar(this.echestPos, (Integer)this.eChestHotbarSlot.get())) {
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Placing ender chest", new Object[0]);
@@ -1906,7 +1944,10 @@ public class AutoFlyingRegear extends Module {
             this.error("Ender chest failed to place after 15 attempts", new Object[0]);
          }
 
-         this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+         // Box already built; tear it down rather than leave it standing for the next regear to
+         // stack onto.
+         this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+         this.timer = 0;
          this.placementAttempts = 0;
       } else {
          if ((Boolean)this.debugMessages.get()) {
@@ -1966,6 +2007,52 @@ public class AutoFlyingRegear extends Module {
       if ((Boolean)this.debugMessages.get()) {
          this.info("Opening ender chest", new Object[0]);
       }
+   }
+
+   /**
+    * Moves a stray stack out of the shulker hotbar slot into an empty inventory slot while the
+    * ender chest is open: two pick-up clicks on the container's own slot ids (the chest's rows
+    * first, then the main inventory, then the hotbar). Returns true when a move was made and the
+    * caller should wait a pass. With no empty slot the swap goes ahead as before, and the stack
+    * ends up in the ender chest rather than lost.
+    */
+   private boolean clearShulkerSlot(GenericContainerScreenHandler handler, int syncId) {
+      int hotbarIndex = (Integer)this.shulkerHotbarSlot.get();
+      ItemStack inTheWay = this.mc.player.getInventory().getStack(hotbarIndex);
+      if (inTheWay.isEmpty() || this.isShulkerBox(inTheWay.getItem())) {
+         return false;
+      }
+
+      if (!this.mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+         return false;
+      }
+
+      int containerSlots = handler.getRows() * 9;
+      int emptyMain = -1;
+      for (int i = 9; i < 36; i++) {
+         if (this.mc.player.getInventory().getStack(i).isEmpty()) {
+            emptyMain = i;
+            break;
+         }
+      }
+
+      if (emptyMain == -1) {
+         if ((Boolean)this.debugMessages.get()) {
+            this.warning("Shulker slot holds " + inTheWay.getName().getString() + " and the inventory has no free slot to park it in - it will go into the ender chest", new Object[0]);
+         }
+
+         return false;
+      }
+
+      int hotbarId = containerSlots + 27 + hotbarIndex;
+      int mainId = containerSlots + (emptyMain - 9);
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Parking " + inTheWay.getName().getString() + " x" + inTheWay.getCount() + " from shulker slot " + hotbarIndex + " into inventory slot " + emptyMain + " before taking the shulker", new Object[0]);
+      }
+
+      this.mc.interactionManager.clickSlot(syncId, hotbarId, 0, SlotActionType.PICKUP, this.mc.player);
+      this.mc.interactionManager.clickSlot(syncId, mainId, 0, SlotActionType.PICKUP, this.mc.player);
+      return true;
    }
 
    private void handleTakingShulker() {
@@ -2033,6 +2120,15 @@ public class AutoFlyingRegear extends Module {
                   this.timer = (Integer)this.containerOpenDelay.get();
                }
 
+               return;
+            }
+
+            // The hotbar swap puts whatever the shulker slot holds into the ender chest. The
+            // slot is meant to be empty, but the block and rocket moves before this shuffle
+            // things around: on 2026-09-07 a stack of rockets landed there and went into the
+            // chest in place of the shulker. Park it in the inventory first, and swap next pass.
+            if (this.clearShulkerSlot(var16, syncId)) {
+               this.timer = (Integer)this.clickDelay.get();
                return;
             }
 
@@ -2350,6 +2446,48 @@ public class AutoFlyingRegear extends Module {
       }
    }
 
+   /**
+    * With the extra's shulker still open, moves the smallest surplus stack of the item back into it,
+    * one per call, so an overshoot ("goal 32, already had 20, a full 64 came over") collapses from two
+    * slots to one. Only moves a stack when what remains stays at or above the goal, and never touches
+    * the last stack. Returns true when it moved one (the caller waits a pass and re-checks), false when
+    * the item is already in as few slots as it can be.
+    */
+   private boolean consolidateExtraIntoShulker(int syncId) {
+      if (this.extra == AutoFlyingRegear.Extra.NONE) return false;
+      Item item = this.restockItem();
+
+      int total = 0;
+      int stacks = 0;
+      int smallestCount = Integer.MAX_VALUE;
+      int smallestInvSlot = -1;
+      for (int i = 0; i < 36; i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (stack.getItem() != item) continue;
+         total += stack.getCount();
+         stacks++;
+         if (stack.getCount() < smallestCount) {
+            smallestCount = stack.getCount();
+            smallestInvSlot = i;
+         }
+      }
+
+      if (stacks <= 1 || smallestInvSlot == -1) return false;
+      if (total - smallestCount < this.extraGoal()) return false;
+
+      // Player inventory slot -> this container's slot id: shulker rows first, then the 27 main
+      // slots (player 9..35), then the 9 hotbar slots (player 0..8). QUICK_MOVE on a player slot
+      // while a container is open sends the whole stack into the container.
+      int containerSlots = this.mc.player.currentScreenHandler.slots.size() - 36;
+      int containerId = smallestInvSlot >= 9 ? containerSlots + (smallestInvSlot - 9) : containerSlots + 27 + smallestInvSlot;
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Consolidating: smallest stack of " + smallestCount + " " + this.restockLabel() + "s back into the shulker (kept " + (total - smallestCount) + ")", new Object[0]);
+      }
+
+      this.mc.interactionManager.clickSlot(syncId, containerId, 0, SlotActionType.QUICK_MOVE, this.mc.player);
+      return true;
+   }
+
    private void handleOpeningShulker() {
       this.mc.options.sneakKey.setPressed(false);
       Vec3d shulkerTop = Vec3d.ofCenter(this.shulkerPlacePos).add(0.0, 0.5, 0.0);
@@ -2380,6 +2518,15 @@ public class AutoFlyingRegear extends Module {
             return;
          }
 
+         // A swap in progress owns the cursor. Nothing else may run until it is done: not the
+         // goal check, not the slot scan. Closing the screen with an elytra on the cursor makes
+         // the server drop that elytra into the inventory, which is how a bag set for four came
+         // to hold seven, three of them worn out.
+         if (this.processingElytras && this.transferStep != 0) {
+            this.continueElytraSwap(var13);
+            return;
+         }
+
          if (this.processingElytras) {
             int currentValidElytras = this.countValidElytras();
             if (currentValidElytras >= (Integer)this.goalElytras.get()) {
@@ -2395,6 +2542,16 @@ public class AutoFlyingRegear extends Module {
             }
          } else {
             if (this.extra != AutoFlyingRegear.Extra.NONE && this.countItem(this.restockItem()) >= this.extraGoal()) {
+               // Whole stacks come over, so reaching a goal of 32 with 20 already carried leaves
+               // 64 in one slot and the old 20 in another — two slots for what fits in one. While
+               // the shulker is still open, push the smallest surplus stack back into it, as long
+               // as what stays is still at or above the goal, until the item sits in as few slots
+               // as possible.
+               if (this.consolidateExtraIntoShulker(var13)) {
+                  this.timer = (Integer)this.clickDelay.get();
+                  return;
+               }
+
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Reached goal of " + this.extraGoal() + " " + itemType + ", stopping transfer", new Object[0]);
                }
@@ -2452,6 +2609,23 @@ public class AutoFlyingRegear extends Module {
 
                      int brokenElytraSlot = this.findBrokenElytraInInventory();
                      if (brokenElytraSlot == -1) {
+                        int emptyForElytra = 0;
+                        for (int i = 0; i < 36; i++) {
+                           if (this.mc.player.getInventory().getStack(i).isEmpty()) emptyForElytra++;
+                        }
+
+                        if (emptyForElytra <= 1) {
+                           if ((Boolean)this.debugMessages.get()) {
+                              this.info("Inventory nearly full, stopping elytra transfer with " + currentValidElytras + "/" + this.goalElytras.get(), new Object[0]);
+                           }
+
+                           this.mc.player.closeHandledScreen();
+                           this.state = AutoFlyingRegear.FlyingRegearState.BREAKING_SHULKER;
+                           this.timer = (Integer)this.breakDelay.get();
+                           this.transferStep = 0;
+                           return;
+                        }
+
                         this.mc.interactionManager.clickSlot(var13, this.transferSlotIndex, 0, SlotActionType.QUICK_MOVE, this.mc.player);
                         if ((Boolean)this.debugMessages.get()) {
                            this.info(
@@ -2472,39 +2646,19 @@ public class AutoFlyingRegear extends Module {
                         return;
                      }
 
-                     if (this.transferStep == 0) {
-                        this.mc.interactionManager.clickSlot(var13, this.transferSlotIndex, 0, SlotActionType.PICKUP, this.mc.player);
-                        if ((Boolean)this.debugMessages.get()) {
-                           this.info("Picking up good elytra from slot " + this.transferSlotIndex, new Object[0]);
-                        }
-
-                        this.timer = (Integer)this.clickDelay.get();
-                        this.transferStep = 1;
-                        return;
+                     // Pick the fresh one up; continueElytraSwap takes it from here on the next
+                     // passes, off the cursor. The old code kept these steps in this loop, keyed
+                     // on the shulker slot — which is empty from the moment the pick-up lands, so
+                     // the loop saw an empty slot, moved on and reset the step with the elytra
+                     // still on the cursor.
+                     this.mc.interactionManager.clickSlot(var13, this.transferSlotIndex, 0, SlotActionType.PICKUP, this.mc.player);
+                     if ((Boolean)this.debugMessages.get()) {
+                        this.info("Picking up good elytra from shulker slot " + this.transferSlotIndex, new Object[0]);
                      }
 
-                     if (this.transferStep == 1) {
-                        this.mc.interactionManager.clickSlot(var13, brokenElytraSlot, 0, SlotActionType.PICKUP, this.mc.player);
-                        if ((Boolean)this.debugMessages.get()) {
-                           this.info("Swapping with broken elytra in slot " + brokenElytraSlot, new Object[0]);
-                        }
-
-                        this.timer = (Integer)this.clickDelay.get();
-                        this.transferStep = 2;
-                        return;
-                     }
-
-                     if (this.transferStep == 2) {
-                        this.mc.interactionManager.clickSlot(var13, this.transferSlotIndex, 0, SlotActionType.PICKUP, this.mc.player);
-                        if ((Boolean)this.debugMessages.get()) {
-                           this.info("Placed broken elytra back into shulker, gained 1 valid elytra", new Object[0]);
-                        }
-
-                        this.timer = (Integer)this.clickDelay.get();
-                        this.transferStep = 0;
-                        this.transferSlotIndex++;
-                        return;
-                     }
+                     this.timer = (Integer)this.clickDelay.get();
+                     this.transferStep = 1;
+                     return;
                   }
                } else if (!this.processingElytras && item == this.restockItem()) {
                   this.mc.interactionManager.clickSlot(var13, this.transferSlotIndex, 0, SlotActionType.QUICK_MOVE, this.mc.player);
@@ -2541,6 +2695,54 @@ public class AutoFlyingRegear extends Module {
             this.timer = (Integer)this.containerOpenDelay.get();
          }
       }
+   }
+
+   /**
+    * Finishes the exchange the loop started with a pick-up. Step 1: the fresh elytra is on the
+    * cursor, click a worn one in the inventory to swap them. Step 2: the worn one is on the
+    * cursor, put it into the shulker slot the fresh one came from. Driven by the cursor and the
+    * remembered slot, never by what the shulker slot holds now.
+    */
+   private void continueElytraSwap(int syncId) {
+      ItemStack cursor = this.mc.player.currentScreenHandler.getCursorStack();
+      if (cursor.isEmpty()) {
+         // The pick-up never landed (server refused it) or was already put away: nothing to finish.
+         this.transferStep = 0;
+         return;
+      }
+
+      if (this.transferStep == 1) {
+         int brokenElytraSlot = this.findBrokenElytraInInventory();
+         if (brokenElytraSlot == -1) {
+            this.mc.interactionManager.clickSlot(syncId, this.transferSlotIndex, 0, SlotActionType.PICKUP, this.mc.player);
+            if ((Boolean)this.debugMessages.get()) {
+               this.info("No worn elytra left to exchange, fresh one back into shulker slot " + this.transferSlotIndex, new Object[0]);
+            }
+
+            this.timer = (Integer)this.clickDelay.get();
+            this.transferStep = 0;
+            this.transferSlotIndex++;
+            return;
+         }
+
+         this.mc.interactionManager.clickSlot(syncId, brokenElytraSlot, 0, SlotActionType.PICKUP, this.mc.player);
+         if ((Boolean)this.debugMessages.get()) {
+            this.info("Swapping with broken elytra in slot " + brokenElytraSlot, new Object[0]);
+         }
+
+         this.timer = (Integer)this.clickDelay.get();
+         this.transferStep = 2;
+         return;
+      }
+
+      this.mc.interactionManager.clickSlot(syncId, this.transferSlotIndex, 0, SlotActionType.PICKUP, this.mc.player);
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Placed broken elytra back into shulker slot " + this.transferSlotIndex + ", gained 1 valid elytra", new Object[0]);
+      }
+
+      this.timer = (Integer)this.clickDelay.get();
+      this.transferStep = 0;
+      this.transferSlotIndex++;
    }
 
    private int findBrokenElytraInInventory() {
@@ -3273,6 +3475,14 @@ public class AutoFlyingRegear extends Module {
       this.cleanupBlockIndex = 0;
    }
 
+   /** Adds a placed block to the cleanup list once, if it is really there (solid, not air/replaceable). */
+   private void addCleanupBlock(BlockPos pos) {
+      BlockPos immutablePos = pos.toImmutable();
+      if (this.cleanupBlocks.contains(immutablePos)) return;
+      BlockState blockState = this.mc.world.getBlockState(immutablePos);
+      if (!blockState.isAir() && !blockState.isReplaceable()) this.cleanupBlocks.add(immutablePos);
+   }
+
    private void handleCleanup() {
       if (!this.cleanupInitialized) {
          this.cleanupInitialized = true;
@@ -3283,20 +3493,20 @@ public class AutoFlyingRegear extends Module {
          this.cleanupBlocks.clear();
          this.cleanupBlockAttempts = 0;
          if (this.platformCenter != null) {
+            // The ender chest goes down first, on purpose: broken with a pickaxe it drops its 8
+            // obsidian, and doing it before the walls means those 8 are picked up while there is
+            // still room, before the rest of the box fills the last free slots. Left standing (the
+            // old behaviour — nothing ever set BREAKING_ECHEST) both the chest and its obsidian
+            // were simply abandoned in the box.
+            if (this.echestPos != null && this.mc.world.getBlockState(this.echestPos).getBlock() == Blocks.ENDER_CHEST) {
+               this.cleanupBlocks.add(this.echestPos.toImmutable());
+            }
+
             Set<BlockPos> floorBlocks = new HashSet<>();
             floorBlocks.add(this.platformCenter.toImmutable());
             floorBlocks.add(this.platformCenter.add(1, 0, 0).toImmutable());
             floorBlocks.add(this.platformCenter.add(0, 0, 1).toImmutable());
             floorBlocks.add(this.platformCenter.add(1, 0, 1).toImmutable());
-
-            for (BlockPos pos : this.placedBlocks) {
-               if (!floorBlocks.contains(pos.toImmutable())) {
-                  BlockState blockState = this.mc.world.getBlockState(pos);
-                  if (!blockState.isAir() && !blockState.isReplaceable()) {
-                     this.cleanupBlocks.add(pos.toImmutable());
-                  }
-               }
-            }
 
             BlockPos[] wallPositionsY1 = new BlockPos[]{
                this.platformCenter.add(-1, 1, 0),
@@ -3313,27 +3523,6 @@ public class AutoFlyingRegear extends Module {
                this.platformCenter.add(1, 1, 1)
             };
 
-            for (BlockPos pos : wallPositionsY1) {
-               BlockPos immutablePos = pos.toImmutable();
-               if (!this.cleanupBlocks.contains(immutablePos)) {
-                  BlockState blockState = this.mc.world.getBlockState(pos);
-                  if (!blockState.isAir() && !blockState.isReplaceable()) {
-                     this.cleanupBlocks.add(immutablePos);
-                  }
-               }
-            }
-
-            for (BlockPos basePos : wallPositionsY1) {
-               BlockPos upperWall = basePos.up();
-               BlockPos immutablePos = upperWall.toImmutable();
-               if (!this.cleanupBlocks.contains(immutablePos)) {
-                  BlockState blockState = this.mc.world.getBlockState(upperWall);
-                  if (!blockState.isAir() && !blockState.isReplaceable()) {
-                     this.cleanupBlocks.add(immutablePos);
-                  }
-               }
-            }
-
             BlockPos[] roofPositions = new BlockPos[]{
                this.platformCenter.add(0, 3, 0),
                this.platformCenter.add(1, 3, 0),
@@ -3341,14 +3530,19 @@ public class AutoFlyingRegear extends Module {
                this.platformCenter.add(1, 3, 1)
             };
 
-            for (BlockPos pos : roofPositions) {
-               BlockPos immutablePos = pos.toImmutable();
-               if (!this.cleanupBlocks.contains(immutablePos)) {
-                  BlockState blockState = this.mc.world.getBlockState(pos);
-                  if (!blockState.isAir() && !blockState.isReplaceable()) {
-                     this.cleanupBlocks.add(immutablePos);
-                  }
-               }
+            // Top down, after the ender chest: roof, then the upper ring, then the lower ring.
+            // Breaking a block drops its item where the block was, and a drop from above falls
+            // onto the platform we are standing on and is absorbed on the way past; break the
+            // bottom ring first instead and its drops scatter off the platform edge into the void
+            // or lava below before we ever reach them. The placed-block sweep runs last, only to
+            // catch anything the fixed lists missed, and its contains-check keeps it from
+            // reordering what the top-down lists already placed.
+            for (BlockPos pos : roofPositions) addCleanupBlock(pos);
+            for (BlockPos basePos : wallPositionsY1) addCleanupBlock(basePos.up());
+            for (BlockPos pos : wallPositionsY1) addCleanupBlock(pos);
+
+            for (BlockPos pos : this.placedBlocks) {
+               if (!floorBlocks.contains(pos.toImmutable())) addCleanupBlock(pos);
             }
          }
 
@@ -3453,8 +3647,71 @@ public class AutoFlyingRegear extends Module {
       if (!this.takeoffInitialized) {
          this.takeoffInitialized = true;
          this.initTakeoff();
+         if (this.baritoneTakesOff()) {
+            this.handTakeoffToBaritone();
+            return;
+         }
+
          this.startTakeoffSequence();
       }
+   }
+
+   /**
+    * Whether the takeoff is Baritone's to do: Nether, the setting says so, the flight module
+    * that was flying uses Baritone there (TrailFollower always does, WaypointFollower in its
+    * Baritone mode), and Baritone is allowed to leave the ground on its own.
+    */
+   private boolean baritoneTakesOff() {
+      if (this.netherTakeoff.get() != AutoFlyingRegear.NetherTakeoff.BARITONE) {
+         return false;
+      }
+
+      if (this.mc.world == null || !this.mc.world.getRegistryKey().equals(World.NETHER)) {
+         return false;
+      }
+
+      boolean baritoneFlies = this.disabledModules.contains("TrailFollower");
+      if (!baritoneFlies && this.disabledModules.contains("WaypointFollower")) {
+         Module follower = this.flightModules.get("WaypointFollower");
+         baritoneFlies = follower instanceof WaypointFollower wf && wf.fliesWithBaritone();
+      }
+
+      if (!baritoneFlies) {
+         return false;
+      }
+
+      if (!BaritoneAPI.getSettings().elytraAutoJump.value) {
+         if ((Boolean)this.debugMessages.get()) {
+            this.warning("Baritone's elytraAutoJump is off, so it cannot take off by itself - taking off the old way", new Object[0]);
+         }
+
+         return false;
+      }
+
+      return true;
+   }
+
+   /**
+    * Ends the regear on the platform and lets Baritone take off. The old way jumped and boosted
+    * on the heading from before the regear, then handed over to a follower that had nothing to
+    * steer with for several seconds: from a box built wherever solid ground was, often a
+    * gallery, that was a straight run into the nearest wall at thirty blocks a second, and a
+    * totem. Baritone's standing takeoff jumps, opens, fires one rocket and follows a path it
+    * computed from right here.
+    */
+   private void handTakeoffToBaritone() {
+      this.releaseMovementKeys();
+      this.event("takeoff left to baritone");
+      if ((Boolean)this.debugMessages.get()) {
+         this.info("Nether flight is Baritone's: staying on the platform and letting it take off along its own path", new Object[0]);
+      }
+
+      this.enableFlightModulesForTakeoff();
+      this.pendingOutcome = "complete";
+      this.takeoff.cancel();
+      this.takeoffInitialized = false;
+      this.state = AutoFlyingRegear.FlyingRegearState.COMPLETE;
+      this.timer = 5;
    }
 
    private void initTakeoff() {
@@ -3552,7 +3809,8 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handleComplete() {
-      if (this.stateTickCounter == 1) {
+      if (!this.completeHandled) {
+         this.completeHandled = true;
          this.endRun(this.pendingOutcome != null ? this.pendingOutcome : "complete");
          if ((Boolean)this.debugMessages.get()) {
             this.info("AutoFlyingRegear complete! Rockets: " + this.countRockets() + " Elytras: " + this.countValidElytras(), new Object[0]);
@@ -3923,21 +4181,46 @@ public class AutoFlyingRegear extends Module {
       }
    }
 
+   /**
+    * Puts an elytra back on in place of the chestplate: the one with the most durability left,
+    * not the first one the inventory scan happens upon, which after a restock is as likely as
+    * not one of the worn ones waiting to go back into the shulker.
+    */
    private void restoreChestplate() {
-      if (!this.savedChestplate.isEmpty()) {
-         for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
-            ItemStack stack = this.mc.player.getInventory().getStack(i);
-            if (stack.getItem() == Items.ELYTRA) {
-               if ((Boolean)this.debugMessages.get()) {
-                  this.info("Elytra from slot " + i + " to the chest, the chestplate goes to slot " + i, new Object[0]);
-               }
+      if (this.savedChestplate.isEmpty()) {
+         return;
+      }
 
-               InvUtils.move().from(i).toArmor(2);
-               this.savedChestplate = ItemStack.EMPTY;
-               return;
-            }
+      int best = -1;
+      int bestDurability = -1;
+
+      for (int i = 0; i < 36; i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (stack.getItem() != Items.ELYTRA) {
+            continue;
+         }
+
+         int durability = stack.getMaxDamage() - stack.getDamage();
+         if (durability > bestDurability) {
+            bestDurability = durability;
+            best = i;
          }
       }
+
+      if (best == -1) {
+         return;
+      }
+
+      if ((Boolean)this.debugMessages.get()) {
+         ItemStack chosen = this.mc.player.getInventory().getStack(best);
+         this.info(
+            "Elytra from slot " + best + " (" + bestDurability * 100 / Math.max(1, chosen.getMaxDamage()) + "%) to the chest, the chestplate goes to slot " + best,
+            new Object[0]
+         );
+      }
+
+      InvUtils.move().from(best).toArmor(2);
+      this.savedChestplate = ItemStack.EMPTY;
    }
 
    private boolean ensureBuildBlocksInHotbar() {
@@ -4266,12 +4549,34 @@ public class AutoFlyingRegear extends Module {
    private void onRender(Render3DEvent event) {
       if ((Boolean)this.render.get() && !this.placedBlocks.isEmpty()) {
          for (BlockPos pos : this.placedBlocks) {
-            event.renderer.box(pos, (Color)this.platformColor.get(), (Color)this.platformColor.get(), ShapeMode.Both, 0);
+            event.renderer.box(pos, this.sideColor.get(), this.lineColor.get(), this.shapeMode.get(), 0);
          }
       }
    }
 
+   /**
+    * Meteor runs every chat message through {@code String.format}, arguments or not, so a
+    * literal percent sign in a message built from an item name or a durability ("(91%)") throws
+    * {@code UnknownFormatConversionException} and takes the game down — which is exactly what
+    * the restore message did on 2026-09-07. Messages given without arguments are literal here.
+    */
+   @Override
+   public void info(String message, Object... args) {
+      super.info(args.length == 0 ? message.replace("%", "%%") : message, args);
+   }
+
+   @Override
+   public void warning(String message, Object... args) {
+      super.warning(args.length == 0 ? message.replace("%", "%%") : message, args);
+   }
+
+   @Override
+   public void error(String message, Object... args) {
+      super.error(args.length == 0 ? message.replace("%", "%%") : message, args);
+   }
+
    private void beginRun() {
+      this.completeHandled = false;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();
       run.lavaWaitSeconds = this.lavaPostponeTicks / 20;
@@ -4374,6 +4679,53 @@ public class AutoFlyingRegear extends Module {
 
    public int hudGoalTotems() {
       return (Integer)this.goalTotems.get();
+   }
+
+   /** What will force the next regear first. */
+   public enum RegearBound {
+      ROCKETS,
+      GAPS,
+      TOTEMS,
+      ELYTRA,
+      BOTTLES,
+      UNKNOWN
+   }
+
+   /**
+    * What will trigger the next regear first. A consumable already under its own trigger minimum
+    * wins outright (the regear is effectively due now); otherwise it is the rockets, on the rate
+    * they are being spent. There is no spend rate for gaps or totems — they deplete slowly and
+    * erratically (a death, a bite), so no honest time can be put on them; they only ever read as
+    * "now" once already short. {@link #hudSecondsToNextRegear} pairs with this.
+    */
+   public RegearBound hudNextRegearBound() {
+      if (!this.isActive() || this.mc.player == null) {
+         return RegearBound.UNKNOWN;
+      }
+
+      if (this.getValidElytraCount() < (Integer)this.minElytras.get()) return RegearBound.ELYTRA;
+      if ((Integer)this.minGaps.get() > 0 && this.countItem(Items.ENCHANTED_GOLDEN_APPLE) < (Integer)this.minGaps.get()) return RegearBound.GAPS;
+      if ((Integer)this.minTotems.get() > 0 && this.countItem(Items.TOTEM_OF_UNDYING) < (Integer)this.minTotems.get()) return RegearBound.TOTEMS;
+      if (this.getRocketCount() < (Integer)this.minRockets.get()) return RegearBound.ROCKETS;
+
+      return this.hudRocketsPerMinute() > 0.0 ? RegearBound.ROCKETS : RegearBound.UNKNOWN;
+   }
+
+   /**
+    * Seconds until the next forced regear: 0 when a consumable is already under its minimum, the
+    * rocket-rate estimate when rockets are the constraint, -1 when it cannot be said (no rate yet).
+    */
+   public int hudSecondsToNextRegear() {
+      RegearBound bound = this.hudNextRegearBound();
+      if (bound == RegearBound.UNKNOWN) return -1;
+      if (bound != RegearBound.ROCKETS) return 0;
+
+      int left = this.getRocketCount() - (Integer)this.minRockets.get();
+      if (left <= 0) return 0;
+
+      double perMinute = this.hudRocketsPerMinute();
+      if (perMinute <= 0.0) return -1;
+      return (int) Math.round(left / perMinute * 60.0);
    }
 
    /**
