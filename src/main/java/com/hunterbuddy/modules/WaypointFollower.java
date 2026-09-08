@@ -352,6 +352,7 @@ public class WaypointFollower extends Module {
         this.waypointsToFollow.clear();
         this.currentWaypointIndex = 0;
         this.startupDelayTicks = 0;
+        this.recentRemovals.clear();
         this.startupRecastTriggered = false;
         this.recastEnabledForStartup = false;
         this.glidingTicksAfterStartup = 0;
@@ -566,7 +567,7 @@ public class WaypointFollower extends Module {
         if (isActive() && !waypointsToFollow.isEmpty()) {
             BlockPos current = getNextWaypoint();
             if (current != null) {
-                removeCurrentWaypoint(current);
+                removeCurrentWaypoint(current, WaypointFollower.Outcome.SKIPPED);
                 if (showChatMessages.get()) info("Skipped waypoint. " + waypointsToFollow.size() + " remaining.");
             }
         }
@@ -599,7 +600,7 @@ public class WaypointFollower extends Module {
         if (this.waypointsToFollow.isEmpty()) return -1;
         BlockPos current = this.getNextWaypoint();
         if (current != null) {
-            this.removeCurrentWaypoint(current);
+            this.removeCurrentWaypoint(current, WaypointFollower.Outcome.SKIPPED);
             return this.waypointsToFollow.size();
         }
         return -1;
@@ -1060,13 +1061,45 @@ public class WaypointFollower extends Module {
     }
 
     private void removeCurrentWaypoint(BlockPos waypoint) {
+        this.removeCurrentWaypoint(waypoint, WaypointFollower.Outcome.ARRIVED);
+    }
+
+    private void removeCurrentWaypoint(BlockPos waypoint, WaypointFollower.Outcome outcome) {
+        int index = this.waypointsCompletedThisSession;
         this.waypointsToFollow.remove(waypoint);
         this.removeFollowWaypoint(waypoint);
         this.waypointsCompletedThisSession++;
         this.lastCompletedAtMs = System.currentTimeMillis();
+        this.pushRemoval(new WaypointFollower.Removal(waypoint, index, outcome, this.lastCompletedAtMs));
         if (this.followMode.get() == FollowMode.Numerical && this.currentWaypointIndex >= this.waypointsToFollow.size()) {
             this.currentWaypointIndex = 0;
         }
+    }
+
+    /** Whether a waypoint left the list by being reached or by the skip button. */
+    public enum Outcome {
+        ARRIVED,
+        SKIPPED
+    }
+
+    /** One waypoint leaving the route, for the HUD to draw a mark as it slides off. */
+    public record Removal(BlockPos pos, int index, WaypointFollower.Outcome outcome, long atMs) {}
+
+    private final java.util.ArrayDeque<WaypointFollower.Removal> recentRemovals = new java.util.ArrayDeque<>();
+
+    private void pushRemoval(WaypointFollower.Removal removal) {
+        this.recentRemovals.addLast(removal);
+        while (this.recentRemovals.size() > 6) this.recentRemovals.pollFirst();
+    }
+
+    /** The last few waypoint exits, oldest first, for the marks that ride the deposit slide. */
+    public java.util.List<WaypointFollower.Removal> hudRecentRemovals() {
+        return new java.util.ArrayList<>(this.recentRemovals);
+    }
+
+    /** The most recent waypoint exit, or null. */
+    public WaypointFollower.Removal hudLastRemoval() {
+        return this.recentRemovals.peekLast();
     }
 
     private void checkAndReloadWaypoints() {
@@ -1503,7 +1536,15 @@ public class WaypointFollower extends Module {
         if (this.fireworkCooldown > 0) this.fireworkCooldown--;
 
         if (this.autoStartFlight.get() && !this.startupRecastTriggered) {
-            if (!player.isGliding()) {
+            // In the Nether with Baritone flying, Baritone leaves the ground by itself (its
+            // standing takeoff), so ElytraRecast would only spam rockets in front of it and fly
+            // blind until it caught up. Only when Baritone is actually allowed to: with
+            // elytraAutoJump off it would sit there, and Recast is still the way up.
+            if (this.isInNether && this.netherFlightMode.get() == NetherFlightMode.Baritone
+                    && BaritoneAPI.getSettings().elytraAutoJump.value) {
+                this.startupRecastTriggered = true;
+                this.baritoneActivatedAfterStartup = true;
+            } else if (!player.isGliding()) {
                 this.startupDelayTicks++;
                 if (this.startupDelayTicks >= this.startupDelay.get()) {
                     if (this.hasElytraEquipped()) {
@@ -2529,6 +2570,12 @@ public class WaypointFollower extends Module {
         if (this.autoStartFlight.get() && !this.startupRecastTriggered) return HudState.STARTING;
         if (this.startupRecastTriggered && !this.baritoneActivatedAfterStartup) return HudState.WAIT_GLIDE;
         return HudState.FLYING;
+    }
+
+    /** Whether, where we are now, this module flies by handing Baritone the goal. */
+    public boolean fliesWithBaritone() {
+        // Read off the world, not the cached flag: this is asked while the module is switched off.
+        return mc.world != null && this.isInNether(mc.world) && this.netherFlightMode.get() == NetherFlightMode.Baritone;
     }
 
     /** Whether the way this dimension is flown involves wings at all. */
