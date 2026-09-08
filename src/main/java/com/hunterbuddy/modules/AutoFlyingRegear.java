@@ -1897,6 +1897,29 @@ public class AutoFlyingRegear extends Module {
                ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(targetHotbarSlot);
             }
 
+            // Re-center before placing, the same way the shulker does. A ghast knocking the bot off
+            // the platform mid-placement was why the ender chest kept failing to place; walk back to
+            // the centre first and only place once within 0.3 of it.
+            Vec3d ecTargetCenter = Vec3d.ofCenter(this.platformCenter);
+            Vec3d ecPlayerPos = this.mc.player.getEntityPos();
+            double ecCenterDist = Math.hypot(ecTargetCenter.x - ecPlayerPos.x, ecTargetCenter.z - ecPlayerPos.z);
+            if (ecCenterDist > 0.3) {
+               IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
+               if (baritone != null && this.stateTickCounter % 10 == 0) {
+                  baritone.getCommandManager().execute("cancel");
+                  baritone.getCommandManager().execute(
+                     "goto " + this.platformCenter.getX() + " " + (this.platformCenter.getY() + 1) + " " + this.platformCenter.getZ()
+                  );
+               }
+
+               if ((Boolean)this.debugMessages.get() && this.stateTickCounter % 20 == 0) {
+                  this.warning("Re-centering before ender chest (distance: " + String.format("%.2f", ecCenterDist) + ")", new Object[0]);
+               }
+
+               this.timer = 2;
+               return;
+            }
+
             BlockPos groundPos = this.echestPos.down();
             if (!this.mc.world.getBlockState(groundPos).isSolidBlock(this.mc.world, groundPos)) {
                if ((Boolean)this.debugMessages.get()) {
@@ -3547,6 +3570,17 @@ public class AutoFlyingRegear extends Module {
             this.info("Found " + this.cleanupBlocks.size() + " blocks to clean up for flight clearance", new Object[0]);
          }
 
+         // Hand the teardown to MlepMine: it was disabled for the shulker ops, turn it back on now so
+         // it packet-mines the box for us. It holds the pickaxe itself for each block, so the regear no
+         // longer grabs the selected hotbar slot every tick - which is what used to keep AutoEat from
+         // ever holding a gap and eating.
+         if (this.mlepMineWasActive && this.mlepMine != null && !this.mlepMine.isActive()) {
+            this.mlepMine.toggle();
+            if ((Boolean)this.debugMessages.get()) {
+               this.info("Re-enabled MlepMine for cleanup teardown", new Object[0]);
+            }
+         }
+
          this.cleanupBlockIndex = 0;
       }
 
@@ -3576,11 +3610,6 @@ public class AutoFlyingRegear extends Module {
                return;
             }
 
-            FindItemResult pickaxe = InvUtils.find(itemStack -> itemStack.isIn(ItemTags.PICKAXES));
-            if (pickaxe.found() && pickaxe.isHotbar() && ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot() != pickaxe.slot()) {
-               ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(pickaxe.slot());
-            }
-
             Vec3d playerPos = this.mc.player.getEntityPos();
             Vec3d blockCenter = Vec3d.ofCenter(pos);
             double dx = playerPos.x - blockCenter.x;
@@ -3595,17 +3624,47 @@ public class AutoFlyingRegear extends Module {
                breakDirection = dy > 0.0 ? Direction.UP : Direction.DOWN;
             }
 
-            boolean startBreak = this.cleanupBlockAttempts == 0;
-            if (!this.breakBlockWhenAligned(pos, breakDirection, blockCenter, startBreak)) {
-               return;
-            }
+            if (this.mlepMine != null && this.mlepMine.isActive()) {
+               // Click once and let the mine module do the rest. queueMiningData holds the pickaxe
+               // itself for the packet mine, so we never touch the selected hotbar slot here - that
+               // is what lets AutoEat keep a gap in hand and actually eat when a ghast hits us. The
+               // queue dedups by position, so re-issuing it while it is still working is a no-op.
+               if (this.cleanupBlockAttempts == 0) {
+                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(pos, breakDirection));
+                  if ((Boolean)this.debugMessages.get()) {
+                     this.info("Mining block " + (this.cleanupBlockIndex + 1) + "/" + this.cleanupBlocks.size() + " via mine module", new Object[0]);
+                  }
+               }
 
-            if (startBreak && (Boolean)this.debugMessages.get()) {
-               this.info("Started breaking block " + (this.cleanupBlockIndex + 1) + "/" + this.cleanupBlocks.size(), new Object[0]);
-            }
+               this.cleanupBlockAttempts++;
+               // Backstop only: if the module has not taken the block down after a while, nudge it
+               // back into the queue. Still no hotbar grab, still no per-tick spam.
+               if (this.cleanupBlockAttempts % 40 == 0) {
+                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(pos, breakDirection));
+               }
 
-            this.cleanupBlockAttempts++;
-            this.timer = 0;
+               this.timer = 2;
+            } else {
+               // No mine module available: break it ourselves, selecting a pickaxe once (not every tick).
+               if (this.cleanupBlockAttempts == 0) {
+                  FindItemResult pickaxe = InvUtils.find(itemStack -> itemStack.isIn(ItemTags.PICKAXES));
+                  if (pickaxe.found() && pickaxe.isHotbar() && ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot() != pickaxe.slot()) {
+                     ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(pickaxe.slot());
+                  }
+               }
+
+               boolean startBreak = this.cleanupBlockAttempts == 0;
+               if (!this.breakBlockWhenAligned(pos, breakDirection, blockCenter, startBreak)) {
+                  return;
+               }
+
+               if (startBreak && (Boolean)this.debugMessages.get()) {
+                  this.info("Started breaking block " + (this.cleanupBlockIndex + 1) + "/" + this.cleanupBlocks.size(), new Object[0]);
+               }
+
+               this.cleanupBlockAttempts++;
+               this.timer = 0;
+            }
          } else {
             if ((Boolean)this.debugMessages.get()) {
                this.info("Cleanup complete, removed " + this.cleanupBlocks.size() + " blocks", new Object[0]);
