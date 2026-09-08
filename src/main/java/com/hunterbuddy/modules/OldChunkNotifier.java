@@ -267,6 +267,8 @@ public class OldChunkNotifier extends Module {
     private static final double ROAD_ELONGATION_MAX = 0.35;
     private static final double ROAD_SIDE_OTHER_MIN_RATIO = 0.6;
     private static final double ROAD_OWN_ROUTE_ANGLE_DEG = 10.0;
+    /** Largest Overworld block coordinate a marker can sit at and still be inside the world border; past it the x8 Nether projection is dropped. */
+    private static final long OVERWORLD_MARKER_LIMIT = 29_000_000L;
 
     private final LinkedHashMap<ChunkKey, Boolean> processedChunks = new LinkedHashMap<>();
     private final LinkedHashMap<ChunkKey, ChunkState> trackedChunks = new LinkedHashMap<>();
@@ -757,7 +759,7 @@ public class OldChunkNotifier extends Module {
 
         boolean wantsMarkers = logType.get() == LogType.Marker || logType.get() == LogType.Both;
         if (wantsMarkers) {
-            for (ChunkKey key : freshlyConfirmed) createMapMarker(key);
+            for (ChunkKey key : runSet) ensureMarker(key);
         }
 
         // Extension of a road already announced: new markers only, no repeat webhook/feed post —
@@ -927,9 +929,11 @@ public class OldChunkNotifier extends Module {
         if (!wantsMarkers) dbg("  marker[A]: ignore, log-type=" + logType.get() + " (aucun waypoint par construction)");
 
         for (ChunkKey chunk : pendingCluster) {
-            ChunkState state = trackedChunks.get(chunk);
-            state.confirmed = true;
-            if (wantsMarkers) createMapMarker(chunk);
+            trackedChunks.get(chunk).confirmed = true;
+        }
+
+        if (wantsMarkers) {
+            for (ChunkKey chunk : collectCluster(pos, true)) ensureMarker(chunk);
         }
 
         // Once per new cluster, not per chunk: an extension of a cluster already announced is
@@ -994,6 +998,24 @@ public class OldChunkNotifier extends Module {
     // to divide by 8 when the Nether map is showing — so the point still lands in the right spot
     // there without ever switching worlds. That is the whole point of the option: seeing it from
     // the Overworld map without touching the dimension menu.
+    /**
+     * Places a marker for a chunk once, whatever confirmed it. The cluster path used to mark only
+     * its unconfirmed members and the road path only its freshly confirmed ones, so a chunk that
+     * one path confirmed in silence (a stretch of our own route, say) got announced by the other
+     * with no marker at all — the case where a Nether-road notification arrived but nothing showed
+     * on the map. Gated on a per-chunk flag, not on confirmation, and createMapMarker dedupes by
+     * position on top of that.
+     */
+    private void ensureMarker(ChunkKey chunk) {
+        ChunkState state = trackedChunks.get(chunk);
+        if (state != null) {
+            if (state.marked) return;
+            state.marked = true;
+        }
+
+        createMapMarker(chunk);
+    }
+
     private void createMapMarker(ChunkKey chunk) {
         MinimapSession minimapSession = BuiltInHudModules.MINIMAP.getCurrentSession();
         if (minimapSession == null) return;
@@ -1006,11 +1028,21 @@ public class OldChunkNotifier extends Module {
         int blockZ = chunk.z * 16;
 
         if (markersFollowXaeroDimension.get() && chunk.dimension.equals(World.NETHER) && isPreferOverworldWaypointsEnabled()) {
-            MinimapWorld overworld = WaypointFollower.resolveOverworldWaypointWorld();
-            if (overworld != null) {
-                targetWorld = overworld;
-                blockX *= 8;
-                blockZ *= 8;
+            long owX = (long) blockX * 8;
+            long owZ = (long) blockZ * 8;
+            // Beyond ~3.75M Nether, the x8 Overworld projection is past the world border, where a
+            // waypoint shows on no map at all. Deep in the Nether like that, keep the marker in the
+            // Nether's own waypoints at real coordinates rather than lose it (the Overworld map just
+            // will not carry this one).
+            if (Math.abs(owX) <= OVERWORLD_MARKER_LIMIT && Math.abs(owZ) <= OVERWORLD_MARKER_LIMIT) {
+                MinimapWorld overworld = WaypointFollower.resolveOverworldWaypointWorld();
+                if (overworld != null) {
+                    targetWorld = overworld;
+                    blockX = (int) owX;
+                    blockZ = (int) owZ;
+                }
+            } else {
+                dbg("  marker " + chunk.x + "," + chunk.z + ": x8 hors bordure (" + owX + "," + owZ + "), pose dans le nether aux vraies coords");
             }
         }
 
@@ -1487,6 +1519,8 @@ public class OldChunkNotifier extends Module {
         private DetectedChunkType type;
         private boolean offHighway;
         private boolean confirmed;
+        /** A marker has been placed for this chunk. Independent of confirmed: a chunk one path confirms silently must still get a marker when another path announces it. */
+        private boolean marked;
         private long webhookDeliveryId;
 
         private ChunkState(DetectedChunkType type, boolean offHighway) {
