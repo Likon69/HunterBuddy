@@ -347,6 +347,21 @@ public class KillAuraPlus extends Module {
         .build()
     );
 
+    private final Setting<Boolean> noDelay = sgTiming.add(new BoolSetting.Builder()
+        .name("no-delay")
+        .description("Hit at the fixed rate below, ignoring the attack cooldown and the charge entirely -- never waiting for the bar to refill. This is what lets the aura bat away a ghast fireball the instant it is in range. Overrides the timing above.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Double> noDelayCps = sgTiming.add(new DoubleSetting.Builder()
+        .name("no-delay-cps")
+        .description("How many hits per second while no-delay is on. High (up to 20) bats fireballs away fastest but each hit is barely charged, so it mostly knocks back -- which is why the sword felt like a fist. Low (around 2-3) lets the bar charge between hits, so each swing lands real sword damage; in between trades one for the other.")
+        .defaultValue(10.0).min(2.0).max(20.0).sliderRange(2.0, 20.0)
+        .visible(noDelay::get)
+        .build()
+    );
+
     private final Setting<Boolean> sprintReset = sgTiming.add(new BoolSetting.Builder()
         .name("sprint-reset")
         .description("Drop sprint by packet for the length of the swing and take it straight back. Sprinting is one of the conditions that forbids a critical hit, so this is what turns every landed swing into a crit without you letting go of the key.")
@@ -954,6 +969,13 @@ public class KillAuraPlus extends Module {
 
     private boolean ready() {
         long now = System.currentTimeMillis();
+
+        // No-delay: hit at the no-delay-cps rate, ignoring the attack cooldown and the charge
+        // entirely -- no waiting for the bar to refill. High rate bats away a ghast fireball the
+        // instant it is in range (low damage per hit); low rate lets the bar charge for real sword
+        // damage. nextHitMs is set from that rate in attack().
+        if (noDelay.get()) return now >= nextHitMs;
+
         if (now < nextHitMs) return false;
 
         if (timing.get() == Timing.Clicks) return true;
@@ -1028,7 +1050,10 @@ public class KillAuraPlus extends Module {
         lastHitMs = now;
         ticksSinceHit = 0;
 
-        if (timing.get() == Timing.Clicks) {
+        if (noDelay.get()) {
+            nextHitMs = now + (long) (1000.0 / Math.max(0.5, noDelayCps.get()));
+        }
+        else if (timing.get() == Timing.Clicks) {
             double low = Math.min(minCps.get(), maxCps.get());
             double high = Math.max(minCps.get(), maxCps.get());
             double cps = low + random.nextDouble() * (high - low);
