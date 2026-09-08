@@ -81,6 +81,16 @@ public class FollowerRouteHud extends HudElement {
         .description("The lane's motion: flow arrows on the route actually eaten, the sonar countdown, the arrival handover, the ten-second mark, the stall amber. Everything holds still while paused or stalled.")
         .defaultValue(true).build());
 
+    private final Setting<Boolean> sonar = sgGeneral.add(new BoolSetting.Builder()
+        .name("sonar")
+        .description("The odometer's ping: one ring per stretch of route eaten, quickening toward the arrival. Rides under animations.")
+        .defaultValue(true).visible(animations::get).build());
+
+    private final Setting<Boolean> showOutcomeMarks = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-outcome-marks")
+        .description("Strike a mark on each milestone as it slides off: a green check for a waypoint reached, a slate cross for one skipped.")
+        .defaultValue(true).build());
+
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
         .name("text-scale").description("Scale of text and marks.")
         .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
@@ -103,6 +113,10 @@ public class FollowerRouteHud extends HudElement {
     private final Setting<SettingColor> textColor = sgColors.add(new ColorSetting.Builder()
         .name("value-color").description("Distance, arrival and the mode initials.")
         .defaultValue(new SettingColor(255, 255, 255, 255)).build());
+
+    private final Setting<SettingColor> skipColor = sgColors.add(new ColorSetting.Builder()
+        .name("skip-color").description("The cross on a milestone that was skipped rather than reached.")
+        .defaultValue(new SettingColor(150, 165, 185, 255)).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
 
@@ -199,7 +213,7 @@ public class FollowerRouteHud extends HudElement {
                 stallBlend = 0.0;
                 etaWarnFresh = 0.0;
                 renderLane(renderer, dt, new double[]{980.0, 2200.0, 3900.0, 5200.0}, 14, 40.0,
-                    "1 240 m", "~2m 10s", "P40", false, -1.0, 38.0, 0.0f);
+                    "1 240 m", "~2m 10s", "P40", false, -1.0, 38.0, 0.0f, List.of());
                 return;
             }
 
@@ -279,8 +293,16 @@ public class FollowerRouteHud extends HudElement {
         boolean paused = state == WaypointFollower.HudState.PAUSED
             || state == WaypointFollower.HudState.AREA_LOADER;
 
-        long sinceDone = System.currentTimeMillis() - follower.hudLastCompletedAt();
-        double doneFade = follower.hudLastCompletedAt() > 0L && sinceDone < FADE_MS
+        // The deposits sliding off behind you are every recent exit; the fanfare — the halo
+        // contraction, the strike ring, the whip — is only for the most recent ARRIVED one, so a
+        // skip slides off quietly without pretending an arrival happened.
+        List<WaypointFollower.Removal> removals = follower.hudRecentRemovals();
+        long lastArrivedAt = 0L;
+        for (WaypointFollower.Removal r : removals) {
+            if (r.outcome() == WaypointFollower.Outcome.ARRIVED) lastArrivedAt = r.atMs();
+        }
+        long sinceDone = System.currentTimeMillis() - lastArrivedAt;
+        double doneFade = lastArrivedAt > 0L && sinceDone < FADE_MS
             ? sinceDone / (double) FADE_MS
             : -1.0;
 
@@ -350,14 +372,16 @@ public class FollowerRouteHud extends HudElement {
             formatDistance(d0),
             paused ? "--" : eta < 0 ? "--" : "~" + formatTime(eta),
             modeInitials(follower.hudModeName()), paused, doneFade,
-            follower.hudSpeed(), targetFresh);
+            follower.hudSpeed(), targetFresh, removals);
     }
 
     private void renderLane(HudRenderer renderer, double dt, double[] cumulative, int overflow,
                             double reach, String distText, String etaText, String mode,
-                            boolean paused, double doneFade, double speedBps, float targetFresh) {
+                            boolean paused, double doneFade, double speedBps, float targetFresh,
+                            List<WaypointFollower.Removal> deposits) {
         boolean shadow = textShadow.get();
         double scale = textScale.get();
+        long nowMs = System.currentTimeMillis();
         double inset = panel.padding();
         double width = laneWidth.get() * scale;
         double laneH = LANE_HEIGHT * scale;
@@ -420,36 +444,47 @@ public class FollowerRouteHud extends HudElement {
             }
         }
 
-        // ---- The handover, first half: the milestone just reached.
-        // Contract, hold one breath of silence, strike. Times in milliseconds
-        // of doneFade — never in frames, which are a different length on
-        // every machine.
-        if (doneFade >= 0.0) {
-            // The deposit: the reached disc sliding off behind you, all 1.5 s.
-            double slide = (8.0 + 16.0 * doneFade) * scale;
-            Color fade = new Color(accent.r, accent.g, accent.b,
-                (int) (accent.a * (1.0 - doneFade) * 0.8));
-            disc(renderer, playerX - slide, midY, 3.0 * scale, fade);
+        // ---- The deposits: every recent waypoint exit still within its 1.5 s leaves a disc
+        // sliding off behind you, its outcome struck on it — newest first, capped at three. A
+        // skip slides a touch faster and sits slightly lower, so it reads apart from an arrival
+        // even before the mark is legible.
+        if (!deposits.isEmpty()) {
+            int drawn = 0;
+            for (int i = deposits.size() - 1; i >= 0 && drawn < 3; i--) {
+                WaypointFollower.Removal rem = deposits.get(i);
+                double age = (nowMs - rem.atMs()) / (double) FADE_MS;
+                if (age < 0.0 || age >= 1.0) continue;
+                drawn++;
 
-            if (anim) {
-                if (doneFade < 0.0733 && contractFromR > 2.0) {
-                    // 0-110 ms: the old halo is eaten — its ring contracts
-                    // onto the marker, brightening as it shrinks.
-                    double cf = doneFade / 0.0733;
-                    double r = contractFromR + (2.5 * scale - contractFromR) * cf;
-                    ring(renderer, playerX, midY, r, (1.5 + 0.9 * cf) * scale,
-                        new Color(accent.r, accent.g, accent.b, (int) (150.0 + 105.0 * cf)));
-                } else if (doneFade >= 0.12) {
-                    // 110-180 ms is the silence. Then the strike: one ring
-                    // blown out of the only immobile point of the lane.
-                    double u = MathHelper.clamp((doneFade - 0.12) / 0.28, 0.0, 1.0);
-                    if (u < 1.0) {
-                        double r = (3.0 + 19.0 * (1.0 - Math.pow(1.0 - u, 3.0))) * scale;
-                        int a = (int) (190.0 * (1.0 - u) * (1.0 - u));
-                        if (a > 5) {
-                            ring(renderer, playerX, midY, r, Math.max(1.0, (1.6 - 0.8 * u) * scale),
-                                new Color(accent.r, accent.g, accent.b, a));
-                        }
+                boolean arrived = rem.outcome() == WaypointFollower.Outcome.ARRIVED;
+                double slideMul = arrived ? 1.0 : 1.25;
+                double dx = playerX - (8.0 + 16.0 * age * slideMul) * scale;
+                double dy = midY + (arrived ? 0.0 : 2.0 * scale);
+                drawDeposit(renderer, rem, dx, dy, scale, 1.0 - age, arrived, anim, nowMs);
+            }
+        }
+
+        // ---- The handover fanfare, driven by the most recent ARRIVED removal: contract, a breath
+        // of silence, then the strike. Skips never reach here. Times in milliseconds of doneFade —
+        // never in frames, which are a different length on every machine.
+        if (doneFade >= 0.0 && anim) {
+            if (doneFade < 0.0733 && contractFromR > 2.0) {
+                // 0-110 ms: the old halo is eaten — its ring contracts onto the marker,
+                // brightening as it shrinks.
+                double cf = doneFade / 0.0733;
+                double r = contractFromR + (2.5 * scale - contractFromR) * cf;
+                ring(renderer, playerX, midY, r, (1.5 + 0.9 * cf) * scale,
+                    new Color(accent.r, accent.g, accent.b, (int) (150.0 + 105.0 * cf)));
+            } else if (doneFade >= 0.12) {
+                // 110-180 ms is the silence. Then the strike: one ring blown out of the only
+                // immobile point of the lane.
+                double u = MathHelper.clamp((doneFade - 0.12) / 0.28, 0.0, 1.0);
+                if (u < 1.0) {
+                    double r = (3.0 + 19.0 * (1.0 - Math.pow(1.0 - u, 3.0))) * scale;
+                    int a = (int) (190.0 * (1.0 - u) * (1.0 - u));
+                    if (a > 5) {
+                        ring(renderer, playerX, midY, r, Math.max(1.0, (1.6 - 0.8 * u) * scale),
+                            new Color(accent.r, accent.g, accent.b, a));
                     }
                 }
             }
@@ -509,7 +544,7 @@ public class FollowerRouteHud extends HudElement {
                 // the dot out past the reach and dying there. Its phase rides
                 // the odometer, so it freezes with the bot and quickens on its
                 // own as the remaining distance shortens.
-                if (anim && !paused && open > 0.6) {
+                if (anim && sonar.get() && !paused && open > 0.6) {
                     double f = pingPhase;
                     double pingR = 3.0 * scale + (haloR + 4.0 * scale - 3.0 * scale) * Math.pow(f, 0.6);
                     int pingA = (int) (110.0 * (1.0 - f) * (1.0 - f));
@@ -733,6 +768,73 @@ public class FollowerRouteHud extends HudElement {
 
         if (cross > 0.0) renderer.triangle(x1, y1, x3, y3, x2, y2, colour);
         else renderer.triangle(x1, y1, x2, y2, x3, y3, colour);
+    }
+
+    /** A thick line segment, drawn as two triangles through the cull-safe tri(). */
+    private void stroke(HudRenderer renderer, double x1, double y1, double x2, double y2, double thickness,
+                        Color colour) {
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+        double len = Math.hypot(dx, dy);
+        if (len < 1.0e-6) return;
+
+        double nx = -dy / len * (thickness / 2.0);
+        double ny = dx / len * (thickness / 2.0);
+
+        tri(renderer, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x2 - nx, y2 - ny, colour);
+        tri(renderer, x1 + nx, y1 + ny, x2 - nx, y2 - ny, x2 + nx, y2 + ny, colour);
+    }
+
+    /**
+     * One deposited milestone: the disc, then its outcome struck on it — a green check for a
+     * waypoint reached, a slate cross for one skipped. The mark pops in over a quarter second and
+     * its alpha rises over the first tenth, then it rides the slide and fades with the disc.
+     *
+     * <p>Below a legible size the mark degrades to shape alone — a solid disc for an arrival, a
+     * hollow ring for a skip — which stays readable where a check and a cross would blur into
+     * each other.
+     */
+    private void drawDeposit(HudRenderer renderer, WaypointFollower.Removal rem, double mx, double my,
+                             double scale, double slideAlpha, boolean arrived, boolean anim, long nowMs) {
+        SettingColor base = arrived ? accentColor.get() : skipColor.get();
+        double dr = 3.0 * scale;
+        boolean tiny = 3.0 * scale < 3.0;
+
+        if (!showOutcomeMarks.get()) {
+            disc(renderer, mx, my, dr, new Color(base.r, base.g, base.b, (int) (base.a * slideAlpha * 0.8)));
+            return;
+        }
+
+        if (tiny) {
+            if (arrived) {
+                disc(renderer, mx, my, dr, new Color(base.r, base.g, base.b, (int) (base.a * slideAlpha)));
+            } else {
+                ring(renderer, mx, my, Math.max(2.0, dr), Math.max(1.0, 0.9 * scale),
+                    new Color(base.r, base.g, base.b, (int) (base.a * slideAlpha)));
+            }
+            return;
+        }
+
+        // The disc the mark is struck on, then the mark.
+        disc(renderer, mx, my, dr, new Color(base.r, base.g, base.b, (int) (base.a * slideAlpha * 0.8)));
+
+        long ageMs = nowMs - rem.atMs();
+        double pop = anim ? HudPulse.pop((float) Math.max(0.0, 1.0 - ageMs / 250.0)) : 1.0;
+        double fadeIn = Math.min(1.0, ageMs / 120.0);
+        int a = (int) (base.a * slideAlpha * fadeIn);
+        if (a <= 3) return;
+
+        Color mc = new Color(base.r, base.g, base.b, a);
+        double s = Math.max(6.0, 7.0 * scale) * pop;
+        double t = Math.max(1.2, 0.18 * s);
+
+        if (arrived) {
+            stroke(renderer, mx - 0.35 * s, my + 0.05 * s, mx - 0.05 * s, my + 0.30 * s, t, mc);
+            stroke(renderer, mx - 0.05 * s, my + 0.30 * s, mx + 0.40 * s, my - 0.30 * s, t, mc);
+        } else {
+            stroke(renderer, mx - 0.30 * s, my - 0.30 * s, mx + 0.30 * s, my + 0.30 * s, t, mc);
+            stroke(renderer, mx + 0.30 * s, my - 0.30 * s, mx - 0.30 * s, my + 0.30 * s, t, mc);
+        }
     }
 
     private static String modeInitials(String mode) {
