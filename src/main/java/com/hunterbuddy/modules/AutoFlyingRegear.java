@@ -1870,11 +1870,7 @@ public class AutoFlyingRegear extends Module {
             this.error("Failed to place ender chest after 15 attempts", new Object[0]);
          }
 
-         // Tear the box down and take off instead of dropping to IDLE. The box (walls + roof) is
-         // already standing here; going IDLE leaves it up, and with supplies still low and no
-         // cooldown the next regear at the same spot stacks a second box on it — the doubled roof.
-         this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
-         this.timer = 0;
+         this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
          this.placementAttempts = 0;
       } else {
          this.mc.options.sneakKey.setPressed(false);
@@ -1887,10 +1883,7 @@ public class AutoFlyingRegear extends Module {
                   this.error("No ender chest found in inventory!", new Object[0]);
                }
 
-               // Box already built; tear it down rather than leave it standing for the next regear
-               // to stack onto.
-               this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
-               this.timer = 0;
+               this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
             } else {
                this.moveStack(eChestSlot, targetHotbarSlot);
                if ((Boolean)this.debugMessages.get()) {
@@ -1910,10 +1903,7 @@ public class AutoFlyingRegear extends Module {
                   this.error("No solid ground for ender chest at " + this.echestPos, new Object[0]);
                }
 
-               // Box already built; tear it down rather than leave it standing for the next regear
-               // to stack onto.
-               this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
-               this.timer = 0;
+               this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
             } else if (this.placeBlockAtHotbar(this.echestPos, (Integer)this.eChestHotbarSlot.get())) {
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Placing ender chest", new Object[0]);
@@ -1944,10 +1934,7 @@ public class AutoFlyingRegear extends Module {
             this.error("Ender chest failed to place after 15 attempts", new Object[0]);
          }
 
-         // Box already built; tear it down rather than leave it standing for the next regear to
-         // stack onto.
-         this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
-         this.timer = 0;
+         this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
          this.placementAttempts = 0;
       } else {
          if ((Boolean)this.debugMessages.get()) {
