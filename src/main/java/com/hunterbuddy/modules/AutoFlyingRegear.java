@@ -436,6 +436,7 @@ public class AutoFlyingRegear extends Module {
    private AutoEat autoEatModule = null;
    private int wallLayer = 0;
    private int wallBuildPhase = 0;
+   private int verifyRounds = 0;
    private BlockPos currentClearingPos = null;
    private int clearingProgress = 0;
    private int shulkerPickupAttempts = 0;
@@ -1349,6 +1350,7 @@ public class AutoFlyingRegear extends Module {
          this.pendingBlocks.clear();
          this.placedBlocks.clear();
          this.currentBlockIndex = 0;
+         this.clearFireInBox();
       }
 
       if (this.pendingBlocks.isEmpty() && this.timer == 0) {
@@ -1441,7 +1443,9 @@ public class AutoFlyingRegear extends Module {
                }
 
                this.placementAttempts++;
-               this.timer = (Integer)this.placeDelay.get();
+               // Platform blocks go down fast: this is the layer that keeps the bot off the ground, so it
+               // must form before the fall does, not on the slow wall cadence.
+               this.timer = Math.max(2, (Integer)this.placeDelay.get() / 4);
             } else {
                if ((Boolean)this.debugMessages.get()) {
                   this.warning("Failed to send placement packet, retrying...", new Object[0]);
@@ -1513,6 +1517,34 @@ public class AutoFlyingRegear extends Module {
       }
    }
 
+   /** Puts out any fire in the box footprint. Fire burns the bot while it builds and, being non-solid,
+    *  gives the air-place raytrace nothing to hit - which is how a cell ends up skipped. Breaks in one hit. */
+   private void clearFireInBox() {
+      if (this.platformCenter == null || this.mc.interactionManager == null || this.mc.world == null) return;
+      for (int dx = -1; dx <= 2; dx++) {
+         for (int dz = -1; dz <= 2; dz++) {
+            for (int dy = 0; dy <= 3; dy++) {
+               BlockPos p = this.platformCenter.add(dx, dy, dz);
+               if (this.mc.world.getBlockState(p).getBlock() instanceof net.minecraft.block.AbstractFireBlock) {
+                  this.mc.interactionManager.attackBlock(p, Direction.DOWN);
+                  this.mc.player.swingHand(Hand.MAIN_HAND);
+               }
+            }
+         }
+      }
+   }
+
+   /** Every cell the box should have, that is still air or replaceable - across the phases actually in scope. */
+   private java.util.List<BlockPos> collectMissingBoxBlocks() {
+      java.util.List<BlockPos> missing = new java.util.ArrayList<>();
+      missing.addAll(this.collectMissingBlocks(this.getWallRingPositions(1)));
+      if (this.getMaxWallBuildPhase() >= 2) {
+         missing.addAll(this.collectMissingBlocks(this.getWallRingPositions(2)));
+         missing.addAll(this.collectMissingBlocks(this.getRoofPositions()));
+      }
+      return missing;
+   }
+
    private void handleCreatingWalls() {
       if (this.stateTickCounter == 1) {
          Vec3d centerTarget = Vec3d.ofCenter(this.platformCenter);
@@ -1538,6 +1570,8 @@ public class AutoFlyingRegear extends Module {
          this.currentBlockIndex = 0;
          this.wallLayer = 0;
          this.wallBuildPhase = 0;
+         this.verifyRounds = 0;
+         this.clearFireInBox();
       }
 
       if (this.pendingBlocks.isEmpty() && this.timer == 0) {
@@ -1627,6 +1661,27 @@ public class AutoFlyingRegear extends Module {
          } else {
             this.placementAttempts = 0;
             if (this.advanceWallBuildPhase()) {
+               return;
+            }
+
+            // Verify every cell of the box actually got a block before calling it done. A cell skipped
+            // after ten failed attempts (fire in the way, no face to place against) would otherwise leave
+            // a hole. Clear fire, then re-run the phases to fill what is still missing - bounded, so a
+            // genuinely unplaceable cell cannot loop forever.
+            java.util.List<BlockPos> stillMissing = this.collectMissingBoxBlocks();
+            if (!stillMissing.isEmpty() && this.verifyRounds < 3) {
+               this.verifyRounds++;
+               this.clearFireInBox();
+               if ((Boolean)this.debugMessages.get()) {
+                  this.warning("Box has " + stillMissing.size() + " missing block(s), verify pass " + this.verifyRounds + "/3", new Object[0]);
+               }
+
+               this.wallBuildPhase = 0;
+               this.wallLayer = 0;
+               this.pendingBlocks.clear();
+               this.currentBlockIndex = 0;
+               this.placementAttempts = 0;
+               this.timer = (Integer)this.placeDelay.get();
                return;
             }
 
@@ -4591,12 +4646,28 @@ public class AutoFlyingRegear extends Module {
       return item instanceof BlockItem blockItem && blockItem.getBlock() instanceof ShulkerBoxBlock;
    }
 
+   /**
+    * Outlines the blocks of the box that are still standing.
+    *
+    * <p>{@link #placedBlocks} is the list of everything we placed, and it is only emptied when the whole
+    * regear ends — nothing takes an entry out of it as the mine module tears the box back down. Drawing it
+    * as-is therefore left a box hanging in the air over every block already broken, for the length of the
+    * teardown. Reading the world instead of trying to keep a second list in step also covers the blocks we
+    * never lost track of but never placed either: one that failed silently, one a neighbour mined, one that
+    * fell in lava.
+    */
    @EventHandler
    private void onRender(Render3DEvent event) {
-      if ((Boolean)this.render.get() && !this.placedBlocks.isEmpty()) {
-         for (BlockPos pos : this.placedBlocks) {
-            event.renderer.box(pos, this.sideColor.get(), this.lineColor.get(), this.shapeMode.get(), 0);
+      if (!(Boolean)this.render.get() || this.placedBlocks.isEmpty() || this.mc.world == null) {
+         return;
+      }
+
+      for (BlockPos pos : this.placedBlocks) {
+         if (this.mc.world.getBlockState(pos).isAir()) {
+            continue;
          }
+
+         event.renderer.box(pos, this.sideColor.get(), this.lineColor.get(), this.shapeMode.get(), 0);
       }
    }
 
