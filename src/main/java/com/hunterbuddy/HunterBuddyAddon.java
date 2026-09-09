@@ -105,6 +105,9 @@ public class HunterBuddyAddon extends MeteorAddon {
         com.hunterbuddy.util.PingSampler.init();
         com.hunterbuddy.util.LifetimeStats.init();
         MeteorClient.EVENT_BUS.subscribe(new com.hunterbuddy.modules.VisualRangeNotifier.Hooks());
+        // Clears RocketBoost's Baritone settings on join when the module is off, so a value left
+        // behind by a crash mid-flight cannot make Baritone plan for a boost nothing is applying.
+        MeteorClient.EVENT_BUS.subscribe(new com.hunterbuddy.modules.RocketBoost.Hooks());
 
         // HUDs
         Hud.get().register(ElytraHelperHud.INFO);
