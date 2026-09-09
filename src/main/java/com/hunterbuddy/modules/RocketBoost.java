@@ -15,6 +15,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.entity.EntityPosition;
 import net.minecraft.entity.effect.StatusEffects;
@@ -24,8 +25,11 @@ import net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -149,6 +153,42 @@ public class RocketBoost extends Module {
       .build()
    );
 
+   private final SettingGroup sgSafety = settings.createGroup("Safety");
+
+   public final Setting<Boolean> wallCheck = sgSafety.add(new BoolSetting.Builder()
+      .name("wall-check")
+      .description("Stop adding speed when there is something solid in front of you. This module makes a rocket push harder than vanilla, which is exactly what turns a survivable approach to a wall into a crash: it raycasts along your look as far as you would travel in lookahead ticks, and drops the boost back to vanilla 1.5 when that line is blocked. It never cancels the boost, only the extra.")
+      .defaultValue(true)
+      .build()
+   );
+
+   public final Setting<Boolean> chunkCheck = sgSafety.add(new BoolSetting.Builder()
+      .name("chunk-check")
+      .description("Stop adding speed when the chunks ahead have not loaded yet. Terrain you cannot see is terrain nothing can check, and outrunning the loader at 2x is how you end up inside it. Same effect as wall-check: back to vanilla 1.5, boost kept.")
+      .defaultValue(true)
+      .build()
+   );
+
+   public final Setting<Integer> lookahead = sgSafety.add(new IntSetting.Builder()
+      .name("lookahead")
+      .description("How many ticks ahead wall-check and chunk-check look. The distance is that many ticks of your current speed, so it grows with how fast you are actually going.")
+      .defaultValue(20)
+      .min(4)
+      .max(80)
+      .sliderRange(8, 60)
+      .visible(() -> wallCheck.get() || chunkCheck.get())
+      .build()
+   );
+
+   private final SettingGroup sgBaritone = settings.createGroup("Baritone");
+
+   public final Setting<Boolean> baritoneSync = sgBaritone.add(new BoolSetting.Builder()
+      .name("baritone-sync")
+      .description("Tell Baritone how hard and how long this module really boosts, while it is flying you. Baritone picks its pitch by simulating the boosted trajectory forward and raytracing it against terrain, and it assumes vanilla on both counts: 1.5 per boosted tick, and a boost that ends when the rocket's lifetime does. This module changes both — the multiplier, and cancelling the rocket's removal to hold it open for boost-duration. Left unsaid, the path Baritone cleared is not the path being flown, and it flies into blocks it never checked (its own \"hbonk\"). Turn this off to fly with Baritone the way it was before, which is also how you A/B the difference.")
+      .defaultValue(true)
+      .build()
+   );
+
    public final Setting<Boolean> logTrace = sgAuto.add(new BoolSetting.Builder()
       .name("log-trace")
       .description("Write one line per boosted tick to hunterbuddy/rocketboost-trace.csv: velocity per axis, look, the multiplier asked for, the bounds we think Grim is holding us to, and how far outside them we landed. Works in manual mode too, which is where it is worth the most - a multiplier you already trust is the cleanest way to measure the model against the server. Costs no speed.")
@@ -204,6 +244,11 @@ public class RocketBoost extends Module {
    private int lastTraceAge = -1;
 
    public double getSpeed() {
+      return lastAppliedSpeed = throttle(rawSpeed());
+   }
+
+   /** The multiplier the speed settings ask for, before any safety throttle. */
+   private double rawSpeed() {
       if (!autoSpeed.get()) {
          double manual = speedMultiplier.get();
 
@@ -217,11 +262,92 @@ public class RocketBoost extends Module {
       }
 
       double auto = computeAutoSpeed();
+      // The solver found nothing usable and we fall back to the slider. lastAutoSpeed keeps the last
+      // value it did solve, because the debug line reports on the solver rather than on the flight -
+      // which is exactly why Baritone must not be told from it.
       if (Double.isNaN(auto)) return speedMultiplier.get();
 
       lastAutoSpeed = auto;
       return auto;
    }
+
+   /** Which safety check, if any, is currently holding the multiplier down. Shown on the debug line. */
+   private String limiter = "speed";
+
+   /**
+    * Gives back vanilla's 1.5 instead of {@code asked} when there is something in front of us.
+    *
+    * <p>Unlike a module that sets velocity, this one only scales the firework's acceleration, so there
+    * is nothing here to cap to a distance - the meaningful choice is between boosting harder than
+    * vanilla and not. Ahead of a wall, or ahead of chunks that have not arrived, the extra speed is
+    * the whole problem: it is what turns an approach the game would have survived into a crash, and
+    * what outruns the chunk loader. The boost itself is left alone, so a Baritone flight keeps its
+    * rocket and simply stops being faster than the trajectory it planned.
+    */
+   private double throttle(double asked) {
+      this.limiter = "speed";
+      if (asked <= VANILLA_SPEED) return asked;
+      if (mc.player == null || mc.world == null || !mc.player.isGliding()) return asked;
+      if (!wallCheck.get() && !chunkCheck.get()) return asked;
+
+      Vec3d eye = mc.player.getEyePos();
+      Vec3d look = mc.player.getRotationVec(1.0F);
+      // How far we would actually go in that many ticks, floored so a slow start still looks a little
+      // way ahead rather than not at all.
+      double speed = mc.player.getVelocity().length();
+      double reach = Math.max(8.0, speed * lookahead.get());
+
+      double capped = asked;
+
+      if (wallCheck.get()) {
+         Vec3d end = eye.add(look.multiply(reach));
+         HitResult hit = mc.world.raycast(new RaycastContext(
+            eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+         if (hit.getType() != HitResult.Type.MISS) {
+            double limit = scaleToDistance(asked, hit.getPos().distanceTo(eye), reach);
+            if (limit < capped) {
+               capped = limit;
+               this.limiter = "wall ahead";
+            }
+         }
+      }
+
+      if (chunkCheck.get()) {
+         for (double d = 16.0; d <= reach; d += 16.0) {
+            BlockPos at = BlockPos.ofFloored(eye.add(look.multiply(d)));
+            if (!mc.world.getChunkManager().isChunkLoaded(at.getX() >> 4, at.getZ() >> 4)) {
+               double limit = scaleToDistance(asked, d, reach);
+               if (limit < capped) {
+                  capped = limit;
+                  this.limiter = "unloaded chunks";
+               }
+               break;
+            }
+         }
+      }
+
+      return capped;
+   }
+
+   /**
+    * The multiplier that is still reasonable with something {@code distance} away, given that we were
+    * looking {@code reach} blocks ahead.
+    *
+    * <p>Proportional rather than a cliff, which is what the module this borrows the idea from does -
+    * though it caps a speed to {@code distance / ticks}, and there is no such arithmetic here, because
+    * what this module controls is an acceleration multiplier and not a velocity. So the distance decides
+    * how much of the <i>extra</i> over vanilla survives: something at the far edge of the lookahead
+    * barely costs anything, something a couple of blocks away leaves plain vanilla 1.5. It never goes
+    * below vanilla - slowing the rocket itself is not this check's business, only declining to make it
+    * stronger than the game would.
+    */
+   private double scaleToDistance(double asked, double distance, double reach) {
+      double fraction = Math.max(0.0, Math.min(1.0, distance / Math.max(1.0, reach)));
+      return VANILLA_SPEED + (asked - VANILLA_SPEED) * fraction;
+   }
+
+   /** What {@link #getSpeed} last actually handed the mixin, on every path through it. */
+   private double lastAppliedSpeed = Double.NaN;
 
    /**
     * Highest firework multiplier that keeps every axis inside Grim's tolerance box.
@@ -587,14 +713,140 @@ public class RocketBoost extends Module {
    }
 
    @Override
+   public void onActivate() {
+      tellBaritoneOurBoost();
+   }
+
+   @Override
    public void onDeactivate() {
       flushAndStop();
       lastGainedMs = -1;
       hasLastRotation = false;
       lastAutoSpeed = Double.NaN;
+      lastAppliedSpeed = Double.NaN;
       autoRecovery = 1.0;
       traceValid = false;
       closeTrace();
+      restoreBaritoneBoost();
+      baritoneSyncAnnounced = false;
+   }
+
+   /** Fork-only Baritone settings, and the last value pushed to each, so a push only happens on a change. */
+   private final java.util.Map<String, Object> baritoneSettings = new java.util.HashMap<>();
+   private final java.util.Map<String, Object> baritonePushed = new java.util.HashMap<>();
+   private java.lang.reflect.Field baritoneSettingValue;
+   private boolean baritoneUnavailable;
+   private boolean baritoneSyncAnnounced;
+
+   /**
+    * Keeps Baritone's flight simulation in step with how the boost actually behaves.
+    *
+    * <p>Baritone picks its pitch by simulating the boosted trajectory forward and raytracing it
+    * against the terrain, and it gets two things from vanilla: the acceleration per boosted tick
+    * (1.5) and how many boosted ticks are left (the rocket's age against its lifetime). This module
+    * changes both — the mixin replaces the constant, and cancelling the rocket's removal keeps it
+    * pushing past the lifetime the server gave it. Left unsaid, Baritone clears a trajectory that
+    * is not the one being flown, and its own "hbonk" is the result: something the simulation
+    * didn't know about.
+    *
+    * <p>The multiplier pushed is the one actually in force, not a bound on it. There is no safe side
+    * to round to: simulating faster than we fly clears a wall ahead but flies over ground the real,
+    * slower trajectory drops into, and simulating slower does the reverse. In manual mode the slider
+    * is exact; under auto-speed it is whatever the mixin last handed the rocket. The extra ticks are
+    * exact by construction — the extension is held on a wall clock from the moment the rocket would
+    * have died, so it is {@code boost-duration} in ticks.
+    */
+   private void tellBaritoneOurBoost() {
+      if (!baritoneSync.get()) {
+         restoreBaritoneBoost();
+         return;
+      }
+      // What the mixin last handed the rocket, on every path through getSpeed - the throttle included.
+      // Reading the slider instead would be wrong in both modes and for two different reasons: under
+      // auto-speed it is not what the solver decided, and in manual mode it is not what wall-check let
+      // through. Before the first rocket of a flight there is nothing to report yet, and the slider is
+      // the right stand-in, being what getSpeed itself falls back to.
+      final double inForce = Double.isNaN(lastAppliedSpeed) ? speedMultiplier.get() : lastAppliedSpeed;
+      pushBaritoneSetting("elytraFireworkBoostMultiplier", inForce);
+      pushBaritoneSetting("elytraFireworkExtraBoostTicks", boostDuration.get() / 50);
+
+      // Say once, in chat, that it actually took. #set will show these too, but only if you go looking,
+      // and only for as long as the module keeps writing them.
+      if (!this.baritoneSyncAnnounced && !this.baritoneUnavailable && !this.baritonePushed.isEmpty()) {
+         this.baritoneSyncAnnounced = true;
+         info("baritone-sync: telling Baritone x%.2f and +%d boost ticks",
+            (double) (Double) this.baritonePushed.get("elytraFireworkBoostMultiplier"),
+            (Integer) this.baritonePushed.get("elytraFireworkExtraBoostTicks"));
+      }
+   }
+
+   /**
+    * What the debug line says about the sync: what Baritone has been told, or why it has not been. The
+    * two settings can be read back with {@code #set} as well, but on the action bar it is in front of you
+    * while it matters, and it distinguishes "off" from "the loaded Baritone has no such setting".
+    */
+   private String baritoneSyncStatus() {
+      if (!baritoneSync.get()) return " §8| sync §7off";
+      if (baritoneUnavailable) return " §8| sync §cno fork";
+      Object mult = baritonePushed.get("elytraFireworkBoostMultiplier");
+      Object extra = baritonePushed.get("elytraFireworkExtraBoostTicks");
+      if (mult == null || extra == null) return " §8| sync §7—";
+      return String.format(" §8| sync §ax%.2f +%dt", (Double) mult, (Integer) extra);
+   }
+
+   /**
+    * Puts the two Baritone settings back to vanilla on every join, unless this module is on and about to
+    * set them itself.
+    *
+    * <p>They are ordinary, visible settings, so Baritone writes them to its settings file like any other.
+    * That is what makes them readable when something looks wrong - but it also means a client that crashed
+    * or was killed mid-flight leaves the last value behind, and the next session would plan for a boost
+    * nothing is applying. Clearing them at the door costs nothing and closes that, while still letting the
+    * value be set by hand afterwards for a deliberate test.
+    */
+   public static final class Hooks {
+      @EventHandler
+      private void onGameJoined(meteordevelopment.meteorclient.events.game.GameJoinedEvent event) {
+         RocketBoost rb = Modules.get().get(RocketBoost.class);
+         if (rb == null || rb.isActive()) return;
+         rb.baritonePushed.clear();
+         rb.restoreBaritoneBoost();
+      }
+   }
+
+   /** Hands Baritone back a vanilla boost. */
+   private void restoreBaritoneBoost() {
+      pushBaritoneSetting("elytraFireworkBoostMultiplier", VANILLA_SPEED);
+      pushBaritoneSetting("elytraFireworkExtraBoostTicks", 0);
+   }
+
+   /**
+    * Writes one fork-only Baritone setting by reflection. The addon compiles against upstream Baritone,
+    * which has neither of these, so a direct reference would not build and a player on an upstream jar
+    * would fail on the field. Same arrangement as TrailFollower's corridor.
+    */
+   private void pushBaritoneSetting(String name, Object value) {
+      if (this.baritoneUnavailable || value.equals(this.baritonePushed.get(name))) return;
+      try {
+         Object setting = this.baritoneSettings.get(name);
+         if (setting == null) {
+            Object settings = baritone.api.BaritoneAPI.getSettings();
+            setting = settings.getClass().getField(name).get(settings);
+            this.baritoneSettings.put(name, setting);
+            if (this.baritoneSettingValue == null) {
+               this.baritoneSettingValue = setting.getClass().getField("value");
+            }
+         }
+         this.baritoneSettingValue.set(setting, value);
+         this.baritonePushed.put(name, value);
+      } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+         // Say so, once, and stop trying. Silence here means Baritone keeps raytracing a vanilla
+         // trajectory while we fly a stronger one, which looks exactly like Baritone flying into walls
+         // for no reason.
+         this.baritoneUnavailable = true;
+         info("baritone: fork setting " + name + " not found - it will plan for a vanilla boost while "
+            + "this module makes yours stronger");
+      }
    }
 
    public void setTrackedRocket(int entityId) {
@@ -779,6 +1031,9 @@ public class RocketBoost extends Module {
    private void onTickWatchdog(TickEvent.Post event) {
       if (mc.player == null) return;
 
+      // the sliders can move while the module is on
+      tellBaritoneOurBoost();
+
       if (boosting && boostStartMs == -1 && trackStartMs != -1
          && System.currentTimeMillis() - trackStartMs >= maxTrackTime.get()) {
          flushAndStop();
@@ -848,6 +1103,11 @@ public class RocketBoost extends Module {
             ? " §8| auto —"
             : String.format(" §8| auto §bx%.2f", lastAutoSpeed);
       }
+
+      if (!"speed".equals(this.limiter)) {
+         msg += " §8| §c" + this.limiter;
+      }
+      msg += baritoneSyncStatus();
 
       mc.player.sendMessage(net.minecraft.text.Text.literal(msg), true);
    }
