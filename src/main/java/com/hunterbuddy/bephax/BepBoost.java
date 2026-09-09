@@ -3,6 +3,11 @@ package com.hunterbuddy.bephax;
 import baritone.api.BaritoneAPI;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.mixin.accessors.FireworkRocketEntityAccessor;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
 import meteordevelopment.meteorclient.events.world.TickEvent.Post;
 import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
@@ -132,6 +137,16 @@ public class BepBoost extends Module {
                 .defaultValue(true)
                 .build()
         );
+    private final Setting<Boolean> logTrace = this.sgSafety
+        .add(
+            new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                .name("log-trace")
+                .description(
+                    "Write one line per boosted tick to hunterbuddy/bepboost-trace.csv: the applied velocity per axis and horizontal speed (b/s), which limiter was active (speed / wall ahead / unloaded chunks), whether it was synced to Baritone, the off-aim, and the sent yaw and pitch. Same idea as rocket-boost's trace, so the two can be compared."
+                )
+                .defaultValue(false)
+                .build()
+        );
     private Vec3d lastMovement = Vec3d.ZERO;
     private Vec3d prevPos = null;
     private Vec3d lastGlidePos = null;
@@ -148,6 +163,8 @@ public class BepBoost extends Module {
     private double appliedSpeed = 0.0;
     private double appliedOffAim = 0.0;
     private boolean syncedToBaritone = false;
+    private BufferedWriter traceWriter = null;
+    private int tracePending = 0;
 
     private static boolean baritonePresent() {
         try {
@@ -189,6 +206,41 @@ public class BepBoost extends Module {
         this.latchGraceTicks = 0;
         this.prevPos = null;
         this.lastGlidePos = null;
+        this.closeTrace();
+    }
+
+    private void writeTraceLine(String line) {
+        try {
+            if (this.traceWriter == null) {
+                File file = new File(new File(MeteorClient.FOLDER, "hunterbuddy"), "bepboost-trace.csv");
+                file.getParentFile().mkdirs();
+                boolean fresh = !file.exists() || file.length() == 0L;
+                this.traceWriter = new BufferedWriter(new FileWriter(file, true));
+                if (fresh) {
+                    this.traceWriter.write("age,vx,vy,vz,bps,limiter,synced,offaim,yaw,pitch" + System.lineSeparator());
+                }
+            }
+            this.traceWriter.write(line);
+            if (++this.tracePending >= 20) {
+                this.traceWriter.flush();
+                this.tracePending = 0;
+            }
+        } catch (IOException e) {
+            HunterBuddyAddon.LOG.error("BepBoost: could not write the boost trace", e);
+            this.closeTrace();
+        }
+    }
+
+    private void closeTrace() {
+        if (this.traceWriter == null) return;
+        try {
+            this.traceWriter.flush();
+            this.traceWriter.close();
+        } catch (IOException e) {
+            HunterBuddyAddon.LOG.error("BepBoost: could not close the boost trace", e);
+        }
+        this.traceWriter = null;
+        this.tracePending = 0;
     }
 
     @EventHandler
@@ -337,6 +389,14 @@ public class BepBoost extends Module {
                     Math.acos(MathHelper.clamp(velocity.dotProduct(look) / Math.max(this.appliedSpeed, 1.0E-9), -1.0, 1.0))
                 );
                 this.appliedInWindow++;
+                if (this.logTrace.get()) {
+                    double bps = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z) * 20.0;
+                    this.writeTraceLine(String.format(java.util.Locale.ROOT,
+                        "%d,%.4f,%.4f,%.4f,%.2f,%s,%b,%.1f,%.1f,%.2f%n",
+                        this.appliedInWindow, velocity.x, velocity.y, velocity.z, bps,
+                        this.limiter, this.syncedToBaritone, this.appliedOffAim,
+                        rotations.getSentYaw(), pitch));
+                }
                 return velocity;
             } else {
                 return this.note("in fluid");
