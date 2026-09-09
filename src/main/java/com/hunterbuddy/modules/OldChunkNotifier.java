@@ -194,55 +194,11 @@ public class OldChunkNotifier extends Module {
         .build()
     );
 
-    private final Setting<Boolean> netherRoads = sgGeneral.add(new BoolSetting.Builder()
-        .name("nether-roads")
-        .description("In the Nether, classify chunks with a marker/biome scan of our own instead of XaeroPlus's overworld-shaped old/new verdict, and look for a one-chunk-wide line of them instead of a 4-connected cluster. XaeroPlus's own nether rule calls a chunk new on a single block, which a neighbouring ore vein spilling across the border does constantly — a real trail reads as a dotted line with holes instead of one. Off, or outside the Nether, nothing here runs.")
-        .defaultValue(false)
-        .build()
-    );
 
-    private final Setting<Integer> netherMarkerMargin = sgGeneral.add(new IntSetting.Builder()
-        .name("nether-marker-margin")
-        .description("Border band ignored when counting 1.16+ marker blocks, in blocks. A vein from a neighbouring new chunk spills a few blocks past its own edge; the margin keeps that spill from reading as proof this chunk is new.")
-        .defaultValue(4)
-        .min(0)
-        .max(7)
-        .sliderRange(0, 7)
-        .visible(netherRoads::get)
-        .build()
-    );
 
-    private final Setting<Integer> netherMarkerMin = sgGeneral.add(new IntSetting.Builder()
-        .name("nether-marker-min")
-        .description("Marker blocks inside the margin (the chunk's core) at or above which the chunk counts as new.")
-        .defaultValue(3)
-        .min(1)
-        .max(64)
-        .sliderRange(1, 20)
-        .visible(netherRoads::get)
-        .build()
-    );
 
-    private final Setting<Integer> roadMinLength = sgGeneral.add(new IntSetting.Builder()
-        .name("road-min-length")
-        .description("Aligned candidate chunks needed before a Nether road is announced.")
-        .defaultValue(4)
-        .min(2)
-        .max(32)
-        .sliderRange(2, 16)
-        .visible(netherRoads::get)
-        .build()
-    );
 
-    private final Setting<Integer> roadMaxGap = sgGeneral.add(new IntSetting.Builder()
-        .name("road-max-gap")
-        .description("Consecutive gaps tolerated in the line — the chunks the classifier still gets wrong.")
-        .defaultValue(1)
-        .min(0)
-        .max(3)
-        .visible(netherRoads::get)
-        .build()
-    );
+
 
     private final Setting<Boolean> debug = sgGeneral.add(new BoolSetting.Builder()
         .name("debug")
@@ -263,24 +219,12 @@ public class OldChunkNotifier extends Module {
 
     // nether-roads (spec §3.5) — all four marked [proposé], meant to be recalibrated against the
     // user's promised example via the per-chunk/per-road debug lines rather than exposed as settings.
-    private static final int ROAD_SEARCH_RADIUS_CHUNKS = 8;
-    private static final double ROAD_ELONGATION_MAX = 0.35;
-    private static final double ROAD_SIDE_OTHER_MIN_RATIO = 0.6;
-    private static final double ROAD_OWN_ROUTE_ANGLE_DEG = 10.0;
     /** Largest Overworld block coordinate a marker can sit at and still be inside the world border; past it the x8 Nether projection is dropped. */
     private static final long OVERWORLD_MARKER_LIMIT = 29_000_000L;
 
     private final LinkedHashMap<ChunkKey, Boolean> processedChunks = new LinkedHashMap<>();
     private final LinkedHashMap<ChunkKey, ChunkState> trackedChunks = new LinkedHashMap<>();
 
-    /**
-     * nether-roads: every Nether chunk classified so far, candidate or not — bounded the same as
-     * {@link #trackedChunks}. {@link #trackedChunks} only ever holds chunks worth announcing;
-     * this holds everything, because the "one chunk wide" test in {@link #tryNotifyRoad} needs to
-     * know the class of a candidate's own perpendicular neighbours, most of which are ordinary
-     * fresh Nether and were never candidates themselves.
-     */
-    private final LinkedHashMap<ChunkKey, NetherClassification> netherSeen = new LinkedHashMap<>();
     private final Map<Long, Delivery> webhookDeliveries = new HashMap<>();
     private final Map<Long, Integer> webhookDeliveryReferences = new HashMap<>();
     private final HttpClient discordHttpClient = HttpClient.newBuilder()
@@ -373,15 +317,6 @@ public class OldChunkNotifier extends Module {
             }
         }
 
-        // nether-roads is an addition, not a replacement: it used to `return` here, which shut off
-        // every ordinary old-chunk verdict (XaeroPlus, chunk-type, the 4-neighbour cluster, markers,
-        // webhook) for the whole Nether the moment the box was checked -- a base, or any non-linear
-        // old structure, went completely unnotified. Both paths run now; each guards its own
-        // confirm/announce state and neither one skips the other (spec §3, "les deux doivent tourner").
-        if (netherRoads.get() && dimension.equals(World.NETHER)) {
-            handleNetherRoadChunk(key, event.chunk(), detectedType);
-        }
-
         if (!shouldNotify) return;
 
         boolean offHighway = false;
@@ -456,336 +391,15 @@ public class OldChunkNotifier extends Module {
         }
     }
 
-    private void trimNetherSeen() {
-        while (netherSeen.size() > MAX_TRACKED_CHUNKS) {
-            Iterator<ChunkKey> iterator = netherSeen.keySet().iterator();
-            iterator.next();
-            iterator.remove();
-        }
-    }
 
-    /**
-     * 1.16+ only, none of them ever added retroactively to a chunk that already existed before
-     * the Nether update — see the class doc on {@link NetherAge}.
-     */
-    private static final Set<Block> NETHER_MARKERS = Set.of(
-        Blocks.NETHER_GOLD_ORE, Blocks.ANCIENT_DEBRIS, Blocks.BLACKSTONE, Blocks.BASALT,
-        Blocks.CRIMSON_NYLIUM, Blocks.WARPED_NYLIUM, Blocks.SOUL_SOIL, Blocks.IRON_CHAIN
-    );
 
-    /**
-     * Whether the chunk actually arrived far enough to classify. The Nether's whole height is
-     * y 0-127, so — unlike the overworld rule this mirrors, which only needs the one section at
-     * y 0 — every section here can carry a marker, and an incomplete delivery answers every test
-     * the way an old chunk does for no reason at all.
-     */
-    static boolean netherReadable(WorldChunk chunk) {
-        for (ChunkSection section : chunk.getSectionArray()) {
-            if (section != null && !section.isEmpty()) return true;
-        }
-        return false;
-    }
 
-    /**
-     * The pre-1.16 half of {@link #classifyNether} on its own, for other modules: the biome and
-     * marker rule with the border margin, no freshness involved. TrailFollower uses it so a
-     * pre-1.16 trail chunk stays a trail chunk when XaeroPlus's one-block nether rule, or a
-     * palette false positive, would have dropped it.
-     */
-    static boolean isPreSixteenNetherChunk(WorldChunk chunk, int margin, int minCore) {
-        if (!netherReadable(chunk)) return false;
-        if (!biomeUniform(chunk)) return false;
-        return scanNetherMarkers(chunk, margin)[1] < minCore;
-    }
 
-    /**
-     * True only if every populated section's biome container is entirely {@code nether_wastes} —
-     * the one biome the pre-1.16 Nether had. A single block of any other biome anywhere in the
-     * chunk is proof the chunk postdates the update, whatever the marker count says; this is the
-     * cheapest and hardest test in {@link #classifyNether}, and is checked first for that reason.
-     *
-     * <p>The least certain claim in this whole feature — see project memory on the subject before
-     * trusting it past a first look at real chunks.
-     */
-    static boolean biomeUniform(WorldChunk chunk) {
-        for (ChunkSection section : chunk.getSectionArray()) {
-            if (section == null) continue;
-            if (section.getBiomeContainer().hasAny(entry -> !entry.matchesKey(BiomeKeys.NETHER_WASTES))) return false;
-        }
-        return true;
-    }
 
-    /**
-     * Marker counts for one chunk: {@code total} across the whole chunk (cheap — palette counts
-     * only, no per-block walk), {@code core} restricted to the {@code margin}-block border band
-     * on every side (the one positional pass, and only for a section whose palette already has a
-     * marker in it at all — most don't). A vein spilling from a neighbouring new chunk lands in
-     * the border band almost every time; the core is what survives that.
-     */
-    static int[] scanNetherMarkers(WorldChunk chunk, int margin) {
-        int total = 0;
-        int core = 0;
 
-        for (ChunkSection section : chunk.getSectionArray()) {
-            if (section == null || section.isEmpty()) continue;
 
-            int[] sectionTotal = {0};
-            section.getBlockStateContainer().count((state, count) -> {
-                if (NETHER_MARKERS.contains(state.getBlock())) sectionTotal[0] += count;
-            });
-            if (sectionTotal[0] == 0) continue;
-            total += sectionTotal[0];
 
-            for (int y = 0; y < 16; y++) {
-                for (int x = margin; x < 16 - margin; x++) {
-                    for (int z = margin; z < 16 - margin; z++) {
-                        if (NETHER_MARKERS.contains(section.getBlockState(x, y, z).getBlock())) core++;
-                    }
-                }
-            }
-        }
 
-        return new int[]{total, core};
-    }
-
-    /**
-     * The Nether-specific age verdict, independent of XaeroPlus entirely. {@code age} is
-     * {@code NEW} the instant any biome other than {@code nether_wastes} shows up, or once the
-     * border-margined core count reaches {@link #netherMarkerMin}; otherwise {@code OLD}. Fresh-
-     * ness ({@link NetherClassification#fresh}) is read separately, at the call site, from
-     * XaeroPlus's own {@code PaletteNewChunks} — the two signals are independent on purpose (a
-     * pre-1.16 chunk seen by someone else yesterday is still {@code OLD} and not fresh; a chunk
-     * generated for us this instant is fresh regardless of what {@code age} says).
-     */
-    private NetherClassification classifyNether(WorldChunk chunk, boolean fresh) {
-        if (!netherReadable(chunk)) return new NetherClassification(NetherAge.UNREADABLE, 0, 0, true, fresh);
-
-        boolean uniform = biomeUniform(chunk);
-        int[] counts = scanNetherMarkers(chunk, netherMarkerMargin.get());
-        int total = counts[0];
-        int core = counts[1];
-
-        NetherAge age;
-        if (!uniform) age = NetherAge.NEW;
-        else if (core >= netherMarkerMin.get()) age = NetherAge.NEW;
-        else age = NetherAge.OLD;
-
-        return new NetherClassification(age, core, total, uniform, fresh);
-    }
-
-    /**
-     * Runs the block/biome classifier and the line detector for a Nether chunk when
-     * {@link #netherRoads} is on — <em>alongside</em> the XaeroPlus-cache path in
-     * {@link #onChunkData}, not instead of it (both used to be mutually exclusive; that was a spec
-     * mistake, not an implementation one — see the call site). Classifies with
-     * {@link #classifyNether}, remembers the verdict in {@link #netherSeen} (every chunk, not just
-     * candidates — the line detector needs the class of a candidate's neighbours, most of which
-     * never are one), and hands off to {@link #tryNotifyRoad} the same way the normal path hands an
-     * old chunk to {@code tryNotifyCluster}: only once, only while unconfirmed.
-     *
-     * @param normalType what the ordinary XaeroPlus-cache path decided for this same chunk this
-     *                    same tick, or {@code null} if it did not consider it notify-worthy at all —
-     *                    reported for debug only (spec §3.2.4); never influences the verdict here.
-     */
-    private void handleNetherRoadChunk(ChunkKey key, WorldChunk chunk, DetectedChunkType normalType) {
-        boolean fresh = ModuleManager.getModule(PaletteNewChunks.class).isNewChunk(key.x, key.z, key.dimension);
-        NetherClassification classification = classifyNether(chunk, fresh);
-        netherSeen.put(key, classification);
-        trimNetherSeen();
-
-        dbg(String.format(Locale.ROOT, "nether %d,%d age=%s core=%d total=%d biomeUniform=%b fresh=%b candidate=%b normal=%s",
-            key.x, key.z, classification.age, classification.core, classification.total,
-            classification.biomeUniform, classification.fresh, classification.isCandidate(),
-            normalType != null ? normalType.label : "none"));
-
-        if (classification.age == NetherAge.UNREADABLE || !classification.isCandidate()) return;
-
-        DetectedChunkType type = classification.age == NetherAge.OLD
-            ? DetectedChunkType.NetherRoadOld
-            : DetectedChunkType.NetherRoadSeen;
-        ChunkState state = trackChunk(key, type, false);
-        if (!state.confirmed) tryNotifyRoad(key);
-    }
-
-    /** Every candidate (§3.4) known so far within Chebyshev distance {@link #ROAD_SEARCH_RADIUS_CHUNKS} of {@code c}. */
-    private List<ChunkKey> nearbyNetherCandidates(ChunkKey c) {
-        List<ChunkKey> result = new ArrayList<>();
-        for (Map.Entry<ChunkKey, NetherClassification> entry : netherSeen.entrySet()) {
-            if (!entry.getValue().isCandidate()) continue;
-            ChunkKey key = entry.getKey();
-            if (Math.max(Math.abs(key.x - c.x), Math.abs(key.z - c.z)) <= ROAD_SEARCH_RADIUS_CHUNKS) result.add(key);
-        }
-        return result;
-    }
-
-    /**
-     * Option A of spec §3.5: fits a line (PCA) through the candidates near {@code c}, requires it
-     * elongated and covered enough, requires it one chunk wide, and only then announces — once per
-     * road, same "confirmed" gate the 4-connected cluster path uses.
-     */
-    private void tryNotifyRoad(ChunkKey c) {
-        List<ChunkKey> nearby = nearbyNetherCandidates(c);
-        if (nearby.size() < roadMinLength.get()) return;
-
-        int n = nearby.size();
-        double mx = 0, mz = 0;
-        for (ChunkKey p : nearby) { mx += p.x; mz += p.z; }
-        mx /= n; mz /= n;
-
-        double sxx = 0, szz = 0, sxz = 0;
-        for (ChunkKey p : nearby) {
-            double dx = p.x - mx, dz = p.z - mz;
-            sxx += dx * dx;
-            szz += dz * dz;
-            sxz += dx * dz;
-        }
-        sxx /= n; szz /= n; sxz /= n;
-
-        double theta = 0.5 * Math.atan2(2 * sxz, sxx - szz);
-        double trace = sxx + szz;
-        double det = sxx * szz - sxz * sxz;
-        double disc = Math.sqrt(Math.max(0, (trace * trace) / 4 - det));
-        double lambda2 = trace / 2 - disc;
-
-        if (lambda2 > ROAD_ELONGATION_MAX) {
-            dbg(String.format(Locale.ROOT, "  road candidat %d,%d: rejete, lambda2=%.3f > %.3f (pas assez aligne)",
-                c.x, c.z, lambda2, ROAD_ELONGATION_MAX));
-            return;
-        }
-
-        // Bucket by the integer coordinate on the major axis (x or z, whichever the line leans
-        // closer to) rather than the rounded projection onto theta: a 45° road advances 1.41 per
-        // chunk in projection, so rounding it opens a fake hole every other slot and eats the real
-        // road-max-gap tolerance on geometry instead of on the chunks the classifier actually gets
-        // wrong (Fable QC). Along its own major axis a chunk trail advances by exactly 1 per step
-        // at any heading, so this key needs no rounding.
-        double cosT = Math.cos(theta), sinT = Math.sin(theta);
-        boolean xMajor = Math.abs(cosT) >= Math.abs(sinT);
-        TreeMap<Integer, List<ChunkKey>> slots = new TreeMap<>();
-        for (ChunkKey p : nearby) {
-            int slot = xMajor ? p.x : p.z;
-            slots.computeIfAbsent(slot, k -> new ArrayList<>()).add(p);
-        }
-
-        List<Integer> slotKeys = new ArrayList<>(slots.keySet());
-        int bestFrom = 0, bestTo = -1, bestCount = 0;
-        int from = 0, count = slots.get(slotKeys.get(0)).size();
-        for (int i = 1; i < slotKeys.size(); i++) {
-            int gap = slotKeys.get(i) - slotKeys.get(i - 1) - 1;
-            if (gap > roadMaxGap.get()) {
-                if (count > bestCount) { bestCount = count; bestFrom = from; bestTo = i - 1; }
-                from = i;
-                count = 0;
-            }
-            count += slots.get(slotKeys.get(i)).size();
-        }
-        if (count > bestCount) { bestCount = count; bestFrom = from; bestTo = slotKeys.size() - 1; }
-
-        if (bestTo < bestFrom || bestCount < roadMinLength.get()) {
-            dbg(String.format(Locale.ROOT, "  road candidat %d,%d: rejete, plus longue suite=%d < %d",
-                c.x, c.z, bestCount, roadMinLength.get()));
-            return;
-        }
-
-        Set<ChunkKey> runSet = new HashSet<>();
-        for (int i = bestFrom; i <= bestTo; i++) runSet.addAll(slots.get(slotKeys.get(i)));
-
-        // The chunk that triggered this call (c) is not necessarily part of the run the fit
-        // settled on — pick a stable member of the run itself for the coordinates/age the
-        // announcement reports (Fable QC).
-        ChunkKey roadAnchor = null;
-        for (ChunkKey key : runSet) {
-            if (roadAnchor == null || key.x < roadAnchor.x || (key.x == roadAnchor.x && key.z < roadAnchor.z)) roadAnchor = key;
-        }
-
-        // "One chunk wide": the run's perpendicular neighbours must mostly belong to some other
-        // class (fresh, or new-and-not-a-candidate) — a wide old zone fails this, its neighbours
-        // are the same class as itself, and stays available to the existing cluster mode instead.
-        int px = (int) Math.round(-sinT), pz = (int) Math.round(cosT);
-        int seenNeighbors = 0, otherClassNeighbors = 0;
-        for (ChunkKey p : runSet) {
-            for (int sign = -1; sign <= 1; sign += 2) {
-                ChunkKey neighbor = p.offset(px * sign, pz * sign);
-                NetherClassification neighborClass = netherSeen.get(neighbor);
-                if (neighborClass == null || neighborClass.age == NetherAge.UNREADABLE) continue;
-                seenNeighbors++;
-                if (!neighborClass.isCandidate()) otherClassNeighbors++;
-            }
-        }
-        double sideOtherRatio = seenNeighbors == 0 ? 1.0 : (double) otherClassNeighbors / seenNeighbors;
-        if (seenNeighbors > 0 && sideOtherRatio < ROAD_SIDE_OTHER_MIN_RATIO) {
-            dbg(String.format(Locale.ROOT, "  road candidat %d,%d: rejete, sideOther=%.0f%% sur %d voisin(s) vu(s) (zone, pas une piste)",
-                c.x, c.z, sideOtherRatio * 100, seenNeighbors));
-            return;
-        }
-        // seenNeighbors == 0 lets the run through unchecked (no data yet either side) — rare in
-        // flight, but real; sideOtherN below is 0 exactly in that case (Fable QC, flagged not fixed).
-
-        double thetaDeg = Math.toDegrees(theta);
-        boolean ownRoute = false;
-        if (notifyOffHighway.get() && mc.player != null) {
-            Vec3d travelDir = yawToDirection(directionOfTravel.get());
-            double travelAngleDeg = Math.toDegrees(Math.atan2(travelDir.z, travelDir.x));
-            if (angleDiffDegMod180(thetaDeg, travelAngleDeg) <= ROAD_OWN_ROUTE_ANGLE_DEG) {
-                ChunkPos playerChunkPos = mc.player.getChunkPos();
-                double distanceFromPlayer = distancePointToDirection(
-                    new Vec3d(playerChunkPos.x, 0, playerChunkPos.z),
-                    new Vec3d(cosT, 0, sinT),
-                    new Vec3d(mx, 0, mz)
-                );
-                ownRoute = distanceFromPlayer <= distanceOffAxis.get();
-            }
-        }
-
-        boolean joinsConfirmedRoad = false;
-        List<ChunkKey> freshlyConfirmed = new ArrayList<>();
-        for (ChunkKey key : runSet) {
-            ChunkState state = trackedChunks.get(key);
-            if (state == null) continue;
-            if (state.confirmed) joinsConfirmedRoad = true;
-            else freshlyConfirmed.add(key);
-        }
-
-        dbg(String.format(Locale.ROOT, "road n=%d theta=%.1f lambda2=%.3f sideOther=%.0f%% sideOtherN=%d ownRoute=%b extension=%b",
-            runSet.size(), thetaDeg, lambda2, sideOtherRatio * 100, seenNeighbors, ownRoute, joinsConfirmedRoad));
-
-        for (ChunkKey key : freshlyConfirmed) {
-            trackedChunks.get(key).confirmed = true;
-        }
-
-        // Own route: mark confirmed so it stops being re-tested every arrival, but announce
-        // nothing — this is the highway we are ourselves flying, not a find (spec §3.5 step 5).
-        if (ownRoute) return;
-
-        boolean wantsMarkers = logType.get() == LogType.Marker || logType.get() == LogType.Both;
-        if (wantsMarkers) {
-            for (ChunkKey key : runSet) ensureMarker(key);
-        }
-
-        // Extension of a road already announced: new markers only, no repeat webhook/feed post —
-        // mirrors joinsConfirmedCluster (:598-).
-        if (joinsConfirmedRoad) return;
-
-        // Not trackedChunks.get(roadAnchor).type: now that the normal XaeroPlus-cache path also runs
-        // on every Nether chunk (see onChunkData), it calls trackChunk on the same key whenever it
-        // finds its own verdict notify-worthy, and that overwrites the shared ChunkState.type this
-        // road detector wrote — every road would report "generated before us" (Fable QC, spec §3.2.3).
-        // netherSeen's own classification is never touched by that other path.
-        NetherClassification anchorClassification = netherSeen.get(roadAnchor);
-        boolean preSixteen = anchorClassification != null && anchorClassification.age == NetherAge.OLD;
-        String ageLabel = preSixteen ? "pre-1.16" : "generated before us";
-        double heading = normalizeHeading(thetaDeg);
-
-        com.hunterbuddy.util.HuntFeed.get().publish(
-            com.hunterbuddy.util.HuntFeed.Type.OLD_CHUNK,
-            String.format(Locale.ROOT, "Nether road · %d chunks · cap %.0f° · %s · %d %d (nether) ~ %d %d (overworld)",
-                runSet.size(), heading, ageLabel, roadAnchor.x, roadAnchor.z, roadAnchor.x * 8, roadAnchor.z * 8),
-            new net.minecraft.util.math.BlockPos(roadAnchor.x << 4, 0, roadAnchor.z << 4));
-
-        if (logType.get() == LogType.Webhook || logType.get() == LogType.Both) {
-            sendRoadWebhook(roadAnchor, runSet, heading, ageLabel);
-        }
-    }
 
     private static double angleDiffDegMod180(double a, double b) {
         double diff = Math.abs(a - b) % 180.0;
@@ -798,76 +412,7 @@ public class OldChunkNotifier extends Module {
         return normalized;
     }
 
-    /**
-     * One-shot POST for a newly confirmed road — deliberately not wired into {@link #webhookDeliveries}
-     * / {@link #processDeliveryEdits}: those grow a reported count by re-walking a 4-connected
-     * cluster ({@link #collectCluster}), which a diagonal or gapped road is not. A road that keeps
-     * growing gets new markers (see {@link #tryNotifyRoad}) but does not edit its Discord message.
-     */
-    private void sendRoadWebhook(ChunkKey anchor, Set<ChunkKey> runSet, double heading, String ageLabel) {
-        String rawUrl = webhookLink.get().trim();
-        if (rawUrl.isEmpty()) {
-            error("Discord webhook URL is empty.", new Object[0]);
-            return;
-        }
 
-        URI webhookUri = parseDiscordWebhookUrl(rawUrl);
-        if (webhookUri == null) {
-            error("Invalid Discord webhook URL. Use a channel webhook URL, not a server invite.", new Object[0]);
-            return;
-        }
-
-        String pingId = null;
-        if (ping.get() && !discordId.get().isBlank()) {
-            pingId = discordId.get().trim();
-            if (!pingId.matches("\\d+")) {
-                error("Invalid Discord user ID. It must contain digits only.", new Object[0]);
-                return;
-            }
-        }
-
-        ExecutorService executor = discordExecutor;
-        if (executor == null || executor.isShutdown()) {
-            error("Discord webhook executor is not available.", new Object[0]);
-            return;
-        }
-
-        String playerName = mc.player != null ? mc.player.getGameProfile().name() : "Unknown";
-        String json = buildRoadWebhookJson(anchor, runSet, heading, ageLabel, playerName, pingId);
-        URI createUri = URI.create(webhookUri.toString() + "?wait=true");
-
-        dbg("  POST piste nether " + anchor.x + "," + anchor.z + " avec " + runSet.size() + " chunk(s)");
-
-        try {
-            executor.submit(() -> {
-                WebhookResult result = sendWebhookRequest("POST", createUri, json);
-                mc.execute(() -> {
-                    if (!result.success) error("Discord webhook failed: " + result.error, new Object[0]);
-                });
-            });
-        } catch (RejectedExecutionException e) {
-            error("Discord webhook could not be queued.", new Object[0]);
-        }
-    }
-
-    private String buildRoadWebhookJson(ChunkKey anchor, Set<ChunkKey> runSet, double heading, String ageLabel, String playerName, String pingId) {
-        Map<String, Object> footer = Map.of("text", "From: " + playerName);
-        Map<String, Object> embed = new LinkedHashMap<>();
-        embed.put("title", "Nether Road Detected");
-        embed.put("description", String.format(Locale.ROOT,
-            "**Chunks:** %d\n**Heading:** %.0f°\n**Age:** %s\n**Chunk coordinates:** `%d, %d`\n**Overworld chunk coordinates:** `%d, %d`",
-            runSet.size(), heading, ageLabel, anchor.x, anchor.z, anchor.x * 8, anchor.z * 8));
-        embed.put("color", 15258703);
-        embed.put("footer", footer);
-
-        Map<String, Object> payload = new LinkedHashMap<>();
-        if (pingId != null) {
-            payload.put("content", "<@" + pingId + ">");
-            payload.put("allowed_mentions", Map.of("users", List.of(pingId)));
-        }
-        payload.put("embeds", List.of(embed));
-        return GSON.toJson(payload);
-    }
 
     private void assignDelivery(ChunkState state, long deliveryId) {
         if (state.webhookDeliveryId == deliveryId) return;
@@ -1452,9 +997,7 @@ public class OldChunkNotifier extends Module {
     private enum DetectedChunkType {
         Old112Followed("1.12 followed in 1.19+"),
         Old112Unfollowed("1.12 not followed in 1.19+"),
-        Old119("1.19+"),
-        NetherRoadOld("nether road, pre-1.16"),
-        NetherRoadSeen("nether road, generated before us");
+        Old119("1.19+");
 
         private final String label;
 
@@ -1468,28 +1011,7 @@ public class OldChunkNotifier extends Module {
         Sent
     }
 
-    /**
-     * nether-roads's own verdict, read from blocks and biomes rather than XaeroPlus's caches.
-     * {@code UNREADABLE} means the chunk hasn't actually arrived far enough to say either way —
-     * see {@link #netherReadable} — and is never treated as a candidate.
-     */
-    private enum NetherAge {
-        OLD,
-        NEW,
-        UNREADABLE
-    }
 
-    /** One chunk's nether-roads verdict, kept in {@link #netherSeen} for as long as it fits. */
-    private record NetherClassification(NetherAge age, int core, int total, boolean biomeUniform, boolean fresh) {
-        /**
-         * A chunk worth building a road out of: pre-1.16 by the block/biome rule, or simply not
-         * generated for us just now (§1.4 of the spec this implements — palette freshness is the
-         * only signal that reaches a post-1.16 trail at all).
-         */
-        private boolean isCandidate() {
-            return age == NetherAge.OLD || !fresh;
-        }
-    }
 
     private record ChunkKey(RegistryKey<World> dimension, int x, int z) {
         private ChunkKey offset(int offsetX, int offsetZ) {
