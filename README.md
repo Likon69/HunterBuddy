@@ -2,6 +2,8 @@
 
 Private Meteor Client addon for hunting, flight, visuals, inventory logistics, and utility tools.
 
+Created by **Texy** and **DragonFood**.
+
 Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
 
 ## Categories and modules
@@ -169,4 +171,13 @@ The built addon JAR is written to `build/libs/hunterbuddy-1.0.0.jar`.
 
 - `.reference/` is gitignored and used locally as read-only source material; it is not built with HunterBuddy.
 - AI instruction files such as `agent.md`, `AGENTS.md`, and `CLAUDE.md` are gitignored.
-- See `LICENSE` for licensing information.
+
+## Credits and provenance
+
+Several modules started as ports from other addons rather than being written from scratch, credited where the code itself says so:
+
+- **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
+- **Dekrom** — the Baritone fork this project builds on, and BepHax, whose rocket boost and rotation-spoofing mechanics `BepBoost`, `BepRocketFly`, `TrailFollower`, and `ElytraBounce` are ported from.
+- **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepMine`, `MlepScaffold`, `MlepAirPlace`).
+- **riths** — Hunting Utilities ("Tim").
+- **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
