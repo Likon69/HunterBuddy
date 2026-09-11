@@ -75,8 +75,13 @@ public class WaypointFollower extends Module {
     private boolean isInEnd = false;
     private int currentWaypointIndex = 0;
     private BlockPos currentBaritoneTarget = null;
-    /** Attempts made at re-giving {@link #currentBaritoneTarget}; reset whenever the target changes. */
+    /**
+     * Attempts made at re-giving {@link #currentBaritoneTarget}; reset whenever the target changes, and
+     * whenever the bot has moved since the last one.
+     */
     private int baritoneRestartAttempts = 0;
+    /** Where the bot stood when it last re-gave the goal: see {@link #BARITONE_RESTART_MOVED_BLOCKS}. */
+    private BlockPos baritoneRestartPos = null;
     /** Ticks left before another re-give attempt at {@link #currentBaritoneTarget} may fire. */
     private int baritoneRestartCooldown = 0;
     private boolean isPaused = false;
@@ -135,6 +140,13 @@ public class WaypointFollower extends Module {
      */
     private static final int BARITONE_RESTART_DELAY_TICKS = 100;
     private static final int BARITONE_RESTART_MAX_ATTEMPTS = 3;
+    /**
+     * How far the bot has to be from where it last re-gave the goal for the attempts to start over:
+     * somewhere new is a new try. The user's rule, after a bot whose three attempts were all spent in ten
+     * seconds fell 38 blocks into open ground and stood there. The same distance Baritone's takeoff uses
+     * for a new spot.
+     */
+    private static final int BARITONE_RESTART_MOVED_BLOCKS = 8;
 
     // ---- Read by the HUDs. Computed on the tick, never per frame, so three
     // elements asking the same questions cost one answer. ----
@@ -552,6 +564,14 @@ public class WaypointFollower extends Module {
         this.currentBaritoneTarget = null;
         this.baritoneRestartAttempts = 0;
         this.baritoneRestartCooldown = 0;
+        this.baritoneRestartPos = null;
+    }
+
+    /** Whether the bot is more than {@link #BARITONE_RESTART_MOVED_BLOCKS} from where it last re-gave the goal. */
+    private boolean movedSinceLastRestart() {
+        return this.baritoneRestartPos != null && mc.player != null
+            && mc.player.getBlockPos().getSquaredDistance(this.baritoneRestartPos)
+                > BARITONE_RESTART_MOVED_BLOCKS * BARITONE_RESTART_MOVED_BLOCKS;
     }
 
     private void clearAllFollowWaypointsAction() {
@@ -1286,12 +1306,17 @@ public class WaypointFollower extends Module {
                 // fresh cap rather than inheriting whatever the previous spot used up.
                 this.baritoneRestartAttempts = 0;
                 this.baritoneRestartCooldown = 0;
+                this.baritoneRestartPos = null;
             } else if (this.baritoneRestartCooldown > 0) {
                 this.baritoneRestartCooldown--;
             } else if (!baritoneInstance.getElytraProcess().isActive()
                     && mc.player != null && mc.player.isOnGround()
                     && this.rocketCount > 0
-                    && this.baritoneRestartAttempts < BARITONE_RESTART_MAX_ATTEMPTS) {
+                    && (this.baritoneRestartAttempts < BARITONE_RESTART_MAX_ATTEMPTS || this.movedSinceLastRestart())) {
+                if (this.movedSinceLastRestart()) {
+                    // somewhere new since the last attempt: a new try, with the whole cap again
+                    this.baritoneRestartAttempts = 0;
+                }
                 // Baritone dropped this goal on its own (a crash, an emergency landing, a manual
                 // #stop, a dimension change tearing the process down) without the waypoint itself
                 // changing, so the check above never re-fires. Left alone, any such drop simply
@@ -1301,6 +1326,7 @@ public class WaypointFollower extends Module {
                 needsNewGoal = true;
                 this.baritoneRestartAttempts++;
                 this.baritoneRestartCooldown = BARITONE_RESTART_DELAY_TICKS;
+                this.baritoneRestartPos = mc.player.getBlockPos();
                 if (this.showChatMessages.get()) {
                     this.info("Baritone's elytra process is gone and I'm grounded with rockets left "
                         + "- giving it the goal again (" + this.baritoneRestartAttempts + "/" + BARITONE_RESTART_MAX_ATTEMPTS + ")");
