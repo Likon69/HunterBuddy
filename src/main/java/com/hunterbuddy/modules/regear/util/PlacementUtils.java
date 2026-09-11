@@ -139,6 +139,11 @@ public class PlacementUtils {
       return placeAt(pos, block, rotate, swing, strictDirection);
    }
 
+   public static BlockHitResult getGrimDirectionalHit(BlockPos pos, Direction direction) {
+      Vec3d center = Vec3d.ofCenter(pos);
+      return new BlockHitResult(center.add(0.0, -0.001, 0.0), direction, pos, true);
+   }
+
    public static BlockHitResult getAirPlaceHit(BlockPos pos, double reach) {
       if (MeteorClient.mc.player != null && MeteorClient.mc.world != null) {
          Vec3d eye = MeteorClient.mc.player.getEyePos();

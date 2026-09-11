@@ -471,6 +471,8 @@ public class AutoFlyingRegear extends Module {
    private ItemStack savedChestplate = ItemStack.EMPTY;
    private final Set<String> processedShulkers = new HashSet<>();
    private int placementAttempts = 0;
+   private final Map<BlockPos, Integer> platformPlacementAttempts = new HashMap<>();
+   private static final int MAX_PLATFORM_PLACEMENT_ATTEMPTS = 12;
    private int shulkerEnderSlot = -1;
    private final int maxPlacementAttempts = 15;
    private int stateTickCounter = 0;
@@ -542,6 +544,7 @@ public class AutoFlyingRegear extends Module {
       this.transferStep = 0;
       this.savedChestplate = ItemStack.EMPTY;
       this.placementAttempts = 0;
+      this.platformPlacementAttempts.clear();
       this.shulkerEnderSlot = -1;
       this.processedShulkers.clear();
       this.stateTickCounter = 0;
@@ -708,14 +711,7 @@ public class AutoFlyingRegear extends Module {
                   case CLEANUP:
                   case TAKING_OFF:
                   default:
-                     if ((Boolean)this.debugMessages.get()) {
-                        this.event("timeout in " + this.getPhaseLabel().toLowerCase(java.util.Locale.ROOT) + ", forcing on");
-                        this.error("Unexpected state timeout in " + this.state + " after 30 seconds. Force completing...", new Object[0]);
-                     }
-
-                     this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
-                     this.stateTickCounter = 0;
-                     this.timer = 0;
+                     this.forceCompleteStuckState();
                      return;
                   case CREATING_WALLS:
                   case DROPPING:
@@ -860,6 +856,18 @@ public class AutoFlyingRegear extends Module {
             }
          }
       }
+   }
+
+   private void forceCompleteStuckState() {
+      if ((Boolean)this.debugMessages.get()) {
+         this.event("timeout in " + this.getPhaseLabel().toLowerCase(java.util.Locale.ROOT) + ", forcing on");
+         this.error("Unexpected state timeout in " + this.state + " after 30 seconds. Force completing...", new Object[0]);
+      }
+
+      this.platformPlacementAttempts.clear();
+      this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+      this.stateTickCounter = 0;
+      this.timer = 0;
    }
 
    @EventHandler
@@ -1189,7 +1197,7 @@ public class AutoFlyingRegear extends Module {
 
       if (this.timer == 0 && this.scaffoldWaitTicks % 2 == 0) {
          this.prepareScaffoldBlocks();
-         if (this.placeBlockGrim(checkPos)) {
+         if (this.placeBlockGrim(checkPos) || this.placeStructureBlock(checkPos, true)) {
             if ((Boolean)this.debugMessages.get()) {
                this.info("AutoFlyingRegear placed fallback block at " + checkPos.toShortString(), new Object[0]);
             }
@@ -1523,6 +1531,41 @@ public class AutoFlyingRegear extends Module {
                this.placementAttempts++;
                this.timer = (Integer)this.placeDelay.get() * 2;
             }
+
+            int totalAttempts = this.platformPlacementAttempts.merge(pos, 1, Integer::sum);
+            if (totalAttempts >= MAX_PLATFORM_PLACEMENT_ATTEMPTS) {
+               BlockPos above = pos.up();
+               BlockState aboveState = this.mc.world.getBlockState(above);
+               if (!aboveState.isReplaceable() && !aboveState.isAir() && this.mlepMine != null && this.mlepMine.isActive()) {
+                  Vec3d playerPos = this.mc.player.getEntityPos();
+                  Vec3d blockCenter = Vec3d.ofCenter(above);
+                  double dx = playerPos.x - blockCenter.x;
+                  double dy = playerPos.y + this.mc.player.getEyeHeight(this.mc.player.getPose()) - blockCenter.y;
+                  double dz = playerPos.z - blockCenter.z;
+                  Direction breakDirection;
+                  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > Math.abs(dz)) {
+                     breakDirection = dx > 0.0 ? Direction.EAST : Direction.WEST;
+                  } else if (Math.abs(dz) > Math.abs(dy)) {
+                     breakDirection = dz > 0.0 ? Direction.SOUTH : Direction.NORTH;
+                  } else {
+                     breakDirection = dy > 0.0 ? Direction.UP : Direction.DOWN;
+                  }
+
+                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(above, breakDirection));
+                  if ((Boolean)this.debugMessages.get()) {
+                     this.info("Platform spot " + pos.toShortString() + " stuck after " + totalAttempts + " attempts, mining " + above.toShortString(), new Object[0]);
+                  }
+
+                  this.platformPlacementAttempts.remove(pos);
+               } else {
+                  if ((Boolean)this.debugMessages.get()) {
+                     this.warning("Platform spot " + pos.toShortString() + " stuck after " + totalAttempts + " attempts with nothing to mine, force completing", new Object[0]);
+                  }
+
+                  this.forceCompleteStuckState();
+                  return;
+               }
+            }
          } else {
             if ((Boolean)this.debugMessages.get()) {
                this.info("Verifying 2x2 platform completion...", new Object[0]);
@@ -1557,6 +1600,7 @@ public class AutoFlyingRegear extends Module {
 
                this.pendingBlocks.clear();
                this.currentBlockIndex = 0;
+               this.platformPlacementAttempts.clear();
                Vec3d centerTarget = Vec3d.ofCenter(this.platformCenter);
                Vec3d playerPos = this.mc.player.getEntityPos();
                double distance = Math.sqrt(
@@ -4311,6 +4355,7 @@ public class AutoFlyingRegear extends Module {
          this.transferStep = 0;
          this.transferSlotIndex = 0;
          this.placementAttempts = 0;
+         this.platformPlacementAttempts.clear();
          this.stateTickCounter = 0;
          this.hadBaritoneGoal = false;
          this.lavaPostponeTicks = 0;
@@ -4755,12 +4800,7 @@ public class AutoFlyingRegear extends Module {
    }
 
    private BlockHitResult getGrimStructureHit(BlockPos pos) {
-      Vec3d center = Vec3d.ofCenter(pos);
-      if (this.isRoofPosition(pos)) {
-         return new BlockHitResult(center.add(0.0, -0.001, 0.0), Direction.UP, pos, true);
-      }
-
-      return new BlockHitResult(center.add(0.0, -0.001, 0.0), Direction.DOWN, pos, true);
+      return PlacementUtils.getGrimDirectionalHit(pos, this.isRoofPosition(pos) ? Direction.UP : Direction.DOWN);
    }
 
    private BlockHitResult resolveStructurePlaceHit(BlockPos pos) {
@@ -4799,6 +4839,10 @@ public class AutoFlyingRegear extends Module {
    }
 
    private boolean placeStructureBlock(BlockPos pos) {
+      return this.placeStructureBlock(pos, false);
+   }
+
+   private boolean placeStructureBlock(BlockPos pos, boolean forceAirPlace) {
       if (!this.canPlaceStructure(pos)) {
          return false;
       }
@@ -4822,7 +4866,7 @@ public class AutoFlyingRegear extends Module {
          return false;
       }
 
-      BlockHitResult hit = this.resolveStructurePlaceHit(pos);
+      BlockHitResult hit = forceAirPlace ? PlacementUtils.getGrimDirectionalHit(pos, Direction.DOWN) : this.resolveStructurePlaceHit(pos);
       if (hit == null) {
          return false;
       }
