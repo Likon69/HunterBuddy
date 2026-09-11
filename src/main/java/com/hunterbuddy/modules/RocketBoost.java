@@ -171,7 +171,7 @@ public class RocketBoost extends Module {
 
    public final Setting<Integer> lookahead = sgSafety.add(new IntSetting.Builder()
       .name("lookahead")
-      .description("How many ticks ahead wall-check and chunk-check look. The distance is that many ticks of your current speed, so it grows with how fast you are actually going.")
+      .description("How many ticks ahead wall-check and chunk-check look. The distance is that many ticks at the speed the boost is taking you to - where the rocket's push settles, or your current speed when that is higher - so a slow moment after a turn or a server correction does not shorten it.")
       .defaultValue(20)
       .min(4)
       .max(80)
@@ -292,9 +292,14 @@ public class RocketBoost extends Module {
 
       Vec3d eye = mc.player.getEyePos();
       Vec3d look = mc.player.getRotationVec(1.0F);
-      // How far we would actually go in that many ticks, floored so a slow start still looks a little
-      // way ahead rather than not at all.
-      double speed = mc.player.getVelocity().length();
+      // How far the boost carries us in that many ticks: at the speed the rocket's push settles at under this
+      // multiplier, or at our own speed when that is higher, floored so it always looks a little way ahead. The
+      // firework tick leaves velocity at v + 0.1 look + 0.5 (m look - v), m being the constant the mixin replaces,
+      // which settles at (m + 0.2) look. Our own speed alone is what this used to go by, and right after a turn or
+      // a server correction it is low: the lookahead shrank to its floor of 8 blocks and the whole extra went
+      // through towards a wall a second away. BepBoost looks ahead from its speed cap whatever the moment; flown an
+      // hour each on 2026-09-10, it hit walls less than half as often per 1000 blocks, if for more reasons than this.
+      double speed = Math.max(mc.player.getVelocity().length(), asked + 0.2);
       double reach = Math.max(8.0, speed * lookahead.get());
 
       double capped = asked;
