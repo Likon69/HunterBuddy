@@ -74,6 +74,11 @@ public class RegearStatusHud extends HudElement {
         .description("Master scale for the whole element: every node, rail, bar, gap and icon, and the base text scale. The knob that makes the whole thing — metro line and bars included — smaller or larger as one.")
         .defaultValue(1.0).min(0.6).max(2.0).sliderRange(0.6, 2.0).build());
 
+    private final Setting<Double> iconSize = sgGeneral.add(new DoubleSetting.Builder()
+        .name("icon-size")
+        .description("How big the item icons are - the badge, the stocks, the next-regear icon and the metro stations - on top of size. 1 is the old look; the rows and the metro line grow with them.")
+        .defaultValue(1.5).min(0.8).max(2.5).sliderRange(0.8, 2.5).build());
+
     private final Setting<IdleView> idleView = sgGeneral.add(new EnumSetting.Builder<IdleView>()
         .name("idle-view")
         .description("Between regears: HIDDEN draws nothing, LEDGER one muted line with the counters, next-regear estimate and the mode as a labelled tail, FULL the whole panel.")
@@ -85,11 +90,11 @@ public class RegearStatusHud extends HudElement {
         .defaultValue(true).build());
 
     private final Setting<Boolean> showSupplies = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-supplies").description("FULL: the stocks row — rockets, valid elytras, gaps, totems (and bottles under REPAIR), with what this regear added.")
+        .name("show-supplies").description("FULL: the stocks row — rockets, valid elytras, gaps, totems, ender chests, obsidian (and bottles under REPAIR), with what this regear added.")
         .defaultValue(true).build());
 
     private final Setting<Boolean> showStockIcons = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-stock-icons").description("Draw an item icon before each stock. Off falls back to a short text label (rkt/ely/gap/tot/xp).")
+        .name("show-stock-icons").description("Draw an item icon before each stock. Off falls back to a short text label (rkt/ely/gap/tot/ech/obs/xp).")
         .defaultValue(true).visible(showSupplies::get).build());
 
     private final Setting<Boolean> showCounters = sgGeneral.add(new BoolSetting.Builder()
@@ -268,8 +273,8 @@ public class RegearStatusHud extends HudElement {
 
         // ---- geometry
         double gap = 3.0 * s;
-        double badgeIcon = 13.0 * s;
-        double ico = 11.0 * s;
+        double badgeIcon = 13.0 * s * iconSize.get();
+        double ico = 11.0 * s * iconSize.get();
         double lineH = renderer.textHeight(shadow, ts);
         double stateH = renderer.textHeight(shadow, ts * stateMul);
         double rowH = Math.max(lineH, ico);
@@ -308,11 +313,11 @@ public class RegearStatusHud extends HudElement {
             String event = regear.hudLastEvent();
             width = Math.max(width, renderer.textWidth(event == null ? "" : event, shadow, ts));
         }
-        if (showSpine) width = Math.max(width, 72.0 * s);
+        if (showSpine) width = Math.max(width, Math.max(72.0 * s, spineMinWidth(stations.size(), s, spineIcons)));
 
         // ---- height
         double labelH = renderer.textHeight(shadow, ts * 0.6);
-        double spineH = showSpine ? 12.0 * s + labelH + 1.0 * s : 0.0;
+        double spineH = showSpine ? 2.0 * spineHalf(s, spineIcons) + labelH + 1.0 * s : 0.0;
         double height = stateRowH
             + (showSpine ? gap + spineH : 0.0)
             + (mergedRow ? gap + rowH : 0.0)
@@ -401,7 +406,7 @@ public class RegearStatusHud extends HudElement {
         boolean shadow = textShadow.get();
         double s = size.get();
         double ts = s * textScale.get();
-        double ico = 11.0 * s;
+        double ico = 11.0 * s * iconSize.get();
         double inset = panel.padding();
         double lineH = renderer.textHeight(shadow, ts);
         double rowH = Math.max(lineH, ico);
@@ -438,6 +443,8 @@ public class RegearStatusHud extends HudElement {
         if (repair && bottles < lowBottles.get()) low.append(" · xp ").append(bottles);
         if (regear.hudGoalGaps() > 0 && regear.hudGapCount() < regear.hudGoalGaps()) low.append(" · gap ").append(regear.hudGapCount());
         if (regear.hudGoalTotems() > 0 && regear.hudTotemCount() < regear.hudGoalTotems()) low.append(" · tot ").append(regear.hudTotemCount());
+        if (regear.hudEnderChestCount() <= regear.hudKeepEnderChests()) low.append(" · ech ").append(regear.hudEnderChestCount());
+        if (regear.hudObsidianCount() <= regear.hudObsidianRefillAt()) low.append(" · obs ").append(regear.hudObsidianCount());
         String tail = low + " · mode " + (repair ? "REPAIR" : "REPLACE");
 
         // Hug the text: measure the "next" segment exactly as drawNext will draw it (actual time
@@ -513,6 +520,19 @@ public class RegearStatusHud extends HudElement {
      * The whole journey on one rail: passed stations in mend green, the current one lit and
      * breathing, the rest dim; supply stations drawn as their item when asked and big enough.
      */
+    /** Half the height of the metro line's node row: a node, or a station icon at icon-size when that is bigger. */
+    private double spineHalf(double s, boolean icons) {
+        double nodeMax = 6.0 * s;
+        return icons ? Math.max(nodeMax, nodeMax * 0.9 * iconSize.get()) : nodeMax;
+    }
+
+    /** The narrowest the metro line can be with its station icons side by side, not over each other. */
+    private double spineMinWidth(int n, double s, boolean icons) {
+        if (!icons || n <= 1) return 0.0;
+        double half = spineHalf(s, true);
+        return 2.0 * Math.max(7.0 * s, half + 1.0 * s) + (n - 1) * 2.0 * half;
+    }
+
     private void drawSpine(HudRenderer renderer, double x0, double yTop, double width,
                            List<AutoFlyingRegear.Step> stations, int current, boolean anim,
                            double s, double ts, boolean icons, boolean shadow) {
@@ -520,8 +540,10 @@ public class RegearStatusHud extends HudElement {
         if (n <= 0) return;
 
         double nodeMax = 6.0 * s;
-        double yc = yTop + nodeMax;
-        double pad = icons ? 7.0 * s : nodeMax;
+        // with icons the stations are as big as icon-size makes them, and the line makes room for them
+        double half = spineHalf(s, icons);
+        double yc = yTop + half;
+        double pad = icons ? Math.max(7.0 * s, half + 1.0 * s) : nodeMax;
         double rail = 3.0 * s;
 
         double[] nx = new double[n];
@@ -551,10 +573,10 @@ public class RegearStatusHud extends HudElement {
             ItemStack supply = icons ? supplyStack(st) : null;
 
             if (supply != null) {
-                double isz = 2.0 * nodeMax * 0.9;
+                double isz = 2.0 * nodeMax * 0.9 * iconSize.get();
                 postItem(renderer, supply, nx[i] - isz / 2.0, yc - isz / 2.0, isz);
                 if (isCurrent) {
-                    ring(renderer, nx[i], yc, nodeMax, 1.5 * s, new Color(busy.r, busy.g, busy.b, (int) (busy.a * breathe)));
+                    ring(renderer, nx[i], yc, half, 1.5 * s, new Color(busy.r, busy.g, busy.b, (int) (busy.a * breathe)));
                 }
             } else if (passed) {
                 disc(renderer, nx[i], yc, 3.0 * s, new Color(mend.r, mend.g, mend.b, (int) (mend.a * 0.85)));
@@ -569,7 +591,7 @@ public class RegearStatusHud extends HudElement {
                 String lbl = st == AutoFlyingRegear.Step.LAND ? "LAND" : "FLY";
                 double lts = ts * 0.6;
                 double lw = renderer.textWidth(lbl, shadow, lts);
-                renderer.text(lbl, nx[i] - lw / 2.0, yc + nodeMax + 1.0 * s,
+                renderer.text(lbl, nx[i] - lw / 2.0, yc + half + 1.0 * s,
                     new Color(dim.r, dim.g, dim.b, (int) (dim.a * 0.8)), shadow, lts);
             }
         }
@@ -596,6 +618,13 @@ public class RegearStatusHud extends HudElement {
         f.add(new Field("ely ", String.valueOf(elytras), "00", stockColor(elytras, lowElytras.get())));
         if (regear.hudGoalGaps() > 0) f.add(new Field("gap ", String.valueOf(gaps), "000", gaps == 0 ? warnColor.get() : valueColor.get()));
         if (regear.hudGoalTotems() > 0) f.add(new Field("tot ", String.valueOf(totems), "00", totems == 0 ? warnColor.get() : valueColor.get()));
+        // orange at or under the ones the refill keeps, and at or under the refill threshold; red at none
+        int echests = regear.hudEnderChestCount();
+        f.add(new Field("ech ", String.valueOf(echests), "00", stockColor(echests, regear.hudKeepEnderChests() + 1)));
+        if (regear.hudObsidianRefillAt() >= 0) {
+            int obsidian = regear.hudObsidianCount();
+            f.add(new Field("obs ", String.valueOf(obsidian), "000", stockColor(obsidian, regear.hudObsidianRefillAt() + 1)));
+        }
         return f;
     }
 
@@ -657,6 +686,17 @@ public class RegearStatusHud extends HudElement {
         if (regear.hudGoalTotems() > 0) {
             list.add(new Stock("tot", Items.TOTEM_OF_UNDYING.getDefaultStack(), String.valueOf(totems), "00",
                 totems == 0 ? warnColor.get() : valueColor.get(), gain(g ? (ended ? gainsFrom.totemsAfter : totems) - gainsFrom.totemsBefore : 0, g)));
+        }
+        // orange at or under the ones the refill keeps, and at or under the refill threshold; red at none
+        int echests = regear.hudEnderChestCount();
+        list.add(new Stock("ech", Items.ENDER_CHEST.getDefaultStack(), String.valueOf(echests), "00",
+            stockColor(echests, regear.hudKeepEnderChests() + 1),
+            gain(g ? (ended ? gainsFrom.enderChestsAfter : echests) - gainsFrom.enderChestsBefore : 0, g)));
+        if (regear.hudObsidianRefillAt() >= 0) {
+            int obsidian = regear.hudObsidianCount();
+            list.add(new Stock("obs", Items.OBSIDIAN.getDefaultStack(), String.valueOf(obsidian), "000",
+                stockColor(obsidian, regear.hudObsidianRefillAt() + 1),
+                gain(g ? (ended ? gainsFrom.obsidianAfter : obsidian) - gainsFrom.obsidianBefore : 0, g)));
         }
         if (repair) {
             list.add(new Stock("xp", Items.EXPERIENCE_BOTTLE.getDefaultStack(), String.valueOf(bottles), "0000",
@@ -808,8 +848,8 @@ public class RegearStatusHud extends HudElement {
         double ts = s * textScale.get();
         double inset = panel.padding();
         double gap = 3.0 * s;
-        double badgeIcon = 13.0 * s;
-        double ico = 11.0 * s;
+        double badgeIcon = 13.0 * s * iconSize.get();
+        double ico = 11.0 * s * iconSize.get();
         double lineH = renderer.textHeight(shadow, ts);
         double rowH = Math.max(lineH, ico);
         double stateH = renderer.textHeight(shadow, ts * STATE_SCALE);
@@ -819,13 +859,13 @@ public class RegearStatusHud extends HudElement {
         double badgeW = badgeWidth(renderer, false, shadow, ts, badgeIcon, s);
         double stateW = Math.max(renderer.textWidth(stateText, shadow, ts * STATE_SCALE),
             renderer.textWidth(STATE_TEMPLATE, shadow, ts * STATE_SCALE));
-        String merged = "rkt 178 · ely 5 · gap 32 · tot 4 · next ";
+        String merged = "rkt 178 · ely 5 · gap 32 · tot 4 · ech 6 · obs 45 · next ";
 
         double labelH = renderer.textHeight(shadow, ts * 0.6);
-        double spineH = 12.0 * s + labelH + 1.0 * s;
+        double spineH = 2.0 * spineHalf(s, showSpineIcons.get() && s >= SPINE_ICON_SIZE) + labelH + 1.0 * s;
         double width = Math.max(badgeW + gap + stateW,
             renderer.textWidth(merged, shadow, ts) + ico + 2.0 * s + renderer.textWidth("≈38m", shadow, ts));
-        width = Math.max(width, 72.0 * s);
+        width = Math.max(width, Math.max(72.0 * s, spineMinWidth(8, s, showSpineIcons.get() && s >= SPINE_ICON_SIZE)));
         double height = stateRowH + gap + spineH + gap + rowH;
 
         panel.draw(renderer, this.x + inset, this.y + inset, width, height, HudGlowPanel.Severity.OK);

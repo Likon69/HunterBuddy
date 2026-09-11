@@ -101,6 +101,13 @@ public class AutoFlyingRegear extends Module {
             .sliderMax(16)
             .build()
       );
+   private final Setting<Integer> minEnderChests = this.sgTriggers
+      .add(
+         new Builder().name("min-ender-chests").description("Regear when fewer ender chests than this are carried, like the gaps and totems; the regear takes more from a shulker in the ender chest (goal-ender-chests). 0 = never for that reason.").defaultValue(0)
+            .min(0)
+            .sliderMax(16)
+            .build()
+      );
    private final Setting<Integer> goalElytras = this.sgTriggers
       .add(
          new Builder().name("goal-elytras").description("Target number of valid elytras after regearing").defaultValue(6)
@@ -220,6 +227,41 @@ public class AutoFlyingRegear extends Module {
             .sliderMax(27)
             .build()
       );
+   private final Setting<Integer> goalEnderChests = this.sgRestock
+      .add(
+         new Builder().name("goal-ender-chests").description("Ender chests to carry after a regear when fewer are left, pulled from any shulker in the ender chest that holds some, the same way as the gaps and totems. 0 = leave them alone.").defaultValue(16)
+            .min(0)
+            .sliderMax(64)
+            .build()
+      );
+   private final Setting<Integer> keepEnderChests = this.sgRestock
+      .add(
+         new Builder().name("keep-ender-chests").description("Ender chests the obsidian refill never breaks: the next regear needs one to reach the supplies at all.").defaultValue(2)
+            .min(1)
+            .sliderMax(16)
+            .build()
+      );
+   private final Setting<Integer> obsidianRefillAt = this.sgRestock
+      .add(
+         new Builder().name("obsidian-refill-at").description("Looked at once per regear, last, when everything else is restocked and before the box comes down: with this much obsidian or less, ender chests are broken inside the box, 8 obsidian each, up to obsidian-refill-to. With more, nothing happens. Obsidian never starts a regear by itself.").defaultValue(26)
+            .min(0)
+            .sliderMax(64)
+            .build()
+      );
+   private final Setting<Integer> obsidianRefillTo = this.sgRestock
+      .add(
+         new Builder().name("obsidian-refill-to").description("How much obsidian the refill stops at. 0 = no refill.").defaultValue(64)
+            .min(0)
+            .sliderMax(128)
+            .build()
+      );
+   private final Setting<Integer> maxEnderChestsBroken = this.sgRestock
+      .add(
+         new Builder().name("max-ender-chests-broken").description("Most ender chests the obsidian refill places and breaks in one regear, besides the one the regear placed anyway.").defaultValue(5)
+            .min(0)
+            .sliderMax(16)
+            .build()
+      );
    private final Setting<Boolean> autoReEnable = this.sgRestock
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -329,6 +371,17 @@ public class AutoFlyingRegear extends Module {
    private boolean processingElytras = true;
    /** Which extra kind is being restocked between the elytras and the rockets, {@link Extra#NONE} outside that. */
    private Extra extra = Extra.NONE;
+   /** Whether this regear has already decided on its obsidian refill; see handleRestoringElytra. */
+   private boolean obsidianTopUpDecided;
+   /** Where the obsidian refill is: 0 deciding, 1 placing a chest, 2 breaking it, 3 waiting for its obsidian. */
+   private int topUpStep;
+   private int topUpStepTicks;
+   /** Ender chests the refill has placed and broken in this regear, besides the regear's own. */
+   private int topUpChestsBroken;
+   /** Obsidian and ender chests held when the current break began, to tell what it gave. */
+   private int topUpObsidianBefore;
+   private int topUpChestsBefore;
+   private boolean topUpBreakStarted;
 
    /** Who takes off after a Nether regear. */
    public enum NetherTakeoff {
@@ -340,7 +393,8 @@ public class AutoFlyingRegear extends Module {
    private enum Extra {
       NONE,
       GAP,
-      TOTEM
+      TOTEM,
+      ECHEST
    }
 
    /** One regear, from the decision to land to the takeoff, as the HUD and the counters see it. */
@@ -363,6 +417,10 @@ public class AutoFlyingRegear extends Module {
       public int gapsAfter;
       public int totemsAfter;
       public int bottlesAfter;
+      public int enderChestsBefore;
+      public int enderChestsAfter;
+      public int obsidianBefore;
+      public int obsidianAfter;
       public int shulkersTaken;
 
       public long durationMs() {
@@ -613,6 +671,9 @@ public class AutoFlyingRegear extends Module {
                   case TAKING_SHULKER:
                   case OPENING_SHULKER:
                   case TRANSFERRING_ITEMS:
+                  // The obsidian refill breaks up to six chests one after another, which can run past thirty
+                  // seconds; each of its steps has its own timeout, so it needs no axe either.
+                  case TOPPING_UP_OBSIDIAN:
                   // Mending an elytra from empty runs through dozens of bottles, one throw
                   // at a time. It belongs with the other states that are slow by nature, not
                   // under a thirty-second axe; its own stall detector ends it.
@@ -778,6 +839,9 @@ public class AutoFlyingRegear extends Module {
                      break;
                   case RESTORING_ELYTRA:
                      this.handleRestoringElytra();
+                     break;
+                  case TOPPING_UP_OBSIDIAN:
+                     this.handleToppingUpObsidian();
                      break;
                   case CLEANUP:
                      this.handleCleanup();
@@ -2268,12 +2332,8 @@ public class AutoFlyingRegear extends Module {
             this.info("Positioning for shulker placement", new Object[0]);
          }
 
-         if (this.mlepMine != null && this.mlepMine.isActive()) {
-            this.mlepMine.toggle();
-            if ((Boolean)this.debugMessages.get()) {
-               this.info("Disabled MlepMine for shulker operations", new Object[0]);
-            }
-         }
+         // MlepMine is never turned off by the regear, here or anywhere: the user's rule. While persistent it
+         // refused anyway, and a red warning in chat was all the attempts here ever did.
       }
 
       Vec3d targetCenter = Vec3d.ofCenter(this.platformCenter);
@@ -2420,13 +2480,6 @@ public class AutoFlyingRegear extends Module {
          this.state = AutoFlyingRegear.FlyingRegearState.CHECK_NEXT_SHULKER;
          this.placementAttempts = 0;
       } else {
-         if (this.mlepMine != null && this.mlepMine.isActive()) {
-            this.mlepMine.toggle();
-            if ((Boolean)this.debugMessages.get()) {
-               this.info("Disabled MlepMine to prevent shulker mining", new Object[0]);
-            }
-         }
-
          this.mc.options.sneakKey.setPressed(false);
          ItemStack shulkerStack = this.mc.player.getInventory().getStack((Integer)this.shulkerHotbarSlot.get());
          if (!this.isShulkerBox(shulkerStack.getItem())) {
@@ -2832,13 +2885,6 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handleBreakingShulker() {
-      if (this.mlepMine != null && this.mlepMine.isActive()) {
-         this.mlepMine.toggle();
-         if ((Boolean)this.debugMessages.get()) {
-            this.info("Disabled MlepMine to prevent interference", new Object[0]);
-         }
-      }
-
       if (this.mc.world.getBlockState(this.shulkerPlacePos).getBlock() instanceof ShulkerBoxBlock) {
          Vec3d shulkerCenter = Vec3d.ofCenter(this.shulkerPlacePos);
          if (!this.breakBlockWhenAligned(this.shulkerPlacePos, Direction.UP, shulkerCenter, true)) {
@@ -3527,6 +3573,20 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handleRestoringElytra() {
+      if (!this.obsidianTopUpDecided) {
+         // Once per regear, last, when everything else is restocked and before the box comes down: see
+         // handleToppingUpObsidian. Decided here, where every way out of the restocks arrives, and marked before it
+         // starts, so that a timeout inside it lands back here and goes on with the teardown instead of starting over.
+         this.obsidianTopUpDecided = true;
+         if (this.obsidianTopUpWanted()) {
+            this.topUpStep = 0;
+            this.topUpStepTicks = 0;
+            this.state = AutoFlyingRegear.FlyingRegearState.TOPPING_UP_OBSIDIAN;
+            this.timer = 0;
+            return;
+         }
+      }
+
       this.totemToOffhand();
       if ((Boolean)this.swapToChestplate.get() && !this.savedChestplate.isEmpty()) {
          this.restoreChestplate();
@@ -3538,6 +3598,204 @@ public class AutoFlyingRegear extends Module {
       this.state = AutoFlyingRegear.FlyingRegearState.CLEANUP;
       this.timer = 5;
       this.cleanupBlockIndex = 0;
+   }
+
+   /**
+    * Whether this regear refills the obsidian before the box comes down: only when it is down to obsidian-refill-at,
+    * in a box that is whole (it is what keeps the drops in), and with something to break - the ender chest the regear
+    * placed, or one to spare over keep-ender-chests.
+    */
+   private boolean obsidianTopUpWanted() {
+      if ((Integer)this.obsidianRefillTo.get() <= 0 || this.platformCenter == null || this.echestPos == null) {
+         return false;
+      }
+
+      if (this.countItem(Items.OBSIDIAN) > (Integer)this.obsidianRefillAt.get()) {
+         return false;
+      }
+
+      if (!this.boxIsWhole()) {
+         this.warning("Obsidian is low but the box is not whole: no refill this time, the drops would fall out", new Object[0]);
+         return false;
+      }
+
+      return this.mc.world.getBlockState(this.echestPos).getBlock() == Blocks.ENDER_CHEST
+         || this.countItem(Items.ENDER_CHEST) > (Integer)this.keepEnderChests.get();
+   }
+
+   /** Both wall rings and the roof standing, whatever the wall settings: the box the obsidian refill breaks chests in. */
+   private boolean boxIsWhole() {
+      return this.collectMissingBlocks(this.getWallRingPositions(1)).isEmpty()
+         && this.collectMissingBlocks(this.getWallRingPositions(2)).isEmpty()
+         && this.collectMissingBlocks(this.getRoofPositions()).isEmpty();
+   }
+
+   /**
+    * Refills the obsidian up to obsidian-refill-to before the box comes down, out of ender chests: broken with a
+    * pickaxe, one drops 8 obsidian and not itself. The ender chest the regear placed goes first, then more are placed
+    * where it stood and broken in turn, at most max-ender-chests-broken of them and never below keep-ender-chests. All
+    * of it inside the closed box, which keeps the drops within reach. Steps: 0 decide, 1 place a chest, 2 break it,
+    * 3 wait for its obsidian.
+    */
+   private void handleToppingUpObsidian() {
+      this.topUpStepTicks++;
+      if (!this.standingInBox()) {
+         // a chest broken at echestPos only drops within reach, and inside walls, from where the regear stands
+         this.finishTopUp("pushed out of the box");
+         return;
+      }
+
+      switch (this.topUpStep) {
+         case 0 -> {
+            if (this.mc.world.getBlockState(this.echestPos).getBlock() == Blocks.ENDER_CHEST) {
+               this.startTopUpBreak();
+               return;
+            }
+
+            int obsidian = this.countItem(Items.OBSIDIAN);
+            int chests = this.countItem(Items.ENDER_CHEST);
+            if (obsidian >= (Integer)this.obsidianRefillTo.get()
+               || this.topUpChestsBroken >= (Integer)this.maxEnderChestsBroken.get()
+               || chests <= (Integer)this.keepEnderChests.get()) {
+               this.finishTopUp(obsidian < (Integer)this.obsidianRefillTo.get() && chests <= (Integer)this.keepEnderChests.get()
+                  ? "no ender chest to spare over the " + this.keepEnderChests.get() + " kept"
+                  : null);
+               return;
+            }
+
+            this.topUpStep = 1;
+            this.topUpStepTicks = 0;
+         }
+         case 1 -> {
+            if (this.mc.world.getBlockState(this.echestPos).getBlock() == Blocks.ENDER_CHEST) {
+               this.topUpChestsBroken++;
+               this.startTopUpBreak();
+               return;
+            }
+
+            if (this.topUpStepTicks > 60) {
+               this.finishTopUp("could not place an ender chest to break");
+               return;
+            }
+
+            // the same slot and the same placement the regear's own ender chest went through
+            int slot = (Integer)this.eChestHotbarSlot.get();
+            if (this.mc.player.getInventory().getStack(slot).getItem() != Items.ENDER_CHEST) {
+               int from = InvUtils.find(new Item[]{Items.ENDER_CHEST}).slot();
+               if (from == -1) {
+                  this.finishTopUp("no ender chest left to break");
+                  return;
+               }
+
+               this.moveStack(from, slot);
+               this.timer = (Integer)this.clickDelay.get();
+               return;
+            }
+
+            if (this.placeBlockAtHotbar(this.echestPos, slot)) {
+               this.timer = (Integer)this.placeDelay.get();
+            }
+         }
+         case 2 -> {
+            if (this.mc.world.getBlockState(this.echestPos).getBlock() != Blocks.ENDER_CHEST) {
+               this.topUpStep = 3;
+               this.topUpStepTicks = 0;
+               return;
+            }
+
+            if (this.topUpStepTicks > 160) {
+               this.finishTopUp("could not break the ender chest");
+               return;
+            }
+
+            // broken without a pickaxe, an ender chest drops nothing at all
+            FindItemResult pickaxe = InvUtils.findInHotbar(itemStack -> itemStack.isIn(ItemTags.PICKAXES));
+            if (!pickaxe.found()) {
+               this.finishTopUp("no pickaxe in the hotbar");
+               return;
+            }
+
+            if (this.mlepMine != null && this.mlepMine.isActive()) {
+               // MlepMine takes the chest the way the cleanup hands it the box: queued once, then left to it. The
+               // pickaxe goes in hand first, for an auto-swap that is off and mines with whatever is held; the
+               // game's own tick sends the slot on before the break can finish, so the drop is the pickaxe's.
+               if (!this.topUpBreakStarted) {
+                  ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(pickaxe.slot());
+               }
+
+               // the queue drops a repeat of a block it is still working on, so this nudge only matters if it let go
+               if (!this.topUpBreakStarted || this.topUpStepTicks % 40 == 0) {
+                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(this.echestPos, Direction.UP));
+                  this.topUpBreakStarted = true;
+               }
+
+               return;
+            }
+
+            // no mine module to hand it to: by hand, as before
+            if (((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot() != pickaxe.slot()) {
+               ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(pickaxe.slot());
+            }
+
+            if (this.breakBlockWhenAligned(this.echestPos, Direction.UP, Vec3d.ofCenter(this.echestPos), !this.topUpBreakStarted)) {
+               this.topUpBreakStarted = true;
+            }
+         }
+         case 3 -> {
+            int obsidian = this.countItem(Items.OBSIDIAN);
+            if (this.countItem(Items.ENDER_CHEST) > this.topUpChestsBefore) {
+               this.finishTopUp("the ender chest came back whole, the pickaxe has Silk Touch");
+               return;
+            }
+
+            if (obsidian >= this.topUpObsidianBefore + 8) {
+               this.topUpStep = 0;
+               this.topUpStepTicks = 0;
+            } else if (this.topUpStepTicks > 40) {
+               if (obsidian > this.topUpObsidianBefore) {
+                  this.topUpStep = 0;
+                  this.topUpStepTicks = 0;
+               } else {
+                  this.finishTopUp("the ender chest's obsidian never reached the inventory");
+               }
+            }
+         }
+         default -> this.finishTopUp(null);
+      }
+   }
+
+   /**
+    * Inside the box's two by two, anywhere from its floor to under its roof: where the refill has to happen. The
+    * height is a band and not one block, for a floor that is a slab, which puts the feet half a block lower, and for
+    * a bump that settles again.
+    */
+   private boolean standingInBox() {
+      double y = this.mc.player.getY();
+      int dx = MathHelper.floor(this.mc.player.getX()) - this.platformCenter.getX();
+      int dz = MathHelper.floor(this.mc.player.getZ()) - this.platformCenter.getZ();
+      return y > this.platformCenter.getY() && y < this.platformCenter.getY() + 2.0 && dx >= 0 && dx <= 1 && dz >= 0 && dz <= 1;
+   }
+
+   private void startTopUpBreak() {
+      this.topUpObsidianBefore = this.countItem(Items.OBSIDIAN);
+      this.topUpChestsBefore = this.countItem(Items.ENDER_CHEST);
+      this.topUpBreakStarted = false;
+      this.topUpStep = 2;
+      this.topUpStepTicks = 0;
+   }
+
+   /** Ends the refill and goes on with the teardown; {@code problem}, when there is one, is said in chat. */
+   private void finishTopUp(String problem) {
+      int obsidian = this.countItem(Items.OBSIDIAN);
+      if (problem != null) {
+         this.warning("Obsidian refill stopped at " + obsidian + ": " + problem, new Object[0]);
+      } else if ((Boolean)this.debugMessages.get()) {
+         this.info("Obsidian refilled to " + obsidian + ", " + this.topUpChestsBroken + " ender chests broken besides the regear's", new Object[0]);
+      }
+
+      this.event("obsidian " + obsidian + (this.topUpChestsBroken > 0 ? ", " + this.topUpChestsBroken + " ender chests broken" : ""));
+      this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
+      this.timer = 0;
    }
 
    /** Adds a placed block to the cleanup list once, if it is really there (solid, not air/replaceable). */
@@ -3650,6 +3908,13 @@ public class AutoFlyingRegear extends Module {
 
                this.cleanupBlockIndex++;
                this.cleanupBlockAttempts = 0;
+               // The watchdog's thirty seconds count from the last block the cleanup got through, not from
+               // its start, so the limit grows with the box. Twenty blocks mined by MlepMine at about 2.7 s
+               // each ran 54 s and were cut at 30 in the log that changed this. A block that stalls is skipped
+               // by its own 150 attempts, well inside those thirty seconds; one that never lines up for the hand
+               // break never counts an attempt, and these thirty seconds, still running from the block before,
+               // are what end it.
+               this.stateTickCounter = 0;
                this.timer = 1;
                return;
             }
@@ -3661,6 +3926,8 @@ public class AutoFlyingRegear extends Module {
 
                this.cleanupBlockIndex++;
                this.cleanupBlockAttempts = 0;
+               // skipping a block is getting through it too, for the watchdog
+               this.stateTickCounter = 0;
                this.timer = 2;
                return;
             }
@@ -4032,7 +4299,10 @@ public class AutoFlyingRegear extends Module {
 
          boolean shortOfGaps = (Integer)this.minGaps.get() > 0 && this.countItem(Items.ENCHANTED_GOLDEN_APPLE) < (Integer)this.minGaps.get();
          boolean shortOfTotems = (Integer)this.minTotems.get() > 0 && this.countItem(Items.TOTEM_OF_UNDYING) < (Integer)this.minTotems.get();
-         return shortOfGaps || shortOfTotems;
+         // with none left at all, a regear could not even place the chest it restocks from, and would start over every tick
+         int enderChests = this.countItem(Items.ENDER_CHEST);
+         boolean shortOfEnderChests = (Integer)this.minEnderChests.get() > 0 && enderChests < (Integer)this.minEnderChests.get() && enderChests > 0;
+         return shortOfGaps || shortOfTotems || shortOfEnderChests;
       } else {
          return false;
       }
@@ -4047,6 +4317,7 @@ public class AutoFlyingRegear extends Module {
       return switch (this.extra) {
          case GAP -> Items.ENCHANTED_GOLDEN_APPLE;
          case TOTEM -> Items.TOTEM_OF_UNDYING;
+         case ECHEST -> Items.ENDER_CHEST;
          default -> Items.FIREWORK_ROCKET;
       };
    }
@@ -4060,6 +4331,7 @@ public class AutoFlyingRegear extends Module {
       return switch (this.extra) {
          case GAP -> "golden apple";
          case TOTEM -> "totem";
+         case ECHEST -> "ender chest";
          default -> "rocket";
       };
    }
@@ -4068,13 +4340,24 @@ public class AutoFlyingRegear extends Module {
       return switch (this.extra) {
          case GAP -> (Integer)this.goalGaps.get();
          case TOTEM -> (Integer)this.goalTotems.get();
+         case ECHEST -> (Integer)this.goalEnderChests.get();
          default -> 0;
       };
    }
 
    private boolean extraWanted(Extra kind) {
-      int goal = kind == Extra.GAP ? (Integer)this.goalGaps.get() : (Integer)this.goalTotems.get();
-      Item item = kind == Extra.GAP ? Items.ENCHANTED_GOLDEN_APPLE : Items.TOTEM_OF_UNDYING;
+      int goal = switch (kind) {
+         case GAP -> (Integer)this.goalGaps.get();
+         case TOTEM -> (Integer)this.goalTotems.get();
+         case ECHEST -> (Integer)this.goalEnderChests.get();
+         default -> 0;
+      };
+      Item item = switch (kind) {
+         case GAP -> Items.ENCHANTED_GOLDEN_APPLE;
+         case TOTEM -> Items.TOTEM_OF_UNDYING;
+         case ECHEST -> Items.ENDER_CHEST;
+         default -> Items.AIR;
+      };
       return goal > 0 && this.countItem(item) < goal;
    }
 
@@ -4087,9 +4370,9 @@ public class AutoFlyingRegear extends Module {
 
    /** Moves on to the next extra kind still short of its goal, or to the rockets, and reopens the ender chest. */
    private void nextExtra() {
-      Extra next = this.extra == Extra.NONE ? Extra.GAP : this.extra == Extra.GAP ? Extra.TOTEM : null;
+      Extra next = nextExtraAfter(this.extra);
       while (next != null && !this.extraWanted(next)) {
-         next = next == Extra.GAP ? Extra.TOTEM : null;
+         next = nextExtraAfter(next);
       }
 
       this.extra = next == null ? Extra.NONE : next;
@@ -4100,6 +4383,16 @@ public class AutoFlyingRegear extends Module {
 
       this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
       this.timer = (Integer)this.containerOpenDelay.get();
+   }
+
+   /** The extras in the order they are restocked, gaps, totems, ender chests; null after the last. */
+   private static Extra nextExtraAfter(Extra kind) {
+      return switch (kind) {
+         case NONE -> Extra.GAP;
+         case GAP -> Extra.TOTEM;
+         case TOTEM -> Extra.ECHEST;
+         case ECHEST -> null;
+      };
    }
 
    /** How many of an item the inventory holds, offhand and armour included. */
@@ -4694,6 +4987,8 @@ public class AutoFlyingRegear extends Module {
 
    private void beginRun() {
       this.completeHandled = false;
+      this.obsidianTopUpDecided = false;
+      this.topUpChestsBroken = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();
       run.lavaWaitSeconds = this.lavaPostponeTicks / 20;
@@ -4702,6 +4997,8 @@ public class AutoFlyingRegear extends Module {
       run.gapsBefore = this.countItem(Items.ENCHANTED_GOLDEN_APPLE);
       run.totemsBefore = this.countItem(Items.TOTEM_OF_UNDYING);
       run.bottlesBefore = this.countExperienceBottles();
+      run.enderChestsBefore = this.countItem(Items.ENDER_CHEST);
+      run.obsidianBefore = this.countItem(Items.OBSIDIAN);
       this.currentRun = run;
       this.pendingOutcome = null;
       this.event(run.lavaWaitSeconds > 0 ? "landing after " + run.lavaWaitSeconds + "s over lava" : "landing to regear");
@@ -4722,6 +5019,8 @@ public class AutoFlyingRegear extends Module {
          run.gapsAfter = this.countItem(Items.ENCHANTED_GOLDEN_APPLE);
          run.totemsAfter = this.countItem(Items.TOTEM_OF_UNDYING);
          run.bottlesAfter = this.countExperienceBottles();
+         run.enderChestsAfter = this.countItem(Items.ENDER_CHEST);
+         run.obsidianAfter = this.countItem(Items.OBSIDIAN);
       }
 
       this.currentRun = null;
@@ -4796,6 +5095,24 @@ public class AutoFlyingRegear extends Module {
 
    public int hudGoalTotems() {
       return (Integer)this.goalTotems.get();
+   }
+
+   public int hudEnderChestCount() {
+      return this.mc.player == null ? 0 : this.countItem(Items.ENDER_CHEST);
+   }
+
+   public int hudObsidianCount() {
+      return this.mc.player == null ? 0 : this.countItem(Items.OBSIDIAN);
+   }
+
+   /** How many ender chests the obsidian refill never breaks. */
+   public int hudKeepEnderChests() {
+      return (Integer)this.keepEnderChests.get();
+   }
+
+   /** The obsidian count at or under which the next regear refills it; {@code -1} when the refill is off. */
+   public int hudObsidianRefillAt() {
+      return (Integer)this.obsidianRefillTo.get() > 0 ? (Integer)this.obsidianRefillAt.get() : -1;
    }
 
    /** What will force the next regear first. */
@@ -4884,7 +5201,7 @@ public class AutoFlyingRegear extends Module {
               ROTATING_FOR_SHULKER, PLACING_SHULKER, WAIT_SHULKER_PLACE, OPENING_SHULKER, TRANSFERRING_ITEMS,
               BREAKING_SHULKER, WAIT_SHULKER_BREAK, WAIT_SHULKER_PICKUP, RETURNING_SHULKER, CHECK_NEXT_SHULKER -> this.restockStep();
          case REPAIRING_ELYTRA -> AutoFlyingRegear.Step.MEND;
-         case BREAKING_ECHEST, WAIT_ECHEST_BREAK, RESTORING_ELYTRA, CLEANUP -> AutoFlyingRegear.Step.CLEAR;
+         case BREAKING_ECHEST, WAIT_ECHEST_BREAK, RESTORING_ELYTRA, TOPPING_UP_OBSIDIAN, CLEANUP -> AutoFlyingRegear.Step.CLEAR;
          case TAKING_OFF -> AutoFlyingRegear.Step.FLY;
       };
    }
@@ -4897,6 +5214,7 @@ public class AutoFlyingRegear extends Module {
       return switch (this.extra) {
          case GAP -> AutoFlyingRegear.Step.GAPS;
          case TOTEM -> AutoFlyingRegear.Step.TOTEMS;
+         case ECHEST -> AutoFlyingRegear.Step.CHEST;
          default -> AutoFlyingRegear.Step.ROCKETS;
       };
    }
@@ -4961,6 +5279,7 @@ public class AutoFlyingRegear extends Module {
          case BREAKING_ECHEST, WAIT_ECHEST_BREAK -> "Recovering chest";
          case REPAIRING_ELYTRA -> "Mending elytra";
          case RESTORING_ELYTRA -> "Restoring elytra";
+         case TOPPING_UP_OBSIDIAN -> "Obsidian";
          case CLEANUP -> "Cleanup";
       };
    }
@@ -5048,6 +5367,7 @@ public class AutoFlyingRegear extends Module {
       WAIT_ECHEST_BREAK,
       REPAIRING_ELYTRA,
       RESTORING_ELYTRA,
+      TOPPING_UP_OBSIDIAN,
       CLEANUP,
       TAKING_OFF,
       COMPLETE;
