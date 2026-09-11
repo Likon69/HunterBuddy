@@ -38,7 +38,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `waypoint-follower` | Follows Xaero waypoints with multi-dimensional travel support. |
 | `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
 
-### Visuals (11)
+### Visuals (12)
 
 ESP, overlays, and render helpers.
 
@@ -47,6 +47,7 @@ ESP, overlays, and render helpers.
 | `cave-air` | Detects portal-shaped disturbances in cave air. |
 | `container-tooltips` | Shows container contents when looking at tracked containers or shulkers in item frames. |
 | `entity-view` | Rescales mobs and players, shows their gear above them through walls, names dropped items on the ground, and outlines nether portals with a tracer to the nearest one. |
+| `FlightTrail` | A light two-trail wake behind the elytra while gliding, with speed-reactive flames at the wingtips, instead of dbrighthd's heavier particle trail. |
 | `flow-esp` | Detects chunk activity from fluid-spread analysis. |
 | `ItemSearchBar` | Searches and highlights items in inventories and containers. |
 | `LoreLocator` | Highlights inventory slots holding rare, unique, or anomalous items. |
@@ -79,10 +80,10 @@ Restocking, inventory handling, and stash transfer tools.
 | `disconnect-sound` | Plays a sound when the disconnect screen appears (e.g. when kicked). |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
 | `ghost-container` | Adds a button that closes a container screen without sending the close packet, leaving it open server-side. |
-| `h-air-place` | Places a block in air where your crosshair is pointing. |
 | `h-mine` | Fast block mining, with a configurable swing animation. |
-| `h-scaffold` | Places blocks beneath you as you move. |
 | `kill-aura-plus` | Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage. |
+| `mlep-air-place` | Places a block in air where your crosshair is pointing. |
+| `mlep-scaffold` | Places blocks beneath you as you move. |
 | `NoHurtCam` | Removes the hurt-camera tilt and shake. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatically computed speed multiplier; can trace every boosted tick to a CSV for tuning. |
@@ -101,7 +102,7 @@ Commands use the configured Meteor command prefix.
 | `arealoaderreset` | Delete every AreaLoader saved route, not just the selected one. |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-## HUD elements (28)
+## HUD elements (29)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
@@ -123,6 +124,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `MobInfo` | Tracks mob spawns and density. |
 | `movement-status` | Current sneaking and sprinting status. |
 | `Odometer` | Session distance on mechanical drums, lifetime total below. |
+| `Performance` | FPS, ping and server TPS in one line, coloured by level and flashing on spikes and drops. |
 | `PingMeter` | Ping with sparkline, jitter, and keepalive freshness. |
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
 | `RegearStatus` | AutoFlyingRegear phase, supplies, and mending progress. |
@@ -149,7 +151,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 ## Dependencies
 
 - **Xaero's Minimap / World Map (with XaeroPlus)** — compile-time libs under `libs/`; must be installed at runtime for `waypoint-follower`, chunk-radar's waypoint marks, and the `Travel` HUD.
-- **Baritone (Meteor fork)** — compile-only, optional at runtime; used by `auto-portal` pathing and some regear/travel helpers when present.
+- **Baritone** — compiled against [meteordevelopment/baritone](https://github.com/meteordevelopment/baritone) (compile-only), but at runtime the elytra flight, `auto-portal`, and the regear/travel helpers are built for [our own fork](.reference/hunterbuddy-baritone), which carries the fixes those features actually need.
 
 ## Files and network
 
