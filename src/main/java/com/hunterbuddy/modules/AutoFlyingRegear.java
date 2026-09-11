@@ -503,6 +503,10 @@ public class AutoFlyingRegear extends Module {
    private int cleanupBlockAttempts = 0;
    private List<BlockPos> cleanupBlocks = new ArrayList<>();
    private boolean cleanupInitialized = false;
+   /** Ticks in a row the player has spent off the platform during the cleanup; see {@link #offPlatform}. */
+   private int offPlatformTicks = 0;
+   /** How long off the platform before the cleanup gives up on the box: half a second, so a knock that lands back on it does not. */
+   private static final int OFF_PLATFORM_TICKS = 10;
    private int reEnableStage = 0;
    private final ElytraTakeoff takeoff = new ElytraTakeoff();
    private boolean takeoffInitialized = false;
@@ -558,6 +562,7 @@ public class AutoFlyingRegear extends Module {
       this.cleanupBlockAttempts = 0;
       this.cleanupBlocks.clear();
       this.cleanupInitialized = false;
+      this.offPlatformTicks = 0;
       this.shulkerPickupAttempts = 0;
       this.shulkerPlacementRetry = false;
       this.mlepMineWasActive = false;
@@ -3806,7 +3811,41 @@ public class AutoFlyingRegear extends Module {
       if (!blockState.isAir() && !blockState.isReplaceable()) this.cleanupBlocks.add(immutablePos);
    }
 
+   /**
+    * Not standing on the platform any more: the body's centre more than half its width beyond the edges of the 2x2,
+    * so that no part of it is over the platform, or the feet under the floor block, fallen through where it was.
+    * Above the platform still counts as on it: a knock upwards comes back down on it.
+    */
+   private boolean offPlatform() {
+      double x = this.mc.player.getX() - this.platformCenter.getX();
+      double z = this.mc.player.getZ() - this.platformCenter.getZ();
+      double half = this.mc.player.getWidth() / 2.0;
+      return x < -half || x > 2.0 + half || z < -half || z > 2.0 + half
+         || this.mc.player.getY() < this.platformCenter.getY();
+   }
+
    private void handleCleanup() {
+      if (this.platformCenter != null && this.offPlatform()) {
+         // Off the platform while the box comes down: a ghast's fireball knocked the bot into the lava below once,
+         // and the cleanup went on waiting for the rest of the box while the bot sat at the bottom until someone
+         // stepped in. The user's rule: off the platform during the box breaking, stop and hand the flight on,
+         // through the same takeoff the end of a cleanup starts, which hands the Nether to Baritone when
+         // netherTakeoff says so; Baritone gets out of the lava its own way. What is left of the box stays standing.
+         if (++this.offPlatformTicks >= OFF_PLATFORM_TICKS) {
+            this.warning("Off the platform while breaking the box, at " + this.mc.player.getBlockPos().toShortString() + " with the platform at "
+               + this.platformCenter.toShortString() + ": leaving the rest of it standing and going on to the takeoff", new Object[0]);
+            this.offPlatformTicks = 0;
+            this.cleanupBlocks.clear();
+            this.cleanupBlockAttempts = 0;
+            this.cleanupBlockIndex = 0;
+            this.cleanupInitialized = false;
+            this.beginTakeoff();
+         }
+
+         return;
+      }
+
+      this.offPlatformTicks = 0;
       if (!this.cleanupInitialized) {
          this.cleanupInitialized = true;
          if ((Boolean)this.debugMessages.get()) {
