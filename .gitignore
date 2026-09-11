@@ -44,6 +44,10 @@ bin/
 
 run/
 
-# decompile-only jars — too big to track, not needed to build
-
-libs/server 1.21.4.jar
+# libs/ is for the jars the build actually uses; ignore everything else dropped in there
+# (decompile-only jars, old versions kept around while testing an upgrade, etc.)
+libs/*.jar
+!libs/LambdaEvents-2.4.2.jar
+!libs/XaeroPlus-2.33.1+fabric-1.21.11-WM1.41.2-MM26.1.4.jar
+!libs/xaerominimap-fabric-1.21.11-26.1.4.jar
+!libs/xaeroworldmap-fabric-1.21.11-1.41.2.jar
