@@ -32,8 +32,17 @@ public class AutoEatSync extends Module {
 
     private final Setting<Double> healthThreshold = sgGeneral.add(new DoubleSetting.Builder()
         .name("health-threshold")
-        .description("Also eat when health falls to or below this many hearts, and treats health at or below this as critical for the combat gate.")
+        .description("Also eat when health falls to or below this many health points (2 points = 1 heart), and treats health at or below this as critical for the combat gate.")
         .defaultValue(6.0)
+        .min(0.0)
+        .sliderRange(0.0, 20.0)
+        .build()
+    );
+
+    private final Setting<Double> emergencyHealth = sgGeneral.add(new DoubleSetting.Builder()
+        .name("emergency-health")
+        .description("At or below this many health points (2 points = 1 heart), eat no matter what: collisions, low flight speed and KillAuraPlus no longer hold back or cut the meal, and it retries right after a rocket takes the hand. Baritone is never paused; its rockets still take the hand.")
+        .defaultValue(8.0)
         .min(0.0)
         .sliderRange(0.0, 20.0)
         .build()
@@ -100,6 +109,8 @@ public class AutoEatSync extends Module {
     private int lastWantEatLogTick = -1000;
     private boolean wasUsingItem;
     private boolean restartSent;
+    private int handRetryAfterTick;
+    private int noBiteRetryAfterTick;
 
     public AutoEatSync() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-eat-sync", "Eats gap apples without ever pausing Baritone or the fly, dodging AutoFlyingRegear, rocket windows and KillAuraPlus swings.");
@@ -113,6 +124,8 @@ public class AutoEatSync extends Module {
         eatTicks = 0;
         tickCounter = 0;
         lastWantEatLogTick = -1000;
+        handRetryAfterTick = 0;
+        noBiteRetryAfterTick = 0;
     }
 
     @Override
@@ -130,7 +143,7 @@ public class AutoEatSync extends Module {
         }
 
         if (regearRunning()) {
-            boolean healthCritical = eatInRegearSurvival.get() && mc.player.getHealth() <= healthThreshold.get();
+            boolean healthCritical = (eatInRegearSurvival.get() && mc.player.getHealth() <= healthThreshold.get()) || emergency();
             if (!healthCritical) {
                 if (eating) stopEating("regear");
                 return;
@@ -138,12 +151,25 @@ public class AutoEatSync extends Module {
         }
 
         if (eating) {
+            if (eatSlot != SlotUtils.OFFHAND && mc.player.getInventory().getSelectedSlot() != eatSlot) {
+                prevSlot = -1;
+                stopEating("hand-taken");
+                handRetryAfterTick = tickCounter + 60;
+                return;
+            }
+
             if (!shouldEat()) {
                 stopEating("satisfied");
                 return;
             }
 
             eatTicks++;
+
+            if (!wasUsingItem && eatTicks >= 20) {
+                stopEating("no-bite");
+                noBiteRetryAfterTick = tickCounter + 60;
+                return;
+            }
 
             if (mustStop()) {
                 stopEating(mustStopReason());
@@ -167,7 +193,7 @@ public class AutoEatSync extends Module {
         }
 
         boolean wantsToEat = shouldEat();
-        if (wantsToEat && safeToStart()) {
+        if (wantsToEat && safeToStart() && tickCounter >= noBiteRetryAfterTick && (emergency() || tickCounter >= handRetryAfterTick)) {
             int slot = findSlot();
             if (slot != -1) beginEating(slot);
         } else if (wantsToEat && debug.get()) {
@@ -186,13 +212,18 @@ public class AutoEatSync extends Module {
 
     private boolean shouldEat() {
         boolean hungerLow = mc.player.getHungerManager().getFoodLevel() <= hungerThreshold.get();
-        boolean healthLow = mc.player.getHealth() <= healthThreshold.get();
+        boolean healthLow = mc.player.getHealth() <= healthThreshold.get() || emergency();
         if (!hungerLow && !healthLow) return false;
 
         return findSlot() != -1;
     }
 
+    private boolean emergency() {
+        return mc.player.getHealth() <= emergencyHealth.get();
+    }
+
     private boolean mustStop() {
+        if (emergency()) return false;
         return elytraMustStop() || combatMustStop();
     }
 
@@ -243,6 +274,8 @@ public class AutoEatSync extends Module {
     }
 
     private boolean safeToStart() {
+        if (emergency()) return true;
+
         if (mc.player.isGliding()) {
             if (!eatInFlight.get()) return false;
 
@@ -334,6 +367,7 @@ public class AutoEatSync extends Module {
             Vec3d velocity = mc.player.getVelocity();
             double hSpeed = Math.hypot(velocity.x, velocity.z);
             info("[AutoEatSync] eating " + stackAt(eatSlot).getItem().getName().getString() + " — context " + currentContext()
+                + (emergency() ? ", emergency" : "")
                 + ", hunger " + mc.player.getHungerManager().getFoodLevel() + ", health " + mc.player.getHealth()
                 + ", speed " + String.format("%.2f", hSpeed) + " b/t");
         }
