@@ -369,13 +369,13 @@ public class RocketBoost extends Module {
 
       Vec3d velocity = mc.player.getVelocity();
       Vec3d look = mc.player.getRotationVector();
-      Vec3d lastLook = hasLastRotation ? Vec3d.fromPolar(lastPitch, lastYaw) : look;
-      double solved = solveMaxMultiplier(velocity, look, lastLook, autoAxisLimit.get());
+      Vec3d nextLook = computeNextLook(look);
+      double solved = solveMaxMultiplier(velocity, look, nextLook, autoAxisLimit.get());
       if (Double.isNaN(solved)) return Double.NaN;
 
       solved = MathHelper.clamp(solved, VANILLA_SPEED, autoCeiling.get());
       traceClosed = solved;
-      solved = narrowToGrimBound(solved, velocity, look, lastLook);
+      solved = narrowToGrimBound(solved, velocity, look, nextLook);
       traceFinal = solved;
 
       if (logTrace.get()) {
@@ -388,7 +388,40 @@ public class RocketBoost extends Module {
       return VANILLA_SPEED + (solved - VANILLA_SPEED) * autoRecovery;
    }
 
-   private double solveMaxMultiplier(Vec3d velocity, Vec3d look, Vec3d lastLook, double threshold) {
+   private Vec3d computeNextLook(Vec3d look) {
+      float[] baritoneNext = nextBaritoneRotation();
+      if (baritoneNext != null && baritoneNext.length == 2 && Float.isFinite(baritoneNext[0]) && Float.isFinite(baritoneNext[1])) {
+         return Vec3d.fromPolar(baritoneNext[1], baritoneNext[0]);
+      }
+      if (!hasLastRotation || mc.player == null) return look;
+
+      float currentYaw = mc.player.getYaw();
+      float currentPitch = mc.player.getPitch();
+      float nextYaw = currentYaw + MathHelper.wrapDegrees(currentYaw - lastYaw);
+      float nextPitch = MathHelper.clamp(currentPitch + (currentPitch - lastPitch), -90.0F, 90.0F);
+      return Vec3d.fromPolar(nextPitch, nextYaw);
+   }
+
+   private float[] nextBaritoneRotation() {
+      if (this.baritoneRotationUnavailable) return null;
+      try {
+         baritone.api.IBaritone primary = baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone();
+         if (primary == null) return null;
+         Object lookBehavior = primary.getLookBehavior();
+         if (lookBehavior == null) return null;
+         java.lang.reflect.Method method = this.baritoneNextRotationMethod;
+         if (method == null) {
+            method = lookBehavior.getClass().getMethod("hunterbuddyNextRotation");
+            this.baritoneNextRotationMethod = method;
+         }
+         return (float[]) method.invoke(lookBehavior);
+      } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+         this.baritoneRotationUnavailable = true;
+         return null;
+      }
+   }
+
+   private double solveMaxMultiplier(Vec3d velocity, Vec3d look, Vec3d pairLook, double threshold) {
       double margin = autoYMargin.get();
       double bestK = Double.MAX_VALUE;
 
@@ -396,9 +429,9 @@ public class RocketBoost extends Module {
          double dir = axisOf(look, axis);
          if (Math.abs(dir) < 1.0E-6) continue;
 
-         double last = axisOf(lastLook, axis);
-         double min = Math.max(-threshold, (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, last)) * threshold);
-         double max = Math.min(threshold, (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, last)) * threshold);
+         double pair = axisOf(pairLook, axis);
+         double min = Math.max(-threshold, (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, pair)) * threshold);
+         double max = Math.min(threshold, (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, pair)) * threshold);
 
          min += margin;
          max -= margin;
@@ -441,13 +474,13 @@ public class RocketBoost extends Module {
     * which is exactly the regime we are trying to stay in; once we are outside it, the numbers here
     * drift from the server's, and that is what {@code log-trace} is for.
     */
-   private double narrowToGrimBound(double candidate, Vec3d velocity, Vec3d look, Vec3d lastLook) {
+   private double narrowToGrimBound(double candidate, Vec3d velocity, Vec3d look, Vec3d pairLook) {
       traceValid = false;
       if (mc.player == null) return candidate;
 
       double gravity = effectiveGravity(velocity);
       float pitch = mc.player.getPitch();
-      computeGrimBounds(velocity, look, lastLook, pitch, gravity);
+      computeGrimBounds(velocity, look, pairLook, pitch, gravity);
 
       // Below vanilla there is nothing left to narrow, but the bounds are computed first and kept
       // anyway. That case is the fast one - an axis already past its share of the box, which is
@@ -481,19 +514,19 @@ public class RocketBoost extends Module {
     * <p>Stored raw, without the safety margin: the margin is ours, not Grim's, and folding it in
     * would make the logged offsets read as violations that never happened.
     */
-   private void computeGrimBounds(Vec3d velocity, Vec3d look, Vec3d lastLook, float pitch, double gravity) {
+   private void computeGrimBounds(Vec3d velocity, Vec3d look, Vec3d pairLook, float pitch, double gravity) {
       Vec3d predicted = applyGlide(velocity, look, pitch, gravity);
 
       for (int axis = 0; axis < 3; axis++) {
          double dir = axisOf(look, axis);
-         double last = axisOf(lastLook, axis);
+         double pair = axisOf(pairLook, axis);
          double boxMin = Math.max(
             -GRIM_FIREWORK_SCALE,
-            (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, last)) * GRIM_FIREWORK_SCALE
+            (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, pair)) * GRIM_FIREWORK_SCALE
          );
          double boxMax = Math.min(
             GRIM_FIREWORK_SCALE,
-            (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, last)) * GRIM_FIREWORK_SCALE
+            (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, pair)) * GRIM_FIREWORK_SCALE
          );
          double had = axisOf(velocity, axis);
          double centre = axisOf(predicted, axis);
@@ -611,10 +644,10 @@ public class RocketBoost extends Module {
 
       Vec3d velocity = mc.player.getVelocity();
       Vec3d look = mc.player.getRotationVector();
-      Vec3d lastLook = hasLastRotation ? Vec3d.fromPolar(lastPitch, lastYaw) : look;
+      Vec3d nextLook = computeNextLook(look);
 
       traceValid = false;
-      computeGrimBounds(velocity, look, lastLook, mc.player.getPitch(), effectiveGravity(velocity));
+      computeGrimBounds(velocity, look, nextLook, mc.player.getPitch(), effectiveGravity(velocity));
       traceClosed = multiplier;
       traceFinal = multiplier;
       recordTrace(velocity, look);
@@ -742,6 +775,8 @@ public class RocketBoost extends Module {
    private java.lang.reflect.Field baritoneSettingValue;
    private boolean baritoneUnavailable;
    private boolean baritoneSyncAnnounced;
+   private java.lang.reflect.Method baritoneNextRotationMethod;
+   private boolean baritoneRotationUnavailable;
 
    /**
     * Keeps Baritone's flight simulation in step with how the boost actually behaves.
