@@ -21,6 +21,7 @@ import com.hunterbuddy.commands.logistics.SetOutput;
 import com.hunterbuddy.commands.logistics.StashStatus;
 import com.hunterbuddy.modules.AFKVanillaFly;
 import com.hunterbuddy.modules.AngleCalculator;
+import com.hunterbuddy.modules.AutoEatSync;
 import com.hunterbuddy.modules.AutoEXPPlus;
 import com.hunterbuddy.modules.AutoLogPlus;
 import com.hunterbuddy.modules.AutoFlyingRegear;
@@ -165,6 +166,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new TrailFollower());
         Modules.get().add(new MlepMine());
         Modules.get().add(new KillAuraPlus());
+        Modules.get().add(new AutoEatSync());
         Modules.get().add(new FutureTotem());
         Modules.get().add(new MlepScaffold());
         Modules.get().add(new Replenish());
