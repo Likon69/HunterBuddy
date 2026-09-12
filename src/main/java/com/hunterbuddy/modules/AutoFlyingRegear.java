@@ -495,10 +495,14 @@ public class AutoFlyingRegear extends Module {
    private String savedBaritoneCommand = null;
    private int startupDelayTicks = 0;
    private boolean startupComplete = false;
+   private int lowSupplyTicks = 0;
+   private String lowSupplyFirstReason = "none";
    private AutoEat autoEatModule = null;
    private AutoEatSync autoEatSyncModule = null;
    private int wallLayer = 0;
    private int wallBuildPhase = 0;
+   private boolean wallsStarted = false;
+   private boolean wallsRecentered = false;
    private int verifyRounds = 0;
    private BlockPos currentClearingPos = null;
    private int clearingProgress = 0;
@@ -554,6 +558,9 @@ public class AutoFlyingRegear extends Module {
       this.lastState = AutoFlyingRegear.FlyingRegearState.IDLE;
       this.scaffoldWaitTicks = 0;
       this.wallBuildPhase = 0;
+      this.wallsStarted = false;
+      this.wallsRecentered = false;
+      this.lowSupplyTicks = 0;
       this.savedYaw = 0.0F;
       this.currentClearingPos = null;
       this.clearingProgress = 0;
@@ -633,6 +640,9 @@ public class AutoFlyingRegear extends Module {
       this.pendingBlocks.clear();
       this.wallLayer = 0;
       this.wallBuildPhase = 0;
+      this.wallsStarted = false;
+      this.wallsRecentered = false;
+      this.lowSupplyTicks = 0;
       this.cleanupBlocks.clear();
       this.cleanupBlockIndex = 0;
       this.cleanupInitialized = false;
@@ -903,7 +913,25 @@ public class AutoFlyingRegear extends Module {
             this.startupDelayTicks = 0;
          }
       } else {
-         if (this.shouldTriggerRegear()) {
+         boolean lowSupplyNow = this.shouldTriggerRegear();
+         if (lowSupplyNow) {
+            if (this.lowSupplyTicks == 0) {
+               this.lowSupplyFirstReason = this.lowSupplyReason();
+            }
+
+            this.lowSupplyTicks++;
+         } else if (this.lowSupplyTicks > 0) {
+            if ((Boolean)this.debugMessages.get()) {
+               this.info(
+                  "Supplies looked low for " + this.lowSupplyTicks + " ticks (" + this.lowSupplyFirstReason + ") and came back - no regear",
+                  new Object[0]
+               );
+            }
+
+            this.lowSupplyTicks = 0;
+         }
+
+         if (this.lowSupplyTicks >= 20) {
             // Never regear over lava, ever, and no time cap: the bot flies the Nether fine, so
             // when there is lava (or unreadable ground) below we simply do not start the regear —
             // Baritone keeps flying until real, solid (or water) ground is under us, and only then
@@ -916,7 +944,7 @@ public class AutoFlyingRegear extends Module {
 
                if (this.lavaPostponeTicks % 400 == 0 && (Boolean)this.debugMessages.get()) {
                   this.info(
-                     "Low on supplies but lava/unknown ground below - letting the flight continue until solid ground is under us",
+                     "Low on supplies but lava/unknown ground below (" + this.lowSupplyFirstReason + ") - letting the flight continue until solid ground is under us",
                      new Object[0]
                   );
                }
@@ -928,7 +956,7 @@ public class AutoFlyingRegear extends Module {
             this.beginRun();
             this.lavaPostponeTicks = 0;
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Low on supplies - initiating AutoFlyingRegear sequence", new Object[0]);
+               this.info("Low on supplies (" + this.lowSupplyFirstReason + ") - initiating AutoFlyingRegear sequence", new Object[0]);
             }
 
             this.savedYaw = this.mc.player.getYaw();
@@ -1564,6 +1592,7 @@ public class AutoFlyingRegear extends Module {
                this.mlepScaffold.toggle();
             }
 
+            this.wallsStarted = false;
             this.state = this.createWalls.get() ? AutoFlyingRegear.FlyingRegearState.CREATING_WALLS : AutoFlyingRegear.FlyingRegearState.CLEARING_ECHEST_AREA;
             this.timer = (Integer)this.placeDelay.get();
          } else {
@@ -1715,6 +1744,7 @@ public class AutoFlyingRegear extends Module {
                   this.state = AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM;
                   this.timer = 0;
                } else {
+                  this.wallsStarted = false;
                   this.state = this.createWalls.get() ? AutoFlyingRegear.FlyingRegearState.CREATING_WALLS : AutoFlyingRegear.FlyingRegearState.CLEARING_ECHEST_AREA;
                   this.timer = (Integer)this.placeDelay.get();
                }
@@ -1760,17 +1790,18 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handleCreatingWalls() {
-      if (this.stateTickCounter == 1) {
+      if (!this.wallsStarted) {
          Vec3d centerTarget = Vec3d.ofCenter(this.platformCenter);
          Vec3d playerPos = this.mc.player.getEntityPos();
          double distance = Math.sqrt(
             Math.pow(centerTarget.x - playerPos.x, 2.0) + Math.pow(centerTarget.z - playerPos.z, 2.0)
          );
-         if (distance > 0.5) {
+         if (distance > 0.5 && !this.wallsRecentered) {
             if ((Boolean)this.debugMessages.get()) {
                this.warning("Not centered for wall construction, re-centering", new Object[0]);
             }
 
+            this.wallsRecentered = true;
             this.state = AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM;
             this.timer = 0;
             return;
@@ -1786,6 +1817,7 @@ public class AutoFlyingRegear extends Module {
          this.wallBuildPhase = 0;
          this.verifyRounds = 0;
          this.clearFireInBox();
+         this.wallsStarted = true;
       }
 
       if (this.pendingBlocks.isEmpty() && this.timer == 0) {
@@ -2389,6 +2421,7 @@ public class AutoFlyingRegear extends Module {
             // things around: on 2026-09-07 a stack of rockets landed there and went into the
             // chest in place of the shulker. Park it in the inventory first, and swap next pass.
             if (this.clearShulkerSlot(var16, syncId)) {
+               this.processedShulkers.remove(targetType + "_slot_" + this.shulkerEnderSlot);
                this.timer = (Integer)this.clickDelay.get();
                return;
             }
@@ -4461,6 +4494,40 @@ public class AutoFlyingRegear extends Module {
       }
    }
 
+   private String lowSupplyReason() {
+      if (this.mc.player == null || this.mc.interactionManager == null) {
+         return "none";
+      }
+
+      List<String> reasons = new ArrayList<>();
+      int rockets = this.countRockets();
+      int validElytras = this.countValidElytras();
+      if (rockets < (Integer)this.minRockets.get()) {
+         reasons.add("rockets " + rockets + "/" + this.minRockets.get());
+      }
+
+      if (validElytras < (Integer)this.minElytras.get()) {
+         reasons.add("elytras " + validElytras + "/" + this.minElytras.get());
+      }
+
+      int gaps = this.countItem(Items.ENCHANTED_GOLDEN_APPLE);
+      if ((Integer)this.minGaps.get() > 0 && gaps < (Integer)this.minGaps.get()) {
+         reasons.add("gaps " + gaps + "/" + this.minGaps.get());
+      }
+
+      int totems = this.countItem(Items.TOTEM_OF_UNDYING);
+      if ((Integer)this.minTotems.get() > 0 && totems < (Integer)this.minTotems.get()) {
+         reasons.add("totems " + totems + "/" + this.minTotems.get());
+      }
+
+      int enderChests = this.countItem(Items.ENDER_CHEST);
+      if ((Integer)this.minEnderChests.get() > 0 && enderChests < (Integer)this.minEnderChests.get() && enderChests > 0) {
+         reasons.add("ender chests " + enderChests + "/" + this.minEnderChests.get());
+      }
+
+      return reasons.isEmpty() ? "none" : String.join(", ", reasons);
+   }
+
    private boolean shouldTriggerRegear() {
       if (this.mc.player != null && this.mc.interactionManager != null) {
          GameMode gameMode = this.mc.interactionManager.getCurrentGameMode();
@@ -5165,6 +5232,9 @@ public class AutoFlyingRegear extends Module {
       this.completeHandled = false;
       this.obsidianTopUpDecided = false;
       this.topUpChestsBroken = 0;
+      this.wallsStarted = false;
+      this.wallsRecentered = false;
+      this.lowSupplyTicks = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();
       run.lavaWaitSeconds = this.lavaPostponeTicks / 20;
