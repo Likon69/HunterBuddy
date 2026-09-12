@@ -63,17 +63,18 @@ Restocking, inventory handling, and stash transfer tools.
 
 | Meteor name | Description |
 |---|---|
-| `AutoFlyingRegear` | Creates a temporary platform and restocks rockets or elytras from an ender chest. |
+| `AutoFlyingRegear` | Lands on solid ground, never over lava, builds a walled box and restocks rockets, elytras and the other supplies it watches from an ender chest when one runs short. |
 | `ElytraSwap` | Swaps out an elytra when it reaches low durability. |
 | `PearlLoader` | Anti-AFK loop with pearl-loading support. |
 | `replenish` | Replenishes hotbar items using shift-click packets. |
 | `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
 | `stash-mover` | Moves items between selected input and output stash areas using pearl loading. |
 
-### Utility (14)
+### Utility (15)
 
 | Meteor name | Description |
 |---|---|
+| `auto-eat-sync` | Eats golden apples only, in a safe window while flying, fighting or surviving a regear, without ever pausing Baritone; always eats below an emergency health. |
 | `auto-exp-plus` | Repairs armor and tools with experience bottles, restocking bottles into a chosen hotbar slot. |
 | `auto-log-plus` | Additional logout triggers. |
 | `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
@@ -151,7 +152,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 ## Dependencies
 
 - **Xaero's Minimap / World Map (with XaeroPlus)** — compile-time libs under `libs/`; must be installed at runtime for `waypoint-follower`, chunk-radar's waypoint marks, and the `Travel` HUD.
-- **Baritone** — compiled against [meteordevelopment/baritone](https://github.com/meteordevelopment/baritone) (compile-only), but at runtime the elytra flight, `auto-portal`, and the regear/travel helpers are built for [our own fork](.reference/hunterbuddy-baritone), which carries the fixes those features actually need.
+- **Baritone** — compiled against [meteordevelopment/baritone](https://github.com/meteordevelopment/baritone) (compile-only), but at runtime the elytra flight, `auto-portal`, and the regear/travel helpers are built for [our own fork](https://github.com/Likon69/hunterbuddy-baritone), which carries the fixes those features actually need.
 
 ## Files and network
 
