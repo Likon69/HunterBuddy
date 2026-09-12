@@ -1432,6 +1432,14 @@ public class KillAuraPlus extends Module {
         return current;
     }
 
+    public boolean hasActiveTarget() {
+        return isActive() && current != null;
+    }
+
+    public boolean isAboutToAttack() {
+        return isActive() && current != null && switchTimer <= 0 && charged();
+    }
+
     /**
      * The yaw the walk has to be turned by, or {@code NaN} while there is nothing
      * to correct.
