@@ -45,6 +45,7 @@ import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -59,6 +60,7 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
@@ -494,6 +496,7 @@ public class AutoFlyingRegear extends Module {
    private int startupDelayTicks = 0;
    private boolean startupComplete = false;
    private AutoEat autoEatModule = null;
+   private AutoEatSync autoEatSyncModule = null;
    private int wallLayer = 0;
    private int wallBuildPhase = 0;
    private int verifyRounds = 0;
@@ -577,6 +580,7 @@ public class AutoFlyingRegear extends Module {
       }
       this.mlepMine = Modules.get().get(MlepMine.class);
       this.autoEatModule = (AutoEat)Modules.get().get(AutoEat.class);
+      this.autoEatSyncModule = Modules.get().get(AutoEatSync.class);
       if (this.mlepMine != null) {
          this.mlepMineWasActive = this.mlepMine.isActive();
       }
@@ -636,11 +640,15 @@ public class AutoFlyingRegear extends Module {
    }
 
    private boolean isAutoEating() {
-      if (this.autoEatModule == null) {
-         return false;
-      } else {
-         return !this.autoEatModule.isActive() ? false : this.autoEatModule.eating;
+      if (this.autoEatModule != null && this.autoEatModule.isActive() && this.autoEatModule.eating) {
+         return true;
       }
+
+      return this.autoEatSyncModule != null && this.autoEatSyncModule.isActive() && this.autoEatSyncModule.isEating();
+   }
+
+   public boolean isRunning() {
+      return this.isActive() && this.state != AutoFlyingRegear.FlyingRegearState.IDLE;
    }
 
    @EventHandler
@@ -1063,7 +1071,17 @@ public class AutoFlyingRegear extends Module {
       BlockPos beneath = this.mc.player.getBlockPos().down();
       BlockState blockState = this.mc.world.getBlockState(beneath);
       boolean isNether = this.mc.world.getRegistryKey() == World.NETHER;
+      if (this.mc.player.isInLava()) {
+         this.forceCompleteStuckState();
+         return;
+      }
+
       if (!blockState.isReplaceable() && blockState.isSolidBlock(this.mc.world, beneath)) {
+         if (this.hasLavaNearPlatform(beneath)) {
+            this.forceCompleteStuckState();
+            return;
+         }
+
          this.finishScaffoldLanding(beneath, "Detected solid ground at " + beneath.toShortString() + " - centering");
          return;
       }
@@ -1146,12 +1164,9 @@ public class AutoFlyingRegear extends Module {
       double dropHSpeed = Math.hypot(dropVelocity.x, dropVelocity.z);
       double driftPerBlock = dropHSpeed * this.ticksPerBlockOfFall();
       boolean driftTooHigh = driftPerBlock > DROP_MAX_DRIFT_PER_BLOCK;
-      // Never lay a platform over lava. The regear only ever commits over solid ground now
-      // (handleIdleState waits for it), so if lava is under us here we just hold and let the fall
-      // carry on to the solid ground the top of this method lands on, instead of building a box on
-      // a lake. The old "scaffold immediately over lava" is gone — that was the stupid part.
       AutoFlyingRegear.GroundScan dropGround = this.scanGroundBelow();
       if (dropGround.kind() == AutoFlyingRegear.GroundKind.LAVA) {
+         this.forceCompleteStuckState();
          return;
       }
 
@@ -1197,7 +1212,7 @@ public class AutoFlyingRegear extends Module {
 
       if (this.timer == 0 && this.scaffoldWaitTicks % 2 == 0) {
          this.prepareScaffoldBlocks();
-         if (this.placeBlockGrim(checkPos) || this.placeStructureBlock(checkPos, true)) {
+         if (this.placeBlockGrim(checkPos)) {
             if ((Boolean)this.debugMessages.get()) {
                this.info("AutoFlyingRegear placed fallback block at " + checkPos.toShortString(), new Object[0]);
             }
@@ -1311,6 +1326,92 @@ public class AutoFlyingRegear extends Module {
       }
 
       return new AutoFlyingRegear.GroundScan(AutoFlyingRegear.GroundKind.UNKNOWN, feet.getY() - bottomY);
+   }
+
+   private boolean hasLavaNearPlatform(BlockPos platform) {
+      for (int dx = -1; dx <= 2; dx++) {
+         for (int dz = -1; dz <= 2; dz++) {
+            for (int dy = 0; dy <= 1; dy++) {
+               BlockPos probe = platform.add(dx, dy, dz);
+               if (this.mc.world.getBlockState(probe).getFluidState().isIn(FluidTags.LAVA)) {
+                  return true;
+               }
+            }
+         }
+      }
+
+      return false;
+   }
+
+   private List<ItemEntity> itemEntitiesNear(BlockPos anchor, double radius) {
+      BlockPos center = anchor != null ? anchor : this.mc.player.getBlockPos();
+      Box box = new Box(center).expand(radius);
+      return this.mc.world.getEntitiesByClass(ItemEntity.class, box, e -> true);
+   }
+
+   private boolean hasLavaBelow(BlockPos pos, int depth) {
+      if (pos == null) {
+         return false;
+      }
+
+      for (int dy = 0; dy <= depth; dy++) {
+         if (this.mc.world.getBlockState(pos.down(dy)).getFluidState().isIn(FluidTags.LAVA)) {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   private int freeInventorySlots() {
+      int freeSlots = 0;
+
+      for (int i = 0; i < 36; i++) {
+         if (this.mc.player.getInventory().getStack(i).isEmpty()) {
+            freeSlots++;
+         }
+      }
+
+      return freeSlots;
+   }
+
+   private String locateShulkerState() {
+      ItemStack hotbarStack = this.mc.player.getInventory().getStack((Integer)this.shulkerHotbarSlot.get());
+      if (this.isShulkerBox(hotbarStack.getItem())) {
+         return "hand";
+      }
+
+      for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
+         if (this.isShulkerBox(this.mc.player.getInventory().getStack(i).getItem())) {
+            return "inv slot " + i;
+         }
+      }
+
+      for (ItemEntity entity : this.itemEntitiesNear(this.shulkerPlacePos, 3.0)) {
+         if (this.isShulkerBox(entity.getStack().getItem())) {
+            return "ground";
+         }
+      }
+
+      return "MISSING";
+   }
+
+   private boolean shulkerAccountedFor() {
+      return !"MISSING".equals(this.locateShulkerState());
+   }
+
+   private void logShulkerState(String step) {
+      if (!(Boolean)this.debugMessages.get()) {
+         return;
+      }
+
+      int freeSlots = this.freeInventorySlots();
+      int groundItems = this.itemEntitiesNear(this.shulkerPlacePos, 3.0).size();
+      boolean lavaBelow = this.hasLavaBelow(this.shulkerPlacePos, 4) || this.hasLavaBelow(this.platformCenter, 4);
+      this.info(
+         "shulker@" + step + ": freeSlots " + freeSlots + ", groundItems " + groundItems + " within 3, lavaBelow " + lavaBelow + ", shulker " + this.locateShulkerState(),
+         new Object[0]
+      );
    }
 
    private void handleCenteringOnPlatform() {
@@ -2065,25 +2166,7 @@ public class AutoFlyingRegear extends Module {
                ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(targetHotbarSlot);
             }
 
-            // Re-center before placing, the same way the shulker does. A ghast knocking the bot off
-            // the platform mid-placement was why the ender chest kept failing to place; walk back to
-            // the centre first and only place once within 0.3 of it.
-            Vec3d ecTargetCenter = Vec3d.ofCenter(this.platformCenter);
-            Vec3d ecPlayerPos = this.mc.player.getEntityPos();
-            double ecCenterDist = Math.hypot(ecTargetCenter.x - ecPlayerPos.x, ecTargetCenter.z - ecPlayerPos.z);
-            if (ecCenterDist > 0.3) {
-               IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
-               if (baritone != null && this.stateTickCounter % 10 == 0) {
-                  baritone.getCommandManager().execute("cancel");
-                  baritone.getCommandManager().execute(
-                     "goto " + this.platformCenter.getX() + " " + (this.platformCenter.getY() + 1) + " " + this.platformCenter.getZ()
-                  );
-               }
-
-               if ((Boolean)this.debugMessages.get() && this.stateTickCounter % 20 == 0) {
-                  this.warning("Re-centering before ender chest (distance: " + String.format("%.2f", ecCenterDist) + ")", new Object[0]);
-               }
-
+            if (!this.centerOnPlatform("ender chest")) {
                this.timer = 2;
                return;
             }
@@ -2376,22 +2459,24 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handlePositioningForShulker() {
-      if (this.stateTickCounter == 1) {
-         if ((Boolean)this.debugMessages.get()) {
-            this.info("Positioning for shulker placement", new Object[0]);
-         }
-
-         // MlepMine is never turned off by the regear, here or anywhere: the user's rule. While persistent it
-         // refused anyway, and a red warning in chat was all the attempts here ever did.
+      if (this.stateTickCounter == 1 && (Boolean)this.debugMessages.get()) {
+         this.info("Positioning for shulker placement", new Object[0]);
       }
 
+      if (this.centerOnPlatform("shulker")) {
+         this.state = AutoFlyingRegear.FlyingRegearState.ROTATING_FOR_SHULKER;
+         this.timer = 10;
+      }
+   }
+
+   private boolean centerOnPlatform(String label) {
       Vec3d targetCenter = Vec3d.ofCenter(this.platformCenter);
       Vec3d playerPos = this.mc.player.getEntityPos();
       double deltaX = targetCenter.x - playerPos.x;
       double deltaZ = targetCenter.z - playerPos.z;
       double horizontalDistance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+      IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
       if (horizontalDistance < 0.2) {
-         IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null) {
             baritone.getPathingBehavior().cancelEverything();
             baritone.getCommandManager().execute("cancel");
@@ -2403,13 +2488,11 @@ public class AutoFlyingRegear extends Module {
          this.mc.options.rightKey.setPressed(false);
          this.mc.options.sneakKey.setPressed(false);
          if ((Boolean)this.debugMessages.get()) {
-            this.info("Centered for shulker (distance: " + String.format("%.3f", horizontalDistance) + ")", new Object[0]);
+            this.info("Centered for " + label + " (distance: " + String.format("%.3f", horizontalDistance) + ")", new Object[0]);
          }
 
-         this.state = AutoFlyingRegear.FlyingRegearState.ROTATING_FOR_SHULKER;
-         this.timer = 10;
+         return true;
       } else if (this.stateTickCounter <= 5) {
-         IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null) {
             baritone.getCommandManager().execute("cancel");
             baritone.getCommandManager()
@@ -2417,15 +2500,16 @@ public class AutoFlyingRegear extends Module {
                   "goto " + this.platformCenter.getX() + " " + (this.platformCenter.getY() + 1) + " " + this.platformCenter.getZ()
                );
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Baritone goto for shulker - distance: " + String.format("%.2f", horizontalDistance), new Object[0]);
+               this.info("Baritone goto for " + label + " - distance: " + String.format("%.2f", horizontalDistance), new Object[0]);
             }
          }
+
+         return false;
       } else {
-         IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          boolean baritoneActive = baritone != null && baritone.getPathingBehavior().isPathing();
          if (!baritoneActive && this.stateTickCounter > 20) {
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Using manual movement for shulker positioning", new Object[0]);
+               this.info("Using manual movement for " + label + " positioning", new Object[0]);
             }
 
             float targetYaw = (float)Math.toDegrees(Math.atan2(-deltaX, deltaZ));
@@ -2448,7 +2532,7 @@ public class AutoFlyingRegear extends Module {
 
          if (this.stateTickCounter > 150) {
             if ((Boolean)this.debugMessages.get()) {
-               this.warning("Shulker positioning timeout", new Object[0]);
+               this.warning(label + " positioning timeout", new Object[0]);
             }
 
             if (baritone != null) {
@@ -2457,9 +2541,10 @@ public class AutoFlyingRegear extends Module {
 
             this.mc.options.forwardKey.setPressed(false);
             this.mc.options.sneakKey.setPressed(false);
-            this.state = AutoFlyingRegear.FlyingRegearState.ROTATING_FOR_SHULKER;
-            this.timer = 10;
+            return true;
          }
+
+         return false;
       }
    }
 
@@ -2593,6 +2678,7 @@ public class AutoFlyingRegear extends Module {
             this.info("Shulker placed upright successfully", new Object[0]);
          }
 
+         this.logShulkerState("placed");
          this.state = AutoFlyingRegear.FlyingRegearState.OPENING_SHULKER;
          this.timer = (Integer)this.containerOpenDelay.get();
          this.placementAttempts = 0;
@@ -2667,6 +2753,7 @@ public class AutoFlyingRegear extends Module {
       this.transferSlotIndex = 0;
       this.transferStep = 0;
       this.timer = (Integer)this.containerOpenDelay.get();
+      this.logShulkerState("opened");
       if ((Boolean)this.debugMessages.get()) {
          this.info("Opening shulker", new Object[0]);
       }
@@ -2743,6 +2830,7 @@ public class AutoFlyingRegear extends Module {
                   this.info("Inventory nearly full (only " + emptySlots + " empty slots), stopping " + itemType + " transfer", new Object[0]);
                }
 
+               this.logShulkerState("transfer-full");
                this.mc.player.closeHandledScreen();
                this.state = AutoFlyingRegear.FlyingRegearState.BREAKING_SHULKER;
                this.timer = (Integer)this.breakDelay.get();
@@ -2786,6 +2874,7 @@ public class AutoFlyingRegear extends Module {
                               this.info("Inventory nearly full, stopping elytra transfer with " + currentValidElytras + "/" + this.goalElytras.get(), new Object[0]);
                            }
 
+                           this.logShulkerState("transfer-full");
                            this.mc.player.closeHandledScreen();
                            this.state = AutoFlyingRegear.FlyingRegearState.BREAKING_SHULKER;
                            this.timer = (Integer)this.breakDelay.get();
@@ -2976,6 +3065,7 @@ public class AutoFlyingRegear extends Module {
             this.info("Shulker broken - immediately walking to pickup", new Object[0]);
          }
 
+         this.logShulkerState("broken");
          IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null) {
             baritone.getPathingBehavior().cancelEverything();
@@ -3006,12 +3096,17 @@ public class AutoFlyingRegear extends Module {
    }
 
    private void handleWaitShulkerPickup() {
+      if (this.stateTickCounter == 1) {
+         this.logShulkerState("pickup-start");
+      }
+
       ItemStack hotbarStack = this.mc.player.getInventory().getStack((Integer)this.shulkerHotbarSlot.get());
       if (this.isShulkerBox(hotbarStack.getItem())) {
          if ((Boolean)this.debugMessages.get()) {
             this.info("Shulker picked up in hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
          }
 
+         this.logShulkerState("picked-up");
          IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null && baritone.getPathingBehavior().isPathing()) {
             baritone.getPathingBehavior().cancelEverything();
@@ -3108,11 +3203,8 @@ public class AutoFlyingRegear extends Module {
             }
          }
 
-         if (this.stateTickCounter > 120) {
-            if ((Boolean)this.debugMessages.get()) {
-               this.warning("Shulker pickup timeout (120 ticks) - shulker not found, moving to next", new Object[0]);
-            }
-
+         if (this.stateTickCounter > 200 && !this.shulkerAccountedFor()) {
+            this.warning("shulker lost — no shulker in hand, inventory or on the ground; aborting shulker return", new Object[0]);
             this.shulkerPickupAttempts = 0;
 
             try {
@@ -3241,6 +3333,7 @@ public class AutoFlyingRegear extends Module {
                this.info("Shulker successfully returned to ender chest", new Object[0]);
             }
 
+            this.logShulkerState("returned");
             this.mc.player.closeHandledScreen();
             this.state = AutoFlyingRegear.FlyingRegearState.CHECK_NEXT_SHULKER;
             this.timer = (Integer)this.clickDelay.get();

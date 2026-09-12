@@ -304,10 +304,6 @@ public class MlepScaffold extends Module {
             hit = PlacementUtils.resolvePlaceHit(pos, REACH);
          }
 
-         if (hit == null) {
-            hit = PlacementUtils.getGrimDirectionalHit(pos, Direction.DOWN);
-         }
-
          if (hit != null) {
             float[] rotations = RotationUtils.getRotationsTo(this.mc.player.getEyePos(), hit.getPos());
             RotationUtils.getInstance().setRotationFullInstant(rotations[0], rotations[1]);
