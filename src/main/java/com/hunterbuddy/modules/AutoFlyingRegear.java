@@ -481,6 +481,7 @@ public class AutoFlyingRegear extends Module {
    private AutoFlyingRegear.FlyingRegearState lastState = AutoFlyingRegear.FlyingRegearState.IDLE;
    /** Guards the once-only COMPLETE work; reset per regear, set the first time handleComplete runs. */
    private boolean completeHandled;
+   private boolean platformBuildAborted;
    private final int maxStateTimeout = 600;
    private final Map<String, Module> flightModules = new HashMap<>();
    private final Set<String> disabledModules = new HashSet<>();
@@ -879,7 +880,11 @@ public class AutoFlyingRegear extends Module {
    private void forceCompleteStuckState() {
       if ((Boolean)this.debugMessages.get()) {
          this.event("timeout in " + this.getPhaseLabel().toLowerCase(java.util.Locale.ROOT) + ", forcing on");
-         this.error("Unexpected state timeout in " + this.state + " after 30 seconds. Force completing...", new Object[0]);
+         this.error("Unexpected state timeout in " + this.state + " after " + String.format("%.1f", this.stateTickCounter / 20.0) + " seconds. Force completing...", new Object[0]);
+      }
+
+      if (this.state == AutoFlyingRegear.FlyingRegearState.CREATING_INITIAL_PLATFORM) {
+         this.platformBuildAborted = true;
       }
 
       this.platformPlacementAttempts.clear();
@@ -1532,7 +1537,21 @@ public class AutoFlyingRegear extends Module {
          }
 
          if (this.stateTickCounter > 200) {
-            if ((Boolean)this.debugMessages.get()) {
+            BlockPos beneath = this.mc.player.getBlockPos().down();
+            BlockState beneathState = this.mc.world.getBlockState(beneath);
+            if (!this.wallsStarted
+               && this.mc.player.isOnGround()
+               && !this.mc.player.isTouchingWater()
+               && !this.mc.player.isInLava()
+               && beneath.getY() < this.platformCenter.getY()
+               && !beneathState.isReplaceable()
+               && beneathState.isSolidBlock(this.mc.world, beneath)
+               && !this.hasLavaNearPlatform(beneath)) {
+               this.platformCenter = beneath;
+               if ((Boolean)this.debugMessages.get()) {
+                  this.warning("Centering timeout, proceeding anyway - platform set to the block under the feet at " + beneath.toShortString(), new Object[0]);
+               }
+            } else if ((Boolean)this.debugMessages.get()) {
                this.warning("Centering timeout, proceeding anyway", new Object[0]);
             }
 
@@ -4390,7 +4409,11 @@ public class AutoFlyingRegear extends Module {
          this.completeHandled = true;
          this.endRun(this.pendingOutcome != null ? this.pendingOutcome : "complete");
          if ((Boolean)this.debugMessages.get()) {
-            this.info("AutoFlyingRegear complete! Rockets: " + this.countRockets() + " Elytras: " + this.countValidElytras(), new Object[0]);
+            this.info(
+               (this.platformBuildAborted ? "AutoFlyingRegear aborted (platform could not be built) - Rockets: " : "AutoFlyingRegear complete! Rockets: ")
+                  + this.countRockets() + " Elytras: " + this.countValidElytras(),
+               new Object[0]
+            );
          }
 
          this.mc.options.forwardKey.setPressed(false);
@@ -5230,6 +5253,7 @@ public class AutoFlyingRegear extends Module {
 
    private void beginRun() {
       this.completeHandled = false;
+      this.platformBuildAborted = false;
       this.obsidianTopUpDecided = false;
       this.topUpChestsBroken = 0;
       this.wallsStarted = false;
