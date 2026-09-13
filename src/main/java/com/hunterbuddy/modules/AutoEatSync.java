@@ -41,7 +41,7 @@ public class AutoEatSync extends Module {
 
     private final Setting<Double> emergencyHealth = sgGeneral.add(new DoubleSetting.Builder()
         .name("emergency-health")
-        .description("At or below this many health points (2 points = 1 heart), eat no matter what: collisions, low flight speed and KillAuraPlus no longer hold back or cut the meal, and it retries right after a rocket takes the hand. Baritone is never paused; its rockets still take the hand.")
+        .description("At or below this many health points (2 points = 1 heart), eat no matter what: collisions, low flight speed and KillAuraPlus no longer hold back or cut the meal, even once health climbs back above this during it. An enchanted golden apple is eaten first, before any other food. For up to 2 seconds while the meal lasts, Baritone keeps steering in flight but lights no rocket, and stops completely on the ground, in lava or in water; in lava only while the meal is an enchanted golden apple, the one that gives fire resistance.")
         .defaultValue(8.0)
         .min(0.0)
         .sliderRange(0.0, 20.0)
@@ -111,9 +111,12 @@ public class AutoEatSync extends Module {
     private boolean restartSent;
     private int handRetryAfterTick;
     private int noBiteRetryAfterTick;
+    private boolean emergencyMeal;
+    private boolean fireworksHeld;
+    private boolean holdUnavailable;
 
     public AutoEatSync() {
-        super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-eat-sync", "Eats gap apples without ever pausing Baritone or the fly, dodging AutoFlyingRegear, rocket windows and KillAuraPlus swings.");
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "auto-eat-sync", "Eats gap apples without pausing Baritone or the fly, dodging AutoFlyingRegear, rocket windows and KillAuraPlus swings, except at emergency health, where it eats first and Baritone waits.");
     }
 
     @Override
@@ -126,11 +129,13 @@ public class AutoEatSync extends Module {
         lastWantEatLogTick = -1000;
         handRetryAfterTick = 0;
         noBiteRetryAfterTick = 0;
+        emergencyMeal = false;
     }
 
     @Override
     public void onDeactivate() {
         if (eating) stopEating("disabled");
+        holdBaritoneFireworks(false);
     }
 
     @EventHandler
@@ -143,7 +148,7 @@ public class AutoEatSync extends Module {
         }
 
         if (regearRunning()) {
-            boolean healthCritical = (eatInRegearSurvival.get() && mc.player.getHealth() <= healthThreshold.get()) || emergency();
+            boolean healthCritical = (eatInRegearSurvival.get() && mc.player.getHealth() <= healthThreshold.get()) || emergency() || emergencyMeal;
             if (!healthCritical) {
                 if (eating) stopEating("regear");
                 return;
@@ -156,6 +161,11 @@ public class AutoEatSync extends Module {
                 stopEating("hand-taken");
                 handRetryAfterTick = tickCounter + 60;
                 return;
+            }
+
+            if (!emergencyMeal && emergency()) {
+                emergencyMeal = true;
+                holdBaritoneFireworks(emergencyHoldWanted());
             }
 
             if (!shouldEat()) {
@@ -188,6 +198,7 @@ public class AutoEatSync extends Module {
                 }
             }
 
+            if (emergencyMeal) holdBaritoneFireworks(emergencyHoldWanted());
             continueEating();
             return;
         }
@@ -212,7 +223,7 @@ public class AutoEatSync extends Module {
 
     private boolean shouldEat() {
         boolean hungerLow = mc.player.getHungerManager().getFoodLevel() <= hungerThreshold.get();
-        boolean healthLow = mc.player.getHealth() <= healthThreshold.get() || emergency();
+        boolean healthLow = mc.player.getHealth() <= healthThreshold.get() || emergency() || emergencyMeal;
         if (!hungerLow && !healthLow) return false;
 
         return findSlot() != -1;
@@ -223,7 +234,7 @@ public class AutoEatSync extends Module {
     }
 
     private boolean mustStop() {
-        if (emergency()) return false;
+        if (emergency() || emergencyMeal) return false;
         return elytraMustStop() || combatMustStop();
     }
 
@@ -314,6 +325,11 @@ public class AutoEatSync extends Module {
     }
 
     private int findSlot() {
+        if (emergency() || emergencyMeal) {
+            int gapSlot = findEnchantedGap();
+            if (gapSlot != -1) return gapSlot;
+        }
+
         if (isEdible(mc.player.getOffHandStack())) return SlotUtils.OFFHAND;
 
         int slot = findInRange(SlotUtils.HOTBAR_START, SlotUtils.HOTBAR_END);
@@ -328,6 +344,26 @@ public class AutoEatSync extends Module {
         }
 
         return -1;
+    }
+
+    private int findEnchantedGap() {
+        if (mc.player.getOffHandStack().getItem() == Items.ENCHANTED_GOLDEN_APPLE) return SlotUtils.OFFHAND;
+
+        for (int i = SlotUtils.HOTBAR_START; i <= SlotUtils.HOTBAR_END; i++) {
+            if (mc.player.getInventory().getStack(i).getItem() == Items.ENCHANTED_GOLDEN_APPLE) return i;
+        }
+
+        if (InvUtils.find(ItemStack::isEmpty, SlotUtils.HOTBAR_START, SlotUtils.HOTBAR_END).slot() == -1) return -1;
+
+        for (int i = SlotUtils.MAIN_START; i <= SlotUtils.MAIN_END; i++) {
+            if (mc.player.getInventory().getStack(i).getItem() == Items.ENCHANTED_GOLDEN_APPLE) return i;
+        }
+
+        return -1;
+    }
+
+    private boolean emergencyHoldWanted() {
+        return !mc.player.isInLava() || stackAt(eatSlot).getItem() == Items.ENCHANTED_GOLDEN_APPLE;
     }
 
     private boolean changeSlot(int slot) {
@@ -362,12 +398,14 @@ public class AutoEatSync extends Module {
         eatTicks = 0;
         wasUsingItem = false;
         restartSent = false;
+        emergencyMeal = emergency();
+        if (emergencyMeal) holdBaritoneFireworks(emergencyHoldWanted());
 
         if (debug.get()) {
             Vec3d velocity = mc.player.getVelocity();
             double hSpeed = Math.hypot(velocity.x, velocity.z);
             info("[AutoEatSync] eating " + stackAt(eatSlot).getItem().getName().getString() + " — context " + currentContext()
-                + (emergency() ? ", emergency" : "")
+                + (emergencyMeal ? (fireworksHeld ? ", emergency, baritone rockets held" : ", emergency") : "")
                 + ", hunger " + mc.player.getHungerManager().getFoodLevel() + ", health " + mc.player.getHealth()
                 + ", speed " + String.format("%.2f", hSpeed) + " b/t");
         }
@@ -395,13 +433,28 @@ public class AutoEatSync extends Module {
 
     private void stopEating(String reason) {
         if (debug.get()) info("[AutoEatSync] aborted after " + eatTicks + " ticks — reason " + reason);
+        emergencyMeal = false;
+        holdBaritoneFireworks(false);
 
-        if (eatSlot != SlotUtils.OFFHAND && prevSlot != -1) changeSlot(prevSlot);
+        if (mc.player != null && eatSlot != SlotUtils.OFFHAND && prevSlot != -1) changeSlot(prevSlot);
 
         mc.options.useKey.setPressed(false);
         eating = false;
         eatSlot = -1;
         prevSlot = -1;
         eatTicks = 0;
+    }
+
+    private void holdBaritoneFireworks(boolean hold) {
+        if (hold == fireworksHeld || holdUnavailable) return;
+        try {
+            Object settings = baritone.api.BaritoneAPI.getSettings();
+            Object setting = settings.getClass().getField("elytraHoldFireworks").get(settings);
+            setting.getClass().getField("value").set(setting, hold);
+            fireworksHeld = hold;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            holdUnavailable = true;
+            info("[AutoEatSync] baritone has no elytraHoldFireworks setting - its rockets can still take the hand during an emergency meal");
+        }
     }
 }
