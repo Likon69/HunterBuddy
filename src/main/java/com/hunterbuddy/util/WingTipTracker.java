@@ -26,6 +26,8 @@ public final class WingTipTracker {
 
     public static volatile Vec3d leftWorld;
     public static volatile Vec3d rightWorld;
+    public static volatile Vec3d leftBody;
+    public static volatile Vec3d rightBody;
     private static volatile long leftCapturedAt;
     private static volatile long rightCapturedAt;
 
@@ -47,5 +49,40 @@ public final class WingTipTracker {
 
     public static boolean rightFresh(long now) {
         return rightWorld != null && now - rightCapturedAt < FRESH_MS;
+    }
+
+    public static void captureBody(Vec3d left, Vec3d right) {
+        leftBody = left;
+        rightBody = right;
+    }
+
+    public static float glidingProgress(float glidingTicks) {
+        return Math.max(0.0F, Math.min(1.0F, glidingTicks * glidingTicks / 100.0F));
+    }
+
+    public static float glideAngle(float glidingProgress, float pitch) {
+        return glidingProgress * (-90.0F - pitch);
+    }
+
+    public static Vec3d toBody(Vec3d offset, float bodyYaw, float glideAngle) {
+        return rotateX(rotateY(offset, -(180.0 - bodyYaw)), -glideAngle);
+    }
+
+    public static Vec3d toWorld(Vec3d body, float bodyYaw, float glideAngle) {
+        return rotateY(rotateX(body, glideAngle), 180.0 - bodyYaw);
+    }
+
+    private static Vec3d rotateX(Vec3d v, double degrees) {
+        double rad = Math.toRadians(degrees);
+        double cos = Math.cos(rad);
+        double sin = Math.sin(rad);
+        return new Vec3d(v.x, cos * v.y - sin * v.z, sin * v.y + cos * v.z);
+    }
+
+    private static Vec3d rotateY(Vec3d v, double degrees) {
+        double rad = Math.toRadians(degrees);
+        double cos = Math.cos(rad);
+        double sin = Math.sin(rad);
+        return new Vec3d(cos * v.x + sin * v.z, v.y, -sin * v.x + cos * v.z);
     }
 }
