@@ -101,10 +101,16 @@ public class AutoEatSync extends Module {
         .build()
     );
 
+    private static final int MAX_MEAL_TICKS = 60;
+    private static final int MAX_HOLD_TICKS = 40;
+    private static final int FALLBACK_USE_TIME = 30;
+
     private boolean eating;
     private int eatSlot = -1;
     private int prevSlot = -1;
     private int eatTicks;
+    private int mealUseTime;
+    private int biteStartTick;
     private int tickCounter;
     private int lastWantEatLogTick = -1000;
     private boolean wasUsingItem;
@@ -113,6 +119,8 @@ public class AutoEatSync extends Module {
     private int noBiteRetryAfterTick;
     private boolean emergencyMeal;
     private boolean fireworksHeld;
+    private int fireworksHeldSinceTick;
+    private boolean fireworksHoldExpired;
     private boolean holdUnavailable;
 
     public AutoEatSync() {
@@ -125,11 +133,15 @@ public class AutoEatSync extends Module {
         eatSlot = -1;
         prevSlot = -1;
         eatTicks = 0;
+        mealUseTime = 0;
+        biteStartTick = 0;
         tickCounter = 0;
         lastWantEatLogTick = -1000;
         handRetryAfterTick = 0;
         noBiteRetryAfterTick = 0;
         emergencyMeal = false;
+        fireworksHeldSinceTick = 0;
+        fireworksHoldExpired = false;
     }
 
     @Override
@@ -141,6 +153,11 @@ public class AutoEatSync extends Module {
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         tickCounter++;
+
+        if (fireworksHeld && tickCounter - fireworksHeldSinceTick >= MAX_HOLD_TICKS) {
+            fireworksHoldExpired = true;
+            holdBaritoneFireworks(false);
+        }
 
         if (mc.player == null || mc.world == null || !mc.player.isAlive()) {
             if (eating) stopEating("disabled");
@@ -175,7 +192,13 @@ public class AutoEatSync extends Module {
 
             eatTicks++;
 
-            if (!wasUsingItem && eatTicks >= 20) {
+            if (eatTicks > MAX_MEAL_TICKS) {
+                stopEating("meal-timeout");
+                noBiteRetryAfterTick = tickCounter + 60;
+                return;
+            }
+
+            if (!wasUsingItem && tickCounter - biteStartTick >= 20) {
                 stopEating("no-bite");
                 noBiteRetryAfterTick = tickCounter + 60;
                 return;
@@ -196,11 +219,17 @@ public class AutoEatSync extends Module {
                     stopEating("disabled");
                     return;
                 }
+                mealUseTime = useTimeOf(stackAt(eatSlot));
             }
 
             if (emergencyMeal) holdBaritoneFireworks(emergencyHoldWanted());
             continueEating();
             return;
+        }
+
+        if (emergencyMeal && !emergency()) {
+            emergencyMeal = false;
+            holdBaritoneFireworks(false);
         }
 
         boolean wantsToEat = shouldEat();
@@ -388,7 +417,7 @@ public class AutoEatSync extends Module {
     }
 
     private void beginEating(int slot) {
-        prevSlot = mc.player.getInventory().getSelectedSlot();
+        if (prevSlot == -1) prevSlot = mc.player.getInventory().getSelectedSlot();
         if (!changeSlot(slot)) return;
 
         mc.options.useKey.setPressed(true);
@@ -396,9 +425,12 @@ public class AutoEatSync extends Module {
 
         eating = true;
         eatTicks = 0;
+        mealUseTime = useTimeOf(stackAt(eatSlot));
+        biteStartTick = tickCounter;
         wasUsingItem = false;
         restartSent = false;
         emergencyMeal = emergency();
+        fireworksHoldExpired = false;
         if (emergencyMeal) holdBaritoneFireworks(emergencyHoldWanted());
 
         if (debug.get()) {
@@ -420,8 +452,17 @@ public class AutoEatSync extends Module {
         }
 
         if (wasUsingItem) {
-            if (debug.get()) info("[AutoEatSync] finished after " + eatTicks + " ticks");
-            stopEating("finished");
+            if (eatTicks >= mealUseTime) {
+                if (debug.get()) info("[AutoEatSync] finished after " + eatTicks + " ticks");
+                stopEating("finished");
+                return;
+            }
+
+            wasUsingItem = false;
+            restartSent = false;
+            biteStartTick = tickCounter;
+            Utils.rightClick();
+            if (debug.get()) info("[AutoEatSync] bite cut after " + eatTicks + " of " + mealUseTime + " ticks — biting again");
             return;
         }
 
@@ -431,27 +472,45 @@ public class AutoEatSync extends Module {
         }
     }
 
+    private int useTimeOf(ItemStack stack) {
+        int useTime = stack.getMaxUseTime(mc.player);
+        return useTime > 0 ? useTime : FALLBACK_USE_TIME;
+    }
+
+    private boolean isInterruption(String reason) {
+        return switch (reason) {
+            case "finished", "satisfied", "disabled", "regear" -> false;
+            default -> true;
+        };
+    }
+
     private void stopEating(String reason) {
         if (debug.get()) info("[AutoEatSync] aborted after " + eatTicks + " ticks — reason " + reason);
-        emergencyMeal = false;
-        holdBaritoneFireworks(false);
 
-        if (mc.player != null && eatSlot != SlotUtils.OFFHAND && prevSlot != -1) changeSlot(prevSlot);
+        if (!(mc.player != null && emergency() && isInterruption(reason))) {
+            emergencyMeal = false;
+            holdBaritoneFireworks(false);
+
+            if (mc.player != null && eatSlot != SlotUtils.OFFHAND && prevSlot != -1) changeSlot(prevSlot);
+
+            prevSlot = -1;
+        }
 
         mc.options.useKey.setPressed(false);
         eating = false;
         eatSlot = -1;
-        prevSlot = -1;
         eatTicks = 0;
     }
 
     private void holdBaritoneFireworks(boolean hold) {
+        if (hold && fireworksHoldExpired) return;
         if (hold == fireworksHeld || holdUnavailable) return;
         try {
             Object settings = baritone.api.BaritoneAPI.getSettings();
             Object setting = settings.getClass().getField("elytraHoldFireworks").get(settings);
             setting.getClass().getField("value").set(setting, hold);
             fireworksHeld = hold;
+            if (hold) fireworksHeldSinceTick = tickCounter;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
             holdUnavailable = true;
             info("[AutoEatSync] baritone has no elytraHoldFireworks setting - its rockets can still take the hand during an emergency meal");
