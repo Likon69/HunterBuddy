@@ -246,6 +246,10 @@ public class Shader extends Module {
         return e != null && glowTargets.contains(e);
     }
 
+    public boolean selfEnabled() {
+        return self.get();
+    }
+
     // --- Glow post-process (see com.hunterbuddy.render.HbGlowShader) ---
 
     /** True when the post-process pass has anything to do at all. */

@@ -16,6 +16,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
@@ -174,6 +175,10 @@ public class FlightTrail extends Module {
 
     /** Null until the first frame spent gliding; then true/false, logged on every change - see onRender3D. */
     private Boolean lastPrecise = null;
+    private boolean lastShape;
+    private Vec3d leftShape;
+    private Vec3d rightShape;
+    private ClientWorld shapeWorld;
 
     public FlightTrail() {
         super(HunterBuddyAddon.VISUALS_CATEGORY, "FlightTrail",
@@ -184,6 +189,8 @@ public class FlightTrail extends Module {
     public void onDeactivate() {
         left.clear();
         right.clear();
+        leftShape = null;
+        rightShape = null;
     }
 
     @EventHandler
@@ -192,13 +199,19 @@ public class FlightTrail extends Module {
 
         long now = System.currentTimeMillis();
 
+        if (!mc.player.isGliding() || mc.world != shapeWorld) {
+            leftShape = null;
+            rightShape = null;
+            shapeWorld = mc.world;
+        }
+
         // Only grows while actually gliding; pruning below still runs every tick, so a trail already
         // laid down keeps fading out on landing instead of vanishing the instant the glide ends.
         if (mc.player.isGliding()) {
             float yaw = mc.player.getYaw();
             float pitch = mc.player.getPitch();
             Vec3d look = lookVector(yaw, pitch);
-            Vec3d[] wingtips = wingtipPositions(yaw, pitch, mc.player.getEntityPos(), now);
+            Vec3d[] wingtips = wingtipPositions(yaw, pitch, mc.player.getEntityPos(), now, 1.0F);
             Vec3d gap = look.multiply(-trailGap.get());
             double smokeFrac = smokeFraction(speedFraction());
 
@@ -280,9 +293,22 @@ public class FlightTrail extends Module {
      * fresh, the yaw/pitch estimate otherwise. {@code bodyPos} is the feet position to build the estimate
      * from - interpolated in {@link #onRender3D}, the plain tick position in {@link #onTick}.
      */
-    private static Vec3d[] wingtipPositions(float yaw, float pitch, Vec3d bodyPos, long now) {
+    private Vec3d[] wingtipPositions(float yaw, float pitch, Vec3d bodyPos, long now, float tickDelta) {
         if (WingTipTracker.leftFresh(now) && WingTipTracker.rightFresh(now)) {
+            if (WingTipTracker.leftBody != null && WingTipTracker.rightBody != null) {
+                leftShape = WingTipTracker.leftBody;
+                rightShape = WingTipTracker.rightBody;
+            }
             return new Vec3d[] {WingTipTracker.leftWorld, WingTipTracker.rightWorld};
+        }
+
+        if (leftShape != null && rightShape != null) {
+            float bodyYaw = MathHelper.lerpAngleDegrees(tickDelta, mc.player.lastBodyYaw, mc.player.bodyYaw);
+            float glideAngle = WingTipTracker.glideAngle(WingTipTracker.glidingProgress(mc.player.getGlidingTicks() + tickDelta), pitch);
+            return new Vec3d[] {
+                bodyPos.add(WingTipTracker.toWorld(leftShape, bodyYaw, glideAngle)),
+                bodyPos.add(WingTipTracker.toWorld(rightShape, bodyYaw, glideAngle))
+            };
         }
 
         Vec3d look = lookVector(yaw, pitch);
@@ -317,14 +343,18 @@ public class FlightTrail extends Module {
             // Same helper onTick uses for its committed history, with the same freshness check: the two ends
             // of the trail must always agree on where the wingtip is, or the join between them kinks.
             boolean precise = WingTipTracker.leftFresh(now) && WingTipTracker.rightFresh(now);
-            Vec3d[] wingtips = wingtipPositions(yaw, pitch, mc.player.getLerpedPos(event.tickDelta), now);
+            Vec3d[] wingtips = wingtipPositions(yaw, pitch, mc.player.getLerpedPos(event.tickDelta), now, event.tickDelta);
             leftWingtip = wingtips[0];
             rightWingtip = wingtips[1];
 
-            if (this.lastPrecise == null || this.lastPrecise != precise) {
+            boolean shape = !precise && leftShape != null && rightShape != null;
+            if (this.lastPrecise == null || this.lastPrecise != precise || this.lastShape != shape) {
                 this.lastPrecise = precise;
+                this.lastShape = shape;
                 this.info(precise
                     ? "Wingtip position: exact (reading the elytra model directly)"
+                    : shape
+                    ? "Wingtip position: last exact shape (model not drawn)"
                     : "Wingtip position: estimated (exact position unavailable - first person? adjust wingtip-height/pullback/offset)");
             }
 

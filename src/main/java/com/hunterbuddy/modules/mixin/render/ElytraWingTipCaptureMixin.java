@@ -44,6 +44,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class ElytraWingTipCaptureMixin {
     /** Generous on purpose: only needs to rule out a stranger standing yards away, not pin the exact tick. */
     private static final double POSITION_MATCH_RADIUS_SQ = 9.0;
+    private static final double WING_TIP_RADIUS_SQ = 9.0;
 
     @Inject(
         method = "render(Lnet/minecraft/client/render/command/OrderedRenderCommandQueueImpl$ModelCommand;Lnet/minecraft/client/render/RenderLayer;Lnet/minecraft/client/render/VertexConsumer;Lnet/minecraft/client/render/OutlineVertexConsumerProvider;Lnet/minecraft/client/render/VertexConsumerProvider$Immediate;)V",
@@ -85,12 +86,28 @@ public abstract class ElytraWingTipCaptureMixin {
         MatrixStack matrices = new MatrixStack();
         matrices.push();
         matrices.peek().copy(command.matricesEntry());
-        hb$captureWing(matrices, accessor.getLeftWing(), WingTipTracker.LEFT_LOCAL_TIP, now, true);
-        hb$captureWing(matrices, accessor.getRightWing(), WingTipTracker.RIGHT_LOCAL_TIP, now, false);
+        Vec3d left = hb$captureWing(matrices, accessor.getLeftWing(), WingTipTracker.LEFT_LOCAL_TIP);
+        Vec3d right = hb$captureWing(matrices, accessor.getRightWing(), WingTipTracker.RIGHT_LOCAL_TIP);
         matrices.pop();
+
+        Vec3d origin = new Vec3d(bipedState.x, bipedState.y, bipedState.z);
+        if (left.squaredDistanceTo(origin) > WING_TIP_RADIUS_SQ || right.squaredDistanceTo(origin) > WING_TIP_RADIUS_SQ) return;
+
+        WingTipTracker.captureLeft(left, now);
+        WingTipTracker.captureRight(right, now);
+
+        if (state instanceof PlayerEntityRenderState glidingState && glidingState.isGliding) {
+            float glideAngle = WingTipTracker.glideAngle(glidingState.getGlidingProgress(), glidingState.pitch);
+            WingTipTracker.captureBody(
+                WingTipTracker.toBody(left.subtract(origin), glidingState.bodyYaw, glideAngle),
+                WingTipTracker.toBody(right.subtract(origin), glidingState.bodyYaw, glideAngle)
+            );
+        } else {
+            WingTipTracker.captureBody(null, null);
+        }
     }
 
-    private static void hb$captureWing(MatrixStack matrices, ModelPart wing, Vec3d local, long now, boolean isLeft) {
+    private static Vec3d hb$captureWing(MatrixStack matrices, ModelPart wing, Vec3d local) {
         matrices.push();
         // The same real transform the wing itself is about to render with, read one tick early instead of
         // guessed at: pivot, then the pitch/roll/yaw the game already computed for this exact frame.
@@ -105,9 +122,7 @@ public abstract class ElytraWingTipCaptureMixin {
         Vec3d cameraPos = MinecraftClient.getInstance().gameRenderer.getCamera().getCameraPos();
         Vec3d world = new Vec3d(point.x() + cameraPos.x, point.y() + cameraPos.y, point.z() + cameraPos.z);
 
-        if (isLeft) WingTipTracker.captureLeft(world, now);
-        else WingTipTracker.captureRight(world, now);
-
         matrices.pop();
+        return world;
     }
 }

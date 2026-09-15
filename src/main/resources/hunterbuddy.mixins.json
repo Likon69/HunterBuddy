@@ -18,6 +18,7 @@
     "render.GameRendererHandGlowMixin",
     "render.OrderedRenderCommandQueueHandGlowMixin",
     "render.ElytraWingTipCaptureMixin",
+    "render.WorldRendererKeepSelfMixin",
     "accessors.LivingEntityAccessor",
     "accessors.ElytraEntityModelAccessor",
     "accessors.FireworkRocketEntityAccessor",
