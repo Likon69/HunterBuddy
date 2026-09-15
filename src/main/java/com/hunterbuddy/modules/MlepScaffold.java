@@ -514,10 +514,12 @@ public class MlepScaffold extends Module {
    }
 
    private int getRegearBlocksPerTick() {
-      // One block a tick, whatever the fall speed: the landing needs the one
-      // under the feet, and the bursts of three left a little tower to clean
-      // up after every regear.
-      return 1;
+      double velocity = Math.abs(this.mc.player.getVelocity().y);
+      if (velocity > 0.45) {
+         return 3;
+      }
+
+      return velocity > 0.25 ? 2 : 1;
    }
 
    private FindItemResult findRegearBlock() {

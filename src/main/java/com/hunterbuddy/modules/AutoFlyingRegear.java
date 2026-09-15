@@ -507,6 +507,9 @@ public class AutoFlyingRegear extends Module {
    private int verifyRounds = 0;
    private BlockPos currentClearingPos = null;
    private int clearingProgress = 0;
+   private final Set<BlockPos> clearingGivenUp = new HashSet<>();
+   private int clearingAttempts;
+   private int stepAsideTicks;
    private int shulkerPickupAttempts = 0;
    private boolean shulkerPlacementRetry = false;
    private int cleanupBlockIndex = 0;
@@ -541,6 +544,8 @@ public class AutoFlyingRegear extends Module {
       this.timer = 0;
       this.platformCenter = null;
       this.placedBlocks.clear();
+      this.clearingGivenUp.clear();
+      this.clearingAttempts = 0;
       this.pendingBlocks.clear();
       this.currentBlockIndex = 0;
       this.disabledModules.clear();
@@ -552,6 +557,7 @@ public class AutoFlyingRegear extends Module {
       this.transferStep = 0;
       this.savedChestplate = ItemStack.EMPTY;
       this.placementAttempts = 0;
+      this.stepAsideTicks = 0;
       this.platformPlacementAttempts.clear();
       this.shulkerEnderSlot = -1;
       this.processedShulkers.clear();
@@ -638,6 +644,8 @@ public class AutoFlyingRegear extends Module {
       }
 
       this.placedBlocks.clear();
+      this.clearingGivenUp.clear();
+      this.clearingAttempts = 0;
       this.pendingBlocks.clear();
       this.wallLayer = 0;
       this.wallBuildPhase = 0;
@@ -750,6 +758,7 @@ public class AutoFlyingRegear extends Module {
                         this.pendingBlocks.clear();
                         this.currentBlockIndex = 0;
                         this.placementAttempts = 0;
+                        this.stepAsideTicks = 0;
                         this.state = AutoFlyingRegear.FlyingRegearState.CLEARING_ECHEST_AREA;
                      } else if (this.state == AutoFlyingRegear.FlyingRegearState.DROPPING) {
                         this.platformCenter = this.mc.player.getBlockPos().down();
@@ -883,6 +892,19 @@ public class AutoFlyingRegear extends Module {
          this.error("Unexpected state timeout in " + this.state + " after " + String.format("%.1f", this.stateTickCounter / 20.0) + " seconds. Force completing...", new Object[0]);
       }
 
+      this.abortRun();
+   }
+
+   private void abortRunBecause(String reason) {
+      this.event("regear abandoned: " + reason);
+      if ((Boolean)this.debugMessages.get()) {
+         this.warning("Regear abandoned in " + this.state + " - " + reason, new Object[0]);
+      }
+
+      this.abortRun();
+   }
+
+   private void abortRun() {
       if (this.state == AutoFlyingRegear.FlyingRegearState.CREATING_INITIAL_PLATFORM) {
          this.platformBuildAborted = true;
       }
@@ -950,6 +972,26 @@ public class AutoFlyingRegear extends Module {
                if (this.lavaPostponeTicks % 400 == 0 && (Boolean)this.debugMessages.get()) {
                   this.info(
                      "Low on supplies but lava/unknown ground below (" + this.lowSupplyFirstReason + ") - letting the flight continue until solid ground is under us",
+                     new Object[0]
+                  );
+               }
+
+               this.lavaPostponeTicks++;
+               return;
+            }
+
+            BlockPos groundHere = this.mc.player.getBlockPos().down();
+            BlockState groundHereState = this.mc.world.getBlockState(groundHere);
+            if (!groundHereState.isReplaceable()
+               && groundHereState.isSolidBlock(this.mc.world, groundHere)
+               && this.hasLavaNearPlatform(groundHere)) {
+               if (this.lavaPostponeTicks == 0) {
+                  this.event("lava next to the ground here, letting Baritone fly on");
+               }
+
+               if (this.lavaPostponeTicks % 400 == 0 && (Boolean)this.debugMessages.get()) {
+                  this.info(
+                     "Low on supplies but the ground here has lava next to it (" + this.lowSupplyFirstReason + ") - letting the flight continue",
                      new Object[0]
                   );
                }
@@ -1105,13 +1147,13 @@ public class AutoFlyingRegear extends Module {
       BlockState blockState = this.mc.world.getBlockState(beneath);
       boolean isNether = this.mc.world.getRegistryKey() == World.NETHER;
       if (this.mc.player.isInLava()) {
-         this.forceCompleteStuckState();
+         this.abortRunBecause("in lava while dropping, giving the flight back to Baritone");
          return;
       }
 
       if (!blockState.isReplaceable() && blockState.isSolidBlock(this.mc.world, beneath)) {
          if (this.hasLavaNearPlatform(beneath)) {
-            this.forceCompleteStuckState();
+            this.abortRunBecause("lava next to the ground at " + beneath.toShortString());
             return;
          }
 
@@ -1362,9 +1404,9 @@ public class AutoFlyingRegear extends Module {
    }
 
    private boolean hasLavaNearPlatform(BlockPos platform) {
-      for (int dx = -1; dx <= 2; dx++) {
-         for (int dz = -1; dz <= 2; dz++) {
-            for (int dy = 0; dy <= 1; dy++) {
+      for (int dx = -2; dx <= 4; dx++) {
+         for (int dz = -2; dz <= 4; dz++) {
+            for (int dy = 0; dy <= 3; dy++) {
                BlockPos probe = platform.add(dx, dy, dz);
                if (this.mc.world.getBlockState(probe).getFluidState().isIn(FluidTags.LAVA)) {
                   return true;
@@ -1879,6 +1921,7 @@ public class AutoFlyingRegear extends Module {
 
                this.currentBlockIndex++;
                this.placementAttempts = 0;
+               this.stepAsideTicks = 0;
                this.timer = (Integer)this.placeDelay.get();
                return;
             }
@@ -1891,8 +1934,20 @@ public class AutoFlyingRegear extends Module {
 
                this.currentBlockIndex++;
                this.placementAttempts = 0;
+               this.stepAsideTicks = 0;
                this.timer = (Integer)this.placeDelay.get() * 2;
                return;
+            }
+
+            if (this.playerOccupies(pos) && this.stepAsideTicks < 60) {
+               this.stepAsideTicks++;
+               this.stepAsideFrom(pos);
+               this.timer = 1;
+               return;
+            }
+
+            if (this.stepAsideTicks > 0) {
+               this.releaseMovementKeys();
             }
 
             if (this.placeStructureBlock(pos)) {
@@ -2028,6 +2083,7 @@ public class AutoFlyingRegear extends Module {
          this.pendingBlocks.clear();
          this.currentBlockIndex = 0;
          this.placementAttempts = 0;
+         this.stepAsideTicks = 0;
          this.stateTickCounter = 0;
          if ((Boolean)this.debugMessages.get()) {
             this.info("Moving to " + this.getWallPhaseName(), new Object[0]);
@@ -2046,9 +2102,9 @@ public class AutoFlyingRegear extends Module {
          this.platformCenter.add(1, 1, 0),
          this.platformCenter.add(0, 1, 1),
          this.platformCenter.add(1, 1, 1),
-         // Directly above where the ender chest goes (platformCenter+(1,1,1)): a chest will not open
-         // with a solid block on top of it, and a regear built into terrain (a basalt delta, say)
-         // leaves one there. Clearing it before placing is what fixes the "Failed to open" loop.
+         this.platformCenter.add(0, 2, 0),
+         this.platformCenter.add(1, 2, 0),
+         this.platformCenter.add(0, 2, 1),
          this.platformCenter.add(1, 2, 1)
       };
       if (this.currentClearingPos != null) {
@@ -2068,14 +2124,21 @@ public class AutoFlyingRegear extends Module {
                this.clearingProgress++;
             }
 
-            if (this.clearingProgress > 600) {
-               if ((Boolean)this.debugMessages.get()) {
-                  this.warning("Block clearing timeout after 30 seconds at " + this.currentClearingPos.toShortString(), new Object[0]);
-               }
+            if (this.clearingProgress > 100) {
+               if (++this.clearingAttempts < 3) {
+                  this.clearingProgress = 0;
+               } else {
+                  if ((Boolean)this.debugMessages.get()) {
+                     this.warning("Gave up clearing the block at " + this.currentClearingPos.toShortString() + " after 3 attempts", new Object[0]);
+                  }
 
-               this.currentClearingPos = null;
-               this.clearingProgress = 0;
-               this.timer = 2;
+                  this.clearingGivenUp.add(this.currentClearingPos);
+                  this.currentClearingPos = null;
+                  this.clearingProgress = 0;
+                  this.clearingAttempts = 0;
+                  this.timer = 2;
+                  return;
+               }
             }
 
             this.timer = 0;
@@ -2086,10 +2149,15 @@ public class AutoFlyingRegear extends Module {
 
             this.currentClearingPos = null;
             this.clearingProgress = 0;
+            this.clearingAttempts = 0;
             this.timer = 2;
          }
       } else {
          for (BlockPos pos : clearPositions) {
+            if (this.clearingGivenUp.contains(pos)) {
+               continue;
+            }
+
             BlockState blockState = this.mc.world.getBlockState(pos);
             if (!blockState.isAir() && !blockState.isReplaceable() && blockState.getBlock() != Blocks.ENDER_CHEST) {
                this.currentClearingPos = pos;
@@ -2103,7 +2171,12 @@ public class AutoFlyingRegear extends Module {
          }
 
          if ((Boolean)this.debugMessages.get()) {
-            this.info("2x2 area cleared for ender chest placement", new Object[0]);
+            this.info(
+               this.clearingGivenUp.isEmpty()
+                  ? "Box interior cleared for ender chest placement"
+                  : "Box interior cleared except " + this.clearingGivenUp.size() + " block(s) that would not break",
+               new Object[0]
+            );
          }
 
          this.currentClearingPos = null;
@@ -4920,6 +4993,62 @@ public class AutoFlyingRegear extends Module {
       return true;
    }
 
+   private boolean playerOccupies(BlockPos pos) {
+      return this.mc.player != null && this.mc.player.getBoundingBox().intersects(new Box(pos));
+   }
+
+   private void stepAsideFrom(BlockPos blocked) {
+      if (this.mc.player == null || this.platformCenter == null) {
+         return;
+      }
+
+      BlockPos[] floorCells = new BlockPos[]{
+         this.platformCenter.add(0, 1, 0),
+         this.platformCenter.add(1, 1, 0),
+         this.platformCenter.add(0, 1, 1),
+         this.platformCenter.add(1, 1, 1)
+      };
+      BlockPos target = null;
+      double bestDistance = -1.0;
+
+      for (BlockPos cell : floorCells) {
+         double cellDx = cell.getX() - blocked.getX();
+         double cellDz = cell.getZ() - blocked.getZ();
+         double cellDistance = cellDx * cellDx + cellDz * cellDz;
+         if (cellDistance > bestDistance) {
+            bestDistance = cellDistance;
+            target = cell;
+         }
+      }
+
+      if (target == null) {
+         return;
+      }
+
+      Vec3d center = Vec3d.ofCenter(target);
+      double deltaX = center.x - this.mc.player.getX();
+      double deltaZ = center.z - this.mc.player.getZ();
+      double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+      float targetYaw = (float)Math.toDegrees(Math.atan2(-deltaX, deltaZ));
+      float playerYaw = this.mc.player.getYaw();
+      float yawDiff = MathHelper.wrapDegrees(targetYaw - playerYaw);
+      if (Math.abs(yawDiff) > 5.0F) {
+         this.mc.player.setYaw(playerYaw + Math.signum(yawDiff) * 5.0F);
+      }
+
+      if (Math.abs(yawDiff) < 30.0F) {
+         if (distance > 0.5) {
+            Utils.setPressed(this.mc.options.forwardKey, true);
+         } else if (distance > 0.2) {
+            Utils.setPressed(this.mc.options.forwardKey, this.stepAsideTicks % 3 == 0);
+         } else {
+            Utils.setPressed(this.mc.options.forwardKey, false);
+         }
+
+         Utils.setPressed(this.mc.options.sneakKey, distance < 1.0);
+      }
+   }
+
    private void releaseMovementKeys() {
       Utils.setPressed(this.mc.options.forwardKey, false);
       Utils.setPressed(this.mc.options.backKey, false);
@@ -4987,10 +5116,6 @@ public class AutoFlyingRegear extends Module {
    }
 
    private BlockHitResult resolveStructurePlaceHit(BlockPos pos) {
-      if (this.placementAttempts % 2 == 1) {
-         return this.getGrimStructureHit(pos);
-      }
-
       Vec3d eye = this.mc.player.getEyePos();
       BlockHitResult best = null;
       double bestDist = Double.MAX_VALUE;
@@ -5000,7 +5125,12 @@ public class AutoFlyingRegear extends Module {
          BlockState state = this.mc.world.getBlockState(against);
          if (!state.isReplaceable() && !state.getCollisionShape(this.mc.world, against).isEmpty()) {
             Direction side = d.getOpposite();
-            Vec3d hitVec = Vec3d.ofCenter(against).add(Vec3d.of(side.getVector()).multiply(0.5));
+            Vec3d normal = Vec3d.of(side.getVector());
+            Vec3d hitVec = Vec3d.ofCenter(against).add(normal.multiply(0.5));
+            if (eye.subtract(hitVec).dotProduct(normal) <= 0.0) {
+               continue;
+            }
+
             double dist = eye.squaredDistanceTo(hitVec);
             if (!(dist > 20.25) && dist < bestDist) {
                bestDist = dist;
