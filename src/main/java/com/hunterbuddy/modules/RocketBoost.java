@@ -38,7 +38,6 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -183,35 +182,6 @@ public class RocketBoost extends Module {
       .build()
    );
 
-   public final Setting<Boolean> pivotDamping = sgSafety.add(new BoolSetting.Builder()
-      .name("pivot-damping")
-      .description("Push like a plain rocket on the ticks where the look turns sharply, which is when Grim setbacks cluster.")
-      .defaultValue(true)
-      .build()
-   );
-
-   public final Setting<Integer> pivotAngle = sgSafety.add(new IntSetting.Builder()
-      .name("pivot-angle")
-      .description("How far, in degrees, the look has to turn over pivot-window ticks for pivot-damping to push like a plain rocket on that tick.")
-      .defaultValue(45)
-      .min(10)
-      .max(180)
-      .sliderRange(10, 180)
-      .visible(pivotDamping::get)
-      .build()
-   );
-
-   public final Setting<Integer> pivotWindow = sgSafety.add(new IntSetting.Builder()
-      .name("pivot-window")
-      .description("How many ticks back pivot-damping looks for the direction the turn is measured from.")
-      .defaultValue(5)
-      .min(1)
-      .max(PIVOT_WINDOW_MAX)
-      .sliderRange(1, PIVOT_WINDOW_MAX)
-      .visible(pivotDamping::get)
-      .build()
-   );
-
    private final SettingGroup sgBaritone = settings.createGroup("Baritone");
 
    public final Setting<Boolean> baritoneSync = sgBaritone.add(new BoolSetting.Builder()
@@ -251,10 +221,8 @@ public class RocketBoost extends Module {
    /** Ticks spent climbing back from vanilla speed to the solved one after a setback. */
    private static final int AUTO_RECOVERY_TICKS = 60;
 
-   private static final int PIVOT_WINDOW_MAX = 20;
-
    private static final String TRACE_HEADER =
-      "age,vx,vy,vz,lookx,looky,lookz,yaw,pitch,m_closed,m_final,offset,lo_x,hi_x,lo_y,hi_y,lo_z,hi_z,pivot";
+      "age,vx,vy,vz,lookx,looky,lookz,yaw,pitch,m_closed,m_final,offset,lo_x,hi_x,lo_y,hi_y,lo_z,hi_z";
 
    public int setbackCount = 0;
    public long lastEventTime = Long.MAX_VALUE;
@@ -280,39 +248,8 @@ public class RocketBoost extends Module {
    private int tracePending = 0;
    private int lastTraceAge = -1;
 
-   private final Vec3d[] pivotLooks = new Vec3d[PIVOT_WINDOW_MAX + 1];
-   private final int[] pivotAges = new int[PIVOT_WINDOW_MAX + 1];
-   private int pivotAge = Integer.MIN_VALUE;
-   private boolean pivotNow = false;
-
    public double getSpeed() {
-      boolean pivot = pivotDamped();
-      lastAppliedSpeed = throttle(rawSpeed());
-      return pivot ? Math.min(lastAppliedSpeed, VANILLA_SPEED) : lastAppliedSpeed;
-   }
-
-   private boolean pivotDamped() {
-      if (mc.player == null) return false;
-      int age = mc.player.age;
-      if (age == pivotAge) return pivotNow;
-      if (age != pivotAge + 1) Arrays.fill(pivotAges, Integer.MIN_VALUE);
-      pivotAge = age;
-      pivotNow = false;
-
-      Vec3d look = mc.player.getRotationVector();
-      int slot = Math.floorMod(age, pivotLooks.length);
-      pivotLooks[slot] = look;
-      pivotAges[slot] = age;
-
-      if (!pivotDamping.get()) return false;
-      int earlierAge = age - pivotWindow.get();
-      int earlierSlot = Math.floorMod(earlierAge, pivotLooks.length);
-      if (pivotAges[earlierSlot] != earlierAge) return false;
-
-      Vec3d earlier = pivotLooks[earlierSlot];
-      double limit = Math.cos(Math.toRadians(pivotAngle.get()));
-      pivotNow = look.dotProduct(earlier) < limit || computeNextLook(look).dotProduct(earlier) < limit;
-      return pivotNow;
+      return lastAppliedSpeed = throttle(rawSpeed());
    }
 
    /** The multiplier the speed settings ask for, before any safety throttle. */
@@ -689,14 +626,13 @@ public class RocketBoost extends Module {
 
       writeTraceLine(String.format(
          Locale.ROOT,
-         "%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d%n",
+         "%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.2f,%.2f,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f%n",
          mc.player.age,
          velocity.x, velocity.y, velocity.z,
          look.x, look.y, look.z,
          mc.player.getYaw(), mc.player.getPitch(),
          traceClosed, traceFinal, offset,
-         traceLo[0], traceHi[0], traceLo[1], traceHi[1], traceLo[2], traceHi[2],
-         pivotNow ? 1 : 0
+         traceLo[0], traceHi[0], traceLo[1], traceHi[1], traceLo[2], traceHi[2]
       ));
 
       if (traceValid) {
