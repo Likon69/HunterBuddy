@@ -106,6 +106,16 @@ public class BepRocketFly extends Module {
                     "Veer travel onto the nearest 45-degree diagonal. Off by default: it is only a real win with boost-porpoise OFF, where level flight settles each axis at the box edge and a diagonal splits speed across two of them - 47.8 b/s against 33.8 straight down an axis. With the porpoise running the speed comes from the dive conversion instead, which does not care how the horizontal splits, so a diagonal is worth 0.3% (92.4 against 92.2) and costs you your heading. Leave it off unless you actually want to travel diagonally."
                 )
                 .defaultValue(false)
+                .build()
+        );
+    private final Setting<Boolean> asymmetricLegs = this.sgBoost
+        .add(
+            new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                .name("asymmetric-legs")
+                .description(
+                    "Solve the climb and the dive together instead of flying the same angle in both directions. They are not the same problem: the dive turns fall speed into forward speed while the climb spends it, so one angle chosen for the dive is the wrong one going up. Solved as a pair, the whole hop stays inside the boost window instead of only the half the single angle was picked for."
+                )
+                .defaultValue(true)
                 .visible(() -> this.useBoost.get() && this.boostPorpoise.get())
                 .build()
         );
@@ -276,11 +286,11 @@ public class BepRocketFly extends Module {
                 yaw = snapToDiagonal(yaw);
             }
 
-            float magnitude = this.porpoisePitch();
-            float pitch = this.porpoiseDescending ? magnitude : -magnitude;
+            float[] legs = this.porpoiseLegs(yaw);
+            float pitch = this.porpoiseDescending ? legs[0] : -legs[1];
             if (!manualUp && !manualDown && this.porpoiseFlipTicks == 0 && this.legObstructed(yaw, pitch)) {
                 this.porpoiseDescending = !this.porpoiseDescending;
-                pitch = -pitch;
+                pitch = this.porpoiseDescending ? legs[0] : -legs[1];
                 this.porpoiseFlipTicks = 10;
             }
 
@@ -294,11 +304,11 @@ public class BepRocketFly extends Module {
         }
     }
 
-    private float porpoisePitch() {
+    private float[] porpoiseLegs(float yaw) {
         BepBoost boost = this.activeBoost();
         double alignment = boost == null ? 0.0 : boost.alignmentDegrees();
         double threshold = boost == null ? 1.7 : boost.windowThreshold();
-        return BepSolver.solvePitch(this.porpoiseHeight.get().intValue(), this.mc.player.getYaw(), alignment, threshold);
+        return BepSolver.solveLegs(this.porpoiseHeight.get().intValue(), yaw, alignment, threshold, this.asymmetricLegs.get());
     }
 
     private static float snapToDiagonal(float yaw) {
