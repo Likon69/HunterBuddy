@@ -472,6 +472,7 @@ public class AutoFlyingRegear extends Module {
    private int transferStep = 0;
    private ItemStack savedChestplate = ItemStack.EMPTY;
    private final Set<String> processedShulkers = new HashSet<>();
+   private int rocketShulkersTaken = 0;
    private int placementAttempts = 0;
    private final Map<BlockPos, Integer> platformPlacementAttempts = new HashMap<>();
    private static final int MAX_PLATFORM_PLACEMENT_ATTEMPTS = 12;
@@ -503,7 +504,9 @@ public class AutoFlyingRegear extends Module {
    private int wallLayer = 0;
    private int wallBuildPhase = 0;
    private boolean wallsStarted = false;
-   private boolean wallsRecentered = false;
+   private boolean placementHeld = false;
+   private boolean savedAllowPlace = true;
+   private int centerGoalTick = -1;
    private int verifyRounds = 0;
    private BlockPos currentClearingPos = null;
    private int clearingProgress = 0;
@@ -561,12 +564,13 @@ public class AutoFlyingRegear extends Module {
       this.platformPlacementAttempts.clear();
       this.shulkerEnderSlot = -1;
       this.processedShulkers.clear();
+      this.rocketShulkersTaken = 0;
       this.stateTickCounter = 0;
       this.lastState = AutoFlyingRegear.FlyingRegearState.IDLE;
       this.scaffoldWaitTicks = 0;
       this.wallBuildPhase = 0;
       this.wallsStarted = false;
-      this.wallsRecentered = false;
+      this.releaseBaritonePlacement();
       this.lowSupplyTicks = 0;
       this.savedYaw = 0.0F;
       this.currentClearingPos = null;
@@ -615,6 +619,7 @@ public class AutoFlyingRegear extends Module {
    }
 
    public void onDeactivate() {
+      this.releaseBaritonePlacement();
       this.endRun("aborted");
       this.reEnableFlightModules();
       if (!this.savedChestplate.isEmpty() && (Boolean)this.swapToChestplate.get()) {
@@ -650,7 +655,7 @@ public class AutoFlyingRegear extends Module {
       this.wallLayer = 0;
       this.wallBuildPhase = 0;
       this.wallsStarted = false;
-      this.wallsRecentered = false;
+      this.releaseBaritonePlacement();
       this.lowSupplyTicks = 0;
       this.cleanupBlocks.clear();
       this.cleanupBlockIndex = 0;
@@ -759,7 +764,14 @@ public class AutoFlyingRegear extends Module {
                         this.currentBlockIndex = 0;
                         this.placementAttempts = 0;
                         this.stepAsideTicks = 0;
-                        this.state = AutoFlyingRegear.FlyingRegearState.CLEARING_ECHEST_AREA;
+                        if (this.boxIsWhole()) {
+                           this.state = AutoFlyingRegear.FlyingRegearState.CLEARING_ECHEST_AREA;
+                        } else {
+                           this.wallsStarted = false;
+                           if ((Boolean)this.debugMessages.get()) {
+                              this.warning("Box still open after the timeout - restarting wall construction", new Object[0]);
+                           }
+                        }
                      } else if (this.state == AutoFlyingRegear.FlyingRegearState.DROPPING) {
                         this.platformCenter = this.mc.player.getBlockPos().down();
                         this.state = AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM;
@@ -773,6 +785,11 @@ public class AutoFlyingRegear extends Module {
                      this.timer = 5;
                      return;
                }
+            }
+
+            if (this.state != AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM) {
+               this.releaseBaritonePlacement();
+               this.centerGoalTick = -1;
             }
 
             if (this.timer > 0) {
@@ -1489,7 +1506,29 @@ public class AutoFlyingRegear extends Module {
       );
    }
 
+   private void holdBaritonePlacement() {
+      if (!this.placementHeld) {
+         this.savedAllowPlace = BaritoneAPI.getSettings().allowPlace.value;
+         BaritoneAPI.getSettings().allowPlace.value = false;
+         this.placementHeld = true;
+      }
+   }
+
+   private void releaseBaritonePlacement() {
+      if (this.placementHeld) {
+         BaritoneAPI.getSettings().allowPlace.value = this.savedAllowPlace;
+         this.placementHeld = false;
+      }
+   }
+
    private void handleCenteringOnPlatform() {
+      if (this.mc.player.isInLava()) {
+         this.releaseMovementKeys();
+         this.abortRunBecause("in lava while centering, giving the flight back to Baritone");
+         return;
+      }
+
+      this.holdBaritonePlacement();
       if (this.stateTickCounter == 1) {
          if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
             this.mlepScaffold.setRegearMode(false);
@@ -1513,7 +1552,8 @@ public class AutoFlyingRegear extends Module {
       double deltaZ = centerTarget.z - playerPos.z;
       double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
       boolean inAir = !this.mc.player.isOnGround() && !this.mc.player.isGliding();
-      if (distance < 0.2) {
+      boolean atPlatformLevel = this.mc.player.getBlockPos().getY() >= this.platformCenter.getY() + 1;
+      if (distance < 0.2 && atPlatformLevel) {
          IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null) {
             baritone.getPathingBehavior().cancelEverything();
@@ -1527,7 +1567,7 @@ public class AutoFlyingRegear extends Module {
 
          this.state = AutoFlyingRegear.FlyingRegearState.CREATING_INITIAL_PLATFORM;
          this.timer = 10;
-      } else if (!inAir && this.stateTickCounter <= 5) {
+      } else if (!inAir && (this.centerGoalTick < 0 || this.stateTickCounter - this.centerGoalTick <= 5)) {
          IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          if (baritone != null) {
             baritone.getCommandManager().execute("cancel");
@@ -1535,13 +1575,23 @@ public class AutoFlyingRegear extends Module {
                .execute(
                   "goto " + this.platformCenter.getX() + " " + (this.platformCenter.getY() + 1) + " " + this.platformCenter.getZ()
                );
+            if (this.centerGoalTick < 0) {
+               this.centerGoalTick = this.stateTickCounter;
+            }
+
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Baritone goto center - distance: " + String.format("%.2f", distance), new Object[0]);
+               this.info("Baritone goto center on foot - distance: " + String.format("%.2f", distance), new Object[0]);
             }
          }
       } else {
          IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
          boolean baritoneActive = !inAir && baritone != null && baritone.getPathingBehavior().isPathing();
+         if (!inAir && !atPlatformLevel && !baritoneActive && this.centerGoalTick >= 0 && this.stateTickCounter - this.centerGoalTick > 20) {
+            this.releaseMovementKeys();
+            this.abortRunBecause("the platform cannot be reached on foot, regearing somewhere else");
+            return;
+         }
+
          if (inAir || !baritoneActive && this.stateTickCounter > 20) {
             if ((Boolean)this.debugMessages.get() && this.stateTickCounter % 20 == 0) {
                this.info(
@@ -1581,6 +1631,7 @@ public class AutoFlyingRegear extends Module {
          if (this.stateTickCounter > 200) {
             BlockPos beneath = this.mc.player.getBlockPos().down();
             BlockState beneathState = this.mc.world.getBlockState(beneath);
+            boolean reAnchored = false;
             if (!this.wallsStarted
                && this.mc.player.isOnGround()
                && !this.mc.player.isTouchingWater()
@@ -1590,6 +1641,7 @@ public class AutoFlyingRegear extends Module {
                && beneathState.isSolidBlock(this.mc.world, beneath)
                && !this.hasLavaNearPlatform(beneath)) {
                this.platformCenter = beneath;
+               reAnchored = true;
                if ((Boolean)this.debugMessages.get()) {
                   this.warning("Centering timeout, proceeding anyway - platform set to the block under the feet at " + beneath.toShortString(), new Object[0]);
                }
@@ -1602,6 +1654,11 @@ public class AutoFlyingRegear extends Module {
             }
 
             this.releaseMovementKeys();
+            if (!reAnchored && !atPlatformLevel) {
+               this.abortRunBecause("could not get back on the platform, regearing somewhere else");
+               return;
+            }
+
             this.state = AutoFlyingRegear.FlyingRegearState.CREATING_INITIAL_PLATFORM;
             this.timer = 10;
          }
@@ -1857,12 +1914,11 @@ public class AutoFlyingRegear extends Module {
          double distance = Math.sqrt(
             Math.pow(centerTarget.x - playerPos.x, 2.0) + Math.pow(centerTarget.z - playerPos.z, 2.0)
          );
-         if (distance > 0.5 && !this.wallsRecentered) {
+         if (distance > 0.5) {
             if ((Boolean)this.debugMessages.get()) {
                this.warning("Not centered for wall construction, re-centering", new Object[0]);
             }
 
-            this.wallsRecentered = true;
             this.state = AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM;
             this.timer = 0;
             return;
@@ -1888,6 +1944,14 @@ public class AutoFlyingRegear extends Module {
                return;
             }
 
+            if (!this.boxIsWhole()) {
+               this.wallBuildPhase = 0;
+               this.wallLayer = 0;
+               this.currentBlockIndex = 0;
+               this.timer = (Integer)this.placeDelay.get();
+               return;
+            }
+
             this.state = AutoFlyingRegear.FlyingRegearState.CLEARING_ECHEST_AREA;
             this.timer = (Integer)this.placeDelay.get();
             return;
@@ -1909,8 +1973,7 @@ public class AutoFlyingRegear extends Module {
       } else if (this.timer <= 0) {
          if (this.currentBlockIndex < this.pendingBlocks.size()) {
             BlockPos pos = this.pendingBlocks.get(this.currentBlockIndex);
-            BlockState currentState = this.mc.world.getBlockState(pos);
-            if (!currentState.isReplaceable() && !currentState.isAir()) {
+            if (this.cellFilled(pos)) {
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Block placed (" + this.getWallPhaseName() + ") at " + pos.toShortString(), new Object[0]);
                }
@@ -1923,6 +1986,19 @@ public class AutoFlyingRegear extends Module {
                this.placementAttempts = 0;
                this.stepAsideTicks = 0;
                this.timer = (Integer)this.placeDelay.get();
+               return;
+            }
+
+            if (!this.withinPlacementReach(pos)) {
+               if ((Boolean)this.debugMessages.get()) {
+                  this.warning("Too far from " + pos.toShortString() + " to place it, going back to the platform", new Object[0]);
+               }
+
+               this.placementAttempts = 0;
+               this.stepAsideTicks = 0;
+               this.releaseMovementKeys();
+               this.state = AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM;
+               this.timer = 0;
                return;
             }
 
@@ -1984,16 +2060,16 @@ public class AutoFlyingRegear extends Module {
                return;
             }
 
-            // Verify every cell of the box actually got a block before calling it done. A cell skipped
-            // after ten failed attempts (fire in the way, no face to place against) would otherwise leave
-            // a hole. Clear fire, then re-run the phases to fill what is still missing - bounded, so a
-            // genuinely unplaceable cell cannot loop forever.
+            // Verify every cell of the box holds a solid block before calling it done. A cell skipped
+            // after ten failed attempts (fire in the way, no face to place against, knocked out of reach)
+            // would otherwise leave a hole. Clear fire, then re-run the phases until nothing is missing:
+            // the regear must never open the ender chest in a box that is still open.
             java.util.List<BlockPos> stillMissing = this.collectMissingBoxBlocks();
-            if (!stillMissing.isEmpty() && this.verifyRounds < 3) {
+            if (!stillMissing.isEmpty()) {
                this.verifyRounds++;
                this.clearFireInBox();
                if ((Boolean)this.debugMessages.get()) {
-                  this.warning("Box has " + stillMissing.size() + " missing block(s), verify pass " + this.verifyRounds + "/3", new Object[0]);
+                  this.warning("Box has " + stillMissing.size() + " missing block(s), verify pass " + this.verifyRounds, new Object[0]);
                }
 
                this.wallBuildPhase = 0;
@@ -2039,12 +2115,20 @@ public class AutoFlyingRegear extends Module {
       };
    }
 
+   private boolean cellFilled(BlockPos pos) {
+      BlockState state = this.mc.world.getBlockState(pos);
+      return !state.isReplaceable() && !state.isAir() && state.isSolidBlock(this.mc.world, pos);
+   }
+
+   private boolean withinPlacementReach(BlockPos pos) {
+      return this.mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos)) <= 4.0;
+   }
+
    private List<BlockPos> collectMissingBlocks(BlockPos[] positions) {
       List<BlockPos> missing = new ArrayList<>();
 
       for (BlockPos pos : positions) {
-         BlockState state = this.mc.world.getBlockState(pos);
-         if (state.isReplaceable() || state.isAir()) {
+         if (!this.cellFilled(pos)) {
             missing.add(pos.toImmutable());
          }
       }
@@ -2535,6 +2619,10 @@ public class AutoFlyingRegear extends Module {
 
             if (this.currentRun != null) {
                this.currentRun.shulkersTaken++;
+            }
+
+            if (!this.processingElytras && this.extra == AutoFlyingRegear.Extra.NONE) {
+               this.rocketShulkersTaken++;
             }
 
             this.event("took " + targetType + " shulker " + (this.currentRun == null ? "" : "#" + this.currentRun.shulkersTaken));
@@ -3517,9 +3605,9 @@ public class AutoFlyingRegear extends Module {
                this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
                this.timer = (Integer)this.containerOpenDelay.get();
             }
-         } else if (emptySlots > 1) {
+         } else if (emptySlots > 1 && this.rocketShulkersTaken < 3) {
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Still have " + emptySlots + " empty slots, looking for more rocket shulkers", new Object[0]);
+               this.info("Still have " + emptySlots + " empty slots after " + this.rocketShulkersTaken + " rocket shulkers, looking for one more", new Object[0]);
             }
 
             this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;
@@ -5387,7 +5475,7 @@ public class AutoFlyingRegear extends Module {
       this.obsidianTopUpDecided = false;
       this.topUpChestsBroken = 0;
       this.wallsStarted = false;
-      this.wallsRecentered = false;
+      this.releaseBaritonePlacement();
       this.lowSupplyTicks = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();
