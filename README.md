@@ -35,7 +35,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `stash-finder` | Detects stashes; chunks identified as Woodland Mansions are ignored. |
 | `TrailFollower` | Follows detected trails in all dimensions, with a rate-limited heading and a choice of search patterns (spiral, sweep, straight) when the trail is lost. |
 | `visual-range-notifier` | Notifies when players enter visual range or selected items appear on the ground; optional Discord webhook alerts. |
-| `waypoint-follower` | Follows Xaero waypoints with multi-dimensional travel support. |
+| `waypoint-follower` | Follows Xaero waypoints with multi-dimensional travel support. Once the last one is reached it stops where it is, in the air or on the ground, by switching itself off or by leaving the server. |
 | `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
 
 ### Visuals (12)
@@ -63,7 +63,7 @@ Restocking, inventory handling, and stash transfer tools.
 
 | Meteor name | Description |
 |---|---|
-| `AutoFlyingRegear` | Lands on solid ground, never over lava, builds a walled box and restocks rockets, elytras and the other supplies it watches from an ender chest when one runs short. |
+| `AutoFlyingRegear` | Lands on solid ground, never over lava, builds a walled box and restocks rockets, elytras and the other supplies it watches from an ender chest when one runs short. When the chest can no longer supply what is missing it never takes off again: it stays in the closed box and switches the modules off, or leaves the server. |
 | `ElytraSwap` | Swaps out an elytra when it reaches low durability. |
 | `PearlLoader` | Anti-AFK loop with pearl-loading support. |
 | `replenish` | Replenishes hotbar items using shift-click packets. |
@@ -74,7 +74,7 @@ Restocking, inventory handling, and stash transfer tools.
 
 | Meteor name | Description |
 |---|---|
-| `auto-eat-sync` | Eats golden apples only, in a safe window while flying, fighting or surviving a regear, without ever pausing Baritone; always eats below an emergency health. |
+| `auto-eat-sync` | Eats golden apples only, in a safe window while flying, fighting or surviving a regear, without ever pausing Baritone; always eats below an emergency health, and as soon as health is dropping fast enough, however much is left. |
 | `auto-exp-plus` | Repairs armor and tools with experience bottles, restocking bottles into a chosen hotbar slot. |
 | `auto-log-plus` | Additional logout triggers. |
 | `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
