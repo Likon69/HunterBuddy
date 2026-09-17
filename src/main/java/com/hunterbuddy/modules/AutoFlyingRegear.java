@@ -133,6 +133,14 @@ public class AutoFlyingRegear extends Module {
                .defaultValue(AutoFlyingRegear.ElytraMode.REPAIR)
             .build()
       );
+   private final Setting<AutoFlyingRegear.OutOfSuppliesAction> outOfSupplies = this.sgTriggers
+      .add(
+         new meteordevelopment.meteorclient.settings.EnumSetting.Builder<AutoFlyingRegear.OutOfSuppliesAction>()
+                     .name("out-of-supplies")
+                  .description("What to do when a regear ends with something still missing, which means the ender chest cannot supply it any more. The bot stays in the box it just built and never takes off again: OFF_MODULES leaves the flight modules off and switches this one off too, DISCONNECT does the same and then leaves the server.")
+               .defaultValue(AutoFlyingRegear.OutOfSuppliesAction.OFF_MODULES)
+            .build()
+      );
    private final Setting<Integer> xpBottlesToTake = this.sgTriggers
       .add(
          new Builder().name("xp-bottles-to-take").description("How many experience bottles to pull from the shulker before mending.")
@@ -506,6 +514,7 @@ public class AutoFlyingRegear extends Module {
    private boolean wallsStarted = false;
    private boolean placementHeld = false;
    private boolean savedAllowPlace = true;
+   private boolean runAborted = false;
    private int centerGoalTick = -1;
    private int verifyRounds = 0;
    private BlockPos currentClearingPos = null;
@@ -571,6 +580,7 @@ public class AutoFlyingRegear extends Module {
       this.wallBuildPhase = 0;
       this.wallsStarted = false;
       this.releaseBaritonePlacement();
+      this.runAborted = false;
       this.lowSupplyTicks = 0;
       this.savedYaw = 0.0F;
       this.currentClearingPos = null;
@@ -656,6 +666,7 @@ public class AutoFlyingRegear extends Module {
       this.wallBuildPhase = 0;
       this.wallsStarted = false;
       this.releaseBaritonePlacement();
+      this.runAborted = false;
       this.lowSupplyTicks = 0;
       this.cleanupBlocks.clear();
       this.cleanupBlockIndex = 0;
@@ -927,9 +938,30 @@ public class AutoFlyingRegear extends Module {
       }
 
       this.platformPlacementAttempts.clear();
+      this.runAborted = true;
       this.state = AutoFlyingRegear.FlyingRegearState.RESTORING_ELYTRA;
       this.stateTickCounter = 0;
       this.timer = 0;
+   }
+
+   private void stopOutOfSupplies() {
+      String reason = this.lowSupplyReason();
+      this.event("nothing left to regear: " + reason);
+      if ((Boolean)this.debugMessages.get()) {
+         this.warning("Nothing left to regear (" + reason + ") - staying in the box", new Object[0]);
+      }
+
+      this.disabledModules.clear();
+      if (this.outOfSupplies.get() == AutoFlyingRegear.OutOfSuppliesAction.DISCONNECT) {
+         this.mc.player.networkHandler.onDisconnect(
+            new net.minecraft.network.packet.s2c.common.DisconnectS2CPacket(
+               net.minecraft.text.Text.literal("[AutoFlyingRegear] nothing left to regear (" + reason + ")")
+            )
+         );
+         return;
+      }
+
+      this.toggle();
    }
 
    @EventHandler
@@ -3950,6 +3982,11 @@ public class AutoFlyingRegear extends Module {
          }
       }
 
+      if (!this.runAborted && this.shouldTriggerRegear()) {
+         this.stopOutOfSupplies();
+         return;
+      }
+
       this.state = AutoFlyingRegear.FlyingRegearState.CLEANUP;
       this.timer = 5;
       this.cleanupBlockIndex = 0;
@@ -5476,6 +5513,7 @@ public class AutoFlyingRegear extends Module {
       this.topUpChestsBroken = 0;
       this.wallsStarted = false;
       this.releaseBaritonePlacement();
+      this.runAborted = false;
       this.lowSupplyTicks = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();
@@ -5864,5 +5902,10 @@ public class AutoFlyingRegear extends Module {
    public enum ElytraMode {
       REPLACE,
       REPAIR;
+   }
+
+   public enum OutOfSuppliesAction {
+      OFF_MODULES,
+      DISCONNECT;
    }
 }

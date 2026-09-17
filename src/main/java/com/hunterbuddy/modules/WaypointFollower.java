@@ -155,6 +155,7 @@ public class WaypointFollower extends Module {
     private int rocketScanTimer;
     private long activatedAtMs;
     private long lastCompletedAtMs;
+    private boolean routeEndPending;
 
     private final Setting<String> waypointPrefix = sgGeneral.add(new StringSetting.Builder()
         .name("waypoint-prefix")
@@ -166,6 +167,12 @@ public class WaypointFollower extends Module {
         .name("follow-mode")
         .description("How to follow waypoints: Closest goes to nearest waypoint, Numerical follows in order")
         .defaultValue(FollowMode.Numerical)
+        .build());
+
+    private final Setting<RouteEndAction> routeEnd = sgGeneral.add(new EnumSetting.Builder<RouteEndAction>()
+        .name("route-end")
+        .description("What to do once the last waypoint has been reached, wherever that happens, in the air or on the ground: OFF_MODULES switches this module off, DISCONNECT leaves the server. A waypoint removed with the skip button does not count as reaching the end.")
+        .defaultValue(RouteEndAction.OFF_MODULES)
         .build());
 
     private final Setting<Double> reachDistance = sgGeneral.add(new DoubleSetting.Builder()
@@ -379,6 +386,7 @@ public class WaypointFollower extends Module {
         this.rocketScanTimer = 0;
         this.activatedAtMs = System.currentTimeMillis();
         this.lastCompletedAtMs = 0L;
+        this.routeEndPending = false;
         this.startAsyncWaypointLoad();
         this.activeFlightMode = FlightMode.None;
     }
@@ -1094,12 +1102,37 @@ public class WaypointFollower extends Module {
         if (this.followMode.get() == FollowMode.Numerical && this.currentWaypointIndex >= this.waypointsToFollow.size()) {
             this.currentWaypointIndex = 0;
         }
+
+        if (outcome == WaypointFollower.Outcome.ARRIVED && this.waypointsToFollow.isEmpty()) {
+            this.routeEndPending = true;
+        }
+    }
+
+    private void applyRouteEndAction() {
+        if (this.routeEnd.get() == RouteEndAction.DISCONNECT && mc.player != null) {
+            this.info("All waypoints reached - leaving the server");
+            mc.player.networkHandler.onDisconnect(
+                new net.minecraft.network.packet.s2c.common.DisconnectS2CPacket(
+                    net.minecraft.text.Text.literal("[WaypointFollower] all waypoints reached")
+                )
+            );
+            return;
+        }
+
+        this.info("All waypoints reached - switching off");
+        if (this.isActive()) this.toggle();
     }
 
     /** Whether a waypoint left the list by being reached or by the skip button. */
     public enum Outcome {
         ARRIVED,
         SKIPPED
+    }
+
+    /** What to do once the last waypoint has been reached. */
+    public enum RouteEndAction {
+        OFF_MODULES,
+        DISCONNECT
     }
 
     /** One waypoint leaving the route, for the HUD to draw a mark as it slides off. */
@@ -1487,6 +1520,12 @@ public class WaypointFollower extends Module {
 
         ClientPlayerEntity player = mc.player;
         if (isDeactivating || player == null || mc.world == null) return;
+
+        if (this.routeEndPending) {
+            this.routeEndPending = false;
+            this.applyRouteEndAction();
+            return;
+        }
 
         String currentDim = this.getCurrentDimensionKey();
         if (!currentDim.equals(this.lastDimensionKey)) {
