@@ -48,6 +48,15 @@ public class AutoEatSync extends Module {
         .build()
     );
 
+    private final Setting<Double> emergencyDrop = sgGeneral.add(new DoubleSetting.Builder()
+        .name("emergency-drop")
+        .description("Health lost within the last 2 seconds that counts as an emergency on its own, whatever health is left. Taking this much damage that fast means the meal stops being cut by collisions, low flight speed and KillAuraPlus straight away, instead of waiting for health to fall to emergency-health.")
+        .defaultValue(4.0)
+        .min(0.0)
+        .sliderRange(0.0, 20.0)
+        .build()
+    );
+
     private final Setting<Boolean> gapsOnly = sgGeneral.add(new BoolSetting.Builder()
         .name("gaps-only")
         .description("Only eat golden apples and enchanted golden apples. Off, any food counts.")
@@ -118,6 +127,8 @@ public class AutoEatSync extends Module {
     private int handRetryAfterTick;
     private int noBiteRetryAfterTick;
     private boolean emergencyMeal;
+    private float healthMark;
+    private int healthMarkTick;
     private boolean fireworksHeld;
     private int fireworksHeldSinceTick;
     private boolean fireworksHoldExpired;
@@ -140,6 +151,8 @@ public class AutoEatSync extends Module {
         handRetryAfterTick = 0;
         noBiteRetryAfterTick = 0;
         emergencyMeal = false;
+        healthMark = 0.0f;
+        healthMarkTick = 0;
         fireworksHeldSinceTick = 0;
         fireworksHoldExpired = false;
     }
@@ -162,6 +175,12 @@ public class AutoEatSync extends Module {
         if (mc.player == null || mc.world == null || !mc.player.isAlive()) {
             if (eating) stopEating("disabled");
             return;
+        }
+
+        float health = mc.player.getHealth();
+        if (health > healthMark || tickCounter - healthMarkTick > 40) {
+            healthMark = health;
+            healthMarkTick = tickCounter;
         }
 
         if (regearRunning()) {
@@ -259,7 +278,8 @@ public class AutoEatSync extends Module {
     }
 
     private boolean emergency() {
-        return mc.player.getHealth() <= emergencyHealth.get();
+        return mc.player.getHealth() <= emergencyHealth.get()
+                || healthMark - mc.player.getHealth() >= emergencyDrop.get();
     }
 
     private boolean mustStop() {
