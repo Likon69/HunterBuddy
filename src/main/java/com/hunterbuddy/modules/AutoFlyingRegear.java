@@ -515,6 +515,9 @@ public class AutoFlyingRegear extends Module {
    private boolean placementHeld = false;
    private boolean savedAllowPlace = true;
    private boolean runAborted = false;
+   private int wallMissingLast = -1;
+   private int wallNoProgressRounds = 0;
+   private final Set<BlockPos> wallMineQueued = new HashSet<>();
    private int centerGoalTick = -1;
    private int verifyRounds = 0;
    private BlockPos currentClearingPos = null;
@@ -581,6 +584,9 @@ public class AutoFlyingRegear extends Module {
       this.wallsStarted = false;
       this.releaseBaritonePlacement();
       this.runAborted = false;
+      this.wallMissingLast = -1;
+      this.wallNoProgressRounds = 0;
+      this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
       this.savedYaw = 0.0F;
       this.currentClearingPos = null;
@@ -667,6 +673,9 @@ public class AutoFlyingRegear extends Module {
       this.wallsStarted = false;
       this.releaseBaritonePlacement();
       this.runAborted = false;
+      this.wallMissingLast = -1;
+      this.wallNoProgressRounds = 0;
+      this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
       this.cleanupBlocks.clear();
       this.cleanupBlockIndex = 0;
@@ -1977,6 +1986,17 @@ public class AutoFlyingRegear extends Module {
             }
 
             if (!this.boxIsWhole()) {
+               int missing = this.collectMissingBoxBlocks().size();
+               if (this.wallMissingLast < 0 || missing < this.wallMissingLast) {
+                  this.wallMissingLast = missing;
+                  this.wallNoProgressRounds = 0;
+               } else if (++this.wallNoProgressRounds > 3) {
+                  this.abortRunBecause(
+                     "the box is still missing " + missing + " block(s) and four rounds filled none of them, regearing somewhere else"
+                  );
+                  return;
+               }
+
                this.wallBuildPhase = 0;
                this.wallLayer = 0;
                this.currentBlockIndex = 0;
@@ -2032,6 +2052,22 @@ public class AutoFlyingRegear extends Module {
                this.state = AutoFlyingRegear.FlyingRegearState.CENTERING_ON_PLATFORM;
                this.timer = 0;
                return;
+            }
+
+            BlockState inTheWay = this.mc.world.getBlockState(pos);
+            if (!inTheWay.isReplaceable()
+               && !inTheWay.isAir()
+               && this.mlepMine != null
+               && this.mlepMine.isActive()
+               && this.wallMineQueued.add(pos.toImmutable())) {
+               if ((Boolean)this.debugMessages.get()) {
+                  this.warning(
+                     "Wall cell " + pos.toShortString() + " is blocked by " + inTheWay.getBlock().getName().getString() + ", queueing it for mining",
+                     new Object[0]
+                  );
+               }
+
+               ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(pos.toImmutable(), this.faceFromEye(pos)));
             }
 
             if (this.placementAttempts >= 10) {
@@ -2147,6 +2183,21 @@ public class AutoFlyingRegear extends Module {
       };
    }
 
+   private Direction faceFromEye(BlockPos pos) {
+      Vec3d playerPos = this.mc.player.getEntityPos();
+      Vec3d blockCenter = Vec3d.ofCenter(pos);
+      double dx = playerPos.x - blockCenter.x;
+      double dy = playerPos.y + this.mc.player.getEyeHeight(this.mc.player.getPose()) - blockCenter.y;
+      double dz = playerPos.z - blockCenter.z;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > Math.abs(dz)) {
+         return dx > 0.0 ? Direction.EAST : Direction.WEST;
+      } else if (Math.abs(dz) > Math.abs(dy)) {
+         return dz > 0.0 ? Direction.SOUTH : Direction.NORTH;
+      } else {
+         return dy > 0.0 ? Direction.UP : Direction.DOWN;
+      }
+   }
+
    private boolean cellFilled(BlockPos pos) {
       BlockState state = this.mc.world.getBlockState(pos);
       return !state.isReplaceable() && !state.isAir() && state.isSolidBlock(this.mc.world, pos);
@@ -2230,7 +2281,16 @@ public class AutoFlyingRegear extends Module {
             float[] rotations = RotationUtils.getRotationsTo(this.mc.player.getEyePos(), targetVec);
             this.mc.player.setYaw(rotations[0]);
             this.mc.player.setPitch(rotations[1]);
-            if (this.clearingProgress == 0) {
+            if (this.mlepMine != null && this.mlepMine.isActive()) {
+               if (this.clearingProgress == 0 || this.clearingProgress % 40 == 0) {
+                  ((MlepMine)this.mlepMine)
+                     .queueMiningData(
+                        ((MlepMine)this.mlepMine).new MiningData(this.currentClearingPos.toImmutable(), this.faceFromEye(this.currentClearingPos))
+                     );
+               }
+
+               this.clearingProgress++;
+            } else if (this.clearingProgress == 0) {
                this.mc.interactionManager.attackBlock(this.currentClearingPos, Direction.UP);
                this.mc.player.swingHand(Hand.MAIN_HAND);
                this.clearingProgress++;
@@ -2653,7 +2713,7 @@ public class AutoFlyingRegear extends Module {
                this.currentRun.shulkersTaken++;
             }
 
-            if (!this.processingElytras && this.extra == AutoFlyingRegear.Extra.NONE) {
+            if ("rocket".equals(targetType)) {
                this.rocketShulkersTaken++;
             }
 
@@ -5514,6 +5574,9 @@ public class AutoFlyingRegear extends Module {
       this.wallsStarted = false;
       this.releaseBaritonePlacement();
       this.runAborted = false;
+      this.wallMissingLast = -1;
+      this.wallNoProgressRounds = 0;
+      this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();

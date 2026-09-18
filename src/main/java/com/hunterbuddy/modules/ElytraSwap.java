@@ -175,6 +175,10 @@ public class ElytraSwap extends Module {
                         }
                      }
                   }
+               } else if (this.needsSwap) {
+                  this.processSwapStages();
+               } else if (chestItem.isEmpty()) {
+                  this.equipElytraOnBareChest();
                }
             }
          }
@@ -211,6 +215,32 @@ public class ElytraSwap extends Module {
             minPercent
          );
          this.cooldownTimer = (Integer)this.swapCooldown.get();
+      }
+   }
+
+   private void equipElytraOnBareChest() {
+      int bestSlot = -1;
+      double bestPercent = (Integer)this.durabilityThreshold.get();
+
+      for (int i = 0; i < 36; i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (this.isElytra(stack)) {
+            double percent = this.getDurabilityPercent(stack);
+            if (percent > bestPercent) {
+               bestPercent = percent;
+               bestSlot = i;
+            }
+         }
+      }
+
+      if (bestSlot != -1) {
+         this.targetSlot = bestSlot;
+         this.needsSwap = true;
+         this.swapStage = 1;
+         this.stageTimer = 0;
+         if ((Boolean)this.notifySwap.get()) {
+            this.info("Chest slot is bare, putting on the elytra at %.1f%% from slot %d", bestPercent, bestSlot);
+         }
       }
    }
 
