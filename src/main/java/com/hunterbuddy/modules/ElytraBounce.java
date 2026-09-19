@@ -164,8 +164,8 @@ public class ElytraBounce extends Module {
       .add(
          new meteordevelopment.meteorclient.settings.IntSetting.Builder()
                      .name("setback-pause")
-                  .description("Ticks to stop bouncing for after the server teleports you back, so the module doesn't fight a setback loop. 0 disables the pause (the client-side gliding reset still happens either way).")
-               .defaultValue(5)
+                  .description("Ticks to stop bouncing for after the server teleports you back. One is a one-tick hiccup: the teleport lands, the next tick is skipped, the jump and the re-deploy resume on the tick after. 0 disables the pause (the client-side gliding reset still happens either way).")
+               .defaultValue(1)
                .min(0)
                .sliderMax(40)
                .visible(this.bounce::get)
@@ -289,6 +289,13 @@ public class ElytraBounce extends Module {
                .defaultValue(false)
             .build()
       );
+   private final Setting<Boolean> logDurability = this.sgGeneral
+      .add(
+         new Builder().name("log-flight")
+                  .description("Writes to the game log: one line every time the elytra's durability actually moves, and one every five seconds of gliding with the fastest speed reached against what the solver predicted. Nothing new to open, it goes into latest.log with the rest.")
+               .defaultValue(true)
+            .build()
+      );
    private final Setting<Boolean> toggleElytra = this.sgGeneral
       .add(
          new Builder().name("toggle-elytra")
@@ -297,6 +304,9 @@ public class ElytraBounce extends Module {
                .visible(() -> !(Boolean)this.fakeFly.get())
                .build()
       );
+   private int lastDurability = -1;
+   private double peakSpeed = 0.0;
+   private int speedWindowTicks = 0;
    private boolean startSprinting;
    private BlockPos portalTrap = null;
    private boolean paused = false;
@@ -541,7 +551,93 @@ public class ElytraBounce extends Module {
       }
    }
 
+   /**
+    * One line whenever the glider's durability actually moves, wherever it is
+    * - worn or in a hand - plus a line on the first tick of a run so a flight
+    * has a starting value to be read against. Reads only; nothing here can
+    * change what the module does.
+    */
+   /**
+    * The speed actually reached, against what the solver promised. The model
+    * is a faithful port of vanilla's gliding maths, so a flight that comes in
+    * well under its own prediction is being held back by something outside
+    * the physics, and one that beats it means the model is what is wrong.
+    */
+   private void watchSpeed() {
+      if (!(Boolean)this.logDurability.get() || this.mc.player == null) {
+         return;
+      }
+
+      if (!this.mc.player.isGliding()) {
+         return;
+      }
+
+      double speed = this.mc.player.getVelocity().horizontalLength() * 20.0;
+      if (speed > this.peakSpeed) {
+         this.peakSpeed = speed;
+      }
+
+      if (++this.speedWindowTicks >= 100) {
+         this.speedWindowTicks = 0;
+         HunterBuddyAddon.LOG
+            .info(
+               String.format(
+                  java.util.Locale.ROOT,
+                  "[ElytraBounce speed] peak=%.1f b/s (%.0f km/h) predicted=%.1f b/s headroom=%.2f pitch=%.1f",
+                  this.peakSpeed,
+                  this.peakSpeed * 3.6,
+                  this.predictedSpeed,
+                  this.solvedHeadroom,
+                  this.effectivePitch()
+               )
+            );
+         this.peakSpeed = 0.0;
+      }
+   }
+
+   private void watchDurability() {
+      if (!(Boolean)this.logDurability.get() || this.mc.player == null) {
+         return;
+      }
+
+      ItemStack glider = ItemStack.EMPTY;
+      if (isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) {
+         glider = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+      } else if (isGlider(this.mc.player.getStackInHand(Hand.MAIN_HAND))) {
+         glider = this.mc.player.getStackInHand(Hand.MAIN_HAND);
+      } else if (isGlider(this.mc.player.getStackInHand(Hand.OFF_HAND))) {
+         glider = this.mc.player.getStackInHand(Hand.OFF_HAND);
+      }
+
+      if (glider.isEmpty()) {
+         return;
+      }
+
+      int left = glider.getMaxDamage() - glider.getDamage();
+      if (left == this.lastDurability) {
+         return;
+      }
+
+      int lost = this.lastDurability < 0 ? 0 : this.lastDurability - left;
+      this.lastDurability = left;
+      HunterBuddyAddon.LOG
+         .info(
+            String.format(
+               java.util.Locale.ROOT,
+               "[ElytraBounce durability] %d/%d lost=%d worn=%b fakefly=%b gliding=%b tick=%d",
+               left,
+               glider.getMaxDamage(),
+               lost,
+               isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)),
+               (Boolean)this.fakeFly.get(),
+               this.mc.player.isGliding(),
+               this.mc.player.age
+            )
+         );
+   }
+
    public void onActivate() {
+      this.lastDurability = -1;
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
          this.startSprinting = this.mc.player.isSprinting();
          this.tempPath = null;
@@ -665,6 +761,8 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onTick(Pre event) {
+      this.watchDurability();
+      this.watchSpeed();
       this.updateAutoPitch();
       this.tickFakeLag();
       // Before updateJumpKey: a release here can flip realGliding false this
@@ -843,7 +941,13 @@ public class ElytraBounce extends Module {
 
    /** The pitch actually applied: the solver's answer, or the fixed setting when auto-pitch is off. */
    private float effectivePitch() {
-      return (Boolean)this.autoPitch.get() ? this.solvedPitch : ((Double)this.pitch.get()).floatValue();
+      // Under 1.2 blocks of headroom the solver's model has nothing to say:
+      // the ceiling stop kills the vertical speed without touching the
+      // horizontal, so it predicts 80 to 135 b/s in a crawling tunnel and its
+      // answer swings thirty degrees for five centimetres of measurement. The
+      // fixed angle is what flew those tunnels before auto-pitch existed.
+      boolean solverUsable = (Boolean)this.autoPitch.get() && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2);
+      return solverUsable ? this.solvedPitch : ((Double)this.pitch.get()).floatValue();
    }
 
    @Override

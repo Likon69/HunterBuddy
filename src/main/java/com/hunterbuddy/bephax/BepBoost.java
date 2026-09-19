@@ -36,6 +36,16 @@ public class BepBoost extends Module {
     private static final double MAX_PLAUSIBLE_MOVEMENT = 40.0;
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     private final SettingGroup sgSafety = this.settings.createGroup("Safety");
+    public final Setting<Boolean> catchUpPacing = this.sgGeneral
+        .add(
+            new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                .name("catch-up-pacing")
+                .description(
+                    "Spread the ticks owed after a stall over the next frames instead of running them all in one. Vanilla runs up to ten ticks in the frame after a chunk batch or a long frame, and their movement packets reach the server together; past five bunched packets the server holds the whole bunch to one tick's allowance and teleports the rest back, which on a dive reads as a setback out of nowhere. Three ticks a frame, the rest carried forward, no tick lost. Applies while Pitch40, BepRocketFly or ElytraBounce is running, whether or not this module is."
+                )
+                .defaultValue(true)
+                .build()
+        );
     private final Setting<Double> speed = this.sgGeneral
         .add(
             new Builder()
@@ -156,6 +166,7 @@ public class BepBoost extends Module {
     private int latchGraceTicks = 0;
     private int suppressTicks = 0;
     private int travellingTicks = 0;
+   private int porpoisingTicks = 0;
     private String state = "not gliding";
     private String limiter = "speed";
     private int appliedInWindow = 0;
@@ -264,6 +275,10 @@ public class BepBoost extends Module {
 
             if (this.travellingTicks > 0) {
                 this.travellingTicks--;
+            }
+
+            if (this.porpoisingTicks > 0) {
+                this.porpoisingTicks--;
             }
 
             this.keepAimFresh();
@@ -556,9 +571,14 @@ public class BepBoost extends Module {
         int ticks = this.lookahead.get();
         double reach = Math.max(4.0, capped * ticks);
         Vec3d eye = this.mc.player.getEyePos();
+        // Along the line actually flown, not the one looked down. The ride
+        // sits at the corner of the window, which on a coasting leg is tens of
+        // degrees off the look: a wall check down the look clears a path the
+        // body never takes.
+        Vec3d travel = this.rideDirection(look);
         this.limiter = "speed";
         if (this.wallCheck.get()) {
-            Vec3d end = eye.add(look.multiply(reach));
+            Vec3d end = eye.add(travel.multiply(reach));
             HitResult hit = this.mc.world.raycast(new RaycastContext(eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, this.mc.player));
             if (hit.getType() != HitResult.Type.MISS) {
                 double limit = hit.getPos().distanceTo(eye) / ticks;
@@ -571,7 +591,7 @@ public class BepBoost extends Module {
 
         if (this.chunkCheck.get()) {
             for (double d = 16.0; d <= reach; d += 16.0) {
-                Vec3d at = eye.add(look.multiply(d));
+                Vec3d at = eye.add(travel.multiply(d));
                 BlockPos atPos = BlockPos.ofFloored(at);
                 if (!this.mc.world.getChunkManager().isChunkLoaded(atPos.getX() >> 4, atPos.getZ() >> 4)) {
                     if (d / ticks < capped) {
@@ -630,7 +650,20 @@ public class BepBoost extends Module {
     }
 
     private double effectiveAlignment() {
-        return this.baritoneSync.get() && this.baritoneFlying() ? 0.0 : this.alignment.get();
+        if (this.baritoneSync.get() && this.baritoneFlying()) {
+            return 0.0;
+        }
+
+        // The porpoise needs the corner of the box, and the corner sits well
+        // off the look: on a flat coasting leg the fastest point of the window
+        // is around thirty degrees above it, outside any tight alignment.
+        // Capping the ride to the look there throws away most of what the
+        // pumped legs are for.
+        return this.porpoisingTicks > 0 ? Math.max(90.0, this.alignment.get()) : this.alignment.get();
+    }
+
+    public void declarePorpoising() {
+        this.porpoisingTicks = 3;
     }
 
     public double alignmentDegrees() {
@@ -639,6 +672,11 @@ public class BepBoost extends Module {
 
     public double windowThreshold() {
         return this.amount.get();
+    }
+
+    /** The direction the body is actually travelling, falling back to the look before the first tick. */
+    public Vec3d rideDirection(Vec3d look) {
+        return this.lastMovement.lengthSquared() > 0.01 ? this.lastMovement.normalize() : look;
     }
 
     public boolean hasWindow() {

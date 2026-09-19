@@ -60,6 +60,16 @@ public final class BounceSolver {
      * {@code hold-glide-clear} is itself a setting a bounce can disable.
      */
     public static double simulateSpeed(float pitch, double headroom, boolean clearHeld) {
+        return simulateSpeed(pitch, pitch, headroom, clearHeld);
+    }
+
+    /**
+     * Two angles instead of one: the climb and the descent of a hop want
+     * opposite things, and a single constant pitch has to compromise between
+     * them. Simulated the same way, only the angle in force each tick changes
+     * with the sign of the vertical speed.
+     */
+    public static double simulateSpeed(float pitchUp, float pitchDown, double headroom, boolean clearHeld) {
         double vx = 0.0;
         double vy = 0.0;
         double vz = 0.0;
@@ -92,6 +102,7 @@ public final class BounceSolver {
             }
 
             if (gliding) {
+                float pitch = vy > 0.0 ? pitchUp : pitchDown;
                 double f = pitch * (float) (Math.PI / 180.0);
                 double lookZ = MathHelper.cos(f);
                 double d = Math.abs(lookZ);
@@ -149,10 +160,10 @@ public final class BounceSolver {
     }
 
     public static float solvePitch(double headroom, boolean clearHeld) {
-        float best = 89.0F;
+        float best = MAX_PITCH;
         double bestSpeed = -1.0;
 
-        for (float p = 25.0F; p <= 89.0F; p++) {
+        for (float p = MIN_PITCH; p <= MAX_PITCH; p++) {
             double s = simulateSpeed(p, headroom, clearHeld);
             if (s > bestSpeed) {
                 bestSpeed = s;
@@ -161,5 +172,49 @@ public final class BounceSolver {
         }
 
         return best;
+    }
+
+    /**
+     * The fastest pair of angles for a given ceiling: index 0 is the climb,
+     * index 1 the descent. Swept coarsely over the whole range first, then
+     * refined a degree at a time around the best pair, so the cost stays a
+     * few hundred simulations rather than the four thousand a full pass over
+     * both axes would take.
+     */
+    public static float[] solvePlan(double headroom, boolean clearHeld) {
+        float bestUp = 89.0F;
+        float bestDown = 89.0F;
+        double bestSpeed = -1.0;
+
+        for (float up = MIN_PITCH; up <= MAX_PITCH; up += 4.0F) {
+            for (float down = MIN_PITCH; down <= MAX_PITCH; down += 4.0F) {
+                double s = simulateSpeed(up, down, headroom, clearHeld);
+                if (s > bestSpeed) {
+                    bestSpeed = s;
+                    bestUp = up;
+                    bestDown = down;
+                }
+            }
+        }
+
+        float coarseUp = bestUp;
+        float coarseDown = bestDown;
+
+        for (float up = coarseUp - 3.0F; up <= coarseUp + 3.0F; up++) {
+            if (up < MIN_PITCH || up > MAX_PITCH) continue;
+
+            for (float down = coarseDown - 3.0F; down <= coarseDown + 3.0F; down++) {
+                if (down < MIN_PITCH || down > MAX_PITCH) continue;
+
+                double s = simulateSpeed(up, down, headroom, clearHeld);
+                if (s > bestSpeed) {
+                    bestSpeed = s;
+                    bestUp = up;
+                    bestDown = down;
+                }
+            }
+        }
+
+        return new float[]{bestUp, bestDown};
     }
 }
