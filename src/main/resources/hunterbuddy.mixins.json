@@ -33,6 +33,7 @@
     "KeyBindingMixin",
     "ElytraBounceEntityMixin",
     "ElytraBounceCameraMixin",
+    "CatchUpPacingMixin",
     "EntityScaleMixin",
     "MeteorNametagsHeightMixin"
   ],

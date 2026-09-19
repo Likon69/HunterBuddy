@@ -109,6 +109,12 @@ public class ElytraTakeoff {
 
       switch (this.phase) {
          case JUMPING:
+            // Pulsed, not held: a jump the server sees held counts as movement
+            // and cancels every inventory click queued behind it for as long as
+            // it lasts - restocks, chest swaps, the player's own clicks. Every
+            // second tick presses, the tick in between is left clean for a
+            // click to get out.
+            boolean pulse = mc.player.age % 2L == 0L;
             if (mc.player.isOnGround()) {
                if (!this.jumpedThisAttempt) {
                   Utils.holdJump(mc);
@@ -117,11 +123,15 @@ public class ElytraTakeoff {
                   if (this.listener != null) {
                      this.listener.onTakeoffDebug("Takeoff jump (baritone input)");
                   }
-               } else if (this.jumpHoldTicks > 0) {
+               } else if (this.jumpHoldTicks > 0 && pulse) {
                   Utils.holdJump(mc);
+               } else {
+                  this.releaseJump();
                }
-            } else {
+            } else if (pulse) {
                Utils.holdJump(mc);
+            } else {
+               this.releaseJump();
             }
             break;
          case DEPLOYING:
