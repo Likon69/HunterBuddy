@@ -57,6 +57,16 @@ public class AutoEatSync extends Module {
         .build()
     );
 
+    private final Setting<Integer> fetchSlot = sgGeneral.add(new meteordevelopment.meteorclient.settings.IntSetting.Builder()
+        .name("fetch-slot")
+        .description("Which hotbar slot food from the inventory is brought into, 1 to 9. Whatever sits there is exchanged with it and put back afterwards, so a full hotbar is no longer a reason to starve.")
+        .defaultValue(9)
+        .min(1)
+        .max(9)
+        .sliderRange(1, 9)
+        .build()
+    );
+
     private final Setting<Boolean> gapsOnly = sgGeneral.add(new BoolSetting.Builder()
         .name("gaps-only")
         .description("Only eat golden apples and enchanted golden apples. Off, any food counts.")
@@ -113,6 +123,7 @@ public class AutoEatSync extends Module {
     private static final int MAX_MEAL_TICKS = 60;
     private static final int MAX_HOLD_TICKS = 40;
     private static final int FALLBACK_USE_TIME = 30;
+    private static final int EMERGENCY_FINISHED_COOLDOWN_TICKS = 80;
 
     private boolean eating;
     private int eatSlot = -1;
@@ -127,6 +138,7 @@ public class AutoEatSync extends Module {
     private int handRetryAfterTick;
     private int noBiteRetryAfterTick;
     private boolean emergencyMeal;
+    private int emergencyFinishedCooldownUntilTick;
     private float healthMark;
     private int healthMarkTick;
     private boolean fireworksHeld;
@@ -151,6 +163,7 @@ public class AutoEatSync extends Module {
         handRetryAfterTick = 0;
         noBiteRetryAfterTick = 0;
         emergencyMeal = false;
+        emergencyFinishedCooldownUntilTick = 0;
         healthMark = 0.0f;
         healthMarkTick = 0;
         fireworksHeldSinceTick = 0;
@@ -278,8 +291,10 @@ public class AutoEatSync extends Module {
     }
 
     private boolean emergency() {
-        return mc.player.getHealth() <= emergencyHealth.get()
-                || healthMark - mc.player.getHealth() >= emergencyDrop.get();
+        float health = mc.player.getHealth();
+        if (health <= emergencyHealth.get()) return true;
+        if (tickCounter < emergencyFinishedCooldownUntilTick) return false;
+        return healthMark - health >= emergencyDrop.get();
     }
 
     private boolean mustStop() {
@@ -402,8 +417,6 @@ public class AutoEatSync extends Module {
             if (mc.player.getInventory().getStack(i).getItem() == Items.ENCHANTED_GOLDEN_APPLE) return i;
         }
 
-        if (InvUtils.find(ItemStack::isEmpty, SlotUtils.HOTBAR_START, SlotUtils.HOTBAR_END).slot() == -1) return -1;
-
         for (int i = SlotUtils.MAIN_START; i <= SlotUtils.MAIN_END; i++) {
             if (mc.player.getInventory().getStack(i).getItem() == Items.ENCHANTED_GOLDEN_APPLE) return i;
         }
@@ -427,12 +440,15 @@ public class AutoEatSync extends Module {
             return true;
         }
 
-        int emptySlot = InvUtils.find(ItemStack::isEmpty, SlotUtils.HOTBAR_START, SlotUtils.HOTBAR_END).slot();
-        if (emptySlot == -1) return false;
-
-        InvUtils.move().from(slot).toHotbar(emptySlot);
-        InvUtils.swap(emptySlot, false);
-        eatSlot = emptySlot;
+        // Straight into the chosen hotbar slot, whatever is already there: the
+        // move is an exchange, so the occupant lands in the inventory where the
+        // food came from and comes back the same way afterwards. Demanding an
+        // empty slot meant a full hotbar left a whole stack of gaps unreachable
+        // in the inventory and nothing was ever eaten.
+        int target = SlotUtils.HOTBAR_START + fetchSlot.get() - 1;
+        InvUtils.move().from(slot).toHotbar(fetchSlot.get() - 1);
+        InvUtils.swap(target, false);
+        eatSlot = target;
         return true;
     }
 
@@ -506,6 +522,13 @@ public class AutoEatSync extends Module {
 
     private void stopEating(String reason) {
         if (debug.get()) info("[AutoEatSync] aborted after " + eatTicks + " ticks — reason " + reason);
+
+        if ("finished".equals(reason) && emergencyMeal && mc.player != null
+                && mc.player.getHealth() > emergencyHealth.get()) {
+            emergencyFinishedCooldownUntilTick = tickCounter + EMERGENCY_FINISHED_COOLDOWN_TICKS;
+            healthMark = mc.player.getHealth();
+            healthMarkTick = tickCounter;
+        }
 
         if (!(mc.player != null && emergency() && isInterruption(reason))) {
             emergencyMeal = false;

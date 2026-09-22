@@ -17,12 +17,14 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.World;
@@ -111,6 +113,11 @@ public class WaypointFollower extends Module {
     private int glidingTicksAfterStartup = 0;
     private boolean baritoneActivatedAfterStartup = false;
     private int waypointLoadRetries = 0;
+    private BlockPos lavaEscapeGoal = null;
+    private int lavaEscapeCooldown = 0;
+    private Direction lavaEscapeDirection = null;
+    private BlockPos lavaEscapeMinePos = null;
+    private int lavaEscapeMineTicks = 0;
 
     /**
      * Volatile because it is the publication barrier for the list: the loader
@@ -136,10 +143,11 @@ public class WaypointFollower extends Module {
      * Ticks between two attempts at re-giving Baritone the goal it dropped, and how many of those
      * attempts a single waypoint gets before this gives up on it — a spot Baritone cannot actually
      * land near (walled in, no safe block anywhere close) would otherwise be retried forever.
-     * [proposé], to calibrate once this has been seen firing.
      */
     private static final int BARITONE_RESTART_DELAY_TICKS = 100;
     private static final int BARITONE_RESTART_MAX_ATTEMPTS = 3;
+    private static final int LAVA_ESCAPE_REPATH_TICKS = 80;
+    private static final int LAVA_ESCAPE_BLOCKS = 4;
     /**
      * How far the bot has to be from where it last re-gave the goal for the attempts to start over:
      * somewhere new is a new try. The user's rule, after a bot whose three attempts were all spent in ten
@@ -573,6 +581,11 @@ public class WaypointFollower extends Module {
         this.baritoneRestartAttempts = 0;
         this.baritoneRestartCooldown = 0;
         this.baritoneRestartPos = null;
+        this.lavaEscapeGoal = null;
+        this.lavaEscapeCooldown = 0;
+        this.lavaEscapeDirection = null;
+        this.lavaEscapeMinePos = null;
+        this.lavaEscapeMineTicks = 0;
     }
 
     /** Whether the bot is more than {@link #BARITONE_RESTART_MOVED_BLOCKS} from where it last re-gave the goal. */
@@ -1320,10 +1333,243 @@ public class WaypointFollower extends Module {
         }
     }
 
+    private boolean handleLavaFootEscape(BlockPos nextWaypoint) {
+        ClientPlayerEntity player = mc.player;
+        if (player == null) return false;
+
+        if (!this.shouldUseLavaFootEscape(player)) {
+            this.lavaEscapeGoal = null;
+            this.lavaEscapeCooldown = 0;
+            this.lavaEscapeDirection = null;
+            this.lavaEscapeMinePos = null;
+            this.lavaEscapeMineTicks = 0;
+            Utils.setPressed(mc.options.forwardKey, false);
+            Utils.setPressed(mc.options.jumpKey, false);
+            return false;
+        }
+
+        try {
+            IBaritone baritoneInstance = BaritoneAPI.getProvider().getPrimaryBaritone();
+            if (this.lavaEscapeCooldown <= 0 || this.lavaEscapeGoal == null) {
+                BlockPos escape = this.pickLavaEscapeGoal(nextWaypoint);
+                this.lavaEscapeGoal = escape;
+                this.lavaEscapeDirection = this.directionToward(player.getBlockPos(), escape);
+                this.lavaEscapeCooldown = LAVA_ESCAPE_REPATH_TICKS;
+                this.currentBaritoneTarget = null;
+                this.lavaEscapeMinePos = null;
+                this.lavaEscapeMineTicks = 0;
+
+                if (this.showChatMessages.get()) {
+                    this.info("Lava trap detected - stopping elytra and mining out toward "
+                        + escape.getX() + ", " + escape.getY() + ", " + escape.getZ());
+                }
+            } else {
+                this.lavaEscapeCooldown--;
+            }
+
+            baritoneInstance.getPathingBehavior().cancelEverything();
+            if (BaritoneHelper.hasElytraProcess()) {
+                baritoneInstance.getCommandManager().execute("forcecancel");
+            }
+            baritoneInstance.getCustomGoalProcess().setGoal(null);
+            baritoneInstance.getInputOverrideHandler().clearAllKeys();
+
+            this.mineLavaEscapeTunnel();
+        } catch (Exception e) {
+            if (this.showChatMessages.get()) this.error("Lava escape error: " + e.getMessage());
+        }
+
+        return true;
+    }
+
+    /**
+     * Leave normal Baritone flight alone around lava lakes. Foot escape is for lava with walls or
+     * collision around the player, where rockets only pin him into the same block.
+     */
+    private boolean shouldUseLavaFootEscape(ClientPlayerEntity player) {
+        BlockPos feet = player.getBlockPos();
+        if (!mc.world.getBlockState(feet).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+            return false;
+        }
+
+        int walls = 0;
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos adjacent = feet.offset(direction);
+            BlockState state = mc.world.getBlockState(adjacent);
+            if (!state.getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)
+                    && !state.getCollisionShape(mc.world, adjacent).isEmpty()) walls++;
+        }
+
+        return walls >= 2 || player.horizontalCollision || player.verticalCollision || this.lavaEscapeGoal != null;
+    }
+
+    private BlockPos pickLavaEscapeGoal(BlockPos nextWaypoint) {
+        ClientPlayerEntity player = mc.player;
+        BlockPos feet = player.getBlockPos();
+        int goalX = this.toNetherCoord(nextWaypoint.getX());
+        int goalZ = this.toNetherCoord(nextWaypoint.getZ());
+        Direction primary;
+        Direction secondary;
+
+        int dx = goalX - feet.getX();
+        int dz = goalZ - feet.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            primary = dx >= 0 ? Direction.EAST : Direction.WEST;
+            secondary = dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+        } else {
+            primary = dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+            secondary = dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+
+        Direction[] choices = new Direction[] {
+            primary,
+            secondary,
+            primary.getOpposite(),
+            secondary.getOpposite()
+        };
+
+        for (Direction direction : choices) {
+            if (this.lavaEscapeBreakTarget(feet, direction) != null || this.lavaEscapePassageOpen(feet, direction)) {
+                return feet.offset(direction, LAVA_ESCAPE_BLOCKS);
+            }
+        }
+
+        for (Direction direction : choices) {
+            BlockPos candidate = feet.offset(direction, LAVA_ESCAPE_BLOCKS);
+            if (!mc.world.getBlockState(candidate).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)
+                    && !mc.world.getBlockState(candidate.up()).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+                return candidate;
+            }
+        }
+
+        return feet.offset(primary, LAVA_ESCAPE_BLOCKS);
+    }
+
+    private Direction directionToward(BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) return dx >= 0 ? Direction.EAST : Direction.WEST;
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private void mineLavaEscapeTunnel() {
+        ClientPlayerEntity player = mc.player;
+        if (player == null || mc.interactionManager == null || mc.world == null) return;
+
+        BlockPos feet = player.getBlockPos();
+        Direction direction = this.lavaEscapeDirection;
+        if (direction == null) {
+            direction = this.lavaEscapeGoal != null ? this.directionToward(feet, this.lavaEscapeGoal) : Direction.NORTH;
+            this.lavaEscapeDirection = direction;
+        }
+
+        BlockPos breakTarget = this.lavaEscapeBreakTarget(feet, direction);
+        if (breakTarget == null) {
+            Utils.setPressed(mc.options.forwardKey, true);
+            // Pulsed, never held: a jump the server sees held counts as movement
+            // and cancels every inventory click behind it, which is exactly the
+            // slot change AutoEatSync needs to get a fire resistance apple down
+            // while standing in the lava this is escaping from.
+            Utils.setPressed(mc.options.jumpKey, player.age % 2L == 0L);
+            this.rotateFlat(direction);
+            return;
+        }
+
+        if (!breakTarget.equals(this.lavaEscapeMinePos)) {
+            this.lavaEscapeMinePos = breakTarget;
+            this.lavaEscapeMineTicks = 0;
+        }
+
+        Direction face = direction.getOpposite();
+
+        // Handed to the mine module, which holds the pickaxe itself for the
+        // packet mine and never touches the selected hotbar slot. Mining bare
+        // handed got nowhere on anything harder than netherrack, and the block
+        // in front of a lava pocket is rarely netherrack.
+        MlepMine mine = Modules.get().get(MlepMine.class);
+        if (mine != null && mine.isActive()) {
+            if (this.lavaEscapeMineTicks % 40 == 0) {
+                mine.queueMiningData(mine.new MiningData(breakTarget, face));
+            }
+
+            Utils.setPressed(mc.options.forwardKey, true);
+            Utils.setPressed(mc.options.jumpKey, player.age % 2L == 0L);
+            this.lavaEscapeMineTicks++;
+            return;
+        }
+
+        Vec3d target = Vec3d.ofCenter(breakTarget);
+        RotationUtils.rotate(RotationUtils.getYaw(target), RotationUtils.getPitch(target));
+        if (!RotationUtils.getInstance().isAligned(8.0)) return;
+
+        if (this.lavaEscapeMineTicks == 0) {
+            meteordevelopment.meteorclient.utils.player.FindItemResult pickaxe = InvUtils.find(
+                itemStack -> itemStack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)
+            );
+            if (pickaxe.found() && pickaxe.isHotbar()) {
+                InvUtils.swap(pickaxe.slot(), false);
+            }
+        }
+
+        if (this.lavaEscapeMineTicks % 20 == 0) {
+            mc.interactionManager.attackBlock(breakTarget, face);
+        } else {
+            mc.interactionManager.updateBlockBreakingProgress(breakTarget, face);
+        }
+
+        player.swingHand(Hand.MAIN_HAND);
+        Utils.setPressed(mc.options.forwardKey, true);
+        Utils.setPressed(mc.options.jumpKey, player.age % 2L == 0L);
+        this.lavaEscapeMineTicks++;
+    }
+
+    private BlockPos lavaEscapeBreakTarget(BlockPos feet, Direction direction) {
+        BlockPos frontFeet = feet.offset(direction);
+        if (this.isLavaEscapeBreakable(frontFeet)) return frontFeet;
+
+        BlockPos frontHead = frontFeet.up();
+        if (this.isLavaEscapeBreakable(frontHead)) return frontHead;
+
+        BlockPos currentHead = feet.up();
+        if (this.isLavaEscapeBreakable(currentHead)) return currentHead;
+
+        return null;
+    }
+
+    private boolean lavaEscapePassageOpen(BlockPos feet, Direction direction) {
+        BlockPos frontFeet = feet.offset(direction);
+        BlockPos frontHead = frontFeet.up();
+        return this.isLavaEscapeOpen(frontFeet) && this.isLavaEscapeOpen(frontHead);
+    }
+
+    private boolean isLavaEscapeOpen(BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        return state.isAir() || state.isReplaceable() || state.getCollisionShape(mc.world, pos).isEmpty();
+    }
+
+    private boolean isLavaEscapeBreakable(BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.getCollisionShape(mc.world, pos).isEmpty()) return false;
+        return state.getHardness(mc.world, pos) >= 0.0F;
+    }
+
+    private void rotateFlat(Direction direction) {
+        float yaw = switch (direction) {
+            case NORTH -> 180.0F;
+            case SOUTH -> 0.0F;
+            case WEST -> 90.0F;
+            case EAST -> -90.0F;
+            default -> mc.player != null ? mc.player.getYaw() : 0.0F;
+        };
+        RotationUtils.rotate(yaw, 0.0F);
+    }
+
     private void handleNetherBaritonePathfinding() {
         if (this.waypointsToFollow.isEmpty()) return;
         BlockPos nextWaypoint = this.getNextWaypoint();
         if (nextWaypoint == null) return;
+
+        if (this.handleLavaFootEscape(nextWaypoint)) return;
 
         try {
             IBaritone baritoneInstance = BaritoneAPI.getProvider().getPrimaryBaritone();

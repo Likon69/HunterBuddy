@@ -2824,12 +2824,15 @@ public class AutoFlyingRegear extends Module {
                this.mc.player.setYaw(playerYaw + Math.signum(yawDiff) * 5.0F);
             }
 
-            if (Math.abs(yawDiff) < 30.0F) {
-               if (horizontalDistance > 0.5) {
-                  this.mc.options.forwardKey.setPressed(true);
-               } else if (horizontalDistance > 0.2) {
-                  this.mc.options.forwardKey.setPressed(this.stateTickCounter % 3 == 0);
-               }
+            // Held all the way in, never tapped. Sneaking already cuts the
+            // speed to a third below one block, which is what the old one tick
+            // in three was reaching for - but a third of a tick of walking
+            // against ground friction moves almost nothing, and inside a
+            // closed box, pressed against a wall, it moves nothing at all. A
+            // run that stopped 0.48 blocks short spent twenty-eight seconds
+            // there and timed out with the ender chest never placed.
+            if (Math.abs(yawDiff) < 30.0F && horizontalDistance > 0.2) {
+               this.mc.options.forwardKey.setPressed(true);
             }
 
             this.mc.options.sneakKey.setPressed(horizontalDistance < 1.0);
