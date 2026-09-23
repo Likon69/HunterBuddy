@@ -378,6 +378,8 @@ public class AutoFlyingRegear extends Module {
    private int currentBlockIndex = 0;
    private BlockPos shulkerPlacePos = null;
    private BlockPos echestPos = null;
+   private int echestOpenFailures = 0;
+   private int echestAboveMineTicks = 0;
    private boolean processingElytras = true;
    /** Which extra kind is being restocked between the elytras and the rockets, {@link Extra#NONE} outside that. */
    private Extra extra = Extra.NONE;
@@ -515,6 +517,7 @@ public class AutoFlyingRegear extends Module {
    private boolean placementHeld = false;
    private boolean savedAllowPlace = true;
    private boolean runAborted = false;
+   private int solidGroundTicks = 0;
    private int wallMissingLast = -1;
    private int wallNoProgressRounds = 0;
    private final Set<BlockPos> wallMineQueued = new HashSet<>();
@@ -566,6 +569,8 @@ public class AutoFlyingRegear extends Module {
       this.disabledModules.clear();
       this.shulkerPlacePos = null;
       this.echestPos = null;
+      this.echestOpenFailures = 0;
+      this.echestAboveMineTicks = 0;
       this.processingElytras = true;
       this.extra = AutoFlyingRegear.Extra.NONE;
       this.transferSlotIndex = 0;
@@ -1014,6 +1019,7 @@ public class AutoFlyingRegear extends Module {
             }
 
             this.lowSupplyTicks = 0;
+            this.solidGroundTicks = 0;
          }
 
          if (this.lowSupplyTicks >= 20) {
@@ -1035,6 +1041,7 @@ public class AutoFlyingRegear extends Module {
                }
 
                this.lavaPostponeTicks++;
+               this.solidGroundTicks = 0;
                return;
             }
 
@@ -1055,6 +1062,16 @@ public class AutoFlyingRegear extends Module {
                }
 
                this.lavaPostponeTicks++;
+               this.solidGroundTicks = 0;
+               return;
+            }
+
+            // Solid for several ticks in a row, not one. A single reading is
+            // taken at flying speed and the next tick contradicts it: three
+            // runs in a row started on one good tick, saw lava under the drop
+            // on the next and abandoned, each one swapping the chestplate in
+            // and out for nothing.
+            if (++this.solidGroundTicks < 5) {
                return;
             }
 
@@ -1299,7 +1316,7 @@ public class AutoFlyingRegear extends Module {
       boolean driftTooHigh = driftPerBlock > DROP_MAX_DRIFT_PER_BLOCK;
       AutoFlyingRegear.GroundScan dropGround = this.scanGroundBelow();
       if (dropGround.kind() == AutoFlyingRegear.GroundKind.LAVA) {
-         this.forceCompleteStuckState();
+         this.abortRunBecause("lava under the drop, flying on until solid ground is below");
          return;
       }
 
@@ -2520,6 +2537,62 @@ public class AutoFlyingRegear extends Module {
       }
    }
 
+   private boolean prepareEchestForOpening() {
+      if (this.mc.world.getBlockState(this.echestPos).getBlock() != Blocks.ENDER_CHEST) {
+         if ((Boolean)this.debugMessages.get()) {
+            this.warning("No ender chest at " + this.echestPos.toShortString() + " any more, placing it again", new Object[0]);
+         }
+
+         this.echestAboveMineTicks = 0;
+         this.state = AutoFlyingRegear.FlyingRegearState.ROTATING_FOR_ECHEST;
+         this.timer = 2;
+         return false;
+      }
+
+      BlockPos above = this.echestPos.up();
+      BlockState aboveState = this.mc.world.getBlockState(above);
+      if (!aboveState.isAir() && !aboveState.isReplaceable()) {
+         if (this.echestAboveMineTicks > 400) {
+            this.echestAboveMineTicks = 0;
+            this.abortRunBecause(aboveState.getBlock().getName().getString() + " above the ender chest would not break");
+            return false;
+         }
+
+         if (this.echestAboveMineTicks % 40 == 0) {
+            if ((Boolean)this.debugMessages.get()) {
+               this.info("Breaking " + aboveState.getBlock().getName().getString() + " above the ender chest so it can open", new Object[0]);
+            }
+
+            Vec3d target = Vec3d.ofCenter(above);
+            float[] rotations = RotationUtils.getRotationsTo(this.mc.player.getEyePos(), target);
+            this.mc.player.setYaw(rotations[0]);
+            this.mc.player.setPitch(rotations[1]);
+            if (this.mlepMine != null && this.mlepMine.isActive()) {
+               ((MlepMine)this.mlepMine)
+                  .queueMiningData(((MlepMine)this.mlepMine).new MiningData(above.toImmutable(), this.faceFromEye(above)));
+            } else {
+               this.mc.interactionManager.attackBlock(above, this.faceFromEye(above));
+               this.mc.player.swingHand(Hand.MAIN_HAND);
+            }
+         } else if (this.mlepMine == null || !this.mlepMine.isActive()) {
+            this.mc.interactionManager.updateBlockBreakingProgress(above, this.faceFromEye(above));
+            this.mc.player.swingHand(Hand.MAIN_HAND);
+         }
+
+         this.echestAboveMineTicks++;
+         return false;
+      }
+
+      this.echestAboveMineTicks = 0;
+      FindItemResult freeHand = InvUtils.findInHotbar(stack -> !(stack.getItem() instanceof BlockItem));
+      if (freeHand.found() && freeHand.slot() >= 0 && freeHand.slot() <= 8
+         && ((PlayerInventoryAccessor)this.mc.player.getInventory()).getSelectedSlot() != freeHand.slot()) {
+         ((PlayerInventoryAccessor)this.mc.player.getInventory()).setSelectedSlot(freeHand.slot());
+      }
+
+      return true;
+   }
+
    private void handleOpeningEchest() {
       BlockPos standPos = this.echestPos.add(-1, -1, 0);
       Vec3d targetCenter = Vec3d.ofCenter(standPos.up());
@@ -2556,6 +2629,10 @@ public class AutoFlyingRegear extends Module {
       }
 
       this.mc.options.sneakKey.setPressed(false);
+      if (!this.prepareEchestForOpening()) {
+         return;
+      }
+
       Vec3d ecCenter = Vec3d.ofCenter(this.echestPos);
       BlockHitResult openHit = new BlockHitResult(ecCenter, Direction.UP, this.echestPos, false);
       if (!this.interactBlockWhenAligned(ecCenter, openHit)) {
@@ -2618,6 +2695,7 @@ public class AutoFlyingRegear extends Module {
 
    private void handleTakingShulker() {
       if (this.mc.currentScreen instanceof GenericContainerScreen screen) {
+         this.echestOpenFailures = 0;
          GenericContainerScreenHandler var16 = (GenericContainerScreenHandler)screen.getScreenHandler();
          String targetType = this.restockLabel();
          int syncId = var16.syncId;
@@ -2730,6 +2808,14 @@ public class AutoFlyingRegear extends Module {
          if (this.stateTickCounter > 40) {
             if ((Boolean)this.debugMessages.get()) {
                this.error("Failed to open ender chest", new Object[0]);
+            }
+
+            if (++this.echestOpenFailures >= 10) {
+               BlockPos above = this.echestPos == null ? null : this.echestPos.up();
+               String at = this.echestPos == null ? "no chest position" : this.echestPos.toShortString() + " = " + this.mc.world.getBlockState(this.echestPos).getBlock().getName().getString() + ", above = " + this.mc.world.getBlockState(above).getBlock().getName().getString();
+               this.echestOpenFailures = 0;
+               this.abortRunBecause("ender chest would not open 10 times in a row (" + at + ")");
+               return;
             }
 
             this.state = AutoFlyingRegear.FlyingRegearState.OPENING_ECHEST;

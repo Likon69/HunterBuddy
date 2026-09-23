@@ -224,7 +224,7 @@ public class AutoEatSync extends Module {
 
             eatTicks++;
 
-            if (eatTicks > MAX_MEAL_TICKS) {
+            if (eatTicks > Math.max(MAX_MEAL_TICKS, 2 * mealUseTime + 5)) {
                 stopEating("meal-timeout");
                 noBiteRetryAfterTick = tickCounter + 60;
                 return;
@@ -265,7 +265,7 @@ public class AutoEatSync extends Module {
         }
 
         boolean wantsToEat = shouldEat();
-        if (wantsToEat && safeToStart() && tickCounter >= noBiteRetryAfterTick && (emergency() || tickCounter >= handRetryAfterTick)) {
+        if (wantsToEat && safeToStart() && (emergency() || (tickCounter >= noBiteRetryAfterTick && tickCounter >= handRetryAfterTick))) {
             int slot = findSlot();
             if (slot != -1) beginEating(slot);
         } else if (wantsToEat && debug.get()) {

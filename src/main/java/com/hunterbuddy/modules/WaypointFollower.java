@@ -118,6 +118,9 @@ public class WaypointFollower extends Module {
     private Direction lavaEscapeDirection = null;
     private BlockPos lavaEscapeMinePos = null;
     private int lavaEscapeMineTicks = 0;
+    private int lavaEscapeLavaTicks = 0;
+    private int lavaEscapeTotalTicks = 0;
+    private boolean lavaEscapeEngaged = false;
 
     /**
      * Volatile because it is the publication barrier for the list: the loader
@@ -147,6 +150,8 @@ public class WaypointFollower extends Module {
     private static final int BARITONE_RESTART_DELAY_TICKS = 100;
     private static final int BARITONE_RESTART_MAX_ATTEMPTS = 3;
     private static final int LAVA_ESCAPE_REPATH_TICKS = 80;
+    private static final int LAVA_ESCAPE_ARM_TICKS = 20;
+    private static final int LAVA_ESCAPE_GIVE_UP_TICKS = 600;
     private static final int LAVA_ESCAPE_BLOCKS = 4;
     /**
      * How far the bot has to be from where it last re-gave the goal for the attempts to start over:
@@ -586,6 +591,9 @@ public class WaypointFollower extends Module {
         this.lavaEscapeDirection = null;
         this.lavaEscapeMinePos = null;
         this.lavaEscapeMineTicks = 0;
+        this.lavaEscapeLavaTicks = 0;
+        this.lavaEscapeTotalTicks = 0;
+        this.lavaEscapeEngaged = false;
     }
 
     /** Whether the bot is more than {@link #BARITONE_RESTART_MOVED_BLOCKS} from where it last re-gave the goal. */
@@ -1337,14 +1345,33 @@ public class WaypointFollower extends Module {
         ClientPlayerEntity player = mc.player;
         if (player == null) return false;
 
+        // A second of lava under the feet, not one tick of it. Skimming a lake
+        // on the way past dips into lava for a tick or two dozens of times a
+        // session, and every one of those used to cancel Baritone and take the
+        // flight over for nothing.
         if (!this.shouldUseLavaFootEscape(player)) {
-            this.lavaEscapeGoal = null;
-            this.lavaEscapeCooldown = 0;
-            this.lavaEscapeDirection = null;
-            this.lavaEscapeMinePos = null;
-            this.lavaEscapeMineTicks = 0;
-            Utils.setPressed(mc.options.forwardKey, false);
-            Utils.setPressed(mc.options.jumpKey, false);
+            this.lavaEscapeLavaTicks = 0;
+            if (this.lavaEscapeGoal != null || this.lavaEscapeEngaged) {
+                this.endLavaEscape();
+            }
+
+            return false;
+        }
+
+        if (this.lavaEscapeGoal == null && ++this.lavaEscapeLavaTicks < LAVA_ESCAPE_ARM_TICKS) {
+            return false;
+        }
+
+        // Handed back rather than held forever: five minutes of this ran on
+        // 2026-09-22 without getting out, and Baritone could do nothing the
+        // whole time because the escape cancelled it twenty times a second.
+        if (this.lavaEscapeEngaged && ++this.lavaEscapeTotalTicks > LAVA_ESCAPE_GIVE_UP_TICKS) {
+            if (this.showChatMessages.get()) {
+                this.info("Lava escape got nowhere in thirty seconds, handing the flight back to Baritone");
+            }
+
+            this.endLavaEscape();
+            this.lavaEscapeLavaTicks = 0;
             return false;
         }
 
@@ -1367,12 +1394,20 @@ public class WaypointFollower extends Module {
                 this.lavaEscapeCooldown--;
             }
 
-            baritoneInstance.getPathingBehavior().cancelEverything();
-            if (BaritoneHelper.hasElytraProcess()) {
-                baritoneInstance.getCommandManager().execute("forcecancel");
+            // Once, on the way in. Cancelling every tick wrote 5720 lines of
+            // "ok force canceled" into one session and left Baritone no tick
+            // of its own to work with.
+            if (!this.lavaEscapeEngaged) {
+                this.lavaEscapeEngaged = true;
+                this.lavaEscapeTotalTicks = 0;
+                baritoneInstance.getPathingBehavior().cancelEverything();
+                if (BaritoneHelper.hasElytraProcess()) {
+                    baritoneInstance.getCommandManager().execute("forcecancel");
+                }
+
+                baritoneInstance.getCustomGoalProcess().setGoal(null);
+                baritoneInstance.getInputOverrideHandler().clearAllKeys();
             }
-            baritoneInstance.getCustomGoalProcess().setGoal(null);
-            baritoneInstance.getInputOverrideHandler().clearAllKeys();
 
             this.mineLavaEscapeTunnel();
         } catch (Exception e) {
@@ -1380,6 +1415,18 @@ public class WaypointFollower extends Module {
         }
 
         return true;
+    }
+
+    private void endLavaEscape() {
+        this.lavaEscapeGoal = null;
+        this.lavaEscapeCooldown = 0;
+        this.lavaEscapeDirection = null;
+        this.lavaEscapeMinePos = null;
+        this.lavaEscapeMineTicks = 0;
+        this.lavaEscapeEngaged = false;
+        this.lavaEscapeTotalTicks = 0;
+        Utils.setPressed(mc.options.forwardKey, false);
+        Utils.setPressed(mc.options.jumpKey, false);
     }
 
     /**
