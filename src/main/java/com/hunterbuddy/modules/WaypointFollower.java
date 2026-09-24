@@ -1350,7 +1350,7 @@ public class WaypointFollower extends Module {
         // session, and every one of those used to cancel Baritone and take the
         // flight over for nothing.
         if (!this.shouldUseLavaFootEscape(player)) {
-            this.lavaEscapeLavaTicks = 0;
+            this.lavaEscapeLavaTicks = Math.max(0, this.lavaEscapeLavaTicks - 4);
             if (this.lavaEscapeGoal != null || this.lavaEscapeEngaged) {
                 this.endLavaEscape();
             }
@@ -1434,11 +1434,11 @@ public class WaypointFollower extends Module {
      * collision around the player, where rockets only pin him into the same block.
      */
     private boolean shouldUseLavaFootEscape(ClientPlayerEntity player) {
-        BlockPos feet = player.getBlockPos();
-        if (!mc.world.getBlockState(feet).getFluidState().isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+        if (!player.isInLava()) {
             return false;
         }
 
+        BlockPos feet = player.getBlockPos();
         int walls = 0;
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos adjacent = feet.offset(direction);
