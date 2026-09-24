@@ -1,8 +1,13 @@
 # HunterBuddy
 
-Private Meteor Client addon for hunting, flight, visuals, inventory logistics, and utility tools.
+A Meteor Client addon for hunting, flight, visuals, inventory logistics, and utility tools.
 
-Created by **Texy** and **DragonFood**.
+Created by **Texy** and **DragonFood**, for their own 2b2t hunting. Texy started it to get off FutureClient and
+RusherHack and build everything on Meteor instead — that mostly worked out; the only piece of either one still
+around is code that ended up ported into this addon rather than run from its original client (RusherHack's elytra
+flight shape in `elytra-auto-fly`, Future's totem swap in `f-totem`). mlep's code was the base a lot of the rest
+grew from, and bits of Jeff mod's and dekrom's code went in without much hesitation where they were useful. Have
+fun with it, and open a GitHub issue if you hit a problem.
 
 Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
 
@@ -100,7 +105,7 @@ Commands use the configured Meteor command prefix.
 | `setoutput` | Select the StashMover output area with two left-clicked corners. |
 | `stashstatus` | Show the selected areas and current StashMover status. |
 | `setclear` | Clear both StashMover selections. |
-| `arealoaderreset` | Delete every AreaLoader saved route, not just the selected one. |
+| `arealoaderreset` | Delete every AreaLoader saved profile, not just the selected one. |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
 ## HUD elements (29)
@@ -128,7 +133,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `Performance` | FPS, ping and server TPS in one line, coloured by level and flashing on spikes and drops. |
 | `PingMeter` | Ping with sparkline, jitter, and keepalive freshness. |
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
-| `RegearStatus` | AutoFlyingRegear phase, supplies, and mending progress. |
+| `RegearStatus` | The regear's identity badge, its station on its line, stocks and gains, counters, next-regear estimate and last event. |
 | `SessionTimeline` | The session as coloured activity segments with find markers. |
 | `SpeedKMH` | Movement speed in km/h. |
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
@@ -182,5 +187,8 @@ Several modules started as ports from other addons rather than being written fro
 - **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
 - **Dekrom** — the Baritone fork this project builds on, and BepHax, whose rocket boost and rotation-spoofing mechanics `BepBoost`, `BepRocketFly`, `TrailFollower`, and `ElytraBounce` are ported from.
 - **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepMine`, `MlepScaffold`, `MlepAirPlace`).
+- **Jeff mod** (miles352, [meteor-stashhunting-addon](https://github.com/miles352/meteor-stashhunting-addon)) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
+- **RusherHack** — the height-threshold shape `elytra-auto-fly` climbs and dives by; its settings keep RusherHack's own names ("Max Height", "Min Height", "Down Pitch").
+- **FutureClient** — `f-totem`, ported from its `combat/autoTotem` the way Future 2.9 did it.
 - **riths** — Hunting Utilities ("Tim").
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
