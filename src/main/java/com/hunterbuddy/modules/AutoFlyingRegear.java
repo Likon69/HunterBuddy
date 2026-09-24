@@ -5667,6 +5667,7 @@ public class AutoFlyingRegear extends Module {
       this.wallNoProgressRounds = 0;
       this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
+      this.rocketShulkersTaken = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();
       run.lavaWaitSeconds = this.lavaPostponeTicks / 20;
