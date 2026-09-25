@@ -220,6 +220,7 @@ public class Pitch40 extends Module {
    private boolean chestSwapJumpHeld = false;
    private boolean rocketArmed = false;
    private boolean rocketPending = false;
+   private long rocketHoldUntil = 0L;
    private int climbsSinceRocket = 0;
    private float lastPitch = 0.0F;
    private com.hunterbuddy.bephax.BepBoost bepBoost = null;
@@ -478,6 +479,14 @@ public class Pitch40 extends Module {
          return;
       }
 
+      if (this.elytraRecast != null && this.elytraRecast.isActive() && this.elytraRecast.isRecovering()) {
+         if (this.handBackGlide()) {
+            GlideClearHolder.release(this);
+         }
+
+         return;
+      }
+
       boolean gliderWorn = ChestSwapBurst.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST));
       if (!this.mc.player.isGliding()) {
          this.handBackGlide();
@@ -517,6 +526,10 @@ public class Pitch40 extends Module {
       long age = this.mc.player.age;
       int interval = (Integer)this.swapInterval.get();
       if (gliderWorn) {
+         if (age < this.rocketHoldUntil || ChestSwapBurst.rocketAttached(this.mc.player)) {
+            return;
+         }
+
          Hand chestHand = ChestSwapBurst.chestPieceHand(this.mc.player);
          if (chestHand != null && age >= this.chestSwapNextBurst) {
             ChestSwapBurst.swapSilently(chestHand);
@@ -553,7 +566,12 @@ public class Pitch40 extends Module {
       long age = this.mc.player.age;
       long waited = age - GlideClearHolder.heldSince();
       GlideClearHolder.flush();
-      ChestSwapBurst.swapSilently(gliderHand);
+      if (gliderHand != null) {
+         ChestSwapBurst.swapSilently(gliderHand);
+      } else {
+         ChestSwapBurst.wearGlider(this.mc.player);
+      }
+
       this.mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(this.mc.player, Mode.START_FALL_FLYING));
       this.mc.player.startGliding();
       this.mc.options.jumpKey.setPressed(true);
@@ -562,6 +580,10 @@ public class Pitch40 extends Module {
       this.chestSwapNextBurst = age + (Integer)this.swapInterval.get();
       if (this.rocketPending) {
          this.fireRocket();
+         if (!this.rocketPending) {
+            this.chestSwapBurstHand = null;
+            this.rocketHoldUntil = age + 10L;
+         }
       }
 
       this.logSwap(swapBack ? "burst" : "hand-back", "waited=" + waited);
@@ -602,12 +624,12 @@ public class Pitch40 extends Module {
       }
 
       Hand gliderHand = ChestSwapBurst.gliderHand(this.mc.player);
-      if (gliderHand == null) {
+      if (!this.mc.player.isGliding()) {
+         ChestSwapBurst.wearGlider(this.mc.player);
          return true;
       }
 
-      if (!this.mc.player.isGliding()) {
-         ChestSwapBurst.swapSilently(gliderHand);
+      if (gliderHand == null && ChestSwapBurst.gliderSlot(this.mc.player) == -1) {
          return true;
       }
 
@@ -674,6 +696,28 @@ public class Pitch40 extends Module {
       }
 
       return true;
+   }
+
+   @EventHandler
+   private void onPlaySound(meteordevelopment.meteorclient.events.world.PlaySoundEvent event) {
+      if ((Boolean)this.chestSwap.get()) {
+         for (net.minecraft.util.Identifier identifier : java.util.List.of(
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_generic"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_netherite"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_elytra"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_diamond"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_gold"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_iron"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_chain"),
+            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_leather"),
+            net.minecraft.util.Identifier.of("minecraft:item.elytra.flying")
+         )) {
+            if (identifier.equals(event.sound.getId())) {
+               event.cancel();
+               break;
+            }
+         }
+      }
    }
 
    @EventHandler

@@ -625,7 +625,12 @@ public class BepRocketFly extends Module {
 
     private void chestSwapBurst(net.minecraft.util.Hand gliderHand, boolean swapBack) {
         GlideClearHolder.flush();
-        com.hunterbuddy.util.ChestSwapBurst.swapSilently(gliderHand);
+        if (gliderHand != null) {
+            com.hunterbuddy.util.ChestSwapBurst.swapSilently(gliderHand);
+        } else {
+            com.hunterbuddy.util.ChestSwapBurst.wearGlider(this.mc.player);
+        }
+
         this.mc
             .getNetworkHandler()
             .sendPacket(
@@ -662,12 +667,12 @@ public class BepRocketFly extends Module {
         }
 
         net.minecraft.util.Hand gliderHand = com.hunterbuddy.util.ChestSwapBurst.gliderHand(this.mc.player);
-        if (gliderHand == null) {
+        if (!this.mc.player.isGliding()) {
+            com.hunterbuddy.util.ChestSwapBurst.wearGlider(this.mc.player);
             return true;
         }
 
-        if (!this.mc.player.isGliding()) {
-            com.hunterbuddy.util.ChestSwapBurst.swapSilently(gliderHand);
+        if (gliderHand == null && com.hunterbuddy.util.ChestSwapBurst.gliderSlot(this.mc.player) == -1) {
             return true;
         }
 

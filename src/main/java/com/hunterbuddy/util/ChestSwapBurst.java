@@ -63,6 +63,58 @@ public final class ChestSwapBurst {
       return isChestPiece(player.getStackInHand(Hand.OFF_HAND)) ? Hand.OFF_HAND : null;
    }
 
+   public static int gliderSlot(ClientPlayerEntity player) {
+      for (int i = 0; i < 36; i++) {
+         ItemStack stack = player.getInventory().getStack(i);
+         if (isGlider(stack) && !stack.willBreakNextUse()) {
+            return i;
+         }
+      }
+
+      return -1;
+   }
+
+   public static boolean hasGlider(ClientPlayerEntity player) {
+      return isGlider(player.getEquippedStack(EquipmentSlot.CHEST)) || gliderHand(player) != null || gliderSlot(player) != -1;
+   }
+
+   public static boolean wearGlider(ClientPlayerEntity player) {
+      if (isGlider(player.getEquippedStack(EquipmentSlot.CHEST))) {
+         return true;
+      }
+
+      Hand hand = gliderHand(player);
+      if (hand != null && !player.getStackInHand(hand).willBreakNextUse()) {
+         swapSilently(hand);
+         return true;
+      }
+
+      int slot = gliderSlot(player);
+      if (slot == -1) {
+         return false;
+      }
+
+      meteordevelopment.meteorclient.utils.player.InvUtils.move().from(slot).toArmor(2);
+      return true;
+   }
+
+   public static boolean rocketAttached(ClientPlayerEntity player) {
+      net.minecraft.client.MinecraftClient mc = meteordevelopment.meteorclient.MeteorClient.mc;
+      if (mc.world == null) {
+         return false;
+      }
+
+      for (net.minecraft.entity.Entity entity : mc.world.getEntities()) {
+         if (entity instanceof net.minecraft.entity.projectile.FireworkRocketEntity firework
+            && firework.isAlive()
+            && ((com.hunterbuddy.modules.mixin.accessors.FireworkRocketEntityAccessor)firework).getShooter() == player) {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
    public static String pairProblem(ClientPlayerEntity player) {
       ItemStack worn = player.getEquippedStack(EquipmentSlot.CHEST);
       Hand hand = gliderHand(player);
