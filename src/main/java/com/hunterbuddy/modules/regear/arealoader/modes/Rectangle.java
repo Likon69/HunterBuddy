@@ -203,7 +203,7 @@ public class Rectangle extends AreaLoaderMode {
             )
             < 5.0) {
             this.goingToStart = false;
-            this.mc.player.setVelocity(0.0, 0.0, 0.0);
+            this.stopForTurn();
          } else {
             this.steerYawTowards(this.pd.currPos.toCenterPos());
             Utils.setPressed(this.mc.options.forwardKey, true);
@@ -228,12 +228,12 @@ public class Rectangle extends AreaLoaderMode {
             )) {
             this.pd.yawDirection = this.mc.player.getZ() < this.pd.targetPos.getZ() ? 0.0F : 180.0F;
             this.pd.mainPath = false;
-            this.mc.player.setVelocity(0.0, 0.0, 0.0);
+            this.stopForTurn();
          } else if (!this.pd.mainPath && Math.abs(this.mc.player.getZ() - this.pd.lastCompleteRowZ) >= 16 * (Integer)this.searchArea.rowGap.get()) {
             this.pd.lastCompleteRowZ = (int)this.mc.player.getZ();
             this.pd.yawDirection = this.pd.initialPos.getX() > this.mc.player.getX() ? -90.0F : 90.0F;
             this.pd.mainPath = true;
-            this.mc.player.setVelocity(0.0, 0.0, 0.0);
+            this.stopForTurn();
          }
       }
    }

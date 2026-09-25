@@ -195,7 +195,7 @@ public class Circle extends AreaLoaderMode {
             this.lastTickPos = currentPos;
             this.teleportPaused = true;
             Utils.setPressed(this.mc.options.forwardKey, false);
-            this.mc.player.setVelocity(0.0, 0.0, 0.0);
+            this.stopForTurn();
             ChatUtils.info("Polar spiral PAUSED due to teleportation.", new Object[0]);
             ChatUtils.info("Disable and re-enable the module to resume.", new Object[0]);
             return;

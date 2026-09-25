@@ -201,7 +201,7 @@ public class Spiral extends AreaLoaderMode {
                   super.saveToJson(false, this.pd);
                   this.teleportPaused = true;
                   Utils.setPressed(this.mc.options.forwardKey, false);
-                  this.mc.player.setVelocity(0.0, 0.0, 0.0);
+                  this.stopForTurn();
                   ChatUtils.info("Spiral PAUSED due to teleportation. State saved at last safe position.", new Object[0]);
                   ChatUtils.info("Disable and re-enable the module to resume from saved position.", new Object[0]);
                   return;
@@ -244,7 +244,7 @@ public class Spiral extends AreaLoaderMode {
                < 5.0) {
                this.goingToStart = false;
                this.nextCornerTarget = null;
-               this.mc.player.setVelocity(0.0, 0.0, 0.0);
+               this.stopForTurn();
             } else {
                this.steerYawTowards(this.pd.currPos.toCenterPos());
                Utils.setPressed(this.mc.options.forwardKey, true);
@@ -263,7 +263,7 @@ public class Spiral extends AreaLoaderMode {
                this.recovering = false;
                this.recoveryTarget = null;
                this.nextCornerTarget = null;
-               this.mc.player.setVelocity(0.0, 0.0, 0.0);
+               this.stopForTurn();
             } else {
                this.updateGoalWaypoint(this.recoveryTarget);
                this.steerYawTowards(this.recoveryTarget.toCenterPos());
@@ -293,7 +293,7 @@ public class Spiral extends AreaLoaderMode {
                this.recovering = true;
                this.recoveryTarget = expectedPos;
                this.nextCornerTarget = null;
-               this.mc.player.setVelocity(0.0, 0.0, 0.0);
+               this.stopForTurn();
             } else {
                if (this.hasReachedCorner(this.nextCornerTarget)) {
                   BlockPos snappedCorner = this.nextCornerTarget;
@@ -307,7 +307,7 @@ public class Spiral extends AreaLoaderMode {
                      this.pd.mainPath = true;
                   }
 
-                  this.mc.player.setVelocity(0.0, 0.0, 0.0);
+                  this.stopForTurn();
                   this.pd.currPos = snappedCorner;
                   this.updateGoalWaypoint(null);
                   this.nextCornerTarget = null;
