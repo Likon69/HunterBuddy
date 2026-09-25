@@ -213,6 +213,11 @@ public class ElytraRecast extends Module {
       }
 
       boolean currentlyGliding = this.mc.player.isGliding();
+      if (com.hunterbuddy.util.ChestSwapBurst.rocketAttached(this.mc.player)) {
+         this.wasGliding = currentlyGliding;
+         return;
+      }
+
       double currentY = this.mc.player.getY();
       if (this.isInNether()) {
          if (!currentlyGliding) {
@@ -306,6 +311,7 @@ public class ElytraRecast extends Module {
       this.tickCounter = 0;
       this.rocketTickCounter = (Integer)this.rocketDelay.get();
       this.usedActivationRocket = false;
+      com.hunterbuddy.util.ChestSwapBurst.wearGlider(this.mc.player);
       if (this.mc.player.isGliding()) {
          this.enterAscending();
       } else {
@@ -503,7 +509,8 @@ public class ElytraRecast extends Module {
    }
 
    private boolean hasElytraEquipped() {
-      return this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA;
+      return this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA
+         || com.hunterbuddy.util.ChestSwapBurst.hasGlider(this.mc.player);
    }
 
    private boolean isInNether() {
