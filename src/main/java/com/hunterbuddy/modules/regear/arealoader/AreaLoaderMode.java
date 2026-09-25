@@ -198,19 +198,6 @@ public abstract class AreaLoaderMode {
                   if (this.enabledOverworldMode == AreaLoader.OverworldFlightMode.PITCH40) {
                      Module pitch40Module = Modules.get().get(Pitch40.class);
                      if (pitch40Module != null) {
-                        Setting<Boolean> autoRecastSetting = (Setting<Boolean>) pitch40Module.settings.get("auto-recast");
-                        if (autoRecastSetting != null) {
-                           this.oldAutoRecastValue = (Boolean)autoRecastSetting.get();
-                           autoRecastSetting.set(false);
-                           this.pitch40AutoRecastModified = true;
-                        }
-
-                        ElytraRecast elytraRecast = (ElytraRecast)Modules.get().get(ElytraRecast.class);
-                        if (elytraRecast != null && elytraRecast.isActive()) {
-                           elytraRecast.toggle();
-                           this.debugInfo("AreaLoader: ElytraRecast disabled for Pitch40 pathing.");
-                        }
-
                         if (!pitch40Module.isActive()) {
                            pitch40Module.toggle();
                            this.weEnabledPitch40 = true;
@@ -449,6 +436,12 @@ public abstract class AreaLoaderMode {
       this.clearGoalWaypoint();
       this.clearSteeringState();
       this.releaseSteering();
+   }
+
+   protected void stopForTurn() {
+      if (this.mc.player != null && !this.mc.player.isGliding()) {
+         this.mc.player.setVelocity(0.0, 0.0, 0.0);
+      }
    }
 
    protected void steerYaw(float yaw) {

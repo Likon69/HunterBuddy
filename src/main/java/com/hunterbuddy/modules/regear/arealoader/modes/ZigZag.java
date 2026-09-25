@@ -147,7 +147,7 @@ public class ZigZag extends AreaLoaderMode {
             )
             < 5.0) {
             this.goingToStart = false;
-            this.mc.player.setVelocity(0.0, 0.0, 0.0);
+            this.stopForTurn();
          } else {
             this.steerYawTowards(this.pd.currPos.toCenterPos());
             Utils.setPressed(this.mc.options.forwardKey, true);
@@ -163,7 +163,7 @@ public class ZigZag extends AreaLoaderMode {
                this.pd.yawDirection = this.pd.sideYaw;
                this.pd.onMainLeg = false;
                this.pd.legStartPos = this.mc.player.getBlockPos();
-               this.mc.player.setVelocity(0.0, 0.0, 0.0);
+               this.stopForTurn();
                this.pd.legsCompleted++;
             }
          } else {
@@ -173,7 +173,7 @@ public class ZigZag extends AreaLoaderMode {
                this.pd.yawDirection = this.pd.goingForward ? this.pd.mainYaw : this.normalizeYaw(this.pd.mainYaw + 180.0F);
                this.pd.onMainLeg = true;
                this.pd.legStartPos = this.mc.player.getBlockPos();
-               this.mc.player.setVelocity(0.0, 0.0, 0.0);
+               this.stopForTurn();
             }
          }
       }
