@@ -34,6 +34,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.FluidBlock;
 import net.minecraft.component.type.ItemEnchantmentsComponent;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.Enchantments;
@@ -265,33 +266,13 @@ public class MlepMine extends Module {
                .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimNewConfig.get())
                .build()
       );
-   private final Setting<Boolean> grimBalanceConfig = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("grim-balance")
-                     .description("Times every start against a copy of the anticheat's own break balances instead of holding all of them for a fixed 280 ms. After a pause the balance is empty and two or three blocks go straight through; over a long run the two come out the same, because the buffer only repays a tenth at a time.")
-                  .defaultValue(true)
-               .visible(this.grimConfig::get)
-               .build()
-      );
-   private final Setting<Integer> grimBudget = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("grim-budget")
-                     .description("How much of the anticheat's thousand-millisecond buffer to spend. What is left is the margin jitter eats: it measures the delays as the packets land, this measures them as they leave, and a lag spike bunches a whole run of them together.")
-                  .defaultValue(700)
-                  .min(0)
-                  .sliderRange(0, 1000)
-               .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimBalanceConfig.get())
-               .build()
-      );
    private final Setting<Boolean> grimBalanceLog = this.sgGeneral
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
                         .name("grim-balance-log")
                      .description("Writes a line per block to the log: what the block was predicted to cost, where the two balances stand, and how long the server took to confirm the break after the closing stop went out.")
                   .defaultValue(false)
-               .visible(() -> (Boolean)this.grimConfig.get() && (Boolean)this.grimBalanceConfig.get())
+               .visible(this.grimConfig::get)
                .build()
       );
    private final Setting<Keybind> autoMineKey = this.sgAutoMine
@@ -497,9 +478,6 @@ public class MlepMine extends Module {
     */
    private final GrimBreakBalance grimBalance = new GrimBreakBalance(this::breakDamageAt);
 
-   /** Whether the break balance was over budget at the last finish, so it is said once. */
-   private boolean balanceWasOverBudget;
-
    /**
     * When the closing stop went out for a position, for the log line at its break.
     *
@@ -659,7 +637,6 @@ public class MlepMine extends Module {
       // nobody is holding any more.
       this.grimBalance.reset();
       this.stopSentAt.clear();
-      this.balanceWasOverBudget = false;
       this.currentTarget = null;
    }
 
@@ -775,7 +752,7 @@ public class MlepMine extends Module {
                long hotWindow = ((Integer)this.instantWindow.get()).longValue();
 
                for (MlepMine.MiningData data : this.miningQueue) {
-                  if (data.getState().isAir()) {
+                  if (isCleared(data.getState())) {
                      data.resetBreakTime();
                      data.markAir(now);
 
@@ -802,7 +779,7 @@ public class MlepMine extends Module {
                      data.markSolid();
                   }
 
-                  if (!this.isDataPacketMine(data) || !data.getState().isAir() && (!data.hasAttemptedBreak() || !data.passedAttemptedBreakTime(500L))) {
+                  if (!this.isDataPacketMine(data) || !isCleared(data.getState()) && (!data.hasAttemptedBreak() || !data.passedAttemptedBreakTime(500L))) {
                      float damageDelta = this.calcBlockBreakingDelta(data.getState(), this.mc.world, data.getPos());
                      data.damage(damageDelta);
                      this.workedThisTick = true;
@@ -830,7 +807,7 @@ public class MlepMine extends Module {
                   double distance = this.mc.player.getEyePos().squaredDistanceTo(miningData2.getPos().toCenterPos());
                   if (distance > (Double)this.rangeConfig.get() * (Double)this.rangeConfig.get()) {
                      this.miningQueue.remove(miningData2);
-                  } else if (!miningData2.getState().isAir()) {
+                  } else if (!isCleared(miningData2.getState())) {
                      if (miningData2.getBlockDamage() >= (Double)this.speedConfig.get()
                         && miningData2.hasAttemptedBreak()
                         && miningData2.passedAttemptedBreakTime(500L)) {
@@ -970,7 +947,7 @@ public class MlepMine extends Module {
     */
    private void feedGrimBalance(Send event) {
       if (event.isCancelled()) return;
-      if (!(Boolean)this.grimConfig.get() || !(Boolean)this.grimBalanceConfig.get()) return;
+      if (!(Boolean)this.grimConfig.get() || !(Boolean)this.grimBalanceLog.get()) return;
 
       long now = System.currentTimeMillis();
 
@@ -990,14 +967,6 @@ public class MlepMine extends Module {
       }
    }
 
-   /**
-    * Says where the two balances stand, once a finish has been priced.
-    *
-    * <p>The break balance is the one worth a warning: no wait brings it down, so a
-    * run of hard blocks walks it up to nine times what one of them is predicted to
-    * cost and leaves it there. Under the flag that is free; over it, every further
-    * break is measured from a buffer that is already full.
-    */
    private void reportBalance(BlockPos pos) {
       if ((Boolean)this.grimBalanceLog.get()) {
          HunterBuddyAddon.LOG
@@ -1016,26 +985,10 @@ public class MlepMine extends Module {
                )
             );
       }
-
-      // Said once per crossing, and only while the log is on. It used to be said
-      // every ten seconds regardless, which on obsidian is every ten seconds
-      // forever: the balance sits pinned at the ceiling there, so a warning on a
-      // timer is a warning that never stops.
-      boolean over = this.grimBalance.breakBalance() > (Integer)this.grimBudget.get();
-
-      if (over && !this.balanceWasOverBudget && (Boolean)this.grimBalanceLog.get()) {
-         this.warning(
-            "Break balance at %.0f of the anticheat's %.0f. Waiting will not bring it down -- only easier blocks will.",
-            this.grimBalance.breakBalance(),
-            GrimBreakBalance.FLAG
-         );
-      }
-
-      this.balanceWasOverBudget = over;
    }
 
    private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
-      if (packet.getState().isAir()) {
+      if (isCleared(packet.getState())) {
          Long sentAt = this.stopSentAt.remove(packet.getPos());
          if (sentAt != null && (Boolean)this.grimBalanceLog.get()) {
             HunterBuddyAddon.LOG
@@ -1068,14 +1021,14 @@ public class MlepMine extends Module {
          this.renderPendingQueue(event);
 
          for (MlepMine.MiningData data : this.miningQueue) {
-            if (!data.getState().isAir() && !this.fadeList.containsKey(data)) {
+            if (!isCleared(data.getState()) && !this.fadeList.containsKey(data)) {
                this.fadeList.put(data, new MlepMine.Animation(true, ((Integer)this.fadeTimeConfig.get()).intValue()));
             }
          }
 
          for (Entry<MlepMine.MiningData, MlepMine.Animation> entry : this.fadeList.entrySet()) {
             MlepMine.MiningData data = entry.getKey();
-            boolean isActive = this.miningQueue.contains(data) && !data.getState().isAir();
+            boolean isActive = this.miningQueue.contains(data) && !isCleared(data.getState());
             entry.getValue().setState(isActive);
          }
 
@@ -1136,7 +1089,7 @@ public class MlepMine extends Module {
       if (this.miningQueue == null) return null;
 
       for (MlepMine.MiningData data : this.miningQueue) {
-         if (!data.getState().isAir()) return data.getPos().toCenterPos();
+         if (!isCleared(data.getState())) return data.getPos().toCenterPos();
       }
 
       return null;
@@ -1157,7 +1110,7 @@ public class MlepMine extends Module {
          pos.getZ() + local.maxZ
       );
 
-      boolean done = data.getState().isAir() || data.getBlockDamage() >= 0.95F;
+      boolean done = isCleared(data.getState()) || data.getBlockDamage() >= 0.95F;
       SettingColor base = done ? (SettingColor)this.colorDoneConfig.get() : (SettingColor)this.colorConfig.get();
 
       // The whole block, faintly. The progress box starts as a dot in the middle
@@ -1167,7 +1120,7 @@ public class MlepMine extends Module {
       }
 
       float total = this.isDataPacketMine(data) ? 1.0F : ((Double)this.speedConfig.get()).floatValue();
-      float scale = data.getState().isAir()
+      float scale = isCleared(data.getState())
          ? 1.0F
          : MathHelper.clamp((data.getBlockDamage() + (data.getBlockDamage() - data.getLastDamage()) * event.tickDelta) / total, 0.0F, 1.0F);
       if (this.styleConfig.get() == MlepMine.RenderStyle.CLASSIC) {
@@ -1373,7 +1326,7 @@ public class MlepMine extends Module {
          if (fresh && queued && this.queueThroughConfig.get()) this.queueThrough(pos, miningData.getDirection());
          return;
       }
-      if (miningData.getState().isAir()) return;
+      if (isCleared(miningData.getState())) return;
 
       // Anything already waiting has to be served first. Testing only for a block
       // still being broken left a hole between two blocks — and the 280 ms grim
@@ -1452,7 +1405,7 @@ public class MlepMine extends Module {
          if (this.pendingQueue.stream().anyMatch(d -> d.getPos().equals(here))) continue;
 
          BlockState state = this.mc.world.getBlockState(candidate);
-         if (state.isAir()) continue;
+         if (isCleared(state)) continue;
          // A block this module won't touch at all ends the walk rather than
          // being skipped over — vanilla-only and unbreakable blocks are a
          // wall for this line, not a single missing brick in it.
@@ -1472,11 +1425,15 @@ public class MlepMine extends Module {
     * with what is selected, and the module's own swap has not run at this point.
     */
    private boolean leaveToVanilla(BlockState state, BlockPos pos) {
-      if (state.isAir()) return false;
+      if (isCleared(state)) return false;
       if (this.vanillaBlocks.get().contains(state.getBlock())) return true;
 
       return (Boolean)this.vanillaOneShot.get()
          && state.calcBlockBreakingDelta(this.mc.player, this.mc.world, pos) >= 1.0F;
+   }
+
+   private static boolean isCleared(BlockState s) {
+      return s.isAir() || s.getBlock() instanceof FluidBlock;
    }
 
    /** True while any queued entry still has a block left to break. */
@@ -1484,7 +1441,7 @@ public class MlepMine extends Module {
       if (this.miningQueue == null) return false;
 
       for (MlepMine.MiningData data : this.miningQueue) {
-         if (!data.getState().isAir()) return true;
+         if (!isCleared(data.getState())) return true;
       }
 
       return false;
@@ -1530,7 +1487,7 @@ public class MlepMine extends Module {
          // Dropped without a word: the queue render disappearing is the feedback,
          // and a line per block would spam the moment someone else mines part of
          // your selection or you drift out of range.
-         if (state.isAir()) continue;
+         if (isCleared(state)) continue;
          if (state.getHardness(this.mc.world, pos) < 0.0F) continue;
          if (this.mc.player.getEyePos().squaredDistanceTo(pos.toCenterPos()) > rangeSq) continue;
 
@@ -1540,7 +1497,7 @@ public class MlepMine extends Module {
    }
 
    public void queueMiningData(MlepMine.MiningData data) {
-      if (!data.getState().isAir()) {
+      if (!isCleared(data.getState())) {
          MlepMine.FirstOutQueue<MlepMine.MiningData> queue = this.ensureMiningQueue();
          if (queue.stream().anyMatch(p1 -> data.getPos().equals(p1.getPos()))) {
             return;
@@ -1626,13 +1583,13 @@ public class MlepMine extends Module {
    }
 
    private void abortMining(MlepMine.MiningData data) {
-      if (data.isStarted() && !data.getState().isAir()) {
+      if (data.isStarted() && !isCleared(data.getState())) {
          this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.ABORT_DESTROY_BLOCK, data.getPos(), data.getDirection()));
       }
    }
 
    private void stopMining(MlepMine.MiningData data) {
-      if (data.isStarted() && !data.getState().isAir()) {
+      if (data.isStarted() && !isCleared(data.getState())) {
          if ((Boolean)this.rotateConfig.get()) {
             float[] rotations = getRotationsTo(this.mc.player.getEyePos(), data.getPos().toCenterPos());
             this.applyMineRotation(rotations);
@@ -1720,7 +1677,7 @@ public class MlepMine extends Module {
 
       if (this.toolHeldFor != null
          && this.mc.world != null
-         && !this.mc.world.getBlockState(this.toolHeldFor).isAir()
+         && !isCleared(this.mc.world.getBlockState(this.toolHeldFor))
          && System.currentTimeMillis() - this.toolHeldSince < TOOL_HOLD_TIMEOUT_MS) {
          return;
       }
@@ -1832,29 +1789,10 @@ public class MlepMine extends Module {
       this.swingOnce();
    }
 
-   /**
-    * Whether a start has to wait.
-    *
-    * <p>The fixed door underneath is what the anticheat's delay balance costs in the
-    * worst case: hold every start for 280 ms and the balance decays on every one of
-    * them, so it never climbs and never flags. It also never spends. The mirror
-    * spends it: after a pause the buffer is empty and the first blocks go through
-    * with no wait at all, which is what mining a stash looks like -- a few blocks,
-    * then flying, then a few more.
-    *
-    * <p>Only the delay balance is a door. The other one is not payable by waiting --
-    * nothing brings it down but another finish -- so it is watched and reported in
-    * {@link #reportBalance} rather than waited on, because a door that could never
-    * open would simply stop the module.
-    */
    public boolean isBlockDelayGrim() {
       if (!(Boolean)this.grimConfig.get()) return false;
 
-      if (!(Boolean)this.grimBalanceConfig.get()) {
-         return System.currentTimeMillis() - this.lastBreak <= 280L;
-      }
-
-      return !this.grimBalance.canStart((Integer)this.grimBudget.get(), System.currentTimeMillis());
+      return System.currentTimeMillis() - this.lastBreak <= 280L;
    }
 
    /**
