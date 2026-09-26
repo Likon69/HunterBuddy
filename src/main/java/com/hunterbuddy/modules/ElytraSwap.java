@@ -112,6 +112,7 @@ public class ElytraSwap extends Module {
    private int stageTimer = 0;
    private int targetSlot = -1;
    private boolean protectionActive = false;
+   private boolean noElytraWarned = false;
    private int protectionTimer = 0;
    private int lastHurtTime = 0;
    private boolean needsChestplateSwap = false;
@@ -131,6 +132,17 @@ public class ElytraSwap extends Module {
 
    public void onDeactivate() {
       this.resetSwapState();
+   }
+
+   private boolean inventoryPaused() {
+      return (Boolean)this.pauseInInventory.get() && this.mc.player.currentScreenHandler != this.mc.player.playerScreenHandler;
+   }
+
+   private void pauseSwapState() {
+      this.needsSwap = false;
+      this.swapStage = 0;
+      this.stageTimer = 0;
+      this.targetSlot = -1;
    }
 
    private void resetSwapState() {
@@ -159,8 +171,8 @@ public class ElytraSwap extends Module {
 
          if (this.cooldownTimer > 0) {
             this.cooldownTimer--;
-         } else if ((Boolean)this.pauseInInventory.get() && this.mc.player.currentScreenHandler != this.mc.player.playerScreenHandler) {
-            this.resetSwapState();
+         } else if (this.inventoryPaused()) {
+            this.pauseSwapState();
          } else {
             ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
             if (!this.protectionActive) {
@@ -310,8 +322,12 @@ public class ElytraSwap extends Module {
 
    private void handleCombatProtection() {
       if (this.mc.player != null) {
-         if (this.mc.player.hurtTime > 0 && this.mc.player.hurtTime > this.lastHurtTime) {
+         boolean newHit = this.mc.player.hurtTime > 0 && this.mc.player.hurtTime > this.lastHurtTime;
+         if (newHit) {
             this.lastHurtTime = this.mc.player.hurtTime;
+         }
+
+         if (newHit && (this.protectionActive || (this.mc.player.isOnGround() && !this.mc.player.isGliding()))) {
             ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
             if (chestItem.getItem().equals(Items.ELYTRA) && !this.protectionActive) {
                int bestChestplate = this.findBestChestplate();
@@ -338,15 +354,18 @@ public class ElytraSwap extends Module {
          }
 
          if (this.needsChestplateSwap) {
-            this.processChestplateSwap();
+            if (!this.inventoryPaused()) {
+               this.processChestplateSwap();
+            }
          } else {
             if (this.protectionActive && !this.needsChestplateSwap) {
                this.protectionTimer--;
-               if (this.protectionTimer <= 0 && (Boolean)this.autoSwapBack.get()) {
+               if (this.protectionTimer <= 0 && (Boolean)this.autoSwapBack.get() && !this.inventoryPaused()) {
                   ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
                   if (!chestItem.getItem().equals(Items.ELYTRA) && !this.storedElytra.isEmpty()) {
                      int elytraSlot = this.findStoredElytra();
                      if (elytraSlot != -1) {
+                        this.noElytraWarned = false;
                         this.chestplateSlot = elytraSlot;
                         this.needsChestplateSwap = true;
                         this.chestplateSwapStage = 1;
@@ -355,9 +374,9 @@ public class ElytraSwap extends Module {
                         if ((Boolean)this.notifySwap.get()) {
                            this.info("Protection period ended, swapping back to elytra.", new Object[0]);
                         }
-                     } else {
-                        this.protectionActive = false;
-                        this.storedElytra = ItemStack.EMPTY;
+                     } else if (!this.noElytraWarned) {
+                        this.noElytraWarned = true;
+                        this.warning("No elytra in the inventory to swap back to, waiting for one.", new Object[0]);
                      }
                   } else {
                      this.protectionActive = false;
