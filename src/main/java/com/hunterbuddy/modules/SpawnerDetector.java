@@ -470,6 +470,7 @@ public class SpawnerDetector extends Module {
     private boolean autoExitReturning;
     private boolean autoWaterJumpVertical;
     private int autoWalkDirectDryTicks;
+    private int autoWalkDirectStuckTicks;
     private boolean autoWalkKeyLogged;
     private int autoClimbLastRocketTick;
 
@@ -702,7 +703,7 @@ public class SpawnerDetector extends Module {
 
                     if (!roomChunksLoaded(pos)) continue;
 
-                    Room room = findRoom(pos.getX(), pos.getY(), pos.getZ());
+                    Room room = findRoom(pos.getX(), pos.getY(), pos.getZ(), true);
                     if (room == null) {
                         rejected.add(pos);
                         if (log.get()) {
@@ -885,7 +886,7 @@ public class SpawnerDetector extends Module {
 
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
-                Room r = findRoom(baseCx + dx, cy, baseCz + dz);
+                Room r = findRoom(baseCx + dx, cy, baseCz + dz, false);
                 if (r != null && (best == null || r.fit() > best.fit())) best = r;
             }
         }
@@ -939,7 +940,7 @@ public class SpawnerDetector extends Module {
             && a.minZ() <= b.maxZ() && a.maxZ() >= b.minZ();
     }
 
-    private Room findRoom(int cx, int cy, int cz) {
+    private Room findRoom(int cx, int cy, int cz, boolean spawnerAtCenter) {
         Room best = null;
         double bestFit = -1;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
@@ -1009,7 +1010,7 @@ public class SpawnerDetector extends Module {
                         if (!ceilOpen && !ceilFluid) ceilingClosed++;
                     }
                 }
-                if (ceilingClosed < 0.6 * interiorArea) continue;
+                if (!spawnerAtCenter && ceilingClosed < 0.6 * interiorArea) continue;
 
                 double fit = (double) c / aireSol + (double) w / casesAnneau;
                 if (fit > bestFit) {
@@ -1861,6 +1862,7 @@ public class SpawnerDetector extends Module {
         Utils.setPressed(mc.options.sneakKey, false);
         Utils.setPressed(mc.options.jumpKey, false);
         Utils.setPressed(mc.options.attackKey, false);
+        Utils.setPressed(mc.options.sprintKey, false);
         BaritoneHelper.clearInputs();
     }
 
@@ -1960,7 +1962,15 @@ public class SpawnerDetector extends Module {
             startY = fond + 1;
             exitY = waterTop + 1;
             water = true;
-            if (startY <= room.cy() + 4) return null;
+            if (startY < room.cy() + 4) return null;
+            if (startY == room.cy() + 4
+                && (isLava(mc.world.getBlockState(cursor.set(x, startY, z)))
+                    || isLava(mc.world.getBlockState(cursor.set(x + 1, startY, z)))
+                    || isLava(mc.world.getBlockState(cursor.set(x - 1, startY, z)))
+                    || isLava(mc.world.getBlockState(cursor.set(x, startY, z + 1)))
+                    || isLava(mc.world.getBlockState(cursor.set(x, startY, z - 1))))) {
+                return null;
+            }
         } else {
             int y = topY;
             while (y > room.cy() + 4 && isSurfaceSkippable(mc.world.getBlockState(cursor.set(x, y, z)), cursor)) y--;
@@ -2807,6 +2817,7 @@ public class SpawnerDetector extends Module {
             autoWalkDirect = autoColumn.water() || mc.player.isTouchingWater();
             autoWalkStepping = false;
             autoWalkDirectDryTicks = 0;
+            autoWalkDirectStuckTicks = 0;
             autoWalkKeyLogged = false;
             if (autoWalkDirect) {
                 autoLog("WALK", autoSite.center, "water direct");
@@ -2822,23 +2833,31 @@ public class SpawnerDetector extends Module {
 
         if (autoWalkDirect && !mc.player.isTouchingWater() && mc.player.isOnGround()) {
             autoWalkDirectDryTicks++;
-            if (autoWalkDirectDryTicks >= 20) {
-                autoWalkDirect = false;
-                releaseAllAutoKeys();
-                ColumnPlan c = autoColumn;
-                if (c.water() || c.rim() == null) {
-                    RimResult rr = computeRim(c.x(), c.z(), c.startY());
-                    autoColumn = new ColumnPlan(c.x(), c.z(), c.startY(), c.exitY(), false, c.blocksToBreak(),
-                        c.waterCells(), c.maxGap(), c.skyBlocked(), rr.rim() != null ? rr.holeTopY() : c.holeTopY(),
-                        rr.rim() != null ? rr.rim() : c.rim(), c.side(), c.sideEntry());
-                }
-                BlockPos rim = autoColumn.rim();
-                autoLog("WALK", autoSite.center, "not in water, walking with baritone rim="
-                    + (rim != null ? rim.getX() + "," + rim.getY() + "," + rim.getZ() : "none"));
-                startWalkBaritoneGoal();
-            }
         } else {
             autoWalkDirectDryTicks = 0;
+        }
+
+        if (autoWalkDirect && !autoColumn.water() && mc.player.horizontalCollision && mc.player.isTouchingWater()) {
+            autoWalkDirectStuckTicks++;
+        } else {
+            autoWalkDirectStuckTicks = 0;
+        }
+
+        if (autoWalkDirect && (autoWalkDirectDryTicks >= 20 || autoWalkDirectStuckTicks >= 60)) {
+            String reason = autoWalkDirectDryTicks >= 20 ? "not in water" : "stuck against a block";
+            autoWalkDirect = false;
+            releaseAllAutoKeys();
+            ColumnPlan c = autoColumn;
+            if (c.water() || c.rim() == null) {
+                RimResult rr = computeRim(c.x(), c.z(), c.startY());
+                autoColumn = new ColumnPlan(c.x(), c.z(), c.startY(), c.exitY(), false, c.blocksToBreak(),
+                    c.waterCells(), c.maxGap(), c.skyBlocked(), rr.rim() != null ? rr.holeTopY() : c.holeTopY(),
+                    rr.rim() != null ? rr.rim() : c.rim(), c.side(), c.sideEntry());
+            }
+            BlockPos rim = autoColumn.rim();
+            autoLog("WALK", autoSite.center, reason + ", walking with baritone rim="
+                + (rim != null ? rim.getX() + "," + rim.getY() + "," + rim.getZ() : "none"));
+            startWalkBaritoneGoal();
         }
 
         if (autoWalkDirect) {
@@ -2868,7 +2887,9 @@ public class SpawnerDetector extends Module {
             Utils.setPressed(mc.options.sneakKey, horiz <= 0.15);
         }
 
-        boolean feetOk = Math.abs(mc.player.getBlockPos().getY() - autoColumn.startY()) <= 1;
+        int feetY = mc.player.getBlockPos().getY();
+        boolean feetOk = Math.abs(feetY - autoColumn.startY()) <= 1
+            || feetY <= autoSite.room.cy() + 3;
         if (mc.player.isOnGround() && feetOk && centered) {
             releaseAllAutoKeys();
             enterDigState("");
@@ -3182,8 +3203,11 @@ public class SpawnerDetector extends Module {
         BlockPos below = new BlockPos(autoColumn.x(), feetY - 1, autoColumn.z());
         BlockState belowState = mc.world.getBlockState(below);
 
+        boolean groundArrival = mc.player.isOnGround()
+            && (feetY <= roomCy || !(belowState.getBlock() instanceof net.minecraft.block.FallingBlock));
+
         if (below.getY() < roomCy - 1
-            || (feetY <= roomCy + 3 && (mc.player.isOnGround() || isOpenState(belowState, below)))) {
+            || (feetY <= roomCy + 3 && (groundArrival || isOpenState(belowState, below)))) {
             releaseAllAutoKeys();
             boolean water = autoColumn.water() || autoColumn.waterCells() > 0
                 || columnHasWater(autoColumn.x(), autoColumn.z(), roomCy, autoColumn.holeTopY());
@@ -4262,15 +4286,62 @@ public class SpawnerDetector extends Module {
         }
     }
 
-    private void tickRoomClimbPillar() {
-        mc.player.setPitch(90.0f);
+    private BlockPos findRoomFloorHole() {
+        Room room = autoSite.room;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int x = room.cx() - room.k(); x <= room.cx() + room.k(); x++) {
+            for (int z = room.cz() - room.p(); z <= room.cz() + room.p(); z++) {
+                cursor.set(x, room.minY(), z);
+                if (!isOpenState(mc.world.getBlockState(cursor), cursor)) continue;
+                double dx = (x + 0.5) - mc.player.getX(), dz = (z + 0.5) - mc.player.getZ();
+                double distSq = dx * dx + dz * dz;
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = cursor.toImmutable();
+                }
+            }
+        }
+        return best;
+    }
 
+    private void tickRoomClimbPillar() {
         BlockPos feet = mc.player.getBlockPos();
         if (autoRoomClimbPillarPhase == 0 && feet.getY() >= autoSite.room.cy() && mc.player.isOnGround()) {
             releaseAllAutoKeys();
             enterState(AutoState.ROOM, "climb complete");
             return;
         }
+
+        if (autoRoomClimbPillarPhase == 0 && mc.player.isTouchingWater()
+            && (!mc.player.isOnGround() || mc.player.getFluidHeight(FluidTags.WATER) > mc.player.getSwimHeight())) {
+            if (feet.getY() >= autoSite.room.cy()) {
+                releaseAllAutoKeys();
+                enterState(AutoState.ROOM, "climb complete");
+                return;
+            }
+            BlockPos hole = findRoomFloorHole();
+            Utils.setPressed(mc.options.sprintKey, true);
+            if (hole != null) {
+                boolean underHole = feet.getX() == hole.getX() && feet.getZ() == hole.getZ();
+                mc.player.setPitch(underHole ? -80.0f : 20.0f);
+                navigateExitColumn(hole.getX(), hole.getZ(), 0.2, hole, true);
+            } else {
+                mc.player.setPitch(-80.0f);
+                Utils.setPressed(mc.options.sneakKey, false);
+                Utils.setPressed(mc.options.forwardKey, false);
+                Utils.setPressed(mc.options.jumpKey, true);
+            }
+            if (System.currentTimeMillis() - autoRoomClimbStartMs > 20_000L) {
+                abandonRoomClimbPillar("timeout");
+            }
+            return;
+        }
+
+        mc.player.setPitch(90.0f);
+        Utils.setPressed(mc.options.forwardKey, false);
+        Utils.setPressed(mc.options.sprintKey, false);
 
         if (autoRoomClimbPillarPhase == 0 && mc.player.isOnGround()) {
             if (hasBlockAbove(feet.getX(), feet.getY() + 1, feet.getZ(), 2)) {
