@@ -447,7 +447,8 @@ public abstract class AreaLoaderMode {
    protected void steerYaw(float yaw) {
       if (this.mc.player != null) {
          this.mc.player.setYaw(yaw);
-         if (this.enabledOverworldMode != AreaLoader.OverworldFlightMode.PITCH40) {
+         if (this.enabledOverworldMode != AreaLoader.OverworldFlightMode.PITCH40
+            && this.enabledOverworldMode != AreaLoader.OverworldFlightMode.ROCKETS) {
             RotationUtils.getInstance().sustainRotation(yaw, this.mc.player.getPitch());
          }
       }
