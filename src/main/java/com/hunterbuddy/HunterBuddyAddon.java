@@ -141,6 +141,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(com.hunterbuddy.hud.FollowerHeadingHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.FollowerRouteHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.PerformanceHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.SpawnerFarmHud.INFO);
 
         // HunterBuddy modules
         // Modules.get().add(new AFKVanillaFly());
