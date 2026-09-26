@@ -119,7 +119,7 @@ public class EntityView extends Module {
 
     private final Setting<Boolean> portalTracer = sgPortal.add(new BoolSetting.Builder()
         .name("portal-tracer")
-        .description("Draw a line to the nearest portal. It starts at eye level rather than at your feet, so it stays readable while you fly.")
+        .description("Draw a line to every portal. It starts at eye level rather than at your feet, so it stays readable while you fly.")
         .defaultValue(true)
         .visible(portals::get)
         .build()
@@ -143,7 +143,7 @@ public class EntityView extends Module {
 
     private final Setting<SettingColor> portalTracerColor = sgPortal.add(new ColorSetting.Builder()
         .name("portal-tracer-color")
-        .description("Colour of the line to the nearest portal.")
+        .description("Colour of the lines to the portals.")
         .defaultValue(new SettingColor(200, 110, 255, 160))
         .visible(() -> portals.get() && portalTracer.get())
         .build()
@@ -783,32 +783,12 @@ public class EntityView extends Module {
 
         if (!portalTracer.get()) return;
 
-        // Aimed at the middle of the portal, not at whichever of its blocks happens
-        // to be nearest: the nearest one changes as you move around it, and the line
-        // was jumping from block to block of the same portal.
         Vec3d origin = new Vec3d(RenderUtils.center.x, RenderUtils.center.y, RenderUtils.center.z);
-        Box nearest = null;
-        double best = Double.MAX_VALUE;
 
         for (Box frame : portalFrames) {
-            double distance = frame.getCenter().squaredDistanceTo(origin);
-
-            if (distance < best) {
-                best = distance;
-                nearest = frame;
-            }
+            Vec3d target = frame.getCenter();
+            event.renderer.line(origin.x, origin.y, origin.z, target.x, target.y, target.z, portalTracerColor.get());
         }
-
-        if (nearest == null) return;
-
-        Vec3d target = nearest.getCenter();
-
-        // From the camera's own centre, which is where every tracer in the client
-        // starts. Drawn from the player's eyes instead, the line begins at the exact
-        // point you are looking from: it shifts against the interpolated camera on
-        // every frame you move, and vanishes into the near plane when you stand
-        // still, since there is then nothing between the eye and the start of it.
-        event.renderer.line(origin.x, origin.y, origin.z, target.x, target.y, target.z, portalTracerColor.get());
     }
 
     /**
