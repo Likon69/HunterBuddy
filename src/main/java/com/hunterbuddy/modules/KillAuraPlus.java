@@ -42,6 +42,7 @@ import net.minecraft.item.Items;
 import net.minecraft.item.MaceItem;
 import net.minecraft.item.TridentItem;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
@@ -209,6 +210,13 @@ public class KillAuraPlus extends Module {
         .name("pause-while-gliding")
         .description("Stop while you are gliding on an elytra. Whatever put you in the air -- Baritone, WaypointFollower, or your own hand -- a swing turn takes the rotation away from the heading and a hit costs the speed.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> log = sgGeneral.add(new BoolSetting.Builder()
+        .name("log")
+        .description("Writes what the aura sees and why it does or does not swing to latest.log.")
+        .defaultValue(false)
         .build()
     );
 
@@ -543,6 +551,10 @@ public class KillAuraPlus extends Module {
     private float lastAimYaw = Float.NaN;
     private int ticksSinceAim;
 
+    private long lastPausedLogMs;
+    private int targetLogTimer;
+    private String lastReleaseReason;
+
     public KillAuraPlus() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "kill-aura-plus",
             "Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage.");
@@ -567,6 +579,9 @@ public class KillAuraPlus extends Module {
         orbitLastMs = 0;
         lastAimYaw = Float.NaN;
         ticksSinceAim = 0;
+        lastPausedLogMs = 0;
+        targetLogTimer = 0;
+        lastReleaseReason = null;
     }
 
     @Override
@@ -592,7 +607,12 @@ public class KillAuraPlus extends Module {
             ticksSinceHit = 0;
         }
 
-        if (!running()) {
+        String pauseReason = runningReason();
+        if (pauseReason != null) {
+            if (log.get()) {
+                logPaused(pauseReason);
+                logRelease("not running");
+            }
             release();
             return;
         }
@@ -600,17 +620,20 @@ public class KillAuraPlus extends Module {
         gather();
 
         if (targets.isEmpty()) {
+            if (log.get()) logRelease("no targets");
             release();
             return;
         }
 
         Entity target = choose();
         if (target == null) {
+            if (log.get()) logRelease("choose null");
             release();
             return;
         }
 
         current = target;
+        lastReleaseReason = null;
 
         long now = System.currentTimeMillis();
         int selected = mc.player.getInventory().getSelectedSlot();
@@ -694,8 +717,13 @@ public class KillAuraPlus extends Module {
 
         boolean hit = aimed && switchTimer <= 0 && ready() && (!onlyCrits.get() || crits());
 
+        if (log.get()) logTarget(target, goalYaw, aimed, hit);
+
         if (rotate.get() == RotationMode.Off) {
-            if (hit) attack(target);
+            if (hit) {
+                attack(target);
+                logAttack(target, yaw, pitch);
+            }
             return;
         }
 
@@ -716,20 +744,72 @@ public class KillAuraPlus extends Module {
         lastAimYaw = (float) yaw;
         ticksSinceAim = 0;
 
-        if (hit) attack(target);
+        if (hit) {
+            attack(target);
+            logAttack(target, yaw, pitch);
+        }
     }
 
     // Deciding
 
-    private boolean running() {
-        if (!mc.player.isAlive() || mc.player.isSpectator()) return false;
-        if (minHealth.get() > 0 && mc.player.getHealth() <= minHealth.get()) return false;
-        if (mc.currentScreen != null) return false;
-        if (pauseGliding.get() && mc.player.isGliding()) return false;
-        if (onlyOnClick.get() && !mc.options.attackKey.isPressed()) return false;
-        if (pauseMining.get() && mc.interactionManager != null && mc.interactionManager.isBreakingBlock()) return false;
-        if (pauseEating.get() && mc.player.isUsingItem()) return false;
-        return !pauseOnLag.get() || TickRate.INSTANCE.getTimeSinceLastTick() < 1.0f;
+    private String runningReason() {
+        if (!mc.player.isAlive() || mc.player.isSpectator()) return "dead";
+        if (minHealth.get() > 0 && mc.player.getHealth() <= minHealth.get()) return "health";
+        if (mc.currentScreen != null) return "screen";
+        if (pauseGliding.get() && mc.player.isGliding()) return "gliding";
+        if (onlyOnClick.get() && !mc.options.attackKey.isPressed()) return "onlyOnClick";
+        if (pauseMining.get() && mc.interactionManager != null && mc.interactionManager.isBreakingBlock()) return "mining";
+        if (pauseEating.get() && mc.player.isUsingItem()) return "using";
+        if (pauseOnLag.get() && TickRate.INSTANCE.getTimeSinceLastTick() >= 1.0f) return "lag";
+        return null;
+    }
+
+    private void logPaused(String reason) {
+        long now = System.currentTimeMillis();
+        if (now - lastPausedLogMs < 1000) return;
+
+        boolean hasTargets = false;
+        for (Entity entity : mc.world.getEntities()) {
+            if (valid(entity)) {
+                hasTargets = true;
+                break;
+            }
+        }
+        if (!hasTargets) return;
+
+        lastPausedLogMs = now;
+        HunterBuddyAddon.LOG.info("[KillAuraPlus] paused reason={}", reason);
+    }
+
+    private void logRelease(String reason) {
+        if (reason.equals(lastReleaseReason)) return;
+        lastReleaseReason = reason;
+        HunterBuddyAddon.LOG.info("[KillAuraPlus] release reason={}", reason);
+    }
+
+    private void logTarget(Entity target, double goalYaw, boolean aimed, boolean hit) {
+        if (targetLogTimer > 0) {
+            targetLogTimer--;
+            return;
+        }
+        targetLogTimer = 10;
+
+        double yawDiff = MathHelper.wrapDegrees(goalYaw - mc.player.getYaw());
+        float hp = target instanceof LivingEntity living ? living.getHealth() : 0.0f;
+        int hurtTime = target instanceof LivingEntity living ? living.hurtTime : 0;
+
+        HunterBuddyAddon.LOG.info(String.format(
+            "[KillAuraPlus] target=%s id=%d reach=%.2f angle=%.1f yawDiff=%.1f aimed=%b ready=%b charged=%b switchTimer=%d hit=%b hurtTime=%d hp=%.1f canSee=%b",
+            Registries.ENTITY_TYPE.getId(target.getType()).toString(), target.getId(), reachTo(target), angleTo(target),
+            yawDiff, aimed, ready(), charged(), switchTimer, hit, hurtTime, hp, PlayerUtils.canSeeEntity(target)));
+    }
+
+    private void logAttack(Entity target, double yaw, double pitch) {
+        if (!log.get()) return;
+
+        HunterBuddyAddon.LOG.info(String.format(
+            "[KillAuraPlus] attack target=%s id=%d reach=%.2f yaw=%.1f pitch=%.1f",
+            Registries.ENTITY_TYPE.getId(target.getType()).toString(), target.getId(), reachTo(target), yaw, pitch));
     }
 
     private void gather() {
