@@ -2,20 +2,33 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.render.HbGlowShader;
+import com.hunterbuddy.util.DugHoles;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
+import meteordevelopment.meteorclient.events.world.BlockUpdateEvent;
+import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Post;
 import meteordevelopment.meteorclient.renderer.MeshBuilder;
 import meteordevelopment.meteorclient.renderer.MeshRenderer;
 import meteordevelopment.meteorclient.renderer.MeteorRenderPipelines;
+import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.utils.render.MeshBuilderVertexConsumerProvider;
 import meteordevelopment.meteorclient.utils.render.SimpleBlockRenderer;
 import net.minecraft.client.gl.Framebuffer;
 import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -49,11 +62,16 @@ import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
-import net.minecraft.entity.vehicle.MinecartEntity;
+import net.minecraft.entity.vehicle.AbstractMinecartEntity;
+import net.minecraft.entity.vehicle.HopperMinecartEntity;
+import net.minecraft.entity.vehicle.StorageMinecartEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.client.world.ClientChunkManager;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.world.Heightmap;
 import net.minecraft.world.chunk.WorldChunk;
 
 public class Shader extends Module {
@@ -100,7 +118,9 @@ public class Shader extends Module {
     private final Setting<Boolean> items = sgTargets.add(new Builder()
         .name("items").description("Outline dropped items.").defaultValue(false).build());
     private final Setting<Boolean> storages = sgTargets.add(new Builder()
-        .name("storages").description("Highlight storage blocks (chests, barrels, shulkers, ender chests).").defaultValue(false).build());
+        .name("storages").description("Highlight storage blocks (chests, barrels, shulkers, ender chests) and chest and hopper minecarts.").defaultValue(false).build());
+    private final Setting<Boolean> spawners = sgTargets.add(new Builder()
+        .name("spawners").description("Highlight monster spawners and trial spawners.").defaultValue(false).build());
     private final Setting<Boolean> armor = sgTargets.add(new Builder()
         .name("armor").description("Outline armor stands.").defaultValue(false).build());
     private final Setting<Boolean> portals = sgTargets.add(new Builder()
@@ -221,12 +241,85 @@ public class Shader extends Module {
     private final Setting<SettingColor> otherStorageColor = sgStorageColors.add(new ColorSetting.Builder()
         .name("other-storage-color").description("Outline color for bookshelves and decorated pots.")
         .defaultValue(new SettingColor(210, 170, 120, 255)).build());
+    private final Setting<SettingColor> spawnerColor = sgStorageColors.add(new ColorSetting.Builder()
+        .name("spawner-color").description("Outline color for monster spawners and trial spawners.")
+        .defaultValue(new SettingColor(255, 60, 200, 255)).build());
     private final Setting<SettingColor> armorColor = sgColors.add(new ColorSetting.Builder()
         .name("armor-color").description("Outline color for armor stands.")
         .defaultValue(new SettingColor(180, 180, 180, 220)).build());
     private final Setting<SettingColor> portalColor = sgColors.add(new ColorSetting.Builder()
         .name("portal-color").description("Color for nether portal highlights.")
         .defaultValue(new SettingColor(170, 0, 255, 80)).build());
+
+    private final SettingGroup sgHoles = settings.createGroup("Holes");
+
+    private final Setting<Boolean> holes = sgHoles.add(new Builder()
+        .name("holes")
+        .description("Detect and outline dug-out tunnels, shafts, staircases and small air pockets underground.")
+        .defaultValue(false)
+        .onChanged(v -> {
+            if (v) { if (isActive()) startHolesThread(); }
+            else stopHolesThread();
+        })
+        .build());
+    private final Setting<Boolean> holesTunnels = sgHoles.add(new Builder()
+        .name("holes-tunnels").description("Detect straight dug tunnels.").defaultValue(true)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Boolean> holesShafts = sgHoles.add(new Builder()
+        .name("holes-shafts").description("Detect vertical dug shafts.").defaultValue(true)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Boolean> holesStairs = sgHoles.add(new Builder()
+        .name("holes-stairs").description("Detect dug staircases.").defaultValue(true)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Boolean> holesPockets = sgHoles.add(new Builder()
+        .name("holes-cave-air-pockets").description("Detect small dug-out air pockets that touch a cave air cell.").defaultValue(true)
+        .onChanged(v -> invalidateHolesCache()).build());
+
+    private final Setting<Integer> holesMinTunnelLength = sgHoles.add(new IntSetting.Builder()
+        .name("holes-min-tunnel-length").description("Minimum straight tunnel length, in blocks.")
+        .defaultValue(5).min(3).max(32).sliderRange(3, 32)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Integer> holesMinShaftDepth = sgHoles.add(new IntSetting.Builder()
+        .name("holes-min-shaft-depth").description("Minimum vertical shaft depth, in blocks.")
+        .defaultValue(6).min(3).max(64).sliderRange(3, 64)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Integer> holesMinStairSteps = sgHoles.add(new IntSetting.Builder()
+        .name("holes-min-stair-steps").description("Minimum number of chained steps in a staircase.")
+        .defaultValue(4).min(3).max(32).sliderRange(3, 32)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Integer> holesPocketMaxSize = sgHoles.add(new IntSetting.Builder()
+        .name("holes-pocket-max-size").description("Maximum cell count of a cave-air-touching air pocket.")
+        .defaultValue(6).min(1).max(32).sliderRange(1, 32)
+        .onChanged(v -> invalidateHolesCache()).build());
+    private final Setting<Integer> holesMinCover = sgHoles.add(new IntSetting.Builder()
+        .name("holes-min-cover").description("Minimum blocks of cover above a cell for it to count as underground.")
+        .defaultValue(3).min(1).max(16).sliderRange(1, 16)
+        .onChanged(v -> invalidateHolesCache()).build());
+
+    private final Setting<ShapeMode> holesShapeMode = sgHoles.add(new EnumSetting.Builder<ShapeMode>()
+        .name("holes-shape-mode").description("How the hole boxes are drawn.")
+        .defaultValue(ShapeMode.Both).build());
+    private final Setting<SettingColor> holesFillColor = sgHoles.add(new ColorSetting.Builder()
+        .name("holes-fill-color").description("Fill color for hole boxes.")
+        .defaultValue(new SettingColor(255, 120, 40, 255)).build());
+    private final Setting<Double> holesFillOpacity = sgHoles.add(new DoubleSetting.Builder()
+        .name("holes-fill-opacity").description("Opacity multiplier applied to the fill color's alpha.")
+        .defaultValue(0.15).min(0.0).max(1.0).sliderRange(0.0, 1.0).build());
+    private final Setting<SettingColor> holesLineColor = sgHoles.add(new ColorSetting.Builder()
+        .name("holes-line-color").description("Line color for hole boxes.")
+        .defaultValue(new SettingColor(255, 160, 60, 255)).build());
+    private final Setting<Double> holesLineWidth = sgHoles.add(new DoubleSetting.Builder()
+        .name("holes-line-width").description("Line thickness in pixels.")
+        .defaultValue(1.0).min(1.0).max(6.0).sliderRange(1.0, 6.0).build());
+    private final Setting<Double> holesBoxMargin = sgHoles.add(new DoubleSetting.Builder()
+        .name("holes-box-margin").description("Blocks to grow (positive) or shrink (negative) each hole box by.")
+        .defaultValue(0.0).min(-0.45).max(0.3).sliderRange(-0.45, 0.3).build());
+    private final Setting<Integer> holesRenderDistance = sgHoles.add(new IntSetting.Builder()
+        .name("holes-render-distance").description("Maximum distance to render a hole box, in blocks.")
+        .defaultValue(128).min(16).max(512).sliderRange(16, 512).build());
+    private final Setting<Integer> holesMaxBoxes = sgHoles.add(new IntSetting.Builder()
+        .name("holes-max-boxes").description("Maximum number of hole boxes rendered at once.")
+        .defaultValue(400).min(16).max(4000).sliderRange(16, 4000).build());
 
     private final Set<Entity> glowTargets = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<BlockPos> storageTargets = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -236,6 +329,26 @@ public class Shader extends Module {
     private final MeshBuilder blockMesh = new MeshBuilder(MeteorRenderPipelines.WORLD_COLORED);
     private final MeshBuilderVertexConsumerProvider blockMeshProvider = new MeshBuilderVertexConsumerProvider(blockMesh);
     private final Color storageScratch = new Color();
+
+    private final java.util.Map<Long, ChunkHoles> holesCache = new ConcurrentHashMap<>();
+    private final java.util.Map<Long, Integer> holesPending = new ConcurrentHashMap<>();
+    private final Set<Long> holesInFlight = ConcurrentHashMap.newKeySet();
+    private final java.util.Map<Long, Integer> holesErrorCounts = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<HolesResult> holesResults = new ConcurrentLinkedQueue<>();
+    private final Color holesFillScratch = new Color();
+    private final Color holesLineScratch = new Color();
+
+    private volatile DugHoles.Feature[] holesRenderList = new DugHoles.Feature[0];
+    private volatile ExecutorService holesExecutor;
+    private ClientWorld holesLastWorld;
+    private int holesTickCounter;
+    private int holesEpoch;
+
+    private static final int[][] HOLES_EDGES = {
+        {0, 4}, {1, 5}, {2, 6}, {3, 7},
+        {0, 1}, {2, 3}, {0, 2}, {1, 3},
+        {4, 5}, {6, 7}, {4, 6}, {5, 7}
+    };
 
     public Shader() {
         super(HunterBuddyAddon.VISUALS_CATEGORY, "shader",
@@ -322,7 +435,9 @@ public class Shader extends Module {
         if (e instanceof EnderPearlEntity) return pearlsColor.get();
         if (e instanceof ItemEntity) return itemsColor.get();
         if (e instanceof BoatEntity) return vehiclesColor.get();
-        if (e instanceof MinecartEntity) return vehiclesColor.get();
+        if (e instanceof HopperMinecartEntity) return hopperColor.get();
+        if (e instanceof StorageMinecartEntity) return chestColor.get();
+        if (e instanceof AbstractMinecartEntity) return vehiclesColor.get();
         if (e instanceof LivingEntity le) {
             SpawnGroup g = le.getType().getSpawnGroup();
             if (g == SpawnGroup.MONSTER) return shadeForType(le.getType(), monstersColor.get());
@@ -427,11 +542,8 @@ public class Shader extends Module {
         if (e instanceof EndCrystalEntity) return crystals.get();
         if (e instanceof EnderPearlEntity) return pearls.get();
         if (e instanceof ItemEntity) return items.get();
-        if (e instanceof MinecartEntity mc2) {
-            String id2 = net.minecraft.registry.Registries.ENTITY_TYPE.getId(mc2.getType()).toString();
-            if (id2.contains("chest_minecart") || id2.contains("hopper_minecart")) return storages.get();
-            return vehicles.get();
-        }
+        if (e instanceof StorageMinecartEntity) return storages.get();
+        if (e instanceof AbstractMinecartEntity) return vehicles.get();
         if (e instanceof BoatEntity) return vehicles.get();
         if (e instanceof LivingEntity le) {
             SpawnGroup g = le.getType().getSpawnGroup();
@@ -459,9 +571,10 @@ public class Shader extends Module {
         storageTargets.clear();
         portalPositions.clear();
         if (mc.world == null || mc.player == null) return;
-        if (!outline.get() && !storages.get() && !portals.get()) return;
-        if (outline.get()) {
+        if (!outline.get() && !storages.get() && !spawners.get() && !portals.get()) return;
+        if (outline.get() || storages.get()) {
             for (Entity e : mc.world.getEntities()) {
+                if (!outline.get() && !(e instanceof StorageMinecartEntity)) continue;
                 if (!isTarget(e)) continue;
                 glowTargets.add(e);
             }
@@ -469,9 +582,10 @@ public class Shader extends Module {
         // Storages are their own target set: they feed the silhouette buffer
         // directly rather than through the entity path, so gating them on the
         // entity outline switch only hid them for no reason.
-        if (storages.get()) {
+        if (storages.get() || spawners.get()) {
             for (BlockEntity be : Utils.blockEntities()) {
-                if (!isStorageBlock(be)) continue;
+                boolean spawner = isSpawnerBlock(be);
+                if (spawner ? !spawners.get() : !storages.get() || !isStorageBlock(be)) continue;
                 storageTargets.add(be.getPos());
             }
         }
@@ -493,10 +607,21 @@ public class Shader extends Module {
     }
 
     @Override
+    public void onActivate() {
+        if (holes.get()) startHolesThread();
+    }
+
+    @Override
     public void onDeactivate() {
         glowTargets.clear();
         storageTargets.clear();
         portalPositions.clear();
+        stopHolesThread();
+    }
+
+    private boolean isSpawnerBlock(BlockEntity be) {
+        return be instanceof net.minecraft.block.entity.MobSpawnerBlockEntity
+            || be instanceof net.minecraft.block.entity.TrialSpawnerBlockEntity;
     }
 
     private boolean isStorageBlock(BlockEntity be) {
@@ -521,7 +646,8 @@ public class Shader extends Module {
     private Color colorForStorage(BlockEntity be) {
         SettingColor c;
 
-        if (be instanceof TrappedChestBlockEntity) c = trappedChestColor.get();
+        if (isSpawnerBlock(be)) c = spawnerColor.get();
+        else if (be instanceof TrappedChestBlockEntity) c = trappedChestColor.get();
         else if (be instanceof ChestBlockEntity) c = chestColor.get();
         else if (be instanceof BarrelBlockEntity) c = barrelColor.get();
         else if (be instanceof ShulkerBoxBlockEntity) c = shulkerColor.get();
@@ -612,6 +738,397 @@ public class Shader extends Module {
             .pipeline(MeteorRenderPipelines.WORLD_COLORED)
             .mesh(blockMesh, event.matrices)
             .end();
+    }
+
+    @EventHandler
+    private void onHolesChunkData(ChunkDataEvent event) {
+        if (!holes.get()) return;
+
+        WorldChunk chunk = event.chunk();
+        if (chunk == null) return;
+
+        queueHolesChunk(chunk.getPos().toLong(), holesTickCounter);
+    }
+
+    @EventHandler
+    private void onHolesBlockUpdate(BlockUpdateEvent event) {
+        if (!holes.get()) return;
+        if (DugHoles.cellClass(event.oldState) == DugHoles.cellClass(event.newState)) return;
+
+        BlockPos pos = event.pos;
+        int cx = pos.getX() >> 4;
+        int cz = pos.getZ() >> 4;
+        int lx = pos.getX() & 15;
+        int lz = pos.getZ() & 15;
+        int availableTick = holesTickCounter + 40;
+
+        queueHolesChunk(ChunkPos.toLong(cx, cz), availableTick);
+        if (lx <= 3) queueHolesChunk(ChunkPos.toLong(cx - 1, cz), availableTick);
+        if (lx >= 12) queueHolesChunk(ChunkPos.toLong(cx + 1, cz), availableTick);
+        if (lz <= 3) queueHolesChunk(ChunkPos.toLong(cx, cz - 1), availableTick);
+        if (lz >= 12) queueHolesChunk(ChunkPos.toLong(cx, cz + 1), availableTick);
+    }
+
+    @EventHandler
+    private void onHolesTick(Post event) {
+        if (!holes.get()) {
+            holesLastWorld = null;
+            return;
+        }
+        if (mc.world == null) return;
+
+        if (mc.world != holesLastWorld) {
+            holesLastWorld = mc.world;
+            holesCache.clear();
+            holesPending.clear();
+            holesInFlight.clear();
+            holesErrorCounts.clear();
+            holesResults.clear();
+            holesTickCounter = 0;
+            holesEpoch++;
+        }
+
+        holesTickCounter++;
+
+        drainHolesResults();
+
+        if (holesTickCounter % 20 == 0) sweepHolesChunks();
+        if (holesTickCounter % 100 == 0) pruneHolesCache();
+        if (holesTickCounter % 5 == 0) refreshHolesRenderList();
+
+        dispatchHolesChunks();
+    }
+
+    @EventHandler
+    private void onHolesRender(Render3DEvent event) {
+        if (!holes.get() || mc.world == null) return;
+
+        DugHoles.Feature[] features = holesRenderList;
+        if (features.length == 0) return;
+
+        SettingColor fillBase = holesFillColor.get();
+        SettingColor lineBase = holesLineColor.get();
+        holesFillScratch.set(fillBase.r, fillBase.g, fillBase.b, clamp((int) (fillBase.a * holesFillOpacity.get())));
+        holesLineScratch.set(lineBase.r, lineBase.g, lineBase.b, lineBase.a);
+
+        ShapeMode mode = holesShapeMode.get();
+        double margin = holesBoxMargin.get();
+        double lineWidth = holesLineWidth.get();
+
+        for (DugHoles.Feature f : features) {
+            double x1 = f.minX() - margin, y1 = f.minY() - margin, z1 = f.minZ() - margin;
+            double x2 = f.maxX() + 1.0 + margin, y2 = f.maxY() + 1.0 + margin, z2 = f.maxZ() + 1.0 + margin;
+            if (x2 <= x1 || y2 <= y1 || z2 <= z1) continue;
+
+            if (mode.sides()) event.renderer.boxSides(x1, y1, z1, x2, y2, z2, holesFillScratch, 0);
+
+            if (mode.lines()) {
+                if (lineWidth <= 1.0) {
+                    event.renderer.boxLines(x1, y1, z1, x2, y2, z2, holesLineScratch, 0);
+                } else {
+                    renderThickHolesBoxLines(event, x1, y1, z1, x2, y2, z2, holesLineScratch, lineWidth);
+                }
+            }
+        }
+    }
+
+    private void renderThickHolesBoxLines(Render3DEvent event, double x1, double y1, double z1,
+                                           double x2, double y2, double z2, Color color, double lineWidthPx) {
+        double[][] corners = {
+            {x1, y1, z1}, {x1, y1, z2}, {x2, y1, z1}, {x2, y1, z2},
+            {x1, y2, z1}, {x1, y2, z2}, {x2, y2, z1}, {x2, y2, z2}
+        };
+
+        Vec3d cam = mc.gameRenderer.getCamera().getCameraPos();
+        double tanHalfFov = Math.tan(Math.toRadians(mc.options.getFov().getValue() / 2.0));
+        int screenHeight = mc.getWindow().getFramebufferHeight();
+
+        for (int[] edge : HOLES_EDGES) {
+            double[] a = corners[edge[0]];
+            double[] b = corners[edge[1]];
+            Vec3d p1 = new Vec3d(a[0], a[1], a[2]);
+            Vec3d p2 = new Vec3d(b[0], b[1], b[2]);
+            Vec3d mid = p1.add(p2).multiply(0.5);
+            Vec3d side = p2.subtract(p1).crossProduct(mid.subtract(cam));
+            if (side.lengthSquared() < 1.0e-12) continue;
+            side = side.normalize();
+
+            double halfW1 = p1.distanceTo(cam) * tanHalfFov * lineWidthPx / screenHeight;
+            double halfW2 = p2.distanceTo(cam) * tanHalfFov * lineWidthPx / screenHeight;
+
+            Vec3d p1a = p1.add(side.multiply(halfW1));
+            Vec3d p1b = p1.subtract(side.multiply(halfW1));
+            Vec3d p2a = p2.add(side.multiply(halfW2));
+            Vec3d p2b = p2.subtract(side.multiply(halfW2));
+
+            event.renderer.quad(
+                p1a.x, p1a.y, p1a.z,
+                p1b.x, p1b.y, p1b.z,
+                p2b.x, p2b.y, p2b.z,
+                p2a.x, p2a.y, p2a.z,
+                color);
+        }
+    }
+
+    private void refreshHolesRenderList() {
+        if (mc.player == null || holesCache.isEmpty()) {
+            holesRenderList = new DugHoles.Feature[0];
+            return;
+        }
+
+        double renderDist = holesRenderDistance.get();
+        double renderDistSq = renderDist * renderDist;
+        double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
+
+        List<HolesScored> visible = new ArrayList<>();
+        for (ChunkHoles ch : holesCache.values()) {
+            for (DugHoles.Feature f : ch.features()) {
+                double cx = clampToRange(px, f.minX(), f.maxX() + 1.0);
+                double cy = clampToRange(py, f.minY(), f.maxY() + 1.0);
+                double cz = clampToRange(pz, f.minZ(), f.maxZ() + 1.0);
+                double dx = px - cx, dy = py - cy, dz = pz - cz;
+                double distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > renderDistSq) continue;
+                visible.add(new HolesScored(f, distSq));
+            }
+        }
+
+        visible.sort(Comparator.comparingDouble(HolesScored::distSq));
+
+        int max = holesMaxBoxes.get();
+        int n = Math.min(max, visible.size());
+        DugHoles.Feature[] arr = new DugHoles.Feature[n];
+        for (int i = 0; i < n; i++) arr[i] = visible.get(i).feature();
+        holesRenderList = arr;
+    }
+
+    private static double clampToRange(double v, double lo, double hi) {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    }
+
+    private void queueHolesChunk(long key, int availableTick) {
+        holesPending.merge(key, availableTick, Math::max);
+    }
+
+    private void sweepHolesChunks() {
+        if (!(mc.world.getChunkManager() instanceof ClientChunkManager manager)) return;
+
+        AtomicReferenceArray<WorldChunk> chunks = manager.chunks.chunks;
+        for (int i = 0; i < chunks.length(); i++) {
+            WorldChunk chunk = chunks.get(i);
+            if (chunk == null) continue;
+
+            long key = chunk.getPos().toLong();
+            if (holesCache.containsKey(key) || holesPending.containsKey(key) || holesInFlight.contains(key)) continue;
+
+            holesPending.put(key, holesTickCounter);
+        }
+    }
+
+    private void pruneHolesCache() {
+        holesCache.keySet().removeIf(key -> {
+            ChunkPos cp = new ChunkPos(key);
+            return !mc.world.isChunkLoaded(cp.x, cp.z);
+        });
+    }
+
+    private void drainHolesResults() {
+        HolesResult r;
+        while ((r = holesResults.poll()) != null) {
+            holesInFlight.remove(r.key());
+
+            if (r.epoch() != holesEpoch) continue;
+
+            if (r.success()) {
+                holesErrorCounts.remove(r.key());
+                holesCache.put(r.key(), new ChunkHoles(List.copyOf(r.features()), System.currentTimeMillis()));
+            } else {
+                int attempts = holesErrorCounts.merge(r.key(), 1, Integer::sum);
+                if (attempts <= 1) queueHolesChunk(r.key(), holesTickCounter);
+            }
+        }
+    }
+
+    private void dispatchHolesChunks() {
+        if (holesExecutor == null || mc.player == null || holesPending.isEmpty()) return;
+
+        ClientWorld world = mc.world;
+        if (world == null) return;
+
+        double limit = holesRenderDistance.get() + 32;
+        double limitSq = limit * limit;
+        double px = mc.player.getX();
+        double pz = mc.player.getZ();
+
+        List<java.util.Map.Entry<Long, Double>> ready = new ArrayList<>();
+        Iterator<java.util.Map.Entry<Long, Integer>> it = holesPending.entrySet().iterator();
+        while (it.hasNext()) {
+            java.util.Map.Entry<Long, Integer> e = it.next();
+            ChunkPos cp = new ChunkPos(e.getKey());
+            if (!world.getChunkManager().isChunkLoaded(cp.x, cp.z)) {
+                it.remove();
+                continue;
+            }
+
+            if (e.getValue() > holesTickCounter) continue;
+
+            double cx = cp.getStartX() + 8.0;
+            double cz = cp.getStartZ() + 8.0;
+            double dx = cx - px, dz = cz - pz;
+            double distSq = dx * dx + dz * dz;
+            if (distSq > limitSq) continue;
+
+            ready.add(java.util.Map.entry(e.getKey(), distSq));
+        }
+
+        ready.sort(java.util.Map.Entry.comparingByValue());
+
+        int sent = 0;
+        for (java.util.Map.Entry<Long, Double> e : ready) {
+            if (sent >= 6) break;
+            if (!holesNeighborsLoaded(world, new ChunkPos(e.getKey()))) continue;
+            submitHolesChunk(e.getKey());
+            sent++;
+        }
+    }
+
+    private boolean holesNeighborsLoaded(ClientWorld world, ChunkPos cp) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                if (!world.getChunkManager().isChunkLoaded(cp.x + dx, cp.z + dz)) return false;
+            }
+        }
+        return true;
+    }
+
+    private void submitHolesChunk(long key) {
+        ExecutorService executor = holesExecutor;
+        if (executor == null) return;
+
+        if (!holesInFlight.add(key)) {
+            holesPending.remove(key);
+            return;
+        }
+        holesPending.remove(key);
+
+        ClientWorld world = mc.world;
+        if (world == null) {
+            holesInFlight.remove(key);
+            return;
+        }
+
+        ChunkPos cp = new ChunkPos(key);
+        DugHoles.Params params = new DugHoles.Params(
+            holesMinTunnelLength.get(), holesMinShaftDepth.get(), holesMinStairSteps.get(),
+            holesPocketMaxSize.get(), holesMinCover.get(),
+            holesTunnels.get(), holesShafts.get(), holesStairs.get(), holesPockets.get());
+        int worldMinY = world.getBottomY();
+        int epoch = holesEpoch;
+
+        executor.submit(() -> runHolesAnalysis(key, cp, world, params, worldMinY, epoch));
+    }
+
+    private void runHolesAnalysis(long key, ChunkPos cp, ClientWorld world, DugHoles.Params params, int worldMinY, int epoch) {
+        long start = System.nanoTime();
+        try {
+            BlockSourceImpl src = new BlockSourceImpl(world);
+            int maxY = src.computeMaxY(cp);
+            List<DugHoles.Feature> features = maxY >= worldMinY
+                ? DugHoles.analyze(src, cp.getStartX(), cp.getStartZ(), 16, 16, 4, worldMinY, maxY, params)
+                : List.of();
+            holesResults.add(new HolesResult(key, features, true, System.nanoTime() - start, epoch));
+        } catch (Exception e) {
+            holesResults.add(new HolesResult(key, List.of(), false, System.nanoTime() - start, epoch));
+        }
+    }
+
+    private void invalidateHolesCache() {
+        holesCache.clear();
+        holesEpoch++;
+    }
+
+    private void startHolesThread() {
+        if (holesExecutor != null && !holesExecutor.isShutdown()) return;
+        holesEpoch++;
+        holesExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "Shader-Holes");
+            t.setDaemon(true);
+            t.setPriority(Thread.MIN_PRIORITY);
+            return t;
+        });
+    }
+
+    private void stopHolesThread() {
+        ExecutorService executor = holesExecutor;
+        holesExecutor = null;
+        holesEpoch++;
+        if (executor != null) executor.shutdownNow();
+
+        holesCache.clear();
+        holesPending.clear();
+        holesInFlight.clear();
+        holesErrorCounts.clear();
+        holesResults.clear();
+        holesRenderList = new DugHoles.Feature[0];
+        holesLastWorld = null;
+    }
+
+    private record ChunkHoles(List<DugHoles.Feature> features, long analyzedAtMillis) {}
+
+    private record HolesResult(long key, List<DugHoles.Feature> features, boolean success, long nanos, int epoch) {}
+
+    private record HolesScored(DugHoles.Feature feature, double distSq) {}
+
+    private static final class BlockSourceImpl implements DugHoles.BlockSource {
+        private final ClientWorld world;
+        private final java.util.HashMap<Long, WorldChunk> chunkCache = new java.util.HashMap<>();
+        private final BlockPos.Mutable cursor = new BlockPos.Mutable();
+
+        BlockSourceImpl(ClientWorld world) {
+            this.world = world;
+        }
+
+        WorldChunk chunkAt(int cx, int cz) {
+            long key = ChunkPos.toLong(cx, cz);
+            if (chunkCache.containsKey(key)) return chunkCache.get(key);
+
+            WorldChunk chunk = world.getChunkManager().getWorldChunk(cx, cz);
+            chunkCache.put(key, chunk);
+            return chunk;
+        }
+
+        int computeMaxY(ChunkPos cp) {
+            int minX = cp.getStartX() - 4;
+            int maxX = cp.getStartX() + 19;
+            int minZ = cp.getStartZ() - 4;
+            int maxZ = cp.getStartZ() + 19;
+            int best = Integer.MIN_VALUE;
+
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    WorldChunk chunk = chunkAt(x >> 4, z >> 4);
+                    if (chunk == null) continue;
+
+                    int h = chunk.getHeightmap(Heightmap.Type.WORLD_SURFACE).get(x & 15, z & 15);
+                    if (h > best) best = h;
+                }
+            }
+
+            if (best == Integer.MIN_VALUE) best = world.getTopYInclusive();
+            return best + 1;
+        }
+
+        @Override
+        public BlockState get(int x, int y, int z) {
+            WorldChunk chunk = chunkAt(x >> 4, z >> 4);
+            if (chunk == null) return null;
+
+            cursor.set(x, y, z);
+            return chunk.getBlockState(cursor);
+        }
     }
 
 }
