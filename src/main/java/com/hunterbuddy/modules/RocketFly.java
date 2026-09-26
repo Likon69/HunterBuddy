@@ -133,13 +133,7 @@ public class RocketFly extends Module {
    private void startTakeoff() {
       this.takeoffTicks = 0;
 
-      // The same preparation AutoFlyingRegear does before handing over to the
-      // machine. Eight degrees down is what lets the elytra bite the moment it
-      // opens; from a flat or upward look you stall and drop back onto the block
-      // you jumped off. And the boost phase only searches the hotbar, so a stack
-      // sitting in the backpack has to be brought forward before the jump rather
-      // than discovered missing three phases later.
-      this.mc.player.setPitch(8.0F);
+      this.mc.player.setPitch(-75.0F);
       this.ensureRocketsInHotbar();
 
       this.takeoff.start(-1, new ElytraTakeoff.Listener() {
@@ -240,6 +234,9 @@ public class RocketFly extends Module {
       // out of its way — pitch steering during the jump is what drops you back
       // onto the ground before the elytra ever opens.
       if (this.takeoff.isActive()) {
+         if (this.mc.player != null && !this.mc.player.isGliding()) {
+            this.mc.player.setPitch(-75.0F);
+         }
          this.takeoff.tickPre();
          return;
       }
