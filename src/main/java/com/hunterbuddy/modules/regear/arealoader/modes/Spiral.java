@@ -151,32 +151,145 @@ public class Spiral extends AreaLoaderMode {
 
    @Override
    public AreaLoaderMode.CoveragePreview coveragePreview() {
-      if (this.pd == null || this.pd.spiralOrigin == null || this.pd.currPos == null) {
+      if (this.pd == null || this.pd.spiralOrigin == null || this.pd.currPos == null || this.pd.initialPos == null) {
          return null;
       }
 
       int gap = Math.max(16, 16 * (Integer) this.searchArea.rowGap.get());
-      int legsDone = (this.pd.spiralWidth + this.pd.spiralHeight) / gap;
 
-      java.util.List<Spiral.SpiralCornerState> corners =
-         this.generateSpiralCorners(this.pd.spiralOrigin.getX(), this.pd.spiralOrigin.getZ(), gap, legsDone + 4);
+      int curX = this.pd.initialPos.getX();
+      int curZ = this.pd.initialPos.getZ();
+      int width = this.pd.spiralWidth;
+      int height = this.pd.spiralHeight;
+      float yaw = this.pd.yawDirection;
+      boolean mainPath = this.pd.mainPath;
 
-      java.util.List<double[]> points = new java.util.ArrayList<>();
-      for (Spiral.SpiralCornerState c : corners) {
-         points.add(new double[]{c.cornerX, c.cornerZ});
+      int nextX;
+      int nextZ;
+      if (this.nextCornerTarget != null) {
+         nextX = this.nextCornerTarget.getX();
+         nextZ = this.nextCornerTarget.getZ();
+      } else {
+         float normYaw = this.normalizeYaw(yaw);
+         if (mainPath) {
+            nextZ = curZ;
+            nextX = normYaw >= 225.0F && normYaw < 315.0F ? curX + gap + width : curX - (gap + width);
+         } else {
+            nextX = curX;
+            nextZ = !(normYaw >= 315.0F) && !(normYaw < 45.0F) ? curZ - (gap + height) : curZ + gap + height;
+         }
       }
 
-      double curX = this.mc.player != null ? this.mc.player.getX() : this.pd.currPos.getX();
-      double curZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.currPos.getZ();
+      java.util.List<double[]> flown = new java.util.ArrayList<>();
+      java.util.List<double[]> backward = new java.util.ArrayList<>();
+      int bx = curX;
+      int bz = curZ;
+      int bw = width;
+      int bh = height;
+      float byaw = yaw;
+      boolean bmain = mainPath;
+      backward.add(new double[]{bx, bz});
 
-      double nextTurn = -1.0;
-      int nextIdx = Math.min(legsDone + 1, points.size() - 1);
-      if (nextIdx >= 0) {
-         double[] n = points.get(nextIdx);
-         nextTurn = Math.hypot(n[0] - curX, n[1] - curZ);
+      for (int i = 0; i < 60; i++) {
+         boolean prevMain = !bmain;
+         float prevYaw = this.normalizeYaw(byaw - 90.0F);
+         int length = prevMain ? bw : bh;
+         int newW = bw;
+         int newH = bh;
+         if (prevMain) {
+            newW = bw - gap;
+            if (newW < 0) {
+               break;
+            }
+         } else {
+            newH = bh - gap;
+            if (newH < 0) {
+               break;
+            }
+         }
+
+         int dirX = 0;
+         int dirZ = 0;
+         if (prevMain) {
+            dirX = prevYaw >= 225.0F && prevYaw < 315.0F ? 1 : -1;
+         } else {
+            dirZ = !(prevYaw >= 315.0F) && !(prevYaw < 45.0F) ? -1 : 1;
+         }
+
+         bx -= dirX * length;
+         bz -= dirZ * length;
+         bw = newW;
+         bh = newH;
+         byaw = prevYaw;
+         bmain = prevMain;
+         backward.add(new double[]{bx, bz});
       }
 
-      return new AreaLoaderMode.CoveragePreview(points, legsDone, curX, curZ, "spiral",
+      for (int i = backward.size() - 1; i >= 0; i--) {
+         flown.add(backward.get(i));
+      }
+
+      float turnedYaw = this.normalizeYaw(yaw + 90.0F);
+      int turnedW = width;
+      int turnedH = height;
+      boolean turnedMain;
+      if (mainPath) {
+         turnedW = width + gap;
+         turnedMain = false;
+      } else {
+         turnedH = height + gap;
+         turnedMain = true;
+      }
+
+      java.util.List<double[]> points = new java.util.ArrayList<>(flown);
+      points.add(new double[]{nextX, nextZ});
+
+      int px = nextX;
+      int pz = nextZ;
+      int pw = turnedW;
+      int ph = turnedH;
+      float pyaw = turnedYaw;
+      boolean pmain = turnedMain;
+      for (int i = 0; i < 3; i++) {
+         float normYaw = this.normalizeYaw(pyaw);
+         int ex;
+         int ez;
+         if (pmain) {
+            ez = pz;
+            ex = normYaw >= 225.0F && normYaw < 315.0F ? px + gap + pw : px - (gap + pw);
+         } else {
+            ex = px;
+            ez = !(normYaw >= 315.0F) && !(normYaw < 45.0F) ? pz - (gap + ph) : pz + gap + ph;
+         }
+
+         float nyaw = this.normalizeYaw(pyaw + 90.0F);
+         int nw = pw;
+         int nh = ph;
+         boolean nmain;
+         if (pmain) {
+            nw = pw + gap;
+            nmain = false;
+         } else {
+            nh = ph + gap;
+            nmain = true;
+         }
+
+         px = ex;
+         pz = ez;
+         pw = nw;
+         ph = nh;
+         pyaw = nyaw;
+         pmain = nmain;
+         points.add(new double[]{px, pz});
+      }
+
+      int flownSegments = flown.size() - 1;
+
+      double playerX = this.mc.player != null ? this.mc.player.getX() : this.pd.currPos.getX();
+      double playerZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.currPos.getZ();
+      double nextTurn = Math.hypot(nextX - playerX, nextZ - playerZ);
+
+      return new AreaLoaderMode.CoveragePreview(points, flownSegments, playerX, playerZ, "spiral",
          this.pd.spiralWidth + "x" + this.pd.spiralHeight, nextTurn, this.recovering);
    }
 

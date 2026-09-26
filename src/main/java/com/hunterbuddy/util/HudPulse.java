@@ -71,6 +71,12 @@ public final class HudPulse {
             eased.put(key, next);
             return next;
         }
+
+        public void clear() {
+            lastValue.clear();
+            changedAt.clear();
+            eased.clear();
+        }
     }
 
     /**
