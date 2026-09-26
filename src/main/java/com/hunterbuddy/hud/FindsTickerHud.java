@@ -5,7 +5,9 @@ import com.hunterbuddy.util.HudGlowPanel;
 import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.HuntFeed;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
@@ -20,6 +22,7 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.MathHelper;
 
 /**
  * The last few finds as a live feed: coloured dot, what it was, how long ago.
@@ -62,6 +65,11 @@ public class FindsTickerHud extends HudElement {
         .name("alert-on-player").description("Critical glow for a minute after a player sighting.")
         .defaultValue(true).build());
 
+    private final Setting<Boolean> animations = sgGeneral.add(new BoolSetting.Builder()
+        .name("animations")
+        .description("Lines slide and fade in and out instead of snapping.")
+        .defaultValue(true).build());
+
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
         .name("text-scale").description("Scale of the text.")
         .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
@@ -94,6 +102,10 @@ public class FindsTickerHud extends HudElement {
         .name("players").description("Players entering and leaving range.").defaultValue(true).build());
     private final Setting<Boolean> showOldChunks = sgTypes.add(new BoolSetting.Builder()
         .name("old-chunks").description("Confirmed old chunk clusters.").defaultValue(true).build());
+    private final Setting<Boolean> showItems = sgTypes.add(new BoolSetting.Builder()
+        .name("items").description("Watched items seen on the ground.").defaultValue(true).build());
+    private final Setting<Boolean> showCombat = sgTypes.add(new BoolSetting.Builder()
+        .name("combat").description("Crystal and anchor activity nearby.").defaultValue(true).build());
 
     private final Setting<SettingColor> labelColor = sgColors.add(new ColorSetting.Builder()
         .name("age-color").description("The age column.")
@@ -123,8 +135,28 @@ public class FindsTickerHud extends HudElement {
         .name("old-chunk-color").description("Old chunk dot.")
         .defaultValue(new SettingColor(126, 200, 255, 255)).build());
 
+    private final Setting<SettingColor> itemColor = sgColors.add(new ColorSetting.Builder()
+        .name("item-color").description("Watched item dot.")
+        .defaultValue(new SettingColor(255, 85, 255, 255)).build());
+
+    private final Setting<SettingColor> combatColor = sgColors.add(new ColorSetting.Builder()
+        .name("combat-color").description("Crystal and anchor activity dot.")
+        .defaultValue(new SettingColor(255, 100, 40, 255)).build());
+
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
+
+    private static final long ENTER_MS = 250L;
+    private static final long EXIT_MS = 200L;
+    private static final double SLIDE_PX = 12.0;
+
+    private record Ghost(HuntFeed.Entry entry, int index, long startedAt) {
+    }
+
+    private long lastFrameNanos;
+    private final Map<String, Integer> prevIndexByKey = new LinkedHashMap<>();
+    private final Map<String, HuntFeed.Entry> prevEntryByKey = new LinkedHashMap<>();
+    private final Map<String, Ghost> ghosts = new LinkedHashMap<>();
 
     public FindsTickerHud() {
         super(INFO);
@@ -132,24 +164,56 @@ public class FindsTickerHud extends HudElement {
 
     @Override
     public void render(HudRenderer renderer) {
+        long nowNanos = System.nanoTime();
+        double dt = lastFrameNanos == 0L ? 0.016 : Math.min(0.25, (nowNanos - lastFrameNanos) / 1_000_000_000.0);
+        lastFrameNanos = nowNanos;
+        boolean anim = animations.get();
+
         List<HuntFeed.Entry> entries = collect();
+        boolean demo = entries.isEmpty() && isInEditor();
+        if (demo) entries = demoEntries();
+        boolean live = !demo;
+
+        Map<String, Integer> indexByKey = new LinkedHashMap<>();
+        for (int i = 0; i < entries.size(); i++) indexByKey.put(entryKey(entries.get(i)), i);
+
+        long nowMs = System.currentTimeMillis();
+
+        if (anim && live) {
+            for (Map.Entry<String, Integer> pe : prevIndexByKey.entrySet()) {
+                String k = pe.getKey();
+                if (indexByKey.containsKey(k)) continue;
+
+                HuntFeed.Entry ghostEntry = prevEntryByKey.get(k);
+                if (ghostEntry != null) ghosts.putIfAbsent(k, new Ghost(ghostEntry, pe.getValue(), nowMs));
+            }
+            ghosts.keySet().removeIf(indexByKey::containsKey);
+            ghosts.values().removeIf(g -> nowMs - g.startedAt() >= EXIT_MS);
+        } else {
+            ghosts.clear();
+        }
+
+        if (live) {
+            prevIndexByKey.clear();
+            prevIndexByKey.putAll(indexByKey);
+            prevEntryByKey.clear();
+            for (HuntFeed.Entry e : entries) prevEntryByKey.put(entryKey(e), e);
+        }
+
+        int lineCount = entries.size();
+        for (Ghost g : ghosts.values()) lineCount = Math.max(lineCount, g.index() + 1);
+
+        if (lineCount == 0) {
+            setSize(0.0, 0.0);
+            return;
+        }
 
         boolean shadow = textShadow.get();
         double scale = textScale.get();
         double pad = panel.padding();
         double lineH = renderer.textHeight(shadow, scale) + 2.0 * scale;
         double w = panelWidth.get();
-
-        if (entries.isEmpty()) {
-            if (isInEditor()) {
-                entries = demoEntries();
-            } else {
-                setSize(0.0, 0.0);
-                return;
-            }
-        }
-
-        double h = entries.size() * lineH - 2.0 * scale;
+        double h = lineCount * lineH - 2.0 * scale;
 
         HudGlowPanel.Severity severity = HudGlowPanel.Severity.OK;
         if (alertOnPlayer.get()) {
@@ -162,23 +226,39 @@ public class FindsTickerHud extends HudElement {
         float freshness = pulse.freshness("newest",
             entries.isEmpty() ? "" : String.valueOf(entries.get(0).at()), 700);
 
-        double ty = y + pad;
         for (int i = 0; i < entries.size(); i++) {
-            drawEntry(renderer, entries.get(i), x + pad, ty, w, shadow, scale, i == 0 ? freshness : 0.0f);
-            ty += lineH;
+            double rank = rankFactor(i, entries.size());
+            double easedIndex = anim && live
+                ? pulse.ease("pos#" + entryKey(entries.get(i)), i, dt, 0.15)
+                : i;
+            double ty = y + pad + easedIndex * lineH;
+            drawEntry(renderer, entries.get(i), x + pad, ty, w, shadow, scale,
+                i == 0 ? freshness : 0.0f, rank, anim);
+        }
+
+        for (Ghost g : ghosts.values()) {
+            double rank = rankFactor(g.index(), Math.max(entries.size(), g.index() + 1));
+            double exitT = MathHelper.clamp((nowMs - g.startedAt()) / (double) EXIT_MS, 0.0, 1.0);
+            double ty = y + pad + g.index() * lineH;
+            drawEntry(renderer, g.entry(), x + pad, ty, w, shadow, scale, 0.0f, rank * (1.0 - exitT), false);
         }
 
         setSize(w + pad * 2.0, h + pad * 2.0);
     }
 
     private void drawEntry(HudRenderer renderer, HuntFeed.Entry entry, double left, double top,
-                           double w, boolean shadow, double scale, float freshness) {
+                           double w, boolean shadow, double scale, float freshness,
+                           double extraAlpha, boolean animateEntrance) {
         long age = entry.ageMs();
 
-        // Full presence for half a minute, then a slide toward one third: old lines stay legible
-        // but visibly spent.
-        double fade = age <= 30_000L ? 1.0
-            : Math.max(0.35, 1.0 - (age - 30_000L) / (double) (maxAgeMinutes.get() * 60_000L));
+        double enterT = animateEntrance ? MathHelper.clamp(age / (double) ENTER_MS, 0.0, 1.0) : 1.0;
+        double enterEase = easeOutCubic(enterT);
+        double enterAlpha = 0.15 + 0.85 * enterEase;
+
+        double fade = ageFade(age) * extraAlpha * enterAlpha;
+
+        double slide = (1.0 - enterEase) * SLIDE_PX * scale;
+        left = align.get() == Align.Right ? left + slide : left - slide;
 
         SettingColor dot = colorFor(entry.type());
         double dotSize = 3.0 * scale;
@@ -326,7 +406,9 @@ public class FindsTickerHud extends HudElement {
             case STASH -> showStashes.get();
             case SPAWNER -> showSpawners.get();
             case PORTAL -> showPortals.get();
-            case PLAYER_ENTER, PLAYER_LEAVE, DANGER -> showPlayers.get();
+            case PLAYER_ENTER, PLAYER_LEAVE -> showPlayers.get();
+            case ITEM -> showItems.get();
+            case DANGER -> showCombat.get();
             case OLD_CHUNK -> showOldChunks.get();
         };
     }
@@ -336,9 +418,46 @@ public class FindsTickerHud extends HudElement {
             case STASH -> stashColor.get();
             case SPAWNER -> spawnerColor.get();
             case PORTAL -> portalColor.get();
-            case PLAYER_ENTER, PLAYER_LEAVE, DANGER -> playerColor.get();
+            case PLAYER_ENTER, PLAYER_LEAVE -> playerColor.get();
+            case ITEM -> itemColor.get();
+            case DANGER -> combatColor.get();
             case OLD_CHUNK -> oldChunkColor.get();
         };
+    }
+
+    private double ageFade(long age) {
+        long maxAgeMs = maxAgeMinutes.get() * 60_000L;
+        long lastFifthStart = (long) (maxAgeMs * 0.8);
+        double plateauFloor = 0.55;
+
+        if (age <= 30_000L) return 1.0;
+
+        if (lastFifthStart <= 30_000L) {
+            double t = MathHelper.clamp((age - 30_000L) / (double) Math.max(1L, maxAgeMs - 30_000L), 0.0, 1.0);
+            return plateauFloor * (1.0 - t);
+        }
+
+        if (age < lastFifthStart) {
+            double t = (age - 30_000L) / (double) (lastFifthStart - 30_000L);
+            return 1.0 + (plateauFloor - 1.0) * t;
+        }
+
+        double t = MathHelper.clamp((age - lastFifthStart) / (double) Math.max(1L, maxAgeMs - lastFifthStart), 0.0, 1.0);
+        return plateauFloor * (1.0 - t);
+    }
+
+    private static double rankFactor(int index, int count) {
+        if (count <= 1) return 1.0;
+        return 1.0 - 0.4 * index / (double) (count - 1);
+    }
+
+    private static double easeOutCubic(double t) {
+        double u = 1.0 - t;
+        return 1.0 - u * u * u;
+    }
+
+    private static String entryKey(HuntFeed.Entry entry) {
+        return entry.type() + "|" + entry.at();
     }
 
     private static String formatAge(long ms) {
@@ -379,7 +498,10 @@ public class FindsTickerHud extends HudElement {
             : MeteorClient.mc.world.getRegistryKey().getValue().toString();
 
         out.add(new HuntFeed.Entry(HuntFeed.Type.STASH, now - 2_000L, "Stash · 26 chests", demoPos(240, -240), here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.ITEM, now - 45_000L, "Netherite Ingot ×2", demoPos(60, 30), here));
         out.add(new HuntFeed.Entry(HuntFeed.Type.SPAWNER, now - 120_000L, "Skeleton spawner", demoPos(1200, 60), here));
+        out.add(new HuntFeed.Entry(HuntFeed.Type.DANGER, now - 200_000L, "crystal placed · Fit2Win",
+            demoPos(-30, 12), here));
         out.add(new HuntFeed.Entry(HuntFeed.Type.PORTAL, now - 240_000L, "Portal lit", demoPos(-62, 62), here));
         out.add(new HuntFeed.Entry(HuntFeed.Type.PLAYER_ENTER, now - 360_000L, "Fit2Win", demoPos(0, -210), here));
         out.add(new HuntFeed.Entry(HuntFeed.Type.PLAYER_LEAVE, now - 480_000L, "ObamaCare", null, here));

@@ -366,11 +366,14 @@ public class VisualRangeNotifier extends Module {
 
                 if (!trackedPlayers.contains(uuid)
                     && (!ignoreFriends.get() || !Friends.get().isFriend(player))) {
-                    // The feed line is not gated on the chat/webhook toggles: the HUDs reading it
-                    // want the sighting itself, however the notifier is configured to announce it.
+                    String feedLabel = player.getGameProfile().name();
+                    if (playerEquipment.get()) {
+                        String equipShort = getEquipmentShort(player);
+                        if (!equipShort.isEmpty()) feedLabel = feedLabel + " · " + equipShort;
+                    }
                     com.hunterbuddy.util.HuntFeed.get().publish(
                         com.hunterbuddy.util.HuntFeed.Type.PLAYER_ENTER,
-                        player.getGameProfile().name(), player.getBlockPos());
+                        feedLabel, player.getBlockPos());
                 }
 
                 if (playerEnter.get() && !trackedPlayers.contains(uuid) &&
@@ -464,6 +467,10 @@ public class VisualRangeNotifier extends Module {
                 int y = (int) itemEntity.getY();
                 int z = (int) itemEntity.getZ();
 
+                String feedLabel = count > 1 ? itemName + " ×" + count : itemName;
+                com.hunterbuddy.util.HuntFeed.get().publish(
+                    com.hunterbuddy.util.HuntFeed.Type.ITEM, feedLabel, itemEntity.getBlockPos());
+
                 if (chatNotify.get()) {
                     String countStr = count > 1 ? " x" + count : "";
                     MsgUtil.sendMsg("§d" + itemName + countStr + " §7found on ground at §f" + x + " " + y + " " + z);
@@ -491,6 +498,8 @@ public class VisualRangeNotifier extends Module {
         int x = (int) pos.x;
         int y = (int) pos.y;
         int z = (int) pos.z;
+
+        publishDanger("crystal placed", name, new BlockPos(x, y, z));
 
         if (chatNotify.get()) {
             MsgUtil.sendMsg("§d" + name + " §7placed an §dEnd Crystal §7at §f" + x + " " + y + " " + z);
@@ -521,6 +530,8 @@ public class VisualRangeNotifier extends Module {
             int y = (int) pos.y;
             int z = (int) pos.z;
 
+            publishDanger("crystal popped", name, new BlockPos(x, y, z));
+
             if (chatNotify.get()) {
                 MsgUtil.sendMsg("§c" + name + " §7popped an §cEnd Crystal §7at §f" + x + " " + y + " " + z);
             }
@@ -546,6 +557,8 @@ public class VisualRangeNotifier extends Module {
                 PlayerEntity nearest = findNearestPlayer(center);
                 String name = nearest != null ? nearest.getGameProfile().name() : "Unknown";
 
+                publishDanger("anchor placed", name, pos);
+
                 if (chatNotify.get()) {
                     MsgUtil.sendMsg("§d" + name + " §7placed a §dRespawn Anchor §7at §f" +
                         pos.getX() + " " + pos.getY() + " " + pos.getZ());
@@ -564,6 +577,8 @@ public class VisualRangeNotifier extends Module {
             PlayerEntity nearest = findNearestPlayer(center);
             String name = nearest != null ? nearest.getGameProfile().name() : "Unknown";
 
+            publishDanger("anchor popped", name, pos);
+
             if (chatNotify.get()) {
                 MsgUtil.sendMsg("§c" + name + " §7popped a §cRespawn Anchor §7at §f" +
                     pos.getX() + " " + pos.getY() + " " + pos.getZ());
@@ -577,6 +592,11 @@ public class VisualRangeNotifier extends Module {
                         pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\nDimension: " + getDimension());
             }
         }
+    }
+
+    private void publishDanger(String what, String name, BlockPos pos) {
+        String label = "Unknown".equals(name) ? what : what + " · " + name;
+        com.hunterbuddy.util.HuntFeed.get().publish(com.hunterbuddy.util.HuntFeed.Type.DANGER, label, pos);
     }
 
     private void tickAnchorTracking() {
@@ -630,6 +650,35 @@ public class VisualRangeNotifier extends Module {
         if (!offHand.isEmpty()) parts.add(offHand.getName().getString() + " (off)");
 
         return String.join(", ", parts);
+    }
+
+    private String getEquipmentShort(PlayerEntity player) {
+        ItemStack head = player.getEquippedStack(EquipmentSlot.HEAD);
+        ItemStack chest = player.getEquippedStack(EquipmentSlot.CHEST);
+        ItemStack legs = player.getEquippedStack(EquipmentSlot.LEGS);
+        ItemStack feet = player.getEquippedStack(EquipmentSlot.FEET);
+        ItemStack mainHand = player.getMainHandStack();
+        ItemStack offHand = player.getOffHandStack();
+
+        boolean netherite = false;
+        boolean totem = false;
+
+        for (ItemStack stack : new ItemStack[]{head, chest, legs, feet, mainHand, offHand}) {
+            if (stack.isEmpty()) continue;
+            if (isNetheriteGear(stack.getItem())) netherite = true;
+            if (stack.getItem() == Items.TOTEM_OF_UNDYING) totem = true;
+        }
+
+        List<String> tags = new ArrayList<>();
+        if (netherite) tags.add("netherite");
+        if (chest.getItem() == Items.ELYTRA) tags.add("elytra");
+        if (totem) tags.add("totem");
+
+        return String.join(", ", tags);
+    }
+
+    private static boolean isNetheriteGear(Item item) {
+        return net.minecraft.registry.Registries.ITEM.getId(item).getPath().startsWith("netherite_");
     }
 
     private void playNotifSound() {

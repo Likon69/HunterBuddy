@@ -31,6 +31,7 @@ public final class HuntFeed {
         PLAYER_ENTER,
         PLAYER_LEAVE,
         OLD_CHUNK,
+        ITEM,
         DANGER
     }
 
