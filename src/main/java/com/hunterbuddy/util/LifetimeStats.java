@@ -178,6 +178,8 @@ public final class LifetimeStats {
         try (FileReader reader = new FileReader(file, StandardCharsets.UTF_8)) {
             Data read = GSON.fromJson(reader, Data.class);
             if (read != null) data = read;
+            data.regears = 0;
+            data.regearSeconds = 0L;
         } catch (Exception e) {
             // A totals file that cannot be read is left alone on disk and simply not added to;
             // overwriting it with zeros would be the one way to actually lose the record.
