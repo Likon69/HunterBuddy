@@ -88,6 +88,9 @@ import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.block.entity.MobSpawnerBlockEntity;
 import net.minecraft.block.entity.TrialSpawnerBlockEntity;
 import net.minecraft.block.enums.TrialSpawnerState;
+import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.util.Identifier;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
 import net.minecraft.component.DataComponentTypes;
@@ -262,6 +265,14 @@ public class SpawnerDetector extends Module {
         .name("label-scale").description("Size of the label.")
         .defaultValue(1.0).min(0.3).sliderRange(0.3, 3.0).build());
 
+    private final Setting<Boolean> dynamicScale = sgRender.add(new BoolSetting.Builder()
+        .name("dynamic-scale").description("Grow the label progressively with distance, from label-scale up close to dynamic-max-scale at the render distance.")
+        .defaultValue(true).build());
+
+    private final Setting<Double> dynamicMaxScale = sgRender.add(new DoubleSetting.Builder()
+        .name("dynamic-max-scale").description("Label size reached at the render distance when dynamic-scale is on.")
+        .defaultValue(2.0).min(0.3).sliderRange(0.3, 3.0).visible(dynamicScale::get).build());
+
     private final Setting<ShapeMode> shapeMode = sgRender.add(new EnumSetting.Builder<ShapeMode>()
         .name("shape-mode").description("How the boxes are drawn.")
         .defaultValue(ShapeMode.Both).build());
@@ -275,6 +286,13 @@ public class SpawnerDetector extends Module {
         .name("show-empty")
         .description("Draw sites that are not traced and have no containers.")
         .defaultValue(false).build());
+
+    public enum LootedStyle { DIM, CROSS, HIDE }
+
+    private final Setting<LootedStyle> lootedStyle = sgRender.add(new EnumSetting.Builder<LootedStyle>()
+        .name("looted-style")
+        .description("How a room already farmed with success is drawn.")
+        .defaultValue(LootedStyle.DIM).build());
 
     private final Setting<SettingColor> lootedColor = sgColors.add(new ColorSetting.Builder()
         .name("dungeon-color").description("Traced, not strong, with containers.")
@@ -304,6 +322,10 @@ public class SpawnerDetector extends Module {
     private final Setting<SettingColor> emptyCatColor = sgColors.add(new ColorSetting.Builder()
         .name("empty-color").description("Not traced, no containers.")
         .defaultValue(new SettingColor(90, 90, 90, 120)).build());
+
+    private final Setting<SettingColor> farmedColor = sgColors.add(new ColorSetting.Builder()
+        .name("looted-color").description("Box color for a room already farmed with success (dim/cross looted-style).")
+        .defaultValue(new SettingColor(150, 150, 150, 90)).build());
 
     private final Setting<Boolean> autoFarm = sgAuto.add(new BoolSetting.Builder()
         .name("auto-farm")
@@ -1697,6 +1719,192 @@ public class SpawnerDetector extends Module {
         return Collections.unmodifiableCollection(sites.values());
     }
 
+    private static final double LABEL_SCALE_FLOOR = 0.8;
+    private static final int LABEL_MARGIN = 3;
+    private static final int LABEL_STRIPE_WIDTH = 2;
+    private static final int LABEL_BG_ALPHA = 190;
+    private static final float LABEL_LINE2_SCALE = 0.82f;
+    private static final Color AMBER = new Color(255, 176, 40);
+    private static final Color LOOTED_GREEN = new Color(90, 220, 120);
+
+    private double effectiveLabelScale(double distance) {
+        double base = Math.max(labelScale.get(), LABEL_SCALE_FLOOR);
+        if (!dynamicScale.get()) return base;
+        double t = MathHelper.clamp(distance / Math.max(1.0, renderDistance.get()), 0.0, 1.0);
+        double top = Math.max(base, dynamicMaxScale.get());
+        return base + (top - base) * t;
+    }
+
+    private static String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    private static String pluralWord(int n, String noun) {
+        return n + " " + noun + (n == 1 ? "" : "s");
+    }
+
+    private String signalWords(Site site) {
+        List<String> words = new ArrayList<>();
+        if (site.light) words.add("light");
+        if (site.ender) words.add("ender chest");
+        if (site.playerBlocks) words.add("player blocks");
+        if (site.broken) words.add("broken spawner");
+        if (site.mobs) words.add("mobs");
+        if (site.tunnel) words.add("tunnel");
+        if (site.air) words.add("air");
+        return String.join(", ", words);
+    }
+
+    private static boolean isFailureOutcome(String outcome) {
+        return outcome != null && (outcome.startsWith("failed:") || outcome.startsWith("aborted:"));
+    }
+
+    private Map<Long, String> latestOutcomes() {
+        Map<Long, String> outcomes = new HashMap<>();
+        Map<Long, Long> times = new HashMap<>();
+        for (VisitedEntry e : visitedEntries) {
+            long key = BlockPos.asLong(e.x(), e.y(), e.z());
+            Long prevTime = times.get(key);
+            if (prevTime == null || e.time() >= prevTime) {
+                times.put(key, e.time());
+                outcomes.put(key, e.outcome());
+            }
+        }
+        return outcomes;
+    }
+
+    private static String shortFailReason(String outcome) {
+        if (outcome == null) return "";
+        String reason = outcome;
+        int colon = reason.indexOf(':');
+        if (colon >= 0) reason = reason.substring(colon + 1);
+        if (reason.length() > 24) reason = reason.substring(0, 24) + "...";
+        return reason;
+    }
+
+    private void drawTopCross(Render3DEvent event, BlockPos pos, Color color) {
+        double minX = pos.getX(), minY = pos.getY() + 1.0, minZ = pos.getZ();
+        double maxX = pos.getX() + 1.0, maxZ = pos.getZ() + 1.0;
+        event.renderer.line(minX, minY, minZ, maxX, minY, maxZ, color);
+        event.renderer.line(maxX, minY, minZ, minX, minY, maxZ, color);
+    }
+
+    private void drawTwoLineLabel(DrawContext ctx, String line1, String line2, Color stripe, float factor) {
+        var tr = mc.textRenderer;
+        int w1 = tr.getWidth(line1);
+        int w2raw = line2 != null ? tr.getWidth(line2) : 0;
+        int w2 = line2 != null ? (int) Math.ceil(w2raw * LABEL_LINE2_SCALE) : 0;
+        int textWidth = Math.max(w1, w2);
+        int fh = tr.fontHeight;
+        int line2h = line2 != null ? (int) Math.ceil(fh * LABEL_LINE2_SCALE) : 0;
+
+        int innerW = textWidth + LABEL_MARGIN * 2 + LABEL_STRIPE_WIDTH;
+        int innerH = LABEL_MARGIN * 2 + fh + (line2 != null ? line2h + 1 : 0);
+
+        int left = -innerW / 2;
+        int top = -2;
+        int right = left + innerW;
+        int bottom = top + innerH;
+
+        ctx.fill(left, top, right, bottom, new Color(0, 0, 0, (int) (LABEL_BG_ALPHA * factor)).getPacked());
+        ctx.fill(left, top, left + LABEL_STRIPE_WIDTH, bottom,
+            new Color(stripe.r, stripe.g, stripe.b, (int) (255 * factor)).getPacked());
+
+        int textX = left + LABEL_STRIPE_WIDTH + LABEL_MARGIN;
+        int textY = top + LABEL_MARGIN - 1;
+        ctx.drawText(tr, line1, textX, textY, new Color(255, 255, 255, (int) (255 * factor)).getPacked(), true);
+
+        if (line2 != null) {
+            ctx.getMatrices().pushMatrix();
+            ctx.getMatrices().translate(textX, textY + fh + 1);
+            ctx.getMatrices().scale(LABEL_LINE2_SCALE, LABEL_LINE2_SCALE);
+            ctx.drawText(tr, line2, 0, 0, new Color(200, 200, 200, (int) (235 * factor)).getPacked(), true);
+            ctx.getMatrices().popMatrix();
+        }
+    }
+
+    private static final Identifier HEAD_ZOMBIE = Identifier.of("minecraft", "textures/entity/zombie/zombie.png");
+    private static final Identifier HEAD_SKELETON = Identifier.of("minecraft", "textures/entity/skeleton/skeleton.png");
+    private static final Identifier HEAD_SPIDER = Identifier.of("minecraft", "textures/entity/spider/spider.png");
+    private static final Identifier HEAD_CAVE_SPIDER = Identifier.of("minecraft", "textures/entity/spider/cave_spider.png");
+
+    private record MobHeadIcon(Identifier texture, int u, int v, int texWidth, int texHeight, boolean hat) {}
+
+    private static MobHeadIcon headIconFor(String mob) {
+        if (mob == null) return null;
+        return switch (mob) {
+            case "zombie" -> new MobHeadIcon(HEAD_ZOMBIE, 8, 8, 64, 64, true);
+            case "skeleton" -> new MobHeadIcon(HEAD_SKELETON, 8, 8, 64, 32, false);
+            case "spider" -> new MobHeadIcon(HEAD_SPIDER, 40, 12, 64, 32, false);
+            case "cave_spider" -> new MobHeadIcon(HEAD_CAVE_SPIDER, 40, 12, 64, 32, false);
+            default -> null;
+        };
+    }
+
+    private void drawTwoLineLabel(DrawContext ctx, MobHeadIcon icon, String line1Suffix, String line2, Color stripe, float factor) {
+        var tr = mc.textRenderer;
+        int fh = tr.fontHeight;
+        int iconSize = fh;
+        int iconGap = 2;
+        int suffixWidth = tr.getWidth(line1Suffix);
+        int w1 = iconSize + iconGap + suffixWidth;
+        int w2raw = line2 != null ? tr.getWidth(line2) : 0;
+        int w2 = line2 != null ? (int) Math.ceil(w2raw * LABEL_LINE2_SCALE) : 0;
+        int textWidth = Math.max(w1, w2);
+        int line2h = line2 != null ? (int) Math.ceil(fh * LABEL_LINE2_SCALE) : 0;
+
+        int innerW = textWidth + LABEL_MARGIN * 2 + LABEL_STRIPE_WIDTH;
+        int innerH = LABEL_MARGIN * 2 + fh + (line2 != null ? line2h + 1 : 0);
+
+        int left = -innerW / 2;
+        int top = -2;
+        int right = left + innerW;
+        int bottom = top + innerH;
+
+        int alpha = (int) (255 * factor);
+
+        ctx.fill(left, top, right, bottom, new Color(0, 0, 0, (int) (LABEL_BG_ALPHA * factor)).getPacked());
+        ctx.fill(left, top, left + LABEL_STRIPE_WIDTH, bottom,
+            new Color(stripe.r, stripe.g, stripe.b, (int) (255 * factor)).getPacked());
+
+        int iconX = left + LABEL_STRIPE_WIDTH + LABEL_MARGIN;
+        int iconY = top + LABEL_MARGIN - 1;
+        int tint = new Color(255, 255, 255, alpha).getPacked();
+
+        ctx.drawTexture(RenderPipelines.GUI_TEXTURED, icon.texture(), iconX, iconY, icon.u(), icon.v(),
+            iconSize, iconSize, 8, 8, icon.texWidth(), icon.texHeight(), tint);
+        if (icon.hat()) {
+            ctx.drawTexture(RenderPipelines.GUI_TEXTURED, icon.texture(), iconX, iconY, 40, 8,
+                iconSize, iconSize, 8, 8, icon.texWidth(), icon.texHeight(), tint);
+        }
+
+        int textX = iconX + iconSize + iconGap;
+        int textY = iconY;
+        ctx.drawText(tr, line1Suffix, textX, textY, new Color(255, 255, 255, alpha).getPacked(), true);
+
+        if (line2 != null) {
+            ctx.getMatrices().pushMatrix();
+            ctx.getMatrices().translate(iconX, textY + fh + 1);
+            ctx.getMatrices().scale(LABEL_LINE2_SCALE, LABEL_LINE2_SCALE);
+            ctx.drawText(tr, line2, 0, 0, new Color(200, 200, 200, (int) (235 * factor)).getPacked(), true);
+            ctx.getMatrices().popMatrix();
+        }
+    }
+
+    private void drawSimpleLabel(DrawContext ctx, String text, Color textColor, float factor) {
+        var tr = mc.textRenderer;
+        int width = tr.getWidth(text);
+        int left = -width / 2 - LABEL_MARGIN;
+        int right = width / 2 + LABEL_MARGIN;
+        int top = -2;
+        int bottom = top + tr.fontHeight + LABEL_MARGIN * 2 - 1;
+
+        ctx.fill(left, top, right, bottom, new Color(0, 0, 0, (int) (LABEL_BG_ALPHA * factor)).getPacked());
+        ctx.drawText(tr, text, -width / 2, top + LABEL_MARGIN - 1,
+            new Color(textColor.r, textColor.g, textColor.b, (int) (255 * factor)).getPacked(), true);
+    }
+
     @EventHandler
     private void onRender(Render3DEvent event) {
         if (mc.player == null || mc.world == null) return;
@@ -1732,12 +1940,20 @@ public class SpawnerDetector extends Module {
                 side, line, shapeMode.get(), 0);
         }
 
+        Map<Long, String> outcomes = latestOutcomes();
+
         for (Site site : sites.values()) {
             if (site.category == Category.INTACT && !showIntact.get()) continue;
             if (site.category == Category.EMPTY && !showEmpty.get()) continue;
             if (ignoreBelowZero.get() && site.center.getY() < 0) continue;
 
             BlockPos pos = site.center;
+            String outcome = outcomes.get(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
+            boolean failed = isFailureOutcome(outcome);
+            boolean looted = outcome != null && !failed;
+
+            if (looted && lootedStyle.get() == LootedStyle.HIDE) continue;
+
             double distanceSq = eye.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
 
             site.animation.setVisible(distanceSq <= maxDistanceSq);
@@ -1750,7 +1966,7 @@ public class SpawnerDetector extends Module {
                 factor *= (float) (1.0 - Math.min(0.75, distance / maxDistance * 0.75));
             }
 
-            SettingColor base = colorOf(site.category);
+            SettingColor base = looted ? farmedColor.get() : colorOf(site.category);
             Color line = new Color(base.r, base.g, base.b, (int) (base.a * factor));
             Color side = new Color(base.r, base.g, base.b, (int) (base.a * factor * 0.25));
 
@@ -1758,6 +1974,12 @@ public class SpawnerDetector extends Module {
                 pos.getX(), pos.getY(), pos.getZ(),
                 pos.getX() + 1.0, pos.getY() + 1.0, pos.getZ() + 1.0,
                 side, line, shapeMode.get(), 0);
+
+            if (failed) {
+                drawTopCross(event, pos, new Color(AMBER.r, AMBER.g, AMBER.b, (int) (255 * factor)));
+            } else if (looted && lootedStyle.get() == LootedStyle.CROSS) {
+                drawTopCross(event, pos, line);
+            }
         }
     }
 
@@ -1780,19 +2002,24 @@ public class SpawnerDetector extends Module {
             if (factor <= 0.0f) continue;
 
             org.joml.Vector3d screen = new org.joml.Vector3d(pos.getX() + 0.5, pos.getY() + 1.4, pos.getZ() + 0.5);
-            if (!NametagUtils.to2D(screen, labelScale.get())) continue;
+            if (!NametagUtils.to2D(screen, effectiveLabelScale(Math.sqrt(eye.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5))))) continue;
 
-            String text = detection.mob + "  " + detection.chests + "x";
-            int width = mc.textRenderer.getWidth(text);
+            String line2 = detection.category.label;
             SettingColor base = colorOf(detection.category);
 
             NametagUtils.begin(screen, event.drawContext);
-            event.drawContext.fill(-width / 2 - 2, -2, width / 2 + 2, 10,
-                new Color(0, 0, 0, (int) (140 * factor)).getPacked());
-            event.drawContext.drawText(mc.textRenderer, text, -width / 2, 0,
-                new Color(base.r, base.g, base.b, (int) (255 * factor)).getPacked(), true);
+            MobHeadIcon icon = headIconFor(detection.mob);
+            if (icon != null) {
+                drawTwoLineLabel(event.drawContext, icon, " · " + pluralWord(detection.chests, "chest"), line2,
+                    new Color(base.r, base.g, base.b), factor);
+            } else {
+                String line1 = capitalize(detection.mob) + " · " + pluralWord(detection.chests, "chest");
+                drawTwoLineLabel(event.drawContext, line1, line2, new Color(base.r, base.g, base.b), factor);
+            }
             NametagUtils.end(event.drawContext);
         }
+
+        Map<Long, String> outcomes = latestOutcomes();
 
         for (Site site : sites.values()) {
             if (site.category == Category.INTACT && !showIntact.get()) continue;
@@ -1800,24 +2027,46 @@ public class SpawnerDetector extends Module {
             if (ignoreBelowZero.get() && site.center.getY() < 0) continue;
 
             BlockPos pos = site.center;
+            String outcome = outcomes.get(BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ()));
+            boolean failed = isFailureOutcome(outcome);
+            boolean looted = outcome != null && !failed;
+
+            if (looted && lootedStyle.get() == LootedStyle.HIDE) continue;
+            if (looted && lootedStyle.get() == LootedStyle.CROSS) continue;
+
             if (eye.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > maxDistanceSq) continue;
 
             float factor = site.animation.factor();
             if (factor <= 0.0f) continue;
 
             org.joml.Vector3d screen = new org.joml.Vector3d(pos.getX() + 0.5, pos.getY() + 1.4, pos.getZ() + 0.5);
-            if (!NametagUtils.to2D(screen, labelScale.get())) continue;
-
-            String text = (site.hasSpawner ? site.mob : "no spawner") + " " + site.containers + "x s" + site.score
-                + " " + signalLetters(site);
-            int width = mc.textRenderer.getWidth(text);
-            SettingColor base = colorOf(site.category);
+            if (!NametagUtils.to2D(screen, effectiveLabelScale(Math.sqrt(eye.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5))))) continue;
 
             NametagUtils.begin(screen, event.drawContext);
-            event.drawContext.fill(-width / 2 - 2, -2, width / 2 + 2, 10,
-                new Color(0, 0, 0, (int) (140 * factor)).getPacked());
-            event.drawContext.drawText(mc.textRenderer, text, -width / 2, 0,
-                new Color(base.r, base.g, base.b, (int) (255 * factor)).getPacked(), true);
+
+            if (failed) {
+                String text = "✗ failed · " + shortFailReason(outcome);
+                drawSimpleLabel(event.drawContext, text, AMBER, factor);
+            } else if (looted) {
+                drawSimpleLabel(event.drawContext, "✓ looted", LOOTED_GREEN, factor);
+            } else {
+                StringBuilder line2b = new StringBuilder();
+                line2b.append(site.category.label).append(" · score ").append(site.score);
+                String signals = signalWords(site);
+                if (!signals.isEmpty()) line2b.append(" · ").append(signals);
+
+                SettingColor base = colorOf(site.category);
+                MobHeadIcon icon = site.hasSpawner ? headIconFor(site.mob) : null;
+                if (icon != null) {
+                    drawTwoLineLabel(event.drawContext, icon, " · " + pluralWord(site.containers, "chest"),
+                        line2b.toString(), new Color(base.r, base.g, base.b), factor);
+                } else {
+                    String line1 = (site.hasSpawner ? capitalize(site.mob) : "no spawner")
+                        + " · " + pluralWord(site.containers, "chest");
+                    drawTwoLineLabel(event.drawContext, line1, line2b.toString(), new Color(base.r, base.g, base.b), factor);
+                }
+            }
+
             NametagUtils.end(event.drawContext);
         }
     }
