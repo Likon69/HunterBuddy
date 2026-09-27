@@ -124,6 +124,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.client.world.ClientChunkManager;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.world.Heightmap;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.Palette;
 import net.minecraft.world.chunk.WorldChunk;
@@ -405,6 +406,8 @@ public class SpawnerDetector extends Module {
 
     private record VisitedEntry(int x, int y, int z, String outcome, long time) {}
 
+    private static final int SKY_CHECK_HEIGHT = 200;
+
     private static final Set<Item> AUTO_THROWAWAY = Set.of(
         Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.DIRT, Items.NETHERRACK);
 
@@ -419,6 +422,7 @@ public class SpawnerDetector extends Module {
     private Site autoSite;
     private ColumnPlan autoColumn;
     private ExitShaft autoExitShaft;
+    private Site autoStackedPartner;
     private boolean autoRunAbandoned;
 
     private int statRoomsFarmed;
@@ -475,7 +479,12 @@ public class SpawnerDetector extends Module {
     private int autoWalkDirectDryTicks;
     private int autoWalkDirectStuckTicks;
     private boolean autoWalkKeyLogged;
+    private boolean autoFinalBlockedLogged;
+    private boolean autoFinalDiving;
+    private int autoFinalLastRocketTick;
     private int autoClimbLastRocketTick;
+    private long autoOwnRocketFiredAtMs;
+    private boolean autoOwnRocketSeenAlive;
     private double autoClimbLastHeight;
     private int autoClimbStuckAttempts;
     private boolean autoClimbStuck;
@@ -622,6 +631,7 @@ public class SpawnerDetector extends Module {
         autoSite = null;
         autoColumn = null;
         autoExitShaft = null;
+        autoStackedPartner = null;
         autoRunAbandoned = false;
         autoResumeClimbTries = 0;
         autoClimbStuckWaterReturns = 0;
@@ -2036,7 +2046,7 @@ public class SpawnerDetector extends Module {
         }
 
         boolean skyBlocked = false;
-        for (int dy = 1; dy <= 12; dy++) {
+        for (int dy = 1; dy <= SKY_CHECK_HEIGHT; dy++) {
             cursor.set(x, exitY + dy, z);
             if (!isOpenState(mc.world.getBlockState(cursor), cursor)) {
                 skyBlocked = true;
@@ -2268,7 +2278,7 @@ public class SpawnerDetector extends Module {
                     boolean water = mc.world.getBlockState(cursor.set(x, topY, z)).getFluidState().isIn(FluidTags.WATER);
 
                     boolean skyBlocked = false;
-                    for (int dy = 1; dy <= 12; dy++) {
+                    for (int dy = 1; dy <= SKY_CHECK_HEIGHT; dy++) {
                         cursor.set(x, exitY + dy, z);
                         if (!isOpenState(mc.world.getBlockState(cursor), cursor)) { skyBlocked = true; break; }
                     }
@@ -2322,6 +2332,100 @@ public class SpawnerDetector extends Module {
         }
 
         return best;
+    }
+
+    private static boolean footprintOverlaps(Room a, Room b) {
+        boolean xOverlap = a.cx() - a.k() <= b.cx() + b.k() && b.cx() - b.k() <= a.cx() + a.k();
+        boolean zOverlap = a.cz() - a.p() <= b.cz() + b.p() && b.cz() - b.p() <= a.cz() + a.p();
+        return xOverlap && zOverlap;
+    }
+
+    private static boolean verticallyStacked(Room a, Room b) {
+        return a.maxY() < b.minY() || b.maxY() < a.minY();
+    }
+
+    private boolean qualifiesAsStackedPartner(Site site) {
+        if (!qualifiesForAuto(site)) return false;
+        if (isVisited(site.center)) return false;
+        if (site.modern) return false;
+        if (site.room.cy() < 0) return false;
+        if (!mc.world.getChunkManager().isChunkLoaded(site.center.getX() >> 4, site.center.getZ() >> 4)) return false;
+        if (isRoomFlooded(site.room)) return false;
+        return true;
+    }
+
+    private Site findStackedPartner(Site chosen) {
+        Site best = null;
+        double bestDistSq = Double.MAX_VALUE;
+
+        for (Site site : sites.values()) {
+            if (site.center.equals(chosen.center)) continue;
+            if (!qualifiesAsStackedPartner(site)) continue;
+            if (!footprintOverlaps(chosen.room, site.room)) continue;
+            if (!verticallyStacked(chosen.room, site.room)) continue;
+
+            double dx = site.center.getX() - chosen.center.getX();
+            double dz = site.center.getZ() - chosen.center.getZ();
+            double distSq = dx * dx + dz * dz;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = site;
+            }
+        }
+
+        return best;
+    }
+
+    private boolean columnClearInRoom(Room room, int x, int z) {
+        if (!insideInterior(room, x, z)) return false;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int y = room.cy(); y <= room.cy() + 3; y++) {
+            cursor.set(x, y, z);
+            BlockState state = mc.world.getBlockState(cursor);
+            if (state.getBlock() == Blocks.SPAWNER) return false;
+            if (isContainerPresent(cursor)) return false;
+            if (!isOpenState(state, cursor)) return false;
+        }
+        return true;
+    }
+
+    private ColumnPlan planSharedColumn(Site upper, Site lower) {
+        Room ur = upper.room, lr = lower.room;
+        int minX = Math.max(ur.cx() - ur.k(), lr.cx() - lr.k());
+        int maxX = Math.min(ur.cx() + ur.k(), lr.cx() + lr.k());
+        int minZ = Math.max(ur.cz() - ur.p(), lr.cz() - lr.p());
+        int maxZ = Math.min(ur.cz() + ur.p(), lr.cz() + lr.p());
+        if (minX > maxX || minZ > maxZ) return null;
+
+        List<int[]> candidates = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                candidates.add(new int[]{x, z});
+            }
+        }
+        candidates.sort(Comparator.comparingInt(c ->
+            (c[0] - ur.cx()) * (c[0] - ur.cx()) + (c[1] - ur.cz()) * (c[1] - ur.cz())));
+
+        for (int[] c : candidates) {
+            int x = c[0], z = c[1];
+            if (!columnClearInRoom(ur, x, z) || !columnClearInRoom(lr, x, z)) continue;
+
+            ColumnPlan upperPlan = evaluateColumn(ur, x, z);
+            if (upperPlan == null) continue;
+
+            ColumnPlan lowerPlan = evaluateColumn(lr, x, z);
+            if (lowerPlan == null || !sharedColumnPassesGates(lowerPlan)) continue;
+
+            return upperPlan;
+        }
+
+        return null;
+    }
+
+    private boolean sharedColumnPassesGates(ColumnPlan shared) {
+        if (shared.water() && countObsidian() < 1) return false;
+        if (shared.waterCells() >= 3 && mc.player.getAttributeValue(EntityAttributes.OXYGEN_BONUS) < 1.0) return false;
+        return true;
     }
 
     private boolean otherPlayerPresent() {
@@ -2486,7 +2590,24 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        if (best != null) startAutoRun(best, bestPlan);
+        if (best == null) return;
+
+        Site partner = findStackedPartner(best);
+        if (partner != null) {
+            Site upper = partner.room.cy() > best.room.cy() ? partner : best;
+            Site lower = upper == best ? partner : best;
+            ColumnPlan shared = planSharedColumn(upper, lower);
+            if (shared != null && sharedColumnPassesGates(shared)) {
+                autoStackedPartner = lower;
+                autoLog("PLAN", upper.center, String.format(
+                    "vertical partner paired with lower=%d,%d,%d column=%d,%d",
+                    lower.center.getX(), lower.center.getY(), lower.center.getZ(), shared.x(), shared.z()));
+                startAutoRun(upper, shared);
+                return;
+            }
+        }
+
+        startAutoRun(best, bestPlan);
     }
 
     private void startAutoRun(Site site, ColumnPlan plan) {
@@ -2644,6 +2765,18 @@ public class SpawnerDetector extends Module {
             String.format("%.1f", mc.player.getHealth() + mc.player.getAbsorptionAmount()));
     }
 
+    private void logFlightTelemetry(String tag, double H, double D, double speedH, double vy, double px, double py, double pz) {
+        if (!log.get() || stateTicks % 10 != 0) return;
+        HunterBuddyAddon.LOG.info(
+            "[SpawnerDetector/auto] {} site={},{},{} H={} D={} yaw={} pitch={} vy={} speedH={} gliding={} onGround={} health={} pos={},{},{}",
+            tag, autoSite.center.getX(), autoSite.center.getY(), autoSite.center.getZ(),
+            String.format("%.1f", H), String.format("%.1f", D), String.format("%.1f", mc.player.getYaw()),
+            String.format("%.1f", mc.player.getPitch()), String.format("%.2f", vy), String.format("%.2f", speedH),
+            mc.player.isGliding(), mc.player.isOnGround(),
+            String.format("%.1f", mc.player.getHealth() + mc.player.getAbsorptionAmount()),
+            String.format("%.1f", px), String.format("%.1f", py), String.format("%.1f", pz));
+    }
+
     private void logNavTelemetry(String tag, BlockPos goal, int retries) {
         if (!log.get() || stateTicks % 40 != 0) return;
         BlockPos pos = mc.player.getBlockPos();
@@ -2659,6 +2792,26 @@ public class SpawnerDetector extends Module {
     private String playerPosLabel() {
         BlockPos p = mc.player.getBlockPos();
         return p.getX() + "," + p.getY() + "," + p.getZ();
+    }
+
+    private boolean rayBlocked(Vec3d from, Vec3d to) {
+        HitResult hit = mc.world.raycast(new RaycastContext(
+            from, to, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+        return hit != null && hit.getType() == HitResult.Type.BLOCK;
+    }
+
+    private boolean pathToPointBlocked(double px, double py, double pz, double tx, double ty, double tz) {
+        double dx = tx - px, dz = tz - pz;
+        double horiz = Math.hypot(dx, dz);
+        if (horiz < 1.0e-3) return rayBlocked(new Vec3d(px, py, pz), new Vec3d(tx, ty, tz));
+
+        double offX = -dz / horiz * 0.3;
+        double offZ = dx / horiz * 0.3;
+
+        if (rayBlocked(new Vec3d(px, py, pz), new Vec3d(tx, ty, tz))) return true;
+        if (rayBlocked(new Vec3d(px + offX, py, pz + offZ), new Vec3d(tx + offX, ty, tz + offZ))) return true;
+        if (rayBlocked(new Vec3d(px - offX, py, pz - offZ), new Vec3d(tx - offX, ty, tz - offZ))) return true;
+        return false;
     }
 
     private boolean terrainCloseAhead(double px, double py, double pz, float yaw) {
@@ -2779,6 +2932,62 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        if (stateTicks == 1) {
+            autoFinalBlockedLogged = false;
+            autoFinalDiving = false;
+            autoFinalLastRocketTick = -100;
+        }
+
+        if (!autoColumn.water()) {
+            tickFinalGround();
+            return;
+        }
+
+        ColumnPlan plan = autoColumn;
+        double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
+        double dx = (plan.x() + 0.5) - px;
+        double dz = (plan.z() + 0.5) - pz;
+        double D = Math.hypot(dx, dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+
+        Vec3d vel = mc.player.getVelocity();
+        double speedH = Math.hypot(vel.x, vel.z);
+        double targetY = plan.exitY();
+        double H = py - targetY;
+
+        boolean blocked = pathToPointBlocked(px, py, pz, plan.x() + 0.5, targetY + 1.0, plan.z() + 0.5);
+
+        if (blocked) {
+            if (!autoFinalBlockedLogged) {
+                autoFinalBlockedLogged = true;
+                autoLog("FINAL", autoSite.center, String.format("path blocked H=%.1f D=%.1f", H, D));
+            }
+
+            if (D <= 28 && H > autoFlareHeight.get() + 10) {
+                enterState(AutoState.APPROACH, String.format("final blocked, spiraling H=%.1f D=%.1f", H, D));
+                return;
+            }
+
+            applyGlideRotation(yaw, -45.0f);
+            if (!ownRocketActive() && stateTicks - autoFinalLastRocketTick >= 20 && fireShaftRocket()) {
+                autoFinalLastRocketTick = stateTicks;
+            }
+            logFlightTelemetry("FINAL", H, D, speedH, vel.y, px, py, pz);
+            return;
+        }
+
+        autoFinalBlockedLogged = false;
+
+        if (!autoFinalDiving) {
+            autoFinalDiving = true;
+            autoLog("FINAL", autoSite.center, String.format("diving into water H=%.1f D=%.1f", H, D));
+        }
+        float divePitch = (float) MathHelper.clamp(Math.toDegrees(Math.atan2(H, D)), 0.0, 85.0);
+        applyGlideRotation(yaw, divePitch);
+        logFlightTelemetry("FINAL", H, D, speedH, vel.y, px, py, pz);
+    }
+
+    private void tickFinalGround() {
         ColumnPlan plan = autoColumn;
         double dx = (plan.x() + 0.5) - mc.player.getX();
         double dz = (plan.z() + 0.5) - mc.player.getZ();
@@ -2917,11 +3126,23 @@ public class SpawnerDetector extends Module {
         String phase;
 
         if (horiz > 0.5) {
-            phase = "swim";
-            boolean headUnderwater = mc.player.isSubmergedInWater();
-            boolean holdJump = mc.player.horizontalCollision || headUnderwater;
-            Utils.setPressed(mc.options.jumpKey, holdJump);
-            Utils.setPressed(mc.options.sneakKey, false);
+            if (autoColumn.water()) {
+                phase = "swim-descend";
+                BlockPos feet = mc.player.getBlockPos();
+                BlockPos below1 = feet.down();
+                BlockPos below2 = feet.down(2);
+                boolean onFloor = !isOpenState(mc.world.getBlockState(below1), below1);
+                boolean nearFloor = onFloor || !isOpenState(mc.world.getBlockState(below2), below2);
+                boolean horizCollision = mc.player.horizontalCollision;
+                Utils.setPressed(mc.options.jumpKey, horizCollision || onFloor);
+                Utils.setPressed(mc.options.sneakKey, !horizCollision && !nearFloor);
+            } else {
+                phase = "swim";
+                boolean headUnderwater = mc.player.isSubmergedInWater();
+                boolean holdJump = mc.player.horizontalCollision || headUnderwater;
+                Utils.setPressed(mc.options.jumpKey, holdJump);
+                Utils.setPressed(mc.options.sneakKey, false);
+            }
         } else {
             phase = "sink";
             Utils.setPressed(mc.options.jumpKey, false);
@@ -4027,10 +4248,35 @@ public class SpawnerDetector extends Module {
             autoLog("ROOM", autoSite.center, "found=" + autoRoomFoundShulkers + " items=" + autoRoomFoundItems);
         }
 
+        if (tryChainVertical()) return;
         if (autoChainUnderground.get() && tryChainUnderground(autoSite)) return;
 
         autoAscendFromAbort = false;
         enterState(AutoState.EXIT, "");
+    }
+
+    private boolean tryChainVertical() {
+        Site lower = autoStackedPartner;
+        autoStackedPartner = null;
+        if (lower == null) return false;
+
+        if (!qualifiesAsStackedPartner(lower)) {
+            autoLog("CHAIN", autoSite.center, "no vertical chain target reason=partner invalid");
+            return false;
+        }
+
+        BlockPos from = autoSite.center;
+        markVisited(from, autoRunOutcome());
+        autoLog("CHAIN", from, String.format("vertical next=%d,%d,%d",
+            lower.center.getX(), lower.center.getY(), lower.center.getZ()));
+
+        autoSite = lower;
+        autoRunAbandoned = false;
+        autoRoomFoundShulkers = 0;
+        autoRoomFoundItems = 0;
+
+        enterDigState("continuing shaft to lower room");
+        return true;
     }
 
     private boolean isRoomFlooded(Room room) {
@@ -4905,12 +5151,30 @@ public class SpawnerDetector extends Module {
         return false;
     }
 
+    private boolean ownRocketActive() {
+        if (ownRocketBoosting()) {
+            autoOwnRocketSeenAlive = true;
+            return true;
+        }
+        if (autoOwnRocketFiredAtMs == 0) return false;
+        if (autoOwnRocketSeenAlive) {
+            autoOwnRocketFiredAtMs = 0;
+            autoOwnRocketSeenAlive = false;
+            return false;
+        }
+        if (System.currentTimeMillis() - autoOwnRocketFiredAtMs < 2000L) return true;
+        autoOwnRocketFiredAtMs = 0;
+        return false;
+    }
+
     private boolean fireShaftRocket() {
         int slot = ensureRocketInHotbar();
         if (slot < 0) return false;
         ((PlayerInventoryAccessor) mc.player.getInventory()).setSelectedSlot(slot);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
         mc.player.swingHand(Hand.MAIN_HAND);
+        autoOwnRocketFiredAtMs = System.currentTimeMillis();
+        autoOwnRocketSeenAlive = false;
         return true;
     }
 
@@ -5057,7 +5321,7 @@ public class SpawnerDetector extends Module {
             boolean onGround = mc.player.isOnGround();
 
             if (y >= autoExitShaft.exitY() + 4) {
-                mc.player.setPitch(-35.0f);
+                mc.player.setPitch(-90.0f);
                 autoLog("SHAFT_FLY", autoSite.center, "out of shaft");
                 if (takeoff.isActive()) takeoff.cancel();
                 releaseAllAutoKeys();
@@ -5401,7 +5665,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (vy < 0.8 && stateTicks - autoClimbLastRocketTick >= 10 && !ownRocketBoosting()) {
+        if (vy < 0.8 && stateTicks - autoClimbLastRocketTick >= 10 && !ownRocketActive()) {
             if (fireShaftRocket()) {
                 autoClimbLastRocketTick = stateTicks;
                 if (y - autoClimbLastHeight < 1.0) {
@@ -5706,7 +5970,7 @@ public class SpawnerDetector extends Module {
                 double dxz = Math.hypot((p.getX() + 0.5) - mc.player.getX(), (p.getZ() + 0.5) - mc.player.getZ());
                 double dy = Math.abs(mc.player.getY() - p.getY());
                 if (dxz <= 1.0 && dy <= 1.0) {
-                    arrived = mc.player.isOnGround() && !hasBlockAbove(feet.getX(), feet.getY(), feet.getZ(), 12);
+                    arrived = mc.player.isOnGround() && !hasBlockAbove(feet.getX(), feet.getY(), feet.getZ(), SKY_CHECK_HEIGHT);
                     arrivedAt = p;
                     break;
                 }
@@ -5734,7 +5998,7 @@ public class SpawnerDetector extends Module {
                 return;
             }
 
-            boolean blocked = autoColumn.skyBlocked() || hasBlockAbove(autoColumn.x(), autoColumn.exitY(), autoColumn.z(), 12);
+            boolean blocked = autoColumn.skyBlocked() || hasBlockAbove(autoColumn.x(), autoColumn.exitY(), autoColumn.z(), SKY_CHECK_HEIGHT);
             if (blocked) enterState(AutoState.TAKEOFF_SPOT, "");
             else enterState(AutoState.TAKEOFF, "");
             return;
@@ -5995,7 +6259,7 @@ public class SpawnerDetector extends Module {
                 enterState(AutoState.RESUME, "staying on foot");
             } else {
                 boolean blocked = autoColumn.skyBlocked()
-                    || hasBlockAbove(mc.player.getBlockPos().getX(), feetY, mc.player.getBlockPos().getZ(), 12);
+                    || hasBlockAbove(mc.player.getBlockPos().getX(), feetY, mc.player.getBlockPos().getZ(), SKY_CHECK_HEIGHT);
                 if (blocked) enterState(AutoState.TAKEOFF_SPOT, "from ABORT (" + reason + ")");
                 else enterState(AutoState.TAKEOFF, "from ABORT (" + reason + ")");
             }
