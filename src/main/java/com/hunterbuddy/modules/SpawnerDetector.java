@@ -512,6 +512,9 @@ public class SpawnerDetector extends Module {
     private BlockPos autoSideDigBlockPos;
     private long autoSideDigLastSlowLogMs;
 
+    private BlockPos autoExitPathCell;
+    private int autoExitPathStep;
+
     private double autoHealthBeforeLanding;
 
     private BlockPos autoTakeoffSpot;
@@ -553,6 +556,13 @@ public class SpawnerDetector extends Module {
 
     private int autoWaterJumpAttempts;
     private int autoWaterJumpTapPhase;
+
+    private boolean autoElytraWaitLogged;
+
+    private double autoSwimUpLastY;
+    private int autoSwimUpProgressTick;
+    private BlockPos autoSwimUpBreakPos;
+    private String autoSwimUpBreakLabel;
 
     private BlockPos autoObsidianTarget;
     private int autoObsidianPhase;
@@ -659,6 +669,52 @@ public class SpawnerDetector extends Module {
     public int getStatShulkersFound() { return statShulkersFound; }
     public Site getAutoSite() { return autoSite; }
     public String getAutoStateName() { return state.name(); }
+
+    public boolean hasAutoColumn() { return autoColumn != null; }
+    public int getAutoColumnX() { return autoColumn != null ? autoColumn.x() : 0; }
+    public int getAutoColumnZ() { return autoColumn != null ? autoColumn.z() : 0; }
+    public int getAutoColumnStartY() { return autoColumn != null ? autoColumn.startY() : 0; }
+    public int getAutoColumnExitY() { return autoColumn != null ? autoColumn.exitY() : 0; }
+    public BlockPos getAutoColumnRim() { return autoColumn != null ? autoColumn.rim() : null; }
+    public int getAutoDigBlocksPlanned() { return autoDigBlocksPlanned; }
+
+    public boolean hasAutoExitShaft() { return autoExitShaft != null; }
+    public int getAutoExitShaftX() { return autoExitShaft != null ? autoExitShaft.x() : 0; }
+    public int getAutoExitShaftZ() { return autoExitShaft != null ? autoExitShaft.z() : 0; }
+    public int getAutoExitShaftBottomY() { return autoExitShaft != null ? autoExitShaft.bottomY() : 0; }
+    public int getAutoExitShaftExitY() { return autoExitShaft != null ? autoExitShaft.exitY() : 0; }
+    public BlockPos getAutoExitShaftEntry() { return autoExitShaft != null ? autoExitShaft.entry() : null; }
+
+    public BlockPos getAutoTunnelGoal() { return autoTunnelGoal; }
+    public BlockPos getAutoSideDigBlockPos() { return autoSideDigBlockPos; }
+
+    public int getAutoRoomContainerIndex() { return autoRoomIndex; }
+    public int getAutoRoomContainerTotal() { return autoRoomQueue.size(); }
+    public boolean isAutoRoomSpawnerHandled() { return autoRoomSpawnerHandled; }
+    public int getAutoRoomOpenAttempts() { return autoRoomOpenAttempts; }
+    public int getAutoRoomClimbBaritoneIndex() { return autoRoomClimbBaritoneIndex; }
+    public int getAutoRoomClimbBaritoneCandidateCount() { return autoRoomClimbBaritoneCandidates.size(); }
+
+    public int getAutoShaftFlyRerouteAttempts() { return autoShaftFlyRerouteAttempts; }
+    public int getAutoShaftFlyAttempts() { return autoShaftFlyAttempts; }
+    public int getAutoWaterJumpAttempts() { return autoWaterJumpAttempts; }
+
+    public double getAutoClimbTargetY() { return autoClimbTargetY; }
+    public int getAutoClimbStuckAttempts() { return autoClimbStuckAttempts; }
+    public boolean isAutoClimbStuck() { return autoClimbStuck; }
+
+    public BlockPos getAutoObsidianTarget() { return autoObsidianTarget; }
+    public int getAutoObsidianAttempts() { return autoObsidianAttempts; }
+
+    public BlockPos getAutoAscendNearestTarget() { return autoAscendTargets.isEmpty() ? null : autoAscendTargets.get(0); }
+    public int getAutoAscendTargetCount() { return autoAscendTargets.size(); }
+
+    public BlockPos getAutoTakeoffSpot() { return autoTakeoffSpot; }
+    public int getAutoBaritoneRetries() { return autoBaritoneRetries; }
+
+    public boolean isAutoPaused() { return autoPaused; }
+    public String getAutoPauseReason() { return autoPauseReason; }
+    public Entity getAutoShaftChaseTarget() { return autoShaftChaseTarget; }
 
     @EventHandler
     private void onTickPre(TickEvent.Pre event) {
@@ -1905,6 +1961,27 @@ public class SpawnerDetector extends Module {
         BaritoneHelper.clearInputs();
     }
 
+    private boolean waitingForElytra(String stateLabel) {
+        if (mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA) {
+            autoElytraWaitLogged = false;
+            return false;
+        }
+        if (!InvUtils.find(Items.ELYTRA).found()) {
+            autoElytraWaitLogged = false;
+            return false;
+        }
+        if (!autoElytraWaitLogged) {
+            autoLog(stateLabel, autoSite.center, "waiting for elytra");
+            autoElytraWaitLogged = true;
+        }
+        if (mc.player.isTouchingWater()) {
+            Utils.setPressed(mc.options.jumpKey, true);
+        } else {
+            releaseAllAutoKeys();
+        }
+        return true;
+    }
+
     private IBaritone primaryBaritone() {
         if (!BaritoneHelper.isAvailable()) return null;
         try {
@@ -3135,7 +3212,7 @@ public class SpawnerDetector extends Module {
                 boolean nearFloor = onFloor || !isOpenState(mc.world.getBlockState(below2), below2);
                 boolean horizCollision = mc.player.horizontalCollision;
                 Utils.setPressed(mc.options.jumpKey, horizCollision || onFloor);
-                Utils.setPressed(mc.options.sneakKey, !horizCollision && !nearFloor);
+                Utils.setPressed(mc.options.sneakKey, !horizCollision && !nearFloor && !mc.player.isOnGround());
             } else {
                 phase = "swim";
                 boolean headUnderwater = mc.player.isSubmergedInWater();
@@ -3250,17 +3327,26 @@ public class SpawnerDetector extends Module {
     private boolean navigateExitColumn(int columnX, int columnZ, double columnEps, BlockPos entry, boolean holdJumpAlways) {
         BlockPos pos = mc.player.getBlockPos();
 
-        if (entry != null && insideInterior(autoSite.room, pos.getX(), pos.getZ())
-            && (pos.getX() != entry.getX() || pos.getZ() != entry.getZ())) {
-            Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
-            recenterDig(entry.getX(), entry.getZ(), 0.3);
-            Utils.setPressed(mc.options.jumpKey, mc.player.isOnGround() && mc.player.horizontalCollision);
-            return false;
-        }
-
         if (entry != null && (pos.getX() != columnX || pos.getZ() != columnZ)) {
+            boolean axisX = entry.getX() != columnX;
+            int fixedCoord = axisX ? entry.getZ() : entry.getX();
+            int alongPos = axisX ? pos.getX() : pos.getZ();
+            int alongTarget = axisX ? columnX : columnZ;
+            int offAxisPos = axisX ? pos.getZ() : pos.getX();
+
+            int nextAlong = (offAxisPos == fixedCoord && alongPos != alongTarget)
+                ? alongPos + Integer.signum(alongTarget - alongPos) : alongPos;
+            int nx = axisX ? nextAlong : fixedCoord;
+            int nz = axisX ? fixedCoord : nextAlong;
+
+            if (autoExitPathCell == null || autoExitPathCell.getX() != nx || autoExitPathCell.getZ() != nz) {
+                autoExitPathCell = new BlockPos(nx, entry.getY(), nz);
+                autoExitPathStep++;
+                autoLog("EXIT", autoSite.center, String.format("exit path step %d x=%d,z=%d", autoExitPathStep, nx, nz));
+            }
+
             Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
-            recenterDig(columnX, columnZ, columnEps);
+            recenterDig(nx, nz, 0.3);
             Utils.setPressed(mc.options.jumpKey, mc.player.isOnGround() && mc.player.horizontalCollision);
             return false;
         }
@@ -4217,7 +4303,10 @@ public class SpawnerDetector extends Module {
             }
 
             if (autoRoomBreakRepositioning) {
-                if (distSq <= 3.0 * 3.0 && mc.player.isOnGround()) {
+                boolean readyToResume = mc.player.isTouchingWater()
+                    ? distSq <= 4.0 * 4.0
+                    : distSq <= 3.0 * 3.0 && mc.player.isOnGround();
+                if (readyToResume) {
                     releaseAllAutoKeys();
                     autoRoomBreakRepositioning = false;
                     autoRoomBreakAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
@@ -5019,6 +5108,8 @@ public class SpawnerDetector extends Module {
             autoShaftFlyAttempts = 0;
             autoShaftFlyRerouteAttempts = 0;
             autoExitWalkingLogged = false;
+            autoExitPathCell = null;
+            autoExitPathStep = 0;
             if (!autoAreaLoaderWasOn) {
                 enterAscendOrSwimUp("no flight module, staying on foot");
                 return;
@@ -5225,6 +5316,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickShaftFly() {
+        if (waitingForElytra("SHAFT_FLY")) return;
         stateTicks++;
 
         if (stateTicks == 1) {
@@ -5482,7 +5574,16 @@ public class SpawnerDetector extends Module {
     private void tickSwimUp() {
         stateTicks++;
 
-        if (stateTicks > 60 * 20) {
+        if (stateTicks == 1) {
+            autoSwimUpLastY = mc.player.getY();
+            autoSwimUpProgressTick = 0;
+            autoSwimUpBreakPos = null;
+            autoSwimUpBreakLabel = null;
+            autoExitPathCell = null;
+            autoExitPathStep = 0;
+        }
+
+        if (stateTicks - autoSwimUpProgressTick > 60 * 20) {
             releaseAllAutoKeys();
             enterState(AutoState.ASCEND, "swim up timeout");
             return;
@@ -5494,6 +5595,38 @@ public class SpawnerDetector extends Module {
         BlockPos swimUpEntry = autoExitShaft != null ? autoExitShaft.entry() : null;
 
         navigateExitColumn(swimUpX, swimUpZ, 0.2, swimUpEntry, true);
+
+        double swimUpY = mc.player.getY();
+        if (swimUpY > autoSwimUpLastY + 0.02) {
+            autoSwimUpLastY = swimUpY;
+            autoSwimUpProgressTick = stateTicks;
+        }
+
+        if (mc.player.isSubmergedInWater() && stateTicks - autoSwimUpProgressTick >= 10) {
+            BlockPos swimUpFeet = mc.player.getBlockPos();
+            BlockPos above = new BlockPos(swimUpFeet.getX(), swimUpFeet.getY() + 2, swimUpFeet.getZ());
+            if (autoSwimUpBreakPos == null || !autoSwimUpBreakPos.equals(above)) {
+                BlockState aboveState = mc.world.getBlockState(above);
+                boolean solid = !isOpenState(aboveState, above) && !aboveState.getFluidState().isIn(FluidTags.LAVA);
+                if (solid && !isLavaNearShaft(above, above.up())) {
+                    autoSwimUpBreakPos = above;
+                    autoSwimUpBreakLabel = Registries.BLOCK.getId(aboveState.getBlock()).getPath();
+                } else {
+                    autoSwimUpBreakPos = null;
+                    autoSwimUpBreakLabel = null;
+                }
+            }
+            if (autoSwimUpBreakPos != null && autoMineTick("SWIM_UP", autoSwimUpBreakPos, false)) {
+                autoLog("SWIM_UP", autoSite.center, String.format("broken %d,%d,%d block=%s",
+                    autoSwimUpBreakPos.getX(), autoSwimUpBreakPos.getY(), autoSwimUpBreakPos.getZ(), autoSwimUpBreakLabel));
+                autoSwimUpBreakPos = null;
+                autoSwimUpBreakLabel = null;
+                autoSwimUpProgressTick = stateTicks;
+            }
+        } else {
+            autoSwimUpBreakPos = null;
+            autoSwimUpBreakLabel = null;
+        }
 
         if (mc.player.getAir() < 40 && stateTicks % 20 == 0) {
             autoLog("SWIM_UP", autoSite.center,
@@ -5569,6 +5702,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickWaterJump() {
+        if (waitingForElytra("WATER_JUMP")) return;
         stateTicks++;
 
         if (stateTicks == 1) {
@@ -6100,6 +6234,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickTakeoff() {
+        if (waitingForElytra("TAKEOFF")) return;
         stateTicks++;
 
         if (stateTicks == 1) {
