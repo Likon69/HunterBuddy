@@ -3,6 +3,7 @@ package com.hunterbuddy.modules;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.mixin.accessors.FireworkRocketEntityAccessor;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
@@ -98,7 +99,9 @@ import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.entity.decoration.GlowItemFrameEntity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
+import net.minecraft.entity.mob.SkeletonEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.projectile.FireworkRocketEntity;
 import net.minecraft.entity.vehicle.ChestMinecartEntity;
 import net.minecraft.entity.vehicle.HopperMinecartEntity;
 import net.minecraft.item.BlockItem;
@@ -473,11 +476,21 @@ public class SpawnerDetector extends Module {
     private int autoWalkDirectStuckTicks;
     private boolean autoWalkKeyLogged;
     private int autoClimbLastRocketTick;
+    private double autoClimbLastHeight;
+    private int autoClimbStuckAttempts;
+    private boolean autoClimbStuck;
+    private int autoClimbStuckStartTick;
+    private int autoClimbStuckWaterReturns;
 
     private boolean autoPaused;
     private String autoPauseReason;
     private long autoPauseStartMs;
     private int autoPausedTicks;
+
+    private int autoLastHurtTime;
+    private long autoLastHitMs;
+    private boolean autoHitThisTick;
+    private Entity autoShaftChaseTarget;
 
     private BlockPos autoDigQueuedPos;
     private String autoDigQueuedBlockLabel;
@@ -506,6 +519,8 @@ public class SpawnerDetector extends Module {
     private String autoBreachLabel;
 
     private int autoShaftFlyAttempts;
+    private boolean autoShaftFlyReroute;
+    private int autoShaftFlyRerouteAttempts;
     private float autoShaftFlyYaw;
     private int autoShaftFlyOutcome;
     private String autoShaftFlyFailReason;
@@ -540,6 +555,7 @@ public class SpawnerDetector extends Module {
     private int autoRoomClimbMode;
     private int autoRoomClimbPillarPhase;
     private int autoRoomClimbJumpTapTicks;
+    private boolean autoRoomClimbWater;
     private int autoRoomClimbFeetX;
     private int autoRoomClimbFeetY;
     private int autoRoomClimbFeetZ;
@@ -608,6 +624,7 @@ public class SpawnerDetector extends Module {
         autoExitShaft = null;
         autoRunAbandoned = false;
         autoResumeClimbTries = 0;
+        autoClimbStuckWaterReturns = 0;
         autoWaterJumpVertical = false;
         autoExitReturning = false;
         autoWalkStepping = false;
@@ -621,6 +638,9 @@ public class SpawnerDetector extends Module {
         autoApproachBadCells.clear();
         autoApproachTarget = null;
         autoApproachCell = null;
+        autoLastHurtTime = 0;
+        autoLastHitMs = 0;
+        autoShaftChaseTarget = null;
     }
 
     public int getStatRoomsFarmed() { return statRoomsFarmed; }
@@ -943,6 +963,8 @@ public class SpawnerDetector extends Module {
     private Room findRoom(int cx, int cy, int cz, boolean spawnerAtCenter) {
         Room best = null;
         double bestFit = -1;
+        Room fallback = null;
+        double fallbackFit = -1;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
 
         for (int k = 2; k <= 3; k++) {
@@ -995,6 +1017,13 @@ public class SpawnerDetector extends Module {
                     }
                 }
 
+                double anyFit = (double) c / aireSol + (double) w / casesAnneau;
+                if (spawnerAtCenter && anyFit > fallbackFit) {
+                    fallbackFit = anyFit;
+                    boolean fallbackModern = open > 0 && caveAir * 2 >= open;
+                    fallback = new Room(cx, cy, cz, k, p, floorMinX, cy - 1, floorMinZ, floorMaxX, cy + 4, floorMaxZ, fallbackModern, anyFit);
+                }
+
                 if (c < 0.5 * aireSol) continue;
                 if (m < 3) continue;
                 if (iCount < 0.6 * volumeInterieur) continue;
@@ -1021,7 +1050,7 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        return best;
+        return best != null ? best : fallback;
     }
 
     private boolean isOpenState(BlockState state, BlockPos pos) {
@@ -2502,6 +2531,18 @@ public class SpawnerDetector extends Module {
     private void autoTick() {
         if (state == AutoState.IDLE) return;
 
+        autoHitThisTick = mc.player.hurtTime > 0 && mc.player.hurtTime > autoLastHurtTime;
+        if (autoHitThisTick) {
+            autoLastHurtTime = mc.player.hurtTime;
+            autoLastHitMs = System.currentTimeMillis();
+            if (state == AutoState.SHAFT_ALIGN || state == AutoState.SHAFT_FLY) {
+                autoLog(state.name(), autoSite.center, String.format("hit health=%.1f", mc.player.getHealth()));
+            }
+        }
+        if (mc.player.hurtTime < autoLastHurtTime) {
+            autoLastHurtTime = mc.player.hurtTime;
+        }
+
         try {
             AutoFlyingRegear regear = autoFlyingRegearModule();
             if (regear != null && regear.isRunning()) {
@@ -3034,9 +3075,19 @@ public class SpawnerDetector extends Module {
     private void endAutoPause() {
         shiftAutoPauseTimers(System.currentTimeMillis() - autoPauseStartMs);
         autoLog(state.name(), autoSite.center, "resumed");
+        Utils.setPressed(mc.options.sneakKey, autoPauseOnSpawner());
         autoPaused = false;
         autoPauseReason = null;
         autoPauseStartMs = 0;
+    }
+
+    private boolean autoPauseOnSpawner() {
+        if (state != AutoState.ROOM || autoRoomSpawnerPos == null) return false;
+        if (mc.world.getBlockState(autoRoomSpawnerPos).getBlock() != Blocks.SPAWNER) return false;
+        if (mc.player.getBlockPos().getY() != autoRoomSpawnerPos.getY() + 1) return false;
+        double dx = mc.player.getX() - (autoRoomSpawnerPos.getX() + 0.5);
+        double dz = mc.player.getZ() - (autoRoomSpawnerPos.getZ() + 0.5);
+        return Math.abs(dx) <= 0.8 && Math.abs(dz) <= 0.8;
     }
 
     private boolean handleAutoPause(boolean combatEligible) {
@@ -3067,7 +3118,98 @@ public class SpawnerDetector extends Module {
             return true;
         }
 
+        Utils.setPressed(mc.options.forwardKey, false);
+        Utils.setPressed(mc.options.backKey, false);
+        Utils.setPressed(mc.options.leftKey, false);
+        Utils.setPressed(mc.options.rightKey, false);
+        Utils.setPressed(mc.options.jumpKey, false);
+        Utils.setPressed(mc.options.sprintKey, false);
         Utils.setPressed(mc.options.attackKey, false);
+        Utils.setPressed(mc.options.sneakKey, autoPauseOnSpawner());
+        autoPausedTicks++;
+        return true;
+    }
+
+    private boolean insideRoomBounds(double x, double y, double z) {
+        Room room = autoSite.room;
+        int bx = MathHelper.floor(x);
+        int bz = MathHelper.floor(z);
+        return bx >= room.minX() - 1 && bx <= room.maxX() + 1
+            && bz >= room.minZ() - 1 && bz <= room.maxZ() + 1
+            && y >= room.minY() - 1 && y <= room.maxY() + 1;
+    }
+
+    private boolean shaftSkeletonChaseable(Entity target) {
+        return target instanceof SkeletonEntity
+            && insideRoomBounds(target.getX(), target.getY(), target.getZ())
+            && insideRoomBounds(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+    }
+
+    private void moveTowardShaftTarget(Entity target) {
+        double dx = target.getX() - mc.player.getX();
+        double dz = target.getZ() - mc.player.getZ();
+        double distXZ = Math.hypot(dx, dz);
+        float yaw = MathHelper.wrapDegrees((float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0));
+        mc.player.setYaw(yaw);
+        Utils.setPressed(mc.options.sprintKey, false);
+        Utils.setPressed(mc.options.forwardKey, distXZ > 2.5);
+        Utils.setPressed(mc.options.backKey, false);
+        Utils.setPressed(mc.options.leftKey, false);
+        Utils.setPressed(mc.options.rightKey, false);
+        Utils.setPressed(mc.options.jumpKey, mc.player.isOnGround() && mc.player.horizontalCollision);
+        Utils.setPressed(mc.options.attackKey, false);
+        Utils.setPressed(mc.options.sneakKey, false);
+    }
+
+    private boolean handleShaftCombat() {
+        boolean inCombat = autoLastHitMs != 0 && (System.currentTimeMillis() - autoLastHitMs) < 3000L;
+
+        if (!inCombat) {
+            if (autoPaused) endAutoPause();
+            return false;
+        }
+
+        String reason = "combat";
+        long now = System.currentTimeMillis();
+
+        if (!autoPaused) {
+            autoPaused = true;
+            autoPauseReason = reason;
+            autoPauseStartMs = now;
+            autoLog(state.name(), autoSite.center, "paused: " + reason);
+        } else if (!reason.equals(autoPauseReason)) {
+            endAutoPause();
+            autoPaused = true;
+            autoPauseReason = reason;
+            autoPauseStartMs = now;
+            autoLog(state.name(), autoSite.center, "paused: " + reason);
+        } else if (now - autoPauseStartMs > 60_000L) {
+            abort("combat too long");
+            return true;
+        }
+
+        Entity target = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Entity entity : mc.world.getEntities()) {
+            if (!(entity instanceof SkeletonEntity) || !entity.isAlive()) continue;
+            if (!shaftSkeletonChaseable(entity)) continue;
+            double distSq = entity.squaredDistanceTo(mc.player);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                target = entity;
+            }
+        }
+
+        if (target != null) {
+            if (target != autoShaftChaseTarget) {
+                autoShaftChaseTarget = target;
+                autoLog(state.name(), autoSite.center, String.format("chase id=%d dist=%.1f", target.getId(), Math.sqrt(bestDistSq)));
+            }
+            moveTowardShaftTarget(target);
+        } else {
+            autoShaftChaseTarget = null;
+            releaseAllAutoKeys();
+        }
         autoPausedTicks++;
         return true;
     }
@@ -4267,6 +4409,7 @@ public class SpawnerDetector extends Module {
             autoRoomClimbMode = 0;
             autoRoomClimbPillarPhase = 0;
             autoRoomClimbJumpTapTicks = 0;
+            autoRoomClimbWater = false;
             autoRoomClimbStartMs = System.currentTimeMillis();
             autoRoomClimbBaritoneCandidates = List.of();
             autoRoomClimbBaritoneIndex = 0;
@@ -4314,25 +4457,34 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (autoRoomClimbPillarPhase == 0 && mc.player.isTouchingWater()
-            && (!mc.player.isOnGround() || mc.player.getFluidHeight(FluidTags.WATER) > mc.player.getSwimHeight())) {
+        if (mc.player.isTouchingWater()) autoRoomClimbWater = true;
+
+        if (stateTicks % 20 == 0) {
+            autoLog("ROOM_CLIMB", autoSite.center, String.format("pos=%.1f,%.1f,%.1f water=%b touching=%b submerged=%b ground=%b phase=%d",
+                mc.player.getX(), mc.player.getY(), mc.player.getZ(), autoRoomClimbWater, mc.player.isTouchingWater(),
+                mc.player.isSubmergedInWater(), mc.player.isOnGround(), autoRoomClimbPillarPhase));
+        }
+
+        if (autoRoomClimbWater) {
+            autoRoomClimbPillarPhase = 0;
             if (feet.getY() >= autoSite.room.cy()) {
                 releaseAllAutoKeys();
                 enterState(AutoState.ROOM, "climb complete");
                 return;
             }
             BlockPos hole = findRoomFloorHole();
-            Utils.setPressed(mc.options.sprintKey, true);
             if (hole != null) {
-                boolean underHole = feet.getX() == hole.getX() && feet.getZ() == hole.getZ();
-                mc.player.setPitch(underHole ? -80.0f : 20.0f);
-                navigateExitColumn(hole.getX(), hole.getZ(), 0.2, hole, true);
-            } else {
-                mc.player.setPitch(-80.0f);
-                Utils.setPressed(mc.options.sneakKey, false);
-                Utils.setPressed(mc.options.forwardKey, false);
-                Utils.setPressed(mc.options.jumpKey, true);
+                double hdx = (hole.getX() + 0.5) - mc.player.getX();
+                double hdz = (hole.getZ() + 0.5) - mc.player.getZ();
+                if (Math.hypot(hdx, hdz) > 0.3) {
+                    mc.player.setYaw((float) Math.toDegrees(Math.atan2(-hdx, hdz)));
+                }
             }
+            mc.player.setPitch(-30.0f);
+            Utils.setPressed(mc.options.sneakKey, false);
+            Utils.setPressed(mc.options.sprintKey, false);
+            Utils.setPressed(mc.options.forwardKey, true);
+            Utils.setPressed(mc.options.jumpKey, true);
             if (System.currentTimeMillis() - autoRoomClimbStartMs > 20_000L) {
                 abandonRoomClimbPillar("timeout");
             }
@@ -4619,6 +4771,7 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks == 1) {
             autoShaftFlyAttempts = 0;
+            autoShaftFlyRerouteAttempts = 0;
             autoExitWalkingLogged = false;
             if (!autoAreaLoaderWasOn) {
                 enterAscendOrSwimUp("no flight module, staying on foot");
@@ -4694,7 +4847,10 @@ public class SpawnerDetector extends Module {
             IBaritone bt = primaryBaritone();
             if (bt != null) bt.getPathingBehavior().cancelEverything();
             autoShaftAlignCenteredTicks = 0;
+            autoPausedTicks = 0;
         }
+
+        if (handleShaftCombat()) return;
 
         double alignDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
         Utils.setPressed(mc.options.sneakKey, alignDist > 0.12 && alignDist < 0.6 && mc.player.isOnGround() && !mc.player.isTouchingWater());
@@ -4716,7 +4872,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (stateTicks > 20 * 20) {
+        if ((stateTicks - autoPausedTicks) > 20 * 20) {
             releaseAllAutoKeys();
             enterState(AutoState.ASCEND, "shaft align timeout");
             return;
@@ -4724,10 +4880,8 @@ public class SpawnerDetector extends Module {
 
         if (autoShaftAlignCenteredTicks < 5) return;
 
-        KillAuraPlus killAura = killAuraPlusModule();
-        boolean combat = killAura != null && killAura.hasActiveTarget();
         boolean eating = autoEatSyncModule() != null && autoEatSyncModule().isEating();
-        if (combat || eating) return;
+        if (eating) return;
 
         int slot = ensureRocketInHotbar();
         if (slot < 0) {
@@ -4738,6 +4892,17 @@ public class SpawnerDetector extends Module {
 
         releaseAllAutoKeys();
         enterState(AutoState.SHAFT_FLY, "");
+    }
+
+    private boolean ownRocketBoosting() {
+        for (Entity entity : mc.world.getEntities()) {
+            if (entity instanceof FireworkRocketEntity firework
+                && firework.isAlive()
+                && ((FireworkRocketEntityAccessor) firework).getShooter() == mc.player) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean fireShaftRocket() {
@@ -4814,6 +4979,7 @@ public class SpawnerDetector extends Module {
             autoShaftFlyPivotX = 0;
             autoShaftFlyPivotZ = 0;
             autoShaftFlyPivotNoEscapeLogged = false;
+            autoShaftFlyReroute = false;
 
             int slot = ensureRocketInHotbar();
             if (slot < 0) {
@@ -4837,6 +5003,9 @@ public class SpawnerDetector extends Module {
                 @Override
                 public void onTakeoffDebug(String message) {
                     autoLog("SHAFT_FLY", autoSite.center, "slot=" + slot + " " + message);
+                    if (message.startsWith("Retry in ") && !mc.player.isGliding()) {
+                        autoShaftFlyReroute = true;
+                    }
                 }
             });
         }
@@ -4844,10 +5013,30 @@ public class SpawnerDetector extends Module {
         mc.player.setYaw(autoShaftFlyYaw);
         mc.player.setPitch(-90.0f);
 
+        if (autoHitThisTick && !mc.player.isGliding() && autoShaftFlyOutcome != 1) {
+            if (takeoff.isActive()) takeoff.cancel();
+            releaseAllAutoKeys();
+            enterState(AutoState.SHAFT_ALIGN, "hit during takeoff");
+            return;
+        }
+
         if (stateTicks > 25 * 20) {
             if (takeoff.isActive()) takeoff.cancel();
             releaseAllAutoKeys();
             enterState(AutoState.ASCEND, "shaft fly timeout");
+            return;
+        }
+
+        if (autoShaftFlyReroute) {
+            autoShaftFlyReroute = false;
+            if (takeoff.isActive()) takeoff.cancel();
+            releaseAllAutoKeys();
+            autoShaftFlyRerouteAttempts++;
+            if (autoShaftFlyRerouteAttempts >= 5) {
+                enterState(AutoState.ASCEND, "shaft fly retries exhausted");
+            } else {
+                enterState(AutoState.SHAFT_ALIGN, "shaft fly retry " + autoShaftFlyRerouteAttempts);
+            }
             return;
         }
 
@@ -5047,9 +5236,16 @@ public class SpawnerDetector extends Module {
                 String.format("low air y=%.1f air=%d", mc.player.getY(), mc.player.getAir()));
         }
 
+        if (stateTicks % 20 == 0) {
+            autoLog("SWIM_UP", autoSite.center, String.format("x=%.1f y=%.1f z=%.1f submerged=%b touchingWater=%b",
+                mc.player.getX(), mc.player.getY(), mc.player.getZ(),
+                mc.player.isSubmergedInWater(), mc.player.isTouchingWater()));
+        }
+
         boolean surfaced = !mc.player.isSubmergedInWater() && mc.player.getY() >= swimUpExitY - 1;
         if (surfaced) {
             releaseAllAutoKeys();
+            autoLog("SWIM_UP", autoSite.center, String.format("surfaced x=%.1f z=%.1f", mc.player.getX(), mc.player.getZ()));
             if (!autoAreaLoaderWasOn) {
                 enterState(AutoState.OBSIDIAN_PLATFORM, "no flight module, platform only");
             } else {
@@ -5120,7 +5316,8 @@ public class SpawnerDetector extends Module {
         if (mc.player.isGliding()) {
             fireShaftRocket();
             releaseAllAutoKeys();
-            autoLog("WATER_JUMP", autoSite.center, "gliding, rocket fired");
+            autoLog("WATER_JUMP", autoSite.center,
+                String.format("gliding, rocket fired x=%.1f z=%.1f", mc.player.getX(), mc.player.getZ()));
             autoClimbTargetY = mc.player.getY() + climbHeight.get();
             enterState(AutoState.CLIMB, "");
             return;
@@ -5129,7 +5326,8 @@ public class SpawnerDetector extends Module {
         if (stateTicks > 40) {
             releaseAllAutoKeys();
             autoWaterJumpAttempts++;
-            autoLog("WATER_JUMP", autoSite.center, "attempt " + autoWaterJumpAttempts + " failed to glide");
+            autoLog("WATER_JUMP", autoSite.center, String.format("attempt %d failed to glide x=%.1f z=%.1f",
+                autoWaterJumpAttempts, mc.player.getX(), mc.player.getZ()));
             if (autoWaterJumpAttempts >= 3) {
                 enterState(AutoState.OBSIDIAN_PLATFORM, "water jump attempts exhausted");
             } else {
@@ -5158,6 +5356,26 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks == 1) {
             autoClimbLastRocketTick = -100;
+            autoClimbLastHeight = mc.player.getY();
+            autoClimbStuckAttempts = 0;
+            autoClimbStuck = false;
+        }
+
+        if (autoClimbStuck) {
+            mc.player.setPitch(20.0f);
+            if (stateTicks - autoClimbStuckStartTick >= 20 * 10) {
+                releaseAllAutoKeys();
+                enterState(AutoState.ASCEND, "climb stuck");
+            } else if (!mc.player.isGliding()) {
+                releaseAllAutoKeys();
+                if (mc.player.isTouchingWater() && autoClimbStuckWaterReturns < 3) {
+                    autoClimbStuckWaterReturns++;
+                    enterState(AutoState.SWIM_UP, "climb stuck in water");
+                } else {
+                    enterState(AutoState.ASCEND, "climb stuck");
+                }
+            }
+            return;
         }
 
         mc.player.setPitch(-90.0f);
@@ -5183,16 +5401,31 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (vy < 0.8 && stateTicks - autoClimbLastRocketTick >= 10) {
+        if (vy < 0.8 && stateTicks - autoClimbLastRocketTick >= 10 && !ownRocketBoosting()) {
             if (fireShaftRocket()) {
                 autoClimbLastRocketTick = stateTicks;
+                if (y - autoClimbLastHeight < 1.0) {
+                    autoClimbStuckAttempts++;
+                } else {
+                    autoClimbStuckAttempts = 0;
+                }
+                autoClimbLastHeight = y;
+
+                if (autoClimbStuckAttempts >= 3) {
+                    autoLog("CLIMB", autoSite.center, String.format("climb stuck x=%.1f z=%.1f y=%.1f",
+                        mc.player.getX(), mc.player.getZ(), y));
+                    autoClimbStuck = true;
+                    autoClimbStuckStartTick = stateTicks;
+                    return;
+                }
             }
         }
 
         if (log.get() && stateTicks % 20 == 0) {
             HunterBuddyAddon.LOG.info(
-                "[SpawnerDetector/auto] CLIMB site={},{},{} y={} vy={} gliding={}",
+                "[SpawnerDetector/auto] CLIMB site={},{},{} x={} z={} y={} vy={} gliding={}",
                 autoSite.center.getX(), autoSite.center.getY(), autoSite.center.getZ(),
+                String.format("%.1f", mc.player.getX()), String.format("%.1f", mc.player.getZ()),
                 String.format("%.1f", y), String.format("%.2f", vy), mc.player.isGliding());
         }
     }
