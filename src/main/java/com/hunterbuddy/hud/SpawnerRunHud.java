@@ -799,7 +799,13 @@ public class SpawnerRunHud extends HudElement {
 
         double y = y0 + row1H + gap;
         boolean pausedForDisplay = isPausableState(stateName) && detector.isAutoPaused();
-        drawBand(renderer, x0, y, width, row2H, now, shadow, s, anim, runSegments, runStartMs > 0L ? now - runStartMs : 0L, runFailedCap, pausedForDisplay);
+        double totalW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s * 0.8);
+        double bandW = Math.max(0.0, width - gap - totalW);
+        long liveTotal = runStartMs > 0L ? now - runStartMs : 0L;
+        drawBand(renderer, x0, y, bandW, row2H, now, shadow, s, anim, runSegments, liveTotal, runFailedCap, pausedForDisplay);
+        String totalText = formatSpan(liveTotal);
+        double totalTextH = renderer.textHeight(shadow, s * 0.8);
+        renderer.text(totalText, x0 + width - renderer.textWidth(totalText, shadow, s * 0.8), y + (row2H - totalTextH) / 2.0, valueColor.get(), shadow, s * 0.8);
         y += row2H;
 
         if (historyRows > 0) {
@@ -807,11 +813,11 @@ public class SpawnerRunHud extends HudElement {
             renderer.text("last runs", x0, y, mutedColor.get(), shadow, s * 0.75);
             y += legendH;
             double maxTotal = maxHistTotal(now);
-            double scale = maxTotal > 0.0 ? width / maxTotal : 1.0;
+            double scale = maxTotal > 0.0 ? bandW / maxTotal : 1.0;
             for (int i = 0; i < historyRows; i++) {
                 RunRecord r = history.get(i);
                 if (insertion != null && i == 0 && insertion.totalMs == r.totalMs) continue;
-                drawFrozenBand(renderer, x0, y, width, histH, r, scale);
+                drawFrozenBand(renderer, x0, y, bandW, histH, r, scale);
                 y += histH + histGap;
             }
             if (insertion != null) {
@@ -821,8 +827,8 @@ public class SpawnerRunHud extends HudElement {
                 double iy = fromY + (toY - fromY) * progress;
                 double ih = row2H + (histH - row2H) * progress;
                 double maxTotal2 = Math.max(maxTotal, insertion.totalMs);
-                double scale2 = maxTotal2 > 0.0 ? width / maxTotal2 : 1.0;
-                drawFrozenBand(renderer, x0, iy, width, ih, new RunRecord(insertion.segments, insertion.totalMs, insertion.failed), scale2);
+                double scale2 = maxTotal2 > 0.0 ? bandW / maxTotal2 : 1.0;
+                drawFrozenBand(renderer, x0, iy, bandW, ih, new RunRecord(insertion.segments, insertion.totalMs, insertion.failed), scale2);
             }
         }
 
@@ -1048,10 +1054,6 @@ public class SpawnerRunHud extends HudElement {
             renderer.quad(Math.max(x, cx - 2.0 * s), y, 2.0 * s, h, badColor.get());
         }
 
-        String totalText = formatSpan(liveTotalMs);
-        double textH = renderer.textHeight(shadow, s * 0.8);
-        double totalTextW = renderer.textWidth(totalText, shadow, s * 0.8);
-        renderer.text(totalText, x + Math.max(0.0, w - totalTextW), y - textH - 1.0, valueColor.get(), shadow, s * 0.8);
     }
 
     private void drawFrozenBand(HudRenderer renderer, double x, double y, double w, double h, RunRecord record, double scale) {
@@ -1319,7 +1321,9 @@ public class SpawnerRunHud extends HudElement {
         long[] demoDur = {18_000L, 6_000L, 30_000L, 14_000L};
         double total = 0;
         for (long dd : demoDur) total += dd;
-        double scale = width / total;
+        double demoTotalW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s * 0.8);
+        double demoBandW = Math.max(0.0, width - gap - demoTotalW);
+        double scale = demoBandW / total;
         double cx = x0;
         for (int i = 0; i < demoGroups.length; i++) {
             double w = demoDur[i] * scale;
@@ -1329,7 +1333,7 @@ public class SpawnerRunHud extends HudElement {
         drawHatch(renderer, cx - demoDur[3] * scale * 0.3, y, demoDur[3] * scale * 0.3, row2H, amberColor.get(), 0.0);
         String totalText = "1:08";
         renderer.text(totalText, x0 + width - renderer.textWidth(totalText, shadow, s * 0.8),
-            y - renderer.textHeight(shadow, s * 0.8) - 1.0, valueColor.get(), shadow, s * 0.8);
+            y + (row2H - renderer.textHeight(shadow, s * 0.8)) / 2.0, valueColor.get(), shadow, s * 0.8);
         y += row2H + gap;
 
         renderer.text("last runs", x0, y, mutedColor.get(), shadow, s * 0.75);
@@ -1337,7 +1341,7 @@ public class SpawnerRunHud extends HudElement {
 
         for (int r = 0; r < histRows; r++) {
             double hx = x0;
-            double scale2 = width / (total * (1.0 + r * 0.15));
+            double scale2 = demoBandW / (total * (1.0 + r * 0.15));
             for (int i = 0; i < demoGroups.length; i++) {
                 double w = demoDur[i] * scale2 * (1.0 - r * 0.08);
                 renderer.quad(hx, y, Math.max(0.0, w), histH, phaseColor(demoGroups[i]));
