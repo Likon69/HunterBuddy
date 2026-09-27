@@ -41,6 +41,7 @@ import com.hunterbuddy.modules.EntityView;
 import com.hunterbuddy.modules.FlightTrail;
 import com.hunterbuddy.modules.FlowESP;
 import com.hunterbuddy.modules.GhostContainer;
+import com.hunterbuddy.modules.InventoryCleaner;
 import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.FutureTotem;
 import com.hunterbuddy.modules.KillAuraPlus;
@@ -152,6 +153,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ShulkerOverviewModule());
         Modules.get().add(new ElytraSwap());
         Modules.get().add(new GhostContainer());
+        Modules.get().add(new InventoryCleaner());
         Modules.get().add(new NoHurtCam());
         Modules.get().add(new NoJumpDelay());
         Modules.get().add(new OldChunkNotifier());
