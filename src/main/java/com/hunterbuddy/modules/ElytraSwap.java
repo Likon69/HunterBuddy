@@ -121,6 +121,8 @@ public class ElytraSwap extends Module {
    private int chestplateSwapFailures = 0;
    private int chestplateSlot = -1;
    private ItemStack storedElytra = ItemStack.EMPTY;
+   private boolean chestplateHold = false;
+   private boolean chestplateHoldAttempted = false;
 
    public ElytraSwap() {
       super(HunterBuddyAddon.LOGISTICS_CATEGORY, "ElytraSwap", "Automatically swaps elytras when they reach low durability.");
@@ -160,6 +162,20 @@ public class ElytraSwap extends Module {
       this.chestplateSwapFailures = 0;
       this.chestplateSlot = -1;
       this.storedElytra = ItemStack.EMPTY;
+      this.chestplateHold = false;
+      this.chestplateHoldAttempted = false;
+   }
+
+   public void setChestplateHold(boolean hold) {
+      if (hold == this.chestplateHold) {
+         return;
+      }
+
+      this.chestplateHold = hold;
+      this.chestplateHoldAttempted = false;
+      if (!hold && this.protectionActive && (Boolean)this.swapOnHit.get() && (Boolean)this.autoSwapBack.get()) {
+         this.protectionTimer = 0;
+      }
    }
 
    @EventHandler
@@ -351,6 +367,33 @@ public class ElytraSwap extends Module {
 
          if (this.mc.player.hurtTime < this.lastHurtTime) {
             this.lastHurtTime = this.mc.player.hurtTime;
+         }
+
+         if (this.chestplateHold && (Boolean)this.autoSwapBack.get()) {
+            if (!this.protectionActive && !this.chestplateHoldAttempted && !this.mc.player.isGliding()) {
+               ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+               if (chestItem.getItem().equals(Items.ELYTRA)) {
+                  this.chestplateHoldAttempted = true;
+                  int bestChestplate = this.findBestChestplate();
+                  if (bestChestplate != -1) {
+                     this.storedElytra = chestItem.copy();
+                     this.chestplateSlot = bestChestplate;
+                     this.needsChestplateSwap = true;
+                     this.chestplateSwapStage = 1;
+                     this.chestplateStageTimer = 0;
+                     this.chestplateSwapFailures = 0;
+                     this.protectionActive = true;
+                     this.protectionTimer = (Integer)this.hitProtectionDuration.get();
+                     if ((Boolean)this.notifySwap.get()) {
+                        this.info("Swapping to chestplate for protection!", new Object[0]);
+                     }
+                  }
+               }
+            }
+
+            if (this.protectionActive) {
+               this.protectionTimer = (Integer)this.hitProtectionDuration.get();
+            }
          }
 
          if (this.needsChestplateSwap) {
