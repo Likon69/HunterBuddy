@@ -1266,9 +1266,32 @@ public class StashFinder extends Module {
                   }
                }
 
+               StashFinder.StashChunk beforeUpdate = null;
                if (chunk == null) {
                   chunk = new StashFinder.StashChunk(chunkPos);
                   chunk.dimension = this.getCurrentDimension();
+               } else {
+                  beforeUpdate = new StashFinder.StashChunk(chunk.chunkPos);
+                  beforeUpdate.dimension = chunk.dimension;
+                  beforeUpdate.chests = chunk.chests;
+                  beforeUpdate.trappedChests = chunk.trappedChests;
+                  beforeUpdate.barrels = chunk.barrels;
+                  beforeUpdate.shulkers = chunk.shulkers;
+                  beforeUpdate.enderChests = chunk.enderChests;
+                  beforeUpdate.furnaces = chunk.furnaces;
+                  beforeUpdate.dispensersDroppers = chunk.dispensersDroppers;
+                  beforeUpdate.hoppers = chunk.hoppers;
+                  beforeUpdate.brewingStands = chunk.brewingStands;
+                  beforeUpdate.crafters = chunk.crafters;
+                  beforeUpdate.decoratedPots = chunk.decoratedPots;
+                  beforeUpdate.banners = chunk.banners;
+                  beforeUpdate.signs = chunk.signs;
+                  beforeUpdate.hangingSigns = chunk.hangingSigns;
+                  beforeUpdate.mapItemFrames = chunk.mapItemFrames;
+                  beforeUpdate.itemFrames = chunk.itemFrames;
+                  beforeUpdate.enderPearls = chunk.enderPearls;
+                  beforeUpdate.namedEntities = chunk.namedEntities;
+                  beforeUpdate.stackedMinecarts = chunk.stackedMinecarts;
                }
 
                switch (detectionType) {
@@ -1291,12 +1314,11 @@ public class StashFinder extends Module {
                }
 
                if (chunk.getTotal() >= (Integer)this.minimumStorageCount.get() || this.meetsThresholds(chunk)) {
-                  StashFinder.StashChunk prevChunk = null;
                   int i = this.chunks.indexOf(chunk);
                   if (i < 0) {
                      this.chunks.add(chunk);
                   } else {
-                     prevChunk = this.chunks.set(i, chunk);
+                     this.chunks.set(i, chunk);
                   }
 
                   if ((Boolean)this.renderTracer.get()) {
@@ -1305,7 +1327,7 @@ public class StashFinder extends Module {
                   }
 
                   this.save();
-                  boolean isNew = prevChunk == null || !chunk.countsEqual(prevChunk);
+                  boolean isNew = beforeUpdate == null || !chunk.countsEqual(beforeUpdate);
                   if (isNew && this.meetsThresholds(chunk)) {
                      this.addWaypoint(chunk);
                   com.hunterbuddy.util.SessionStats.get().onStashFound();
