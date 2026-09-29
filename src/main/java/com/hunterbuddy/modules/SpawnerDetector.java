@@ -4082,7 +4082,9 @@ public class SpawnerDetector extends Module {
         if (bt != null) {
             BlockPos goal = autoColumn.rim() != null && mc.player.getBlockPos().getY() > autoColumn.startY() + 3
                 ? autoColumn.rim()
-                : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
+                : autoColumn.water() && mc.player.getBlockPos().getY() >= autoColumn.exitY() - 1
+                    ? new BlockPos(autoColumn.x(), autoColumn.exitY() - 1, autoColumn.z())
+                    : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
             bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
         }
     }
@@ -4420,7 +4422,10 @@ public class SpawnerDetector extends Module {
         if (!pathing && baritoneGaveUp && grounded && stateTicks > 20 && autoBaritoneRetries < 3 && !nearHole) {
             autoBaritoneRetries++;
             if (bt != null) {
-                BlockPos goal = gateRim != null ? gateRim : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
+                BlockPos goal = gateRim != null ? gateRim
+                    : autoColumn.water() && mc.player.getBlockPos().getY() >= autoColumn.exitY() - 1
+                        ? new BlockPos(autoColumn.x(), autoColumn.exitY() - 1, autoColumn.z())
+                        : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
                 bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
             }
         } else if (!pathing && baritoneGaveUp && (autoBaritoneRetries >= 3 || nearHole)) {
