@@ -2919,7 +2919,7 @@ public class SpawnerDetector extends Module {
         for (DugHoles.Feature shaft : site.entryShafts) {
             int sx = shaft.minX(), sz = shaft.minZ();
             int shaftOpen = shaft.maxY() - shaft.minY() + 1;
-            if (shaftOpen < 8) {
+            if (shaftOpen < 4) {
                 if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: too short", sx, sz));
                 continue;
             }
@@ -2952,10 +2952,6 @@ public class SpawnerDetector extends Module {
                 }
                 if (fallRun > autoMaxFall.get()) {
                     if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: fall", sx, sz));
-                    continue;
-                }
-                if (shaftPlan.blocksToBreak() > 5) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %d blocks missing", sx, sz, shaftPlan.blocksToBreak()));
                     continue;
                 }
             } else {
@@ -3025,9 +3021,14 @@ public class SpawnerDetector extends Module {
         if (column == null) column = bestBlocked;
 
         if (bestShaftPlan != null) {
-            if (sideHoleUseLogged.add(site.center)) autoLog("PLAN", site.center, String.format("using existing shaft %d,%d %s open=%d missing=%d",
-                bestShaftPlan.x(), bestShaftPlan.z(), bestShaftLabel, bestShaftOpen, bestShaftPlan.blocksToBreak()));
-            return bestShaftPlan;
+            if (bestShaftPlan.blocksToBreak() <= 5 || column == null || column.skyBlocked()
+                || bestShaftPlan.blocksToBreak() < column.blocksToBreak()) {
+                if (sideHoleUseLogged.add(site.center)) autoLog("PLAN", site.center, String.format("using existing shaft %d,%d %s open=%d missing=%d",
+                    bestShaftPlan.x(), bestShaftPlan.z(), bestShaftLabel, bestShaftOpen, bestShaftPlan.blocksToBreak()));
+                return bestShaftPlan;
+            }
+            if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d not used: missing=%d column=%d",
+                bestShaftPlan.x(), bestShaftPlan.z(), bestShaftPlan.blocksToBreak(), column.blocksToBreak()));
         }
 
         ColumnPlan side = findSideHole(site);
@@ -3070,7 +3071,6 @@ public class SpawnerDetector extends Module {
         SideHoleCost sc = computeSideHoleCost(siteCenter, room, x, z);
         if (sc == null) return new SideHoleAttempt(null, null);
         if (sc.rejectReason() != null) return new SideHoleAttempt(null, sc.rejectReason());
-        if (sc.vertCost() > 5) return new SideHoleAttempt(null, sc.vertCost() + " blocks missing");
         return finishSideHolePlan(siteCenter, room, x, z, sc);
     }
 
