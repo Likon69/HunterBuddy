@@ -3463,7 +3463,6 @@ public class SpawnerDetector extends Module {
         if (!mc.world.getChunkManager().isChunkLoaded(site.center.getX() >> 4, site.center.getZ() >> 4)) {
             return QualResult.reject("chunk not loaded");
         }
-        if (site.modern) return QualResult.reject("not 1.12");
 
         double dx = site.center.getX() + 0.5 - mc.player.getX();
         double dz = site.center.getZ() + 0.5 - mc.player.getZ();
