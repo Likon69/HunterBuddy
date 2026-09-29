@@ -5365,6 +5365,14 @@ public class SpawnerDetector extends Module {
                 autoLog("ROOM", target, String.format("approach blocked, broken %d,%d,%d block=%s",
                     autoApproachBreakPos.getX(), autoApproachBreakPos.getY(), autoApproachBreakPos.getZ(), autoApproachBreakLabel));
                 autoApproachBreakCount++;
+                autoRoomDebrisBreaks.merge(autoApproachBreakPos, 1, Integer::sum);
+                autoApproachBreakPos = null;
+                autoApproachBaselineDist = eyeDist;
+                autoApproachTicks = 1;
+            } else if (autoApproachTicks > 200) {
+                autoLog("ROOM", target, String.format("approach blocked, %d,%d,%d not broken in 10s block=%s, leaving it",
+                    autoApproachBreakPos.getX(), autoApproachBreakPos.getY(), autoApproachBreakPos.getZ(), autoApproachBreakLabel));
+                autoRoomDebrisBreaks.put(autoApproachBreakPos, 16);
                 autoApproachBreakPos = null;
                 autoApproachBaselineDist = eyeDist;
                 autoApproachTicks = 1;
@@ -5391,6 +5399,7 @@ public class SpawnerDetector extends Module {
             if (obstacle != null) {
                 BlockState obstacleState = mc.world.getBlockState(obstacle);
                 autoApproachBreakPos = obstacle;
+                autoApproachTicks = 1;
                 autoApproachBreakLabel = Registries.BLOCK.getId(obstacleState.getBlock()).getPath();
                 autoLog("ROOM", target, String.format("approach blocked at %d,%d,%d block=%s, breaking",
                     obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoApproachBreakLabel));
@@ -5435,7 +5444,8 @@ public class SpawnerDetector extends Module {
             && !isLavaNearShaft(obstacle, obstacle.up())
             && obstacle.getY() >= mc.player.getBlockPos().getY()
             && mc.player.getEyePos().distanceTo(Vec3d.ofCenter(obstacle)) <= 4.2
-            && (!falling || autoApproachBreakCount < 16);
+            && (!falling || autoApproachBreakCount < 16)
+            && autoRoomDebrisBreaks.getOrDefault(obstacle, 0) < (falling ? 16 : 2);
     }
 
     private BlockPos approachFallbackCandidate(BlockPos feet, int stepX, int stepZ, BlockPos target, BlockPos aimAt) {
