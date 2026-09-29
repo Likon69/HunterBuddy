@@ -7614,8 +7614,8 @@ public class SpawnerDetector extends Module {
         if (cached != null) return cached;
         int ccx = center.getX() >> 4, ccz = center.getZ() >> 4;
         boolean allLoaded = true;
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dz = -5; dz <= 5; dz++) {
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
                 WorldChunk chunk = mc.world.getChunkManager().getWorldChunk(ccx + dx, ccz + dz);
                 if (chunk == null) {
                     allLoaded = false;
