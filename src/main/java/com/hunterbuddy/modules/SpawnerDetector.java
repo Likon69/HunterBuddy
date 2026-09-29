@@ -5166,10 +5166,12 @@ public class SpawnerDetector extends Module {
             if (state.getBlock() == Blocks.SPAWNER) continue;
             if (isContainerPresent(pos)) continue;
 
-            HitResult losHit = mc.world.raycast(new RaycastContext(
-                eye, Vec3d.ofCenter(pos), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
-            if (losHit instanceof BlockHitResult && losHit.getType() == HitResult.Type.BLOCK
-                && !((BlockHitResult) losHit).getBlockPos().equals(pos)) continue;
+            if (!autoSite.roomContainers.contains(pos.down())) {
+                HitResult losHit = mc.world.raycast(new RaycastContext(
+                    eye, Vec3d.ofCenter(pos), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+                if (losHit instanceof BlockHitResult && losHit.getType() == HitResult.Type.BLOCK
+                    && !((BlockHitResult) losHit).getBlockPos().equals(pos)) continue;
+            }
 
             if (autoRoomDebrisIgnored.contains(pos)) continue;
             sawDebris = true;
@@ -6240,7 +6242,8 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickRoomDebris(BlockPos pos) {
-        int regenLimit = mc.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.FallingBlock ? 16 : 2;
+        int regenLimit = mc.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.FallingBlock
+            ? (autoSite.roomContainers.contains(pos.down()) ? Integer.MAX_VALUE : 16) : 2;
         if (!pos.equals(autoRoomDebrisCurrent) && autoRoomDebrisBreaks.getOrDefault(pos, 0) >= regenLimit) {
             autoRoomDebrisIgnored.add(pos);
             autoRoomDebrisCurrent = null;
