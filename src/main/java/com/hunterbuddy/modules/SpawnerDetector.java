@@ -4406,7 +4406,9 @@ public class SpawnerDetector extends Module {
         boolean baritoneGaveUp = bt == null || !bt.getCustomGoalProcess().isActive();
         int nearKeyX = gateRim != null ? gateRim.getX() : autoColumn.x();
         int nearKeyZ = gateRim != null ? gateRim.getZ() : autoColumn.z();
-        boolean nearHole = Math.hypot((nearKeyX + 0.5) - mc.player.getX(), (nearKeyZ + 0.5) - mc.player.getZ()) <= 3.0;
+        int nearKeyY = gateRim != null ? gateRim.getY() : autoColumn.startY();
+        boolean nearHole = Math.hypot((nearKeyX + 0.5) - mc.player.getX(), (nearKeyZ + 0.5) - mc.player.getZ()) <= 3.0
+            && mc.player.getBlockPos().getY() == nearKeyY;
         if (!pathing && !baritoneGaveUp) {
             autoWalkIdleTicks++;
             if (nearHole || autoWalkIdleTicks >= 100) {
