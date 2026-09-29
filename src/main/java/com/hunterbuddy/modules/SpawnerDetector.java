@@ -4967,8 +4967,9 @@ public class SpawnerDetector extends Module {
             if (autoDigDisplacedSinceMs == 0) {
                 autoDigDisplacedSinceMs = System.currentTimeMillis();
                 autoLog("DIG", autoSite.center, String.format("displaced gap=%.2f", gap));
-            } else if (System.currentTimeMillis() - autoDigDisplacedSinceMs > 10_000L) {
-                abort("displaced from the column");
+            } else if (System.currentTimeMillis() - autoDigDisplacedSinceMs > 3_000L) {
+                releaseAllAutoKeys();
+                enterState(AutoState.WALK, String.format("displaced gap=%.2f, back to the column", gap));
             }
             return;
         }
