@@ -8601,7 +8601,7 @@ public class SpawnerDetector extends Module {
         }
 
         mc.player.setYaw(autoTakeoffYaw);
-        mc.player.setPitch(-60.0f);
+        mc.player.setPitch(-90.0f);
 
         if (stateTicks > 40 * 20) {
             if (takeoff.isActive()) takeoff.cancel();
