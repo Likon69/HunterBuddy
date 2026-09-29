@@ -100,6 +100,7 @@ public class RocketFly extends Module {
    }
 
    public void onActivate() {
+      HunterBuddyAddon.LOG.info("[RocketFly] activated", new Throwable("RocketFly activation stack"));
       this.launched = false;
       this.yTarget = -1.0;
       this.takeoffGaveUp = false;
