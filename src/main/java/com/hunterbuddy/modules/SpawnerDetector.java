@@ -410,6 +410,9 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> sideHoleLogged = new java.util.HashSet<>();
     private final Set<BlockPos> sideHoleUseLogged = new java.util.HashSet<>();
     private final Set<BlockPos> entryShaftLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> noSafeColumnLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> lowGlideLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> floatingBlockLogged = new java.util.HashSet<>();
     private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
 
     private long totalTicks;
@@ -424,6 +427,10 @@ public class SpawnerDetector extends Module {
     private record ColumnPlan(int x, int z, int startY, int exitY, boolean water,
                                int blocksToBreak, int waterCells, int maxGap, boolean skyBlocked,
                                int holeTopY, BlockPos rim, boolean side, BlockPos sideEntry) {}
+
+    private record ColumnEval(ColumnPlan plan, String rejectReason) {}
+
+    private record ColumnReject(int x, int z, String reason) {}
 
     private record ExitShaft(int x, int z, int bottomY, int exitY, boolean water, boolean skyBlocked, BlockPos entry) {}
 
@@ -727,6 +734,9 @@ public class SpawnerDetector extends Module {
         sideHoleLogged.clear();
         sideHoleUseLogged.clear();
         entryShaftLogged.clear();
+        noSafeColumnLogged.clear();
+        lowGlideLogged.clear();
+        floatingBlockLogged.clear();
         jungleTempleSkipLogged.clear();
         jungleTempleLowestYCache.clear();
         monumentCache.clear();
@@ -2602,6 +2612,48 @@ public class SpawnerDetector extends Module {
         return state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.LOGS);
     }
 
+    private boolean hasTwentyDryOpenBelow(int x, int y, int z, BlockPos.Mutable cursor) {
+        for (int dy = 1; dy <= 20; dy++) {
+            cursor.set(x, y - dy, z);
+            BlockState state = mc.world.getBlockState(cursor);
+            if (!isOpenState(state, cursor) || !state.getFluidState().isEmpty()) return false;
+        }
+        return true;
+    }
+
+    private int descendPastFloatingBlocks(BlockPos siteCenter, int x, int z, int y, int minY, boolean skipWater, BlockPos.Mutable cursor) {
+        while (y > minY) {
+            cursor.set(x, y, z);
+            BlockState state = mc.world.getBlockState(cursor);
+            if ((!state.getFluidState().isIn(FluidTags.WATER) || skipWater) && isSurfaceSkippable(state, cursor)) {
+                y--;
+                continue;
+            }
+            if (!hasTwentyDryOpenBelow(x, y, z, cursor)) break;
+            if (siteCenter != null && floatingBlockLogged.add(siteCenter)) {
+                autoLog("PLAN", siteCenter, String.format("column %d,%d floating block at y=%d ignored", x, z, y));
+            }
+            y--;
+        }
+        return y;
+    }
+
+    private int descendPastFloatingBlockTop(BlockPos siteCenter, int x, int z, int y, int minY, BlockPos.Mutable cursor) {
+        while (y > minY && hasTwentyDryOpenBelow(x, y, z, cursor)) {
+            if (siteCenter != null && floatingBlockLogged.add(siteCenter)) {
+                autoLog("PLAN", siteCenter, String.format("column %d,%d floating block at y=%d ignored", x, z, y));
+            }
+            y--;
+            while (y > minY) {
+                cursor.set(x, y, z);
+                BlockState state = mc.world.getBlockState(cursor);
+                if (!isOpenState(state, cursor) || !state.getFluidState().isEmpty()) break;
+                y--;
+            }
+        }
+        return y;
+    }
+
     private boolean isLava(BlockState state) {
         return state.getFluidState().isIn(FluidTags.LAVA);
     }
@@ -2642,7 +2694,15 @@ public class SpawnerDetector extends Module {
     }
 
     private ColumnPlan evaluateColumn(Room room, int x, int z, int maxFallAllowed) {
-        if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return null;
+        return evaluateColumnResult(room, x, z, maxFallAllowed).plan();
+    }
+
+    private ColumnEval evaluateColumnResult(Room room, int x, int z, int maxFallAllowed) {
+        return evaluateColumnResult(null, room, x, z, maxFallAllowed);
+    }
+
+    private ColumnEval evaluateColumnResult(BlockPos siteCenter, Room room, int x, int z, int maxFallAllowed) {
+        if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return new ColumnEval(null, "chunk not loaded");
         BlockPos.Mutable cursor = new BlockPos.Mutable();
 
         BlockState floorState = mc.world.getBlockState(cursor.set(x, room.cy() - 1, z));
@@ -2653,10 +2713,11 @@ public class SpawnerDetector extends Module {
                 fy--;
                 s = mc.world.getBlockState(cursor.set(x, fy, z));
             }
-            if (isLava(s)) return null;
+            if (isLava(s)) return new ColumnEval(null, "lava");
         }
 
         int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+        topY = descendPastFloatingBlocks(siteCenter, x, z, topY, room.cy() + 4, false, cursor);
         BlockState topState = mc.world.getBlockState(cursor.set(x, topY, z));
 
         int startY, exitY;
@@ -2671,28 +2732,27 @@ public class SpawnerDetector extends Module {
                 y--;
             }
             int fond = y - 1;
-            if (isLava(mc.world.getBlockState(cursor.set(x, fond, z)))) return null;
+            if (isLava(mc.world.getBlockState(cursor.set(x, fond, z)))) return new ColumnEval(null, "lava");
             startY = fond + 1;
             exitY = waterTop + 1;
             water = true;
-            if (startY < room.cy() + 4) return null;
+            if (startY < room.cy() + 4) return new ColumnEval(null, "too low start");
             if (startY == room.cy() + 4
                 && (isLava(mc.world.getBlockState(cursor.set(x, startY, z)))
                     || isLava(mc.world.getBlockState(cursor.set(x + 1, startY, z)))
                     || isLava(mc.world.getBlockState(cursor.set(x - 1, startY, z)))
                     || isLava(mc.world.getBlockState(cursor.set(x, startY, z + 1)))
                     || isLava(mc.world.getBlockState(cursor.set(x, startY, z - 1))))) {
-                return null;
+                return new ColumnEval(null, "lava");
             }
         } else {
             int y = topY;
-            while (y > room.cy() + 4 && isSurfaceSkippable(mc.world.getBlockState(cursor.set(x, y, z)), cursor)) y--;
             startY = y + 1;
             exitY = y + 1;
             water = false;
         }
 
-        if (startY < room.cy() - 16) return null;
+        if (startY < room.cy() - 16) return new ColumnEval(null, "too low start");
 
         int[][] neighbors = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         int blocksToBreak = 0, waterCells = 0, maxGap = 0, airRun = 0;
@@ -2700,7 +2760,7 @@ public class SpawnerDetector extends Module {
         for (int y = startY - 1; y >= room.cy() + 4; y--) {
             for (int[] n : neighbors) {
                 cursor.set(x + n[0], y, z + n[1]);
-                if (isLava(mc.world.getBlockState(cursor))) return null;
+                if (isLava(mc.world.getBlockState(cursor))) return new ColumnEval(null, "lava");
             }
 
             BlockState center = mc.world.getBlockState(cursor.set(x, y, z));
@@ -2713,7 +2773,7 @@ public class SpawnerDetector extends Module {
                 airRun++;
                 maxGap = Math.max(maxGap, airRun);
             } else {
-                if (airRun > maxFallAllowed) return null;
+                if (airRun > maxFallAllowed) return new ColumnEval(null, "fall " + airRun);
                 airRun = 0;
                 blocksToBreak++;
             }
@@ -2737,7 +2797,7 @@ public class SpawnerDetector extends Module {
             holeTopY = rr.holeTopY();
         }
 
-        return new ColumnPlan(x, z, startY, exitY, water, blocksToBreak, waterCells, maxGap, skyBlocked, holeTopY, rim, false, null);
+        return new ColumnEval(new ColumnPlan(x, z, startY, exitY, water, blocksToBreak, waterCells, maxGap, skyBlocked, holeTopY, rim, false, null), null);
     }
 
     private RimResult computeRim(int x, int z, int startY) {
@@ -2866,7 +2926,7 @@ public class SpawnerDetector extends Module {
                     if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: open floor below", sx, sz));
                     continue;
                 }
-                shaftPlan = evaluateColumn(room, sx, sz, autoMaxFall.get());
+                shaftPlan = evaluateColumnResult(site.center, room, sx, sz, autoMaxFall.get()).plan();
                 if (shaftPlan == null) {
                     if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: plan null", sx, sz));
                     continue;
@@ -2891,7 +2951,7 @@ public class SpawnerDetector extends Module {
                 }
             } else {
                 label = "beside";
-                SideHoleAttempt attempt = evaluateSideHolePosition(room, sx, sz);
+                SideHoleAttempt attempt = evaluateSideHolePosition(site.center, room, sx, sz);
                 if (attempt.plan() == null) {
                     if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
                         attempt.rejectReason() != null ? attempt.rejectReason() : "no plan"));
@@ -2923,10 +2983,33 @@ public class SpawnerDetector extends Module {
 
         ColumnPlan bestBlocked = null;
         ColumnPlan column = null;
+        List<ColumnReject> columnRejects = new ArrayList<>();
+        ColumnPlan fallFallback = null;
+        String fallFallbackReason = null;
+        ColumnPlan openFloorFallback = null;
         for (int[] c : candidates) {
-            if (floorOpenBelow(room, c[0], c[1])) continue;
-            ColumnPlan plan = evaluateColumn(room, c[0], c[1]);
-            if (plan == null) continue;
+            if (floorOpenBelow(room, c[0], c[1])) {
+                columnRejects.add(new ColumnReject(c[0], c[1], "open floor below"));
+                if (openFloorFallback == null) {
+                    ColumnPlan plan = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get()).plan();
+                    if (plan != null) openFloorFallback = plan;
+                }
+                continue;
+            }
+            ColumnEval eval = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get());
+            ColumnPlan plan = eval.plan();
+            if (plan == null) {
+                String reason = eval.rejectReason() != null ? eval.rejectReason() : "no plan";
+                columnRejects.add(new ColumnReject(c[0], c[1], reason));
+                if (fallFallback == null && reason.startsWith("fall ")) {
+                    ColumnPlan retry = evaluateColumnResult(site.center, room, c[0], c[1], Integer.MAX_VALUE).plan();
+                    if (retry != null) {
+                        fallFallback = retry;
+                        fallFallbackReason = reason;
+                    }
+                }
+                continue;
+            }
             if (!plan.skyBlocked()) { column = plan; break; }
             if (bestBlocked == null) bestBlocked = plan;
         }
@@ -2946,6 +3029,21 @@ public class SpawnerDetector extends Module {
             return side;
         }
 
+        if (column == null) {
+            ColumnPlan fallback = fallFallback != null ? fallFallback : openFloorFallback;
+            String fallbackReason = fallFallback != null ? fallFallbackReason : "open floor below";
+            if (noSafeColumnLogged.add(site.center)) {
+                for (ColumnReject reject : columnRejects) {
+                    autoLog("PLAN", site.center, String.format("column %d,%d refused: %s", reject.x(), reject.z(), reject.reason()));
+                }
+                if (fallback != null) {
+                    autoLog("PLAN", site.center, String.format("no safe column, digging anyway at %d,%d reason=%s",
+                        fallback.x(), fallback.z(), fallbackReason));
+                }
+            }
+            if (fallback != null) return fallback;
+        }
+
         return column;
     }
 
@@ -2956,25 +3054,30 @@ public class SpawnerDetector extends Module {
     }
 
     private SideHoleAttempt evaluateSideHolePosition(Room room, int x, int z) {
-        SideHoleCost sc = computeSideHoleCost(room, x, z);
+        return evaluateSideHolePosition(null, room, x, z);
+    }
+
+    private SideHoleAttempt evaluateSideHolePosition(BlockPos siteCenter, Room room, int x, int z) {
+        SideHoleCost sc = computeSideHoleCost(siteCenter, room, x, z);
         if (sc == null) return new SideHoleAttempt(null, null);
         if (sc.rejectReason() != null) return new SideHoleAttempt(null, sc.rejectReason());
         if (sc.vertCost() > 5) return new SideHoleAttempt(null, sc.vertCost() + " blocks missing");
-        return finishSideHolePlan(room, x, z, sc);
+        return finishSideHolePlan(siteCenter, room, x, z, sc);
     }
 
     private SideHoleCost computeSideHoleCost(Room room, int x, int z) {
+        return computeSideHoleCost(null, room, x, z);
+    }
+
+    private SideHoleCost computeSideHoleCost(BlockPos siteCenter, Room room, int x, int z) {
         int cx = room.cx(), cz = room.cz(), cy = room.cy(), k = room.k(), p = room.p();
         BlockPos.Mutable cursor = new BlockPos.Mutable();
 
         if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return null;
 
         int y = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+        y = descendPastFloatingBlocks(siteCenter, x, z, y, cy - 2, true, cursor);
         BlockState state = mc.world.getBlockState(cursor.set(x, y, z));
-        while (y > cy - 2 && isSurfaceSkippable(state, cursor)) {
-            y--;
-            state = mc.world.getBlockState(cursor.set(x, y, z));
-        }
 
         if (isLava(state)) return new SideHoleCost(y + 1, 0, 0, 0, 0, "lava");
 
@@ -3071,8 +3174,13 @@ public class SpawnerDetector extends Module {
     }
 
     private SideHoleAttempt finishSideHolePlan(Room room, int x, int z, SideHoleCost sc) {
+        return finishSideHolePlan(null, room, x, z, sc);
+    }
+
+    private SideHoleAttempt finishSideHolePlan(BlockPos siteCenter, Room room, int x, int z, SideHoleCost sc) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+        topY = descendPastFloatingBlockTop(siteCenter, x, z, topY, room.cy() - 2, cursor);
         int exitY = topY + 1;
         boolean water = mc.world.getBlockState(cursor.set(x, topY, z)).getFluidState().isIn(FluidTags.WATER);
 
@@ -3125,7 +3233,7 @@ public class SpawnerDetector extends Module {
                 boolean zAligned = z >= cz - p && z <= cz + p;
                 if (xAligned && zAligned) continue;
 
-                SideHoleCost sc = computeSideHoleCost(room, x, z);
+                SideHoleCost sc = computeSideHoleCost(site.center, room, x, z);
                 if (sc == null) continue;
                 if (sc.rejectReason() != null) {
                     rejects.add(new SideHoleReject(x, z, sc.bottomFeet(), sc.rejectReason()));
@@ -3136,7 +3244,7 @@ public class SpawnerDetector extends Module {
                 double distSq = dx * dx + dz * dz;
 
                 if (sc.cost() < bestCost || (sc.cost() == bestCost && distSq < bestDistSq)) {
-                    SideHoleAttempt attempt = finishSideHolePlan(room, x, z, sc);
+                    SideHoleAttempt attempt = finishSideHolePlan(site.center, room, x, z, sc);
                     if (attempt.plan() == null) {
                         rejects.add(new SideHoleReject(x, z, sc.bottomFeet(), attempt.rejectReason()));
                         continue;
@@ -3400,11 +3508,6 @@ public class SpawnerDetector extends Module {
             return QualResult.reject("no respiration for water column");
         }
 
-        if (!walkChain && gliding) {
-            double H = mc.player.getY() - plan.exitY();
-            if (H < 0.2 * dist + 20) return QualResult.reject("trop bas pour planer");
-        }
-
         return QualResult.ok(plan);
     }
 
@@ -3417,7 +3520,12 @@ public class SpawnerDetector extends Module {
         double bestDistSq = Double.MAX_VALUE;
 
         for (Site site : sites.values()) {
-            if (!qualifiesForAuto(site)) continue;
+            if (!qualifiesForAuto(site)) {
+                if (!site.roomContainers.isEmpty()) {
+                    logSkipOnce(site.center, "score too low score=" + site.score);
+                }
+                continue;
+            }
 
             QualResult qr = evaluateQualification(site);
             if (qr.reject() != null) {
@@ -3483,6 +3591,10 @@ public class SpawnerDetector extends Module {
         double dz = site.center.getZ() + 0.5 - mc.player.getZ();
         double D = Math.hypot(dx, dz);
         double H = mc.player.getY() - plan.exitY();
+        double need = 0.2 * D + 20;
+        if (mc.player.isGliding() && H < need && lowGlideLogged.add(site.center)) {
+            autoLog("PLAN", site.center, String.format("low glide H=%.1f need=%.1f, going anyway", H, need));
+        }
 
         String rimStr = plan.rim() != null
             ? String.format("%d,%d,%d", plan.rim().getX(), plan.rim().getY(), plan.rim().getZ())
@@ -5864,13 +5976,20 @@ public class SpawnerDetector extends Module {
 
         for (Site site : sites.values()) {
             if (site.center.equals(finishedSite.center)) continue;
-            if (!qualifiesForAuto(site)) continue;
 
             double dx = site.center.getX() + 0.5 - mc.player.getX();
             double dz = site.center.getZ() + 0.5 - mc.player.getZ();
             double distSq = dx * dx + dz * dz;
 
             if (finishedFlooded && distSq > 32.0 * 32.0) continue;
+
+            if (!qualifiesForAuto(site)) {
+                if (!site.roomContainers.isEmpty() && distSq <= 32.0 * 32.0 && distSq < nearestRejectDistSq) {
+                    nearestRejectDistSq = distSq;
+                    nearestRejectReason = "score too low";
+                }
+                continue;
+            }
 
             QualResult qr = evaluateQualification(site, false, true);
             if (qr.reject() != null) {
@@ -5888,9 +6007,13 @@ public class SpawnerDetector extends Module {
         }
 
         if (chainSite == null) {
+            String reason = finishedFlooded ? " reason=flooded room, nothing within 32"
+                : (nearestRejectReason != null ? " reason=" + nearestRejectReason : "");
+            if (finishedFlooded && nearestRejectReason != null) {
+                reason += ", nearest=" + nearestRejectReason;
+            }
             autoLog("CHAIN", finishedSite.center, "no underground chain target"
-                + (finishedFlooded ? " reason=flooded room, nothing within 32"
-                    : (nearestRejectReason != null ? " reason=" + nearestRejectReason : "")));
+                + reason);
             return false;
         }
 
