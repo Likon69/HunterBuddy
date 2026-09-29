@@ -31,6 +31,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -100,11 +101,13 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.entity.decoration.GlowItemFrameEntity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.mob.AbstractSkeletonEntity;
 import net.minecraft.entity.mob.SkeletonEntity;
+import net.minecraft.entity.mob.WitchEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.FireworkRocketEntity;
 import net.minecraft.entity.vehicle.ChestMinecartEntity;
@@ -359,7 +362,7 @@ public class SpawnerDetector extends Module {
     private final Setting<Integer> autoMaxFall = sgAuto.add(new IntSetting.Builder()
         .name("auto-max-fall")
         .description("Largest air gap allowed in the column to dig, unless it ends on water.")
-        .defaultValue(8).min(3).max(30).sliderRange(3, 30).build());
+        .defaultValue(8).min(3).sliderRange(3, 200).build());
 
     private final Setting<Boolean> autoAvoidPlayers = sgAuto.add(new BoolSetting.Builder()
         .name("auto-avoid-players")
@@ -398,11 +401,16 @@ public class SpawnerDetector extends Module {
 
     private final Set<BlockPos> rejected = ConcurrentHashMap.newKeySet();
     private final Set<Long> mossyScanned = ConcurrentHashMap.newKeySet();
+    private int mossyScanCursor = 0;
+    private final Set<BlockPos> spawnerlessWaiting = ConcurrentHashMap.newKeySet();
+    private final Map<Long, List<BlockPos>> mossyByChunk = new ConcurrentHashMap<>();
     private final Map<BlockPos, Site> sites = new LinkedHashMap<>();
     private final Map<BlockPos, PendingSite> pendingEval = new LinkedHashMap<>();
     private final Set<BlockPos> approached = new java.util.HashSet<>();
     private final Set<BlockPos> sideHoleLogged = new java.util.HashSet<>();
     private final Set<BlockPos> sideHoleUseLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> entryShaftLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
 
     private long totalTicks;
     private int scanCooldown;
@@ -422,6 +430,10 @@ public class SpawnerDetector extends Module {
     private record RimResult(BlockPos rim, int holeTopY) {}
 
     private record SideHoleReject(int x, int z, int bottomFeet, String reason) {}
+
+    private record SideHoleCost(int bottomFeet, int tx, int tz, int cost, int vertCost, String rejectReason) {}
+
+    private record SideHoleAttempt(ColumnPlan plan, String rejectReason) {}
 
     private record QualResult(String reject, ColumnPlan plan) {
         static QualResult ok(ColumnPlan plan) { return new QualResult(null, plan); }
@@ -447,6 +459,7 @@ public class SpawnerDetector extends Module {
     private int stateTicks;
     private Site autoSite;
     private ColumnPlan autoColumn;
+    private boolean autoChestplateAllowed;
     private ExitShaft autoExitShaft;
     private Site autoStackedPartner;
     private boolean autoRunAbandoned;
@@ -463,10 +476,12 @@ public class SpawnerDetector extends Module {
 
     private boolean autoWalkDirect;
     private boolean autoWalkStepping;
+    private boolean autoWalkSwimOverride;
 
     private BlockPos autoLandSpot;
     private int autoLandSpotAttempts;
     private boolean autoLandSpotGaveUpLogged;
+    private int autoWaterDiveClearTicks;
 
     private List<BlockPos> autoRoomQueue = new ArrayList<>();
     private int autoRoomIndex;
@@ -487,6 +502,19 @@ public class SpawnerDetector extends Module {
     private Vec3d autoRoomSpawnerAnchor;
     private boolean autoRoomSpawnerRepositioning;
 
+    private BlockPos autoRoomStepOffTarget;
+    private BlockPos autoRoomStepOffCell;
+    private Set<BlockPos> autoRoomStepOffTried = new java.util.HashSet<>();
+    private int autoRoomStepOffTicks;
+    private double autoRoomStepOffBaselineDist;
+    private BlockPos autoRoomStepOffNoCellLoggedTarget;
+
+    private BlockPos autoRoomPillarTarget;
+    private int autoRoomPillarPhase;
+    private int autoRoomPillarFeetX;
+    private int autoRoomPillarFeetY;
+    private int autoRoomPillarFeetZ;
+
     private final Set<BlockPos> autoRoomDebrisDeferred = new java.util.HashSet<>();
     private final Map<BlockPos, Integer> autoRoomDebrisBreaks = new HashMap<>();
     private final Set<BlockPos> autoRoomDebrisIgnored = new java.util.HashSet<>();
@@ -499,16 +527,43 @@ public class SpawnerDetector extends Module {
     private BlockPos autoApproachCell;
     private int autoApproachTicks;
     private double autoApproachBaselineDist;
+    private BlockPos autoApproachBreakPos;
+    private String autoApproachBreakLabel;
+    private int autoApproachBreakCount;
 
     private boolean autoExitWalkingLogged;
 
     private double autoClimbTargetY;
     private int autoResumeClimbTries;
+    private int autoClimbLostGlideRetries;
     private boolean autoExitReturning;
+    private int autoExitNoPathChecks;
+    private boolean autoExitSelfWalk;
+    private double autoExitSelfBestDist;
+    private int autoExitSelfStuckTicks;
+    private BlockPos autoExitBreakPos;
+    private String autoExitBreakLabel;
     private boolean autoWaterJumpVertical;
     private int autoWalkDirectDryTicks;
     private int autoWalkDirectStuckTicks;
+    private int autoWalkDirectSwimStuckTicks;
+    private BlockPos autoWalkDirectSwimStuckPos;
+    private boolean autoWalkDirectSwimBreaking;
+    private int autoWalkDirectSwimBreakStage;
+    private BlockPos autoWalkDirectSwimBreakTarget;
+    private String autoWalkDirectSwimBreakBlockName;
+    private int autoWalkDirectSwimBrokenTotal;
     private boolean autoWalkKeyLogged;
+    private int autoWalkStuckTicks;
+    private double autoWalkStuckLastDist;
+    private boolean autoWalkStuckUseBreak;
+    private boolean autoWalkStuckBreaking;
+    private BlockPos autoWalkStuckBreakPos;
+    private String autoWalkStuckBreakLabel;
+    private double autoWalkBestDist;
+    private int autoWalkBestDistTick;
+    private boolean autoWalkReapproach;
+    private int autoWalkReapproachCount;
     private boolean autoFinalBlockedLogged;
     private boolean autoFinalDiving;
     private int autoFinalLastRocketTick;
@@ -520,6 +575,8 @@ public class SpawnerDetector extends Module {
     private boolean autoClimbStuck;
     private int autoClimbStuckStartTick;
     private int autoClimbStuckWaterReturns;
+    private double autoClimbWindowY;
+    private int autoClimbWindowTick;
 
     private boolean autoPaused;
     private String autoPauseReason;
@@ -529,6 +586,7 @@ public class SpawnerDetector extends Module {
     private int autoLastHurtTime;
     private long autoLastHitMs;
     private boolean autoHitThisTick;
+    private final Set<Integer> autoHostileIds = new HashSet<>();
     private Entity autoShaftChaseTarget;
     private double autoShaftChaseLastDist;
     private int autoShaftChaseStuckTicks;
@@ -556,6 +614,9 @@ public class SpawnerDetector extends Module {
     private int autoTakeoffOutcome;
     private String autoTakeoffFailReason;
     private float autoTakeoffYaw;
+    private boolean autoTakeoffFought;
+    private int autoTakeoffRetries;
+    private Set<BlockPos> autoAscendFailedPoints = new java.util.HashSet<>();
 
     private BlockPos autoTunnelGoal;
 
@@ -589,6 +650,22 @@ public class SpawnerDetector extends Module {
 
     private List<BlockPos> autoAscendTargets = List.of();
 
+    private BlockPos autoAscendStuckPos;
+    private int autoAscendStuckTicks;
+    private boolean autoAscendBreakingUp;
+    private BlockPos autoAscendBreakPos;
+    private String autoAscendBreakLabel;
+    private int autoAscendRadius;
+    private boolean autoAscendTowerActive;
+    private int autoAscendPillarPhase;
+    private int autoAscendPillarFeetX, autoAscendPillarFeetY, autoAscendPillarFeetZ;
+    private int autoAscendFallingBrokenCount;
+    private int autoAscendTimeoutBaseTick;
+    private double autoAscendTowerBestY;
+    private int autoAscendSurfacedCount;
+    private BlockPos autoAscendArrivedAt;
+    private int autoAscendTowerHoldUntil;
+
     private int autoWaterJumpAttempts;
     private int autoWaterJumpTapPhase;
 
@@ -608,7 +685,7 @@ public class SpawnerDetector extends Module {
 
     private int autoRoomClimbMode;
     private int autoRoomClimbPillarPhase;
-    private int autoRoomClimbJumpTapTicks;
+    private int autoRoomClimbPillarStallTicks;
     private boolean autoRoomClimbWater;
     private int autoRoomClimbFeetX;
     private int autoRoomClimbFeetY;
@@ -617,6 +694,11 @@ public class SpawnerDetector extends Module {
     private List<BlockPos> autoRoomClimbBaritoneCandidates = List.of();
     private int autoRoomClimbBaritoneIndex;
     private long autoRoomClimbBaritoneTryStartMs;
+    private Vec3d autoRoomClimbBaritoneMoveAnchor;
+    private long autoRoomClimbBaritoneMoveAnchorMs;
+    private BlockPos autoRoomClimbSwimTarget;
+    private boolean autoRoomClimbSwimIsFloorHole;
+    private long autoRoomClimbSwimStartMs;
 
     public SpawnerDetector() {
         super(HunterBuddyAddon.VISUALS_CATEGORY, "SpawnerDetector",
@@ -636,11 +718,18 @@ public class SpawnerDetector extends Module {
         trialFound.clear();
         rejected.clear();
         mossyScanned.clear();
+        mossyScanCursor = 0;
+        spawnerlessWaiting.clear();
+        mossyByChunk.clear();
         sites.clear();
         pendingEval.clear();
         approached.clear();
         sideHoleLogged.clear();
         sideHoleUseLogged.clear();
+        entryShaftLogged.clear();
+        jungleTempleSkipLogged.clear();
+        jungleTempleLowestYCache.clear();
+        monumentCache.clear();
     }
 
     @Override
@@ -660,6 +749,7 @@ public class SpawnerDetector extends Module {
     @Override
     public void onDeactivate() {
         purgeAllState();
+        setChestplateHold(false);
         if (state != AutoState.IDLE && state != AutoState.FAILED) {
             if (log.get()) HunterBuddyAddon.LOG.info("[SpawnerDetector/auto] disabled state={} - cleaning up", state);
             if (takeoff.isActive()) takeoff.cancel();
@@ -672,6 +762,7 @@ public class SpawnerDetector extends Module {
 
     private void resetAutoState() {
         state = AutoState.IDLE;
+        setChestplateHold(false);
         stateTicks = 0;
         autoSite = null;
         autoColumn = null;
@@ -693,8 +784,12 @@ public class SpawnerDetector extends Module {
         autoApproachBadCells.clear();
         autoApproachTarget = null;
         autoApproachCell = null;
+        autoApproachBreakPos = null;
+        autoApproachBreakLabel = null;
+        autoApproachBreakCount = 0;
         autoLastHurtTime = 0;
         autoLastHitMs = 0;
+        autoHostileIds.clear();
         autoShaftChaseTarget = null;
         autoShaftChaseLastDist = 0;
         autoShaftChaseStuckTicks = 0;
@@ -704,6 +799,22 @@ public class SpawnerDetector extends Module {
         autoLandSpot = null;
         autoLandSpotAttempts = 0;
         autoLandSpotGaveUpLogged = false;
+        autoClimbLostGlideRetries = 0;
+        autoTakeoffRetries = 0;
+        autoAscendFailedPoints.clear();
+        autoAscendRadius = 0;
+        autoAscendTowerActive = false;
+        autoAscendPillarPhase = 0;
+        autoAscendFallingBrokenCount = 0;
+        autoAscendTimeoutBaseTick = 0;
+        autoAscendTowerBestY = 0;
+        autoAscendSurfacedCount = 0;
+        autoAscendArrivedAt = null;
+        autoAscendTowerHoldUntil = 0;
+        autoWalkBestDist = -1;
+        autoWalkBestDistTick = 0;
+        autoWalkReapproach = false;
+        autoWalkReapproachCount = 0;
     }
 
     public int getStatRoomsFarmed() { return statRoomsFarmed; }
@@ -858,6 +969,15 @@ public class SpawnerDetector extends Module {
         return true;
     }
 
+    private boolean spawnerlessChunksLoaded(int baseCx, int baseCz) {
+        for (int cx = (baseCx - 9) >> 4; cx <= (baseCx + 9) >> 4; cx++) {
+            for (int cz = (baseCz - 9) >> 4; cz <= (baseCz + 9) >> 4; cz++) {
+                if (!mc.world.getChunkManager().isChunkLoaded(cx, cz)) return false;
+            }
+        }
+        return true;
+    }
+
     private static String spawnerEntityId(MobSpawnerBlockEntity spawner) {
         try {
             var entry = spawner.getLogic().spawnEntry;
@@ -885,7 +1005,10 @@ public class SpawnerDetector extends Module {
             long key = it.next();
             int cx = net.minecraft.util.math.ChunkPos.getPackedX(key);
             int cz = net.minecraft.util.math.ChunkPos.getPackedZ(key);
-            if (!mc.world.isChunkLoaded(cx, cz)) it.remove();
+            if (!mc.world.isChunkLoaded(cx, cz)) {
+                it.remove();
+                mossyByChunk.remove(key);
+            }
         }
     }
 
@@ -901,20 +1024,43 @@ public class SpawnerDetector extends Module {
         if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
         if (!(mc.world.getChunkManager() instanceof ClientChunkManager manager)) return;
 
+        processSpawnerlessWaiting();
+
         AtomicReferenceArray<WorldChunk> chunks = manager.chunks.chunks;
+        int len = chunks.length();
         int examined = 0;
+        long scanStart = System.nanoTime();
 
-        for (int i = 0; i < chunks.length() && examined < 8; i++) {
+        int i = len == 0 ? 0 : mossyScanCursor % len;
+        for (int steps = 0; steps < len && examined < 8; steps++) {
+            if (System.nanoTime() - scanStart > 4_000_000L) break;
+
             WorldChunk chunk = chunks.get(i);
-            if (chunk == null) continue;
+            if (chunk != null) {
+                long key = chunk.getPos().toLong();
+                if (!mossyScanned.contains(key)) {
+                    mossyScanned.add(key);
+                    examined++;
 
-            long key = chunk.getPos().toLong();
-            if (mossyScanned.contains(key)) continue;
+                    scanChunkForMossy(chunk);
+                }
+            }
 
-            mossyScanned.add(key);
-            examined++;
+            i = (i + 1) % len;
+        }
+        mossyScanCursor = i;
+    }
 
-            scanChunkForMossy(chunk);
+    private void processSpawnerlessWaiting() {
+        Iterator<BlockPos> it = spawnerlessWaiting.iterator();
+        while (it.hasNext()) {
+            BlockPos pos = it.next();
+            if (!mc.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) {
+                it.remove();
+            } else if (spawnerlessChunksLoaded(pos.getX(), pos.getZ())) {
+                it.remove();
+                considerSpawnerlessCandidate(pos.getX(), pos.getY(), pos.getZ());
+            }
         }
     }
 
@@ -923,6 +1069,12 @@ public class SpawnerDetector extends Module {
         int bottomY = chunk.getBottomY();
         int startX = chunk.getPos().getStartX();
         int startZ = chunk.getPos().getStartZ();
+        long chunkKey = chunk.getPos().toLong();
+        int chunkX = chunk.getPos().x;
+        int chunkZ = chunk.getPos().z;
+
+        List<List<BlockPos>> sectionCandidates = new ArrayList<>();
+        List<BlockPos> chunkCandidates = new ArrayList<>();
 
         for (int si = 0; si < sections.length; si++) {
             ChunkSection section = sections[si];
@@ -939,16 +1091,51 @@ public class SpawnerDetector extends Module {
 
                         int wx = startX + lx, wy = sectionBaseY + ly, wz = startZ + lz;
                         if (ignoreBelowZero.get() && wy + 1 < 0) continue;
+                        if (wy < 63) {
+                            candidates.add(new BlockPos(wx, wy, wz));
+                            continue;
+                        }
                         BlockPos above = new BlockPos(wx, wy + 1, wz);
-                        if (isOpenState(mc.world.getBlockState(above), above)) {
+                        BlockState aboveState = mc.world.getBlockState(above);
+                        if (isOpenState(aboveState, above) || aboveState.getBlock() instanceof net.minecraft.block.FallingBlock || aboveState.getBlock() == Blocks.COBBLESTONE) {
                             candidates.add(new BlockPos(wx, wy, wz));
                         }
                     }
                 }
             }
 
-            processMossyCandidates(candidates);
+            sectionCandidates.add(candidates);
+            chunkCandidates.addAll(candidates);
         }
+
+        mossyByChunk.put(chunkKey, chunkCandidates);
+
+        for (List<BlockPos> candidates : sectionCandidates) {
+            processMossyCandidates(withNeighbourMossy(candidates, startX, startZ, chunkX, chunkZ));
+        }
+    }
+
+    private List<BlockPos> withNeighbourMossy(List<BlockPos> candidates, int startX, int startZ, int chunkX, int chunkZ) {
+        Set<Integer> ys = new java.util.HashSet<>();
+        for (BlockPos c : candidates) ys.add(c.getY());
+
+        List<BlockPos> merged = new ArrayList<>(candidates);
+        for (int dcx = -1; dcx <= 1; dcx++) {
+            for (int dcz = -1; dcz <= 1; dcz++) {
+                if (dcx == 0 && dcz == 0) continue;
+
+                List<BlockPos> neighbour = mossyByChunk.get(net.minecraft.util.math.ChunkPos.toLong(chunkX + dcx, chunkZ + dcz));
+                if (neighbour == null) continue;
+
+                for (BlockPos n : neighbour) {
+                    if (n.getX() < startX - 3 || n.getX() > startX + 18) continue;
+                    if (n.getZ() < startZ - 3 || n.getZ() > startZ + 18) continue;
+                    if (!ys.contains(n.getY())) continue;
+                    if (!merged.contains(n)) merged.add(n);
+                }
+            }
+        }
+        return merged;
     }
 
     private static boolean sectionHasMossy(ChunkSection section) {
@@ -961,13 +1148,12 @@ public class SpawnerDetector extends Module {
     }
 
     private void processMossyCandidates(List<BlockPos> candidates) {
-        if (candidates.size() < 3) return;
-
         Map<Integer, List<BlockPos>> byY = new HashMap<>();
         for (BlockPos c : candidates) byY.computeIfAbsent(c.getY(), key -> new ArrayList<>()).add(c);
 
         for (List<BlockPos> plane : byY.values()) {
             boolean[] used = new boolean[plane.size()];
+            int minGroupSize = plane.get(0).getY() < 63 ? 1 : 3;
 
             for (int i = 0; i < plane.size(); i++) {
                 if (used[i]) continue;
@@ -992,7 +1178,7 @@ public class SpawnerDetector extends Module {
                     }
                 }
 
-                if (group.size() < 3) continue;
+                if (group.size() < minGroupSize) continue;
 
                 int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
                 int minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
@@ -1011,15 +1197,30 @@ public class SpawnerDetector extends Module {
     }
 
     private void considerSpawnerlessCandidate(int baseCx, int cy, int baseCz) {
+        for (Site s : sites.values()) {
+            if (baseCx >= s.room.minX() + 1 && baseCx <= s.room.maxX() - 1 && baseCz >= s.room.minZ() + 1 && baseCz <= s.room.maxZ() - 1
+                && ((cy - 1 >= s.room.minY() && cy - 1 <= s.room.maxY()) || (cy >= s.room.minY() && cy <= s.room.maxY()))) return;
+        }
+        for (PendingSite ps : pendingEval.values()) {
+            if (baseCx >= ps.room().minX() + 1 && baseCx <= ps.room().maxX() - 1 && baseCz >= ps.room().minZ() + 1 && baseCz <= ps.room().maxZ() - 1
+                && ((cy - 1 >= ps.room().minY() && cy - 1 <= ps.room().maxY()) || (cy >= ps.room().minY() && cy <= ps.room().maxY()))) return;
+        }
+
+        if (!spawnerlessChunksLoaded(baseCx, baseCz)) {
+            spawnerlessWaiting.add(new BlockPos(baseCx, cy, baseCz));
+            return;
+        }
+
         Room best = null;
 
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
                 Room r = findRoom(baseCx + dx, cy, baseCz + dz, false);
                 if (r != null && (best == null || r.fit() > best.fit())) best = r;
             }
         }
 
+        if (best == null) best = findLooseBoxRoom(baseCx, cy, baseCz);
         if (best == null) return;
         if (roomHasSpawnerBlock(best)) return;
 
@@ -1029,6 +1230,49 @@ public class SpawnerDetector extends Module {
         removeOverlapping(best);
 
         pendingEval.put(center, new PendingSite(center, false, null, best));
+    }
+
+    private Room findLooseBoxRoom(int baseCx, int cy, int baseCz) {
+        int floorY = cy - 1;
+        int cobble = 0;
+        Block clueBlock = null;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+
+        for (int x = baseCx - 6; x <= baseCx + 6; x++) {
+            for (int z = baseCz - 6; z <= baseCz + 6; z++) {
+                for (int y = floorY; y <= cy + 4; y++) {
+                    Block b = mc.world.getBlockState(cursor.set(x, y, z)).getBlock();
+                    if (b == Blocks.COBBLESTONE) cobble++;
+                    if (clueBlock == null && isLooseBoxClue(b)) clueBlock = b;
+                }
+            }
+        }
+
+        if (cobble < 20 || clueBlock == null) return null;
+
+        Room best = null;
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
+                Room r = findRoom(baseCx + dx, cy, baseCz + dz, true);
+                if (r != null && (best == null || r.fit() > best.fit())) best = r;
+            }
+        }
+
+        boolean accepted = best != null && best.fit() >= 0.6;
+
+        if (log.get()) {
+            HunterBuddyAddon.LOG.info("[SpawnerDetector] loose box {} {} {} cobble={} clue={} fit={} {}",
+                baseCx, cy, baseCz, cobble, Registries.BLOCK.getId(clueBlock).getPath(),
+                best == null ? "none" : String.format("%.2f", best.fit()), accepted ? "accepted" : "rejected");
+        }
+
+        if (!accepted) return null;
+        return best;
+    }
+
+    private static boolean isLooseBoxClue(Block b) {
+        return b == Blocks.CHEST || b == Blocks.TRAPPED_CHEST || b == Blocks.BARREL || b instanceof ShulkerBoxBlock
+            || b instanceof AbstractTorchBlock || b instanceof LanternBlock;
     }
 
     private boolean roomHasSpawnerBlock(Room room) {
@@ -1045,10 +1289,16 @@ public class SpawnerDetector extends Module {
 
     private boolean spawnerlessCandidateWins(Room room) {
         for (Site s : sites.values()) {
-            if (boxesOverlap(room, s.room) && (s.hasSpawner || s.room.fit() >= room.fit())) return false;
+            if (boxesOverlap(room, s.room) && (s.hasSpawner || s.room.fit() >= room.fit() || isVisited(s.center)
+                || (state != AutoState.IDLE && autoSite != null && autoSite.center.equals(s.center)))) return false;
         }
         for (PendingSite ps : pendingEval.values()) {
             if (boxesOverlap(room, ps.room()) && (ps.hasSpawner() || ps.room().fit() >= room.fit())) return false;
+        }
+        for (VisitedEntry e : visitedEntries) {
+            if (e.x() >= room.minX() && e.x() <= room.maxX()
+                && e.y() >= room.minY() && e.y() <= room.maxY()
+                && e.z() >= room.minZ() && e.z() <= room.maxZ()) return false;
         }
         return true;
     }
@@ -1064,9 +1314,9 @@ public class SpawnerDetector extends Module {
     }
 
     private static boolean boxesOverlap(Room a, Room b) {
-        return a.minX() <= b.maxX() && a.maxX() >= b.minX()
+        return a.minX() + 1 <= b.maxX() - 1 && a.maxX() - 1 >= b.minX() + 1
             && a.minY() <= b.maxY() && a.maxY() >= b.minY()
-            && a.minZ() <= b.maxZ() && a.maxZ() >= b.minZ();
+            && a.minZ() + 1 <= b.maxZ() - 1 && a.maxZ() - 1 >= b.minZ() + 1;
     }
 
     private Room findRoom(int cx, int cy, int cz, boolean spawnerAtCenter) {
@@ -1075,6 +1325,7 @@ public class SpawnerDetector extends Module {
         Room fallback = null;
         double fallbackFit = -1;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int mMin = cy - 1 < 63 ? 1 : 3;
 
         for (int k = 2; k <= 3; k++) {
             for (int p = 2; p <= 3; p++) {
@@ -1107,7 +1358,7 @@ public class SpawnerDetector extends Module {
                     }
                 }
 
-                int open = 0, caveAir = 0, iCount = 0;
+                int open = 0, caveAir = 0, iCount = 0, fallen = 0;
                 for (int y = cy; y <= cy + 3; y++) {
                     for (int x = interiorMinX; x <= interiorMaxX; x++) {
                         for (int z = interiorMinZ; z <= interiorMaxZ; z++) {
@@ -1121,7 +1372,10 @@ public class SpawnerDetector extends Module {
                                 if (b == Blocks.CAVE_AIR) caveAir++;
                             }
 
-                            if (isOpen || b == Blocks.CHEST || b == Blocks.TRAPPED_CHEST || b == Blocks.SPAWNER) iCount++;
+                            if (isOpen || b == Blocks.CHEST || b == Blocks.TRAPPED_CHEST || b == Blocks.SPAWNER
+                                || b instanceof net.minecraft.block.FallingBlock) iCount++;
+
+                            if (b instanceof net.minecraft.block.FallingBlock) fallen++;
                         }
                     }
                 }
@@ -1134,7 +1388,7 @@ public class SpawnerDetector extends Module {
                 }
 
                 if (c < 0.5 * aireSol) continue;
-                if (m < 3) continue;
+                if (m < mMin) continue;
                 if (iCount < 0.6 * volumeInterieur) continue;
                 if (w < 0.35 * casesAnneau) continue;
 
@@ -1148,7 +1402,8 @@ public class SpawnerDetector extends Module {
                         if (!ceilOpen && !ceilFluid) ceilingClosed++;
                     }
                 }
-                if (!spawnerAtCenter && ceilingClosed < 0.6 * interiorArea) continue;
+                int openCeiling = interiorArea - ceilingClosed;
+                if (!spawnerAtCenter && ceilingClosed < 0.6 * interiorArea && !(fallen >= 3 && fallen * 2 >= openCeiling)) continue;
 
                 double fit = (double) c / aireSol + (double) w / casesAnneau;
                 if (fit > bestFit) {
@@ -1261,6 +1516,17 @@ public class SpawnerDetector extends Module {
             return false;
         }
 
+        if (!jungleTempleChunksLoaded(center)) return true;
+
+        Integer jungleTempleY = jungleTempleLowestY(center);
+        if (!ps.hasSpawner() && jungleTempleY != null && room.maxY() >= jungleTempleY - 3) {
+            rejected.add(center);
+            if (jungleTempleSkipLogged.add(center)) {
+                autoLog("SITE", center, "skipped: jungle temple");
+            }
+            return false;
+        }
+
         long t0 = System.nanoTime();
 
         LightHit lightHit = detectTorches.get() ? computeLight(room) : LightHit.NONE;
@@ -1281,9 +1547,14 @@ public class SpawnerDetector extends Module {
         site.broken = !ps.hasSpawner();
         site.tunnel = tr.hit();
         site.tunnelFeature = tr.feature();
+        site.entryShafts = tr.entryShafts();
         site.air = air;
         site.airCount = airCount;
         site.roomContainers = computeRoomContainers(room);
+        if (hasMisplacedContainer(room)) {
+            site.playerBlocks = true;
+            site.playerBlockTypes.add("placed chest");
+        }
         site.discoveredAt = System.currentTimeMillis();
         site.discoveredAtTick = totalTicks;
         site.animation = new Animation(fadeTime.get());
@@ -1553,7 +1824,7 @@ public class SpawnerDetector extends Module {
         }
     }
 
-    private record TunnelResult(boolean hit, DugHoles.Feature feature) {}
+    private record TunnelResult(boolean hit, DugHoles.Feature feature, List<DugHoles.Feature> entryShafts) {}
 
     private TunnelResult computeTunnel(Room room) {
         int minX = room.minX() - 8, maxX = room.maxX() + 8;
@@ -1569,20 +1840,29 @@ public class SpawnerDetector extends Module {
 
         boolean hit = false;
         DugHoles.Feature hitFeature = null;
+        List<DugHoles.Feature> entryShafts = new ArrayList<>();
 
         for (DugHoles.Feature f : features) {
             boolean overlaps = f.minX() - 1 <= room.maxX() && f.maxX() + 1 >= room.minX()
                 && f.minY() - 1 <= room.maxY() && f.maxY() + 1 >= room.minY()
                 && f.minZ() - 1 <= room.maxZ() && f.maxZ() + 1 >= room.minZ();
-            if (!overlaps) continue;
 
-            if (f.kind() != DugHoles.Kind.POCKET && !hit) {
+            if (overlaps && f.kind() != DugHoles.Kind.POCKET && !hit) {
                 hit = true;
                 hitFeature = f;
             }
+
+            if (f.kind() == DugHoles.Kind.SHAFT) {
+                int sx = f.minX(), sz = f.minZ();
+                int distX = sx < room.minX() ? room.minX() - sx : (sx > room.maxX() ? sx - room.maxX() : 0);
+                int distZ = sz < room.minZ() ? room.minZ() - sz : (sz > room.maxZ() ? sz - room.maxZ() : 0);
+                if (Math.max(distX, distZ) <= 3 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
+                    entryShafts.add(f);
+                }
+            }
         }
 
-        return new TunnelResult(hit, hitFeature);
+        return new TunnelResult(hit, hitFeature, entryShafts);
     }
 
     private int countStrayAir(Room room) {
@@ -1657,6 +1937,42 @@ public class SpawnerDetector extends Module {
         }
 
         return result;
+    }
+
+    private boolean hasMisplacedContainer(Room room) {
+        int cx = room.cx(), cy = room.cy(), cz = room.cz(), k = room.k(), p = room.p();
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int plainChests = 0;
+
+        for (int x = cx - k; x <= cx + k; x++) {
+            for (int z = cz - p; z <= cz + p; z++) {
+                for (int y = cy; y <= cy + 3; y++) {
+                    Block b = mc.world.getBlockState(cursor.set(x, y, z)).getBlock();
+                    boolean isChest = b == Blocks.CHEST;
+                    boolean isOtherContainer = b == Blocks.TRAPPED_CHEST || b == Blocks.BARREL || b instanceof ShulkerBoxBlock;
+                    if (!isChest && !isOtherContainer) continue;
+                    if (isOtherContainer) return true;
+
+                    plainChests++;
+                    if (y != cy) return true;
+
+                    int solidForZero = 0, solidForCorner = 0;
+                    int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+                    for (int[] d : dirs) {
+                        BlockPos npos = new BlockPos(x + d[0], y, z + d[1]);
+                        BlockState nstate = mc.world.getBlockState(npos);
+                        Block nb = nstate.getBlock();
+                        boolean nChest = nb == Blocks.CHEST;
+                        boolean nSolid = !isOpenState(nstate, npos) && !(nb instanceof net.minecraft.block.FallingBlock);
+                        if (nSolid || nChest) solidForZero++;
+                        if (nSolid && !nChest) solidForCorner++;
+                    }
+                    if (solidForZero == 0 || solidForCorner >= 2) return true;
+                }
+            }
+        }
+
+        return plainChests > 2;
     }
 
     private int countContainersAround(BlockPos pos) {
@@ -2111,6 +2427,12 @@ public class SpawnerDetector extends Module {
     private WaypointFollower waypointFollowerModule() { return Modules.get().get(WaypointFollower.class); }
     private AutoEatSync autoEatSyncModule() { return Modules.get().get(AutoEatSync.class); }
     private KillAuraPlus killAuraPlusModule() { return Modules.get().get(KillAuraPlus.class); }
+    private ElytraSwap elytraSwapModule() { return Modules.get().get(ElytraSwap.class); }
+
+    private void setChestplateHold(boolean hold) {
+        ElytraSwap es = elytraSwapModule();
+        if (es != null) es.setChestplateHold(hold);
+    }
 
     private File visitedFile() {
         return new File(new File(new File(MeteorClient.FOLDER, "spawnerdetector"),
@@ -2207,6 +2529,8 @@ public class SpawnerDetector extends Module {
     private void enterState(AutoState next, String details) {
         state = next;
         stateTicks = 0;
+        setChestplateHold(autoChestplateAllowed && (next == AutoState.DIG || next == AutoState.SIDE_DIG
+            || next == AutoState.ROOM || next == AutoState.ROOM_CLIMB || next == AutoState.TUNNEL));
         autoLog(next.name(), autoSite.center, details);
     }
 
@@ -2517,18 +2841,69 @@ public class SpawnerDetector extends Module {
 
     private ColumnPlan planColumn(Site site) {
         Room room = site.room;
+        boolean logShafts = entryShaftLogged.add(site.center);
 
-        if (site.tunnelFeature != null && site.tunnelFeature.kind() == DugHoles.Kind.SHAFT) {
-            DugHoles.Feature shaft = site.tunnelFeature;
-            int shaftX = shaft.minX(), shaftZ = shaft.minZ();
+        ColumnPlan bestShaftPlan = null;
+        String bestShaftLabel = null;
+        int bestShaftOpen = 0;
 
-            if (shaftX >= room.minX() && shaftX <= room.maxX() && shaftZ >= room.minZ() && shaftZ <= room.maxZ()) {
-                ColumnPlan shaftPlan = evaluateColumn(room, shaftX, shaftZ, Integer.MAX_VALUE);
-                if (shaftPlan != null) {
-                    autoLog("PLAN", site.center, String.format("using existing shaft %d,%d", shaftX, shaftZ));
-                    return shaftPlan;
+        for (DugHoles.Feature shaft : site.entryShafts) {
+            int sx = shaft.minX(), sz = shaft.minZ();
+            int shaftOpen = shaft.maxY() - shaft.minY() + 1;
+            if (shaftOpen < 8) {
+                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: too short", sx, sz));
+                continue;
+            }
+            boolean insideInterior = sx >= room.cx() - room.k() && sx <= room.cx() + room.k()
+                && sz >= room.cz() - room.p() && sz <= room.cz() + room.p();
+
+            ColumnPlan shaftPlan;
+            String label;
+
+            if (insideInterior) {
+                label = "inside";
+                if (floorOpenBelow(room, sx, sz)) {
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: open floor below", sx, sz));
+                    continue;
                 }
-                autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused", shaftX, shaftZ));
+                shaftPlan = evaluateColumn(room, sx, sz, autoMaxFall.get());
+                if (shaftPlan == null) {
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: plan null", sx, sz));
+                    continue;
+                }
+                BlockPos.Mutable fallCursor = new BlockPos.Mutable();
+                int fallRun = 0;
+                for (int fy = (shaftPlan.rim() != null ? shaftPlan.rim().getY() : shaftPlan.holeTopY()) - 1; fy >= shaftPlan.startY(); fy--) {
+                    BlockState fallState = mc.world.getBlockState(fallCursor.set(sx, fy, sz));
+                    if (fallState.getFluidState().isIn(FluidTags.WATER)) {
+                        fallRun = 0;
+                    } else if (isOpenState(fallState, fallCursor)) {
+                        fallRun++;
+                    }
+                }
+                if (fallRun > autoMaxFall.get()) {
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: fall", sx, sz));
+                    continue;
+                }
+                if (shaftPlan.blocksToBreak() > 5) {
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %d blocks missing", sx, sz, shaftPlan.blocksToBreak()));
+                    continue;
+                }
+            } else {
+                label = "beside";
+                SideHoleAttempt attempt = evaluateSideHolePosition(room, sx, sz);
+                if (attempt.plan() == null) {
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
+                        attempt.rejectReason() != null ? attempt.rejectReason() : "no plan"));
+                    continue;
+                }
+                shaftPlan = attempt.plan();
+            }
+
+            if (bestShaftPlan == null || shaftPlan.blocksToBreak() < bestShaftPlan.blocksToBreak()) {
+                bestShaftPlan = shaftPlan;
+                bestShaftLabel = label;
+                bestShaftOpen = shaftOpen;
             }
         }
 
@@ -2549,6 +2924,7 @@ public class SpawnerDetector extends Module {
         ColumnPlan bestBlocked = null;
         ColumnPlan column = null;
         for (int[] c : candidates) {
+            if (floorOpenBelow(room, c[0], c[1])) continue;
             ColumnPlan plan = evaluateColumn(room, c[0], c[1]);
             if (plan == null) continue;
             if (!plan.skyBlocked()) { column = plan; break; }
@@ -2556,8 +2932,14 @@ public class SpawnerDetector extends Module {
         }
         if (column == null) column = bestBlocked;
 
+        if (bestShaftPlan != null) {
+            if (sideHoleUseLogged.add(site.center)) autoLog("PLAN", site.center, String.format("using existing shaft %d,%d %s open=%d missing=%d",
+                bestShaftPlan.x(), bestShaftPlan.z(), bestShaftLabel, bestShaftOpen, bestShaftPlan.blocksToBreak()));
+            return bestShaftPlan;
+        }
+
         ColumnPlan side = findSideHole(site);
-        if (side != null && (column == null || side.blocksToBreak() < column.blocksToBreak())) {
+        if (side != null && (column == null || column.skyBlocked() || side.blocksToBreak() + 10 <= column.blocksToBreak())) {
             if (sideHoleUseLogged.add(site.center)) autoLog("PLAN", site.center, String.format("using side hole %d,%d cost=%d instead of column cost=%s",
                 side.x(), side.z(), side.blocksToBreak(),
                 column != null ? String.valueOf(column.blocksToBreak()) : "none"));
@@ -2567,141 +2949,201 @@ public class SpawnerDetector extends Module {
         return column;
     }
 
+    private boolean floorOpenBelow(Room room, int x, int z) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        BlockState floorState = mc.world.getBlockState(cursor.set(x, room.cy() - 1, z));
+        return isOpenState(floorState, cursor) || !floorState.getFluidState().isEmpty();
+    }
+
+    private SideHoleAttempt evaluateSideHolePosition(Room room, int x, int z) {
+        SideHoleCost sc = computeSideHoleCost(room, x, z);
+        if (sc == null) return new SideHoleAttempt(null, null);
+        if (sc.rejectReason() != null) return new SideHoleAttempt(null, sc.rejectReason());
+        if (sc.vertCost() > 5) return new SideHoleAttempt(null, sc.vertCost() + " blocks missing");
+        return finishSideHolePlan(room, x, z, sc);
+    }
+
+    private SideHoleCost computeSideHoleCost(Room room, int x, int z) {
+        int cx = room.cx(), cz = room.cz(), cy = room.cy(), k = room.k(), p = room.p();
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+
+        if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return null;
+
+        int y = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+        BlockState state = mc.world.getBlockState(cursor.set(x, y, z));
+        while (y > cy - 2 && isSurfaceSkippable(state, cursor)) {
+            y--;
+            state = mc.world.getBlockState(cursor.set(x, y, z));
+        }
+
+        if (isLava(state)) return new SideHoleCost(y + 1, 0, 0, 0, 0, "lava");
+
+        int bottomFeet = y + 1;
+        if (bottomFeet < cy) return new SideHoleCost(bottomFeet, 0, 0, 0, 0, "too deep");
+
+        int tx = Math.max(cx - k, Math.min(cx + k, x));
+        int tz = Math.max(cz - p, Math.min(cz + p, z));
+
+        BlockState entryState = mc.world.getBlockState(cursor.set(tx, cy, tz));
+        if (entryState.getBlock() == Blocks.SPAWNER || isContainerPresent(cursor)) {
+            return new SideHoleCost(bottomFeet, tx, tz, 0, 0, "entry blocked");
+        }
+
+        List<BlockPos> horizCells = new ArrayList<>();
+        int hx = x, hz = z;
+        while (hx != tx) {
+            hx += Integer.signum(tx - hx);
+            horizCells.add(new BlockPos(hx, cy, hz));
+        }
+        while (hz != tz) {
+            hz += Integer.signum(tz - hz);
+            horizCells.add(new BlockPos(hx, cy, hz));
+        }
+
+        boolean tunnelBlocked = false;
+        for (BlockPos hc : horizCells) {
+            for (int dyy = 0; dyy <= 1 && !tunnelBlocked; dyy++) {
+                cursor.set(hc.getX(), cy + dyy, hc.getZ());
+                if (mc.world.getBlockState(cursor).getBlock() == Blocks.SPAWNER || isContainerPresent(cursor)) tunnelBlocked = true;
+            }
+        }
+        cursor.set(x, cy + 1, z);
+        if (mc.world.getBlockState(cursor).getBlock() == Blocks.SPAWNER || isContainerPresent(cursor)) tunnelBlocked = true;
+        if (tunnelBlocked) return new SideHoleCost(bottomFeet, tx, tz, 0, 0, "tunnel blocked");
+
+        int[][] neighbors = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        boolean lavaFound = false;
+        boolean fallReject = false;
+        int vertBlocksToBreak = 0, vertAirRun = 0;
+
+        outer:
+        for (int vy = bottomFeet - 1; vy >= cy; vy--) {
+            for (int[] n : neighbors) {
+                if (isLava(mc.world.getBlockState(cursor.set(x + n[0], vy, z + n[1])))) { lavaFound = true; break outer; }
+            }
+            BlockState vCenter = mc.world.getBlockState(cursor.set(x, vy, z));
+            if (isOpenState(vCenter, cursor)) {
+                vertAirRun++;
+            } else {
+                if (vertAirRun > autoMaxFall.get()) { fallReject = true; break; }
+                vertAirRun = 0;
+                vertBlocksToBreak++;
+                if (vertBlocksToBreak > 20) break;
+            }
+        }
+        if (!lavaFound) {
+            outer2:
+            for (BlockPos hc : horizCells) {
+                for (int dyy = 0; dyy <= 1; dyy++) {
+                    for (int[] n : neighbors) {
+                        if (isLava(mc.world.getBlockState(cursor.set(hc.getX() + n[0], cy + dyy, hc.getZ() + n[1])))) { lavaFound = true; break outer2; }
+                    }
+                }
+            }
+        }
+        if (!lavaFound) {
+            for (int[] n : neighbors) {
+                if (isLava(mc.world.getBlockState(cursor.set(x + n[0], cy + 1, z + n[1])))) { lavaFound = true; break; }
+            }
+        }
+        if (lavaFound) return new SideHoleCost(bottomFeet, tx, tz, 0, vertBlocksToBreak, "lava");
+        if (fallReject) return new SideHoleCost(bottomFeet, tx, tz, 0, vertBlocksToBreak, "fall");
+
+        boolean noFloor = isOpenState(mc.world.getBlockState(cursor.set(x, cy - 1, z)), cursor);
+        for (BlockPos hc : horizCells) {
+            if (noFloor) break;
+            noFloor = isOpenState(mc.world.getBlockState(cursor.set(hc.getX(), cy - 1, hc.getZ())), cursor);
+        }
+        if (noFloor) return new SideHoleCost(bottomFeet, tx, tz, 0, vertBlocksToBreak, "no floor");
+
+        int tunnelBlocksToBreak = 0;
+        for (BlockPos hc : horizCells) {
+            for (int dyy = 0; dyy <= 1; dyy++) {
+                cursor.set(hc.getX(), cy + dyy, hc.getZ());
+                if (!isOpenState(mc.world.getBlockState(cursor), cursor)) tunnelBlocksToBreak++;
+            }
+        }
+
+        int cost = vertBlocksToBreak + tunnelBlocksToBreak;
+        if (cost > 20) return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, "cost cap");
+
+        return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, null);
+    }
+
+    private SideHoleAttempt finishSideHolePlan(Room room, int x, int z, SideHoleCost sc) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+        int exitY = topY + 1;
+        boolean water = mc.world.getBlockState(cursor.set(x, topY, z)).getFluidState().isIn(FluidTags.WATER);
+
+        BlockPos rim = null;
+        int holeTopY = exitY;
+        if (!water) {
+            RimResult rr = computeRim(x, z, sc.bottomFeet());
+            rim = rr.rim();
+            if (rim != null) holeTopY = rr.holeTopY();
+        }
+
+        boolean skyBlocked = false;
+        for (int sy = holeTopY; sy <= exitY + SKY_CHECK_HEIGHT; sy++) {
+            cursor.set(x, sy, z);
+            if (!isOpenState(mc.world.getBlockState(cursor), cursor)) { skyBlocked = true; break; }
+        }
+        if (skyBlocked) return new SideHoleAttempt(null, "sky blocked");
+
+        int entryY = rim != null ? rim.getY() : holeTopY;
+        if (!water && rim == null) return new SideHoleAttempt(null, "covered");
+
+        int fallRun = 0;
+        for (int fy = entryY - 1; fy >= sc.bottomFeet(); fy--) {
+            BlockState fallState = mc.world.getBlockState(cursor.set(x, fy, z));
+            if (fallState.getFluidState().isIn(FluidTags.WATER)) {
+                fallRun = 0;
+            } else if (isOpenState(fallState, cursor)) {
+                fallRun++;
+            }
+        }
+        if (fallRun > autoMaxFall.get()) return new SideHoleAttempt(null, "fall");
+
+        return new SideHoleAttempt(new ColumnPlan(x, z, sc.bottomFeet(), exitY, water, sc.cost(), 0, 0, skyBlocked, holeTopY, rim,
+            true, new BlockPos(sc.tx(), room.cy(), sc.tz())), null);
+    }
+
     private ColumnPlan findSideHole(Site site) {
         Room room = site.room;
         int cx = room.cx(), cz = room.cz(), cy = room.cy(), k = room.k(), p = room.p();
-        BlockPos.Mutable cursor = new BlockPos.Mutable();
 
         ColumnPlan best = null;
         int bestCost = Integer.MAX_VALUE;
         double bestDistSq = Double.MAX_VALUE;
         List<SideHoleReject> rejects = new ArrayList<>();
 
-        for (int x = cx - k - 3; x <= cx + k + 3; x++) {
+        for (int x = cx - k - 7; x <= cx + k + 7; x++) {
             boolean xAligned = x >= cx - k && x <= cx + k;
 
-            for (int z = cz - p - 3; z <= cz + p + 3; z++) {
+            for (int z = cz - p - 7; z <= cz + p + 7; z++) {
                 boolean zAligned = z >= cz - p && z <= cz + p;
                 if (xAligned && zAligned) continue;
-                if (!xAligned && !zAligned) continue;
-                if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) continue;
 
-                int y = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
-                BlockState state = mc.world.getBlockState(cursor.set(x, y, z));
-                while (y > cy - 2 && isSurfaceSkippable(state, cursor)) {
-                    y--;
-                    state = mc.world.getBlockState(cursor.set(x, y, z));
-                }
-
-                if (isLava(state)) {
-                    rejects.add(new SideHoleReject(x, z, y + 1, "lava"));
+                SideHoleCost sc = computeSideHoleCost(room, x, z);
+                if (sc == null) continue;
+                if (sc.rejectReason() != null) {
+                    rejects.add(new SideHoleReject(x, z, sc.bottomFeet(), sc.rejectReason()));
                     continue;
                 }
 
-                int bottomFeet = y + 1;
-                if (bottomFeet > cy + 6) {
-                    rejects.add(new SideHoleReject(x, z, bottomFeet, "not deep"));
-                    continue;
-                }
-                if (bottomFeet < cy) {
-                    rejects.add(new SideHoleReject(x, z, bottomFeet, "too deep"));
-                    continue;
-                }
-
-                int tx = Math.max(cx - k, Math.min(cx + k, x));
-                int tz = Math.max(cz - p, Math.min(cz + p, z));
-
-                BlockState entryState = mc.world.getBlockState(cursor.set(tx, cy, tz));
-                if (entryState.getBlock() == Blocks.SPAWNER || isContainerPresent(cursor)) {
-                    rejects.add(new SideHoleReject(x, z, bottomFeet, "entry blocked"));
-                    continue;
-                }
-
-                List<BlockPos> horizCells = new ArrayList<>();
-                int hx = x, hz = z;
-                while (hx != tx || hz != tz) {
-                    hx += Integer.signum(tx - hx);
-                    hz += Integer.signum(tz - hz);
-                    horizCells.add(new BlockPos(hx, cy, hz));
-                }
-
-                boolean tunnelBlocked = false;
-                for (BlockPos hc : horizCells) {
-                    for (int dyy = 0; dyy <= 1 && !tunnelBlocked; dyy++) {
-                        cursor.set(hc.getX(), cy + dyy, hc.getZ());
-                        if (mc.world.getBlockState(cursor).getBlock() == Blocks.SPAWNER || isContainerPresent(cursor)) tunnelBlocked = true;
-                    }
-                }
-                if (tunnelBlocked) {
-                    rejects.add(new SideHoleReject(x, z, bottomFeet, "tunnel blocked"));
-                    continue;
-                }
-
-                int[][] neighbors = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-                boolean lavaFound = false;
-
-                outer:
-                for (int vy = cy; vy <= bottomFeet - 1; vy++) {
-                    for (int[] n : neighbors) {
-                        if (isLava(mc.world.getBlockState(cursor.set(x + n[0], vy, z + n[1])))) { lavaFound = true; break outer; }
-                    }
-                }
-                if (!lavaFound) {
-                    outer2:
-                    for (BlockPos hc : horizCells) {
-                        for (int dyy = 0; dyy <= 1; dyy++) {
-                            for (int[] n : neighbors) {
-                                if (isLava(mc.world.getBlockState(cursor.set(hc.getX() + n[0], cy + dyy, hc.getZ() + n[1])))) { lavaFound = true; break outer2; }
-                            }
-                        }
-                    }
-                }
-                if (lavaFound) {
-                    rejects.add(new SideHoleReject(x, z, bottomFeet, "lava"));
-                    continue;
-                }
-
-                boolean noFloor = isOpenState(mc.world.getBlockState(cursor.set(x, cy - 1, z)), cursor);
-                for (BlockPos hc : horizCells) {
-                    if (noFloor) break;
-                    noFloor = isOpenState(mc.world.getBlockState(cursor.set(hc.getX(), cy - 1, hc.getZ())), cursor);
-                }
-                if (noFloor) {
-                    rejects.add(new SideHoleReject(x, z, bottomFeet, "no floor"));
-                    continue;
-                }
-
-                int cost = (bottomFeet - cy) + 2 * horizCells.size();
                 double dx = x - mc.player.getX(), dz = z - mc.player.getZ();
                 double distSq = dx * dx + dz * dz;
 
-                if (cost < bestCost || (cost == bestCost && distSq < bestDistSq)) {
-                    int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
-                    int exitY = topY + 1;
-                    boolean water = mc.world.getBlockState(cursor.set(x, topY, z)).getFluidState().isIn(FluidTags.WATER);
-
-                    boolean skyBlocked = false;
-                    for (int dy = 1; dy <= SKY_CHECK_HEIGHT; dy++) {
-                        cursor.set(x, exitY + dy, z);
-                        if (!isOpenState(mc.world.getBlockState(cursor), cursor)) { skyBlocked = true; break; }
+                if (sc.cost() < bestCost || (sc.cost() == bestCost && distSq < bestDistSq)) {
+                    SideHoleAttempt attempt = finishSideHolePlan(room, x, z, sc);
+                    if (attempt.plan() == null) {
+                        rejects.add(new SideHoleReject(x, z, sc.bottomFeet(), attempt.rejectReason()));
+                        continue;
                     }
-
-                    BlockPos rim = null;
-                    int holeTopY = exitY;
-                    if (!water) {
-                        RimResult rr = computeRim(x, z, bottomFeet);
-                        rim = rr.rim();
-                        if (rim != null) holeTopY = rr.holeTopY();
-                    }
-
-                    if (!water && rim == null) {
-                        rejects.add(new SideHoleReject(x, z, bottomFeet, "covered"));
-                    } else {
-                        bestCost = cost;
-                        bestDistSq = distSq;
-                        best = new ColumnPlan(x, z, bottomFeet, exitY, water, cost, 0, 0, skyBlocked, holeTopY, rim,
-                            true, new BlockPos(tx, cy, tz));
-                    }
+                    bestCost = sc.cost();
+                    bestDistSq = distSq;
+                    best = attempt.plan();
                 }
             }
         }
@@ -2923,6 +3365,7 @@ public class SpawnerDetector extends Module {
         }
 
         if (nearOceanMonument(site.center)) return QualResult.reject("near ocean monument");
+        if (isJunglePyramidSite(site)) return QualResult.reject("near jungle temple");
 
         AutoFlyingRegear regear = autoFlyingRegearModule();
         if (regear != null && regear.isRunning()) return QualResult.reject("AutoFlyingRegear running");
@@ -3015,9 +3458,13 @@ public class SpawnerDetector extends Module {
     private void startAutoRun(Site site, ColumnPlan plan) {
         autoSite = site;
         autoColumn = plan;
+        autoHostileIds.clear();
+        autoChestplateAllowed = !plan.water();
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
         autoRoomFoundItems = 0;
+        autoAscendFromAbort = false;
+        autoAscendSurfacedCount = 0;
 
         if (!hasFreeSlotOrThrowaway()) {
             autoLog("PREPARE", site.center, "inventory full, Baritone may not pillar");
@@ -3058,6 +3505,11 @@ public class SpawnerDetector extends Module {
         if (autoHitThisTick) {
             autoLastHurtTime = mc.player.hurtTime;
             autoLastHitMs = System.currentTimeMillis();
+            DamageSource hitSource = mc.player.getRecentDamageSource();
+            Entity hitAttacker = hitSource != null ? hitSource.getAttacker() : null;
+            if (hitAttacker instanceof AbstractSkeletonEntity || hitAttacker instanceof WitchEntity) {
+                autoHostileIds.add(hitAttacker.getId());
+            }
             if (state == AutoState.SHAFT_ALIGN || state == AutoState.SHAFT_FLY) {
                 autoLog(state.name(), autoSite.center, String.format("hit health=%.1f", mc.player.getHealth()));
             }
@@ -3099,6 +3551,7 @@ public class SpawnerDetector extends Module {
                 case TAKEOFF_SPOT -> tickTakeoffSpot();
                 case TAKEOFF -> tickTakeoff();
                 case RESUME -> tickResume();
+                case FAILED -> tickFailed();
                 default -> {}
             }
         } catch (Exception e) {
@@ -3108,6 +3561,7 @@ public class SpawnerDetector extends Module {
             try { BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace; } catch (Exception ignored) {}
             try { if (takeoff.isActive()) takeoff.cancel(); } catch (Exception ignored) {}
             state = AutoState.FAILED;
+            setChestplateHold(false);
             stateTicks = 0;
         }
     }
@@ -3143,6 +3597,7 @@ public class SpawnerDetector extends Module {
         if (mc.player.isGliding()) {
             autoLandSpotAttempts = 0;
             autoLandSpotGaveUpLogged = false;
+            autoWaterDiveClearTicks = 0;
             if (autoColumn.water()) {
                 autoLandSpot = null;
             } else {
@@ -3335,6 +3790,15 @@ public class SpawnerDetector extends Module {
             applyGlideRotation(yaw, pitch);
             logFlightTelemetry("APPROACH", H, D, speedH, vel.y);
         } else if (H > autoFlareHeight.get() + 10) {
+            boolean diveClear = isWaterLandingZone() && !pathToPointBlocked(px, py, pz, plan.x() + 0.5, plan.exitY() + 1.0, plan.z() + 0.5);
+            autoWaterDiveClearTicks = diveClear ? autoWaterDiveClearTicks + 1 : 0;
+            if (autoWaterDiveClearTicks >= 10) {
+                autoWaterDiveClearTicks = 0;
+                autoHealthBeforeLanding = mc.player.getHealth();
+                enterState(AutoState.FINAL, String.format("H=%.1f D=%.1f dive clear", H, D));
+                return;
+            }
+
             double angleToCenter = Math.toDegrees(Math.atan2(-yawDx, yawDz));
             double correction = MathHelper.clamp((D - 24) * 2, -30.0, 30.0);
             float heading = (float) MathHelper.wrapDegrees(angleToCenter + 90.0 + correction);
@@ -3407,14 +3871,12 @@ public class SpawnerDetector extends Module {
             }
 
             if (D <= 28 && H > autoFlareHeight.get() + 10) {
+                autoWaterDiveClearTicks = 0;
                 enterState(AutoState.APPROACH, String.format("final blocked, spiraling H=%.1f D=%.1f", H, D));
                 return;
             }
 
             applyGlideRotation(yaw, -45.0f);
-            if (!ownRocketActive() && stateTicks - autoFinalLastRocketTick >= 20 && fireShaftRocket()) {
-                autoFinalLastRocketTick = stateTicks;
-            }
             logFlightTelemetry("FINAL", H, D, speedH, vel.y, px, py, pz);
             return;
         }
@@ -3497,7 +3959,7 @@ public class SpawnerDetector extends Module {
         autoBaritoneRetries = 0;
         IBaritone bt = primaryBaritone();
         if (bt != null) {
-            BlockPos goal = autoColumn.rim() != null
+            BlockPos goal = autoColumn.rim() != null && mc.player.getBlockPos().getY() > autoColumn.startY() + 3
                 ? autoColumn.rim()
                 : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
             bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
@@ -3510,20 +3972,66 @@ public class SpawnerDetector extends Module {
         if (mc.player.isInLava()) { abort("in lava"); return; }
 
         if (stateTicks == 1) {
-            autoWalkDirect = autoColumn.water() || mc.player.isTouchingWater();
+            double startHoriz = Math.hypot((autoColumn.x() + 0.5) - mc.player.getX(), (autoColumn.z() + 0.5) - mc.player.getZ());
+            autoWalkDirect = autoColumn.water() && mc.player.isTouchingWater();
             autoWalkStepping = false;
+            autoWalkSwimOverride = false;
             autoWalkDirectDryTicks = 0;
             autoWalkDirectStuckTicks = 0;
+            autoWalkDirectSwimStuckTicks = 0;
+            autoWalkDirectSwimStuckPos = null;
+            autoWalkDirectSwimBreaking = false;
+            autoWalkDirectSwimBreakStage = 0;
+            autoWalkDirectSwimBreakTarget = null;
+            autoWalkDirectSwimBrokenTotal = 0;
             autoWalkKeyLogged = false;
+            autoWalkStuckTicks = 0;
+            autoWalkStuckLastDist = -1;
+            autoWalkStuckUseBreak = false;
+            autoWalkStuckBreaking = false;
+            autoWalkStuckBreakPos = null;
+            autoWalkStuckBreakLabel = null;
+            autoWalkBestDist = -1;
+            autoWalkBestDistTick = stateTicks;
             if (autoWalkDirect) {
                 autoLog("WALK", autoSite.center, "water direct");
+            } else if (autoColumn.water()) {
+                autoLog("WALK", autoSite.center, String.format("water hole, landed on ground, baritone first dist=%.1f", startHoriz));
+                startWalkBaritoneGoal();
             } else {
                 startWalkBaritoneGoal();
             }
         }
 
-        if (stateTicks > 60 * 20) {
-            abort("walk timeout");
+        double walkHoriz = Math.hypot((autoColumn.x() + 0.5) - mc.player.getX(), (autoColumn.z() + 0.5) - mc.player.getZ());
+        if (autoWalkBestDist < 0 || walkHoriz <= autoWalkBestDist - 1.0) {
+            autoWalkBestDist = walkHoriz;
+            autoWalkBestDistTick = stateTicks;
+        }
+
+        if (stateTicks - autoWalkBestDistTick > 60 * 20) {
+            if (!autoAreaLoaderWasOn || autoWalkReapproachCount >= 3) {
+                abort("walk timeout");
+                return;
+            }
+            autoWalkReapproachCount++;
+            autoWalkReapproach = true;
+            releaseAllAutoKeys();
+            IBaritone walkBt = primaryBaritone();
+            if (walkBt != null) walkBt.getPathingBehavior().cancelEverything();
+            autoLog("WALK", autoSite.center, "no progress 60s, re-approach " + autoWalkReapproachCount + " by air");
+            if (isClearSkyHere()) {
+                if (mc.player.isTouchingWater()) {
+                    autoWaterJumpAttempts = 0;
+                    autoWaterJumpVertical = false;
+                    enterState(AutoState.WATER_JUMP, "");
+                } else {
+                    autoAscendArrivedAt = null;
+                    enterState(AutoState.TAKEOFF, "");
+                }
+            } else {
+                enterState(AutoState.TAKEOFF_SPOT, "");
+            }
             return;
         }
 
@@ -3533,7 +4041,7 @@ public class SpawnerDetector extends Module {
             autoWalkDirectDryTicks = 0;
         }
 
-        if (autoWalkDirect && !autoColumn.water() && mc.player.horizontalCollision && mc.player.isTouchingWater()) {
+        if (autoWalkDirect && !(autoColumn.water() || autoWalkSwimOverride) && mc.player.horizontalCollision && mc.player.isTouchingWater()) {
             autoWalkDirectStuckTicks++;
         } else {
             autoWalkDirectStuckTicks = 0;
@@ -3572,7 +4080,7 @@ public class SpawnerDetector extends Module {
         String phase;
 
         if (horiz > 0.5) {
-            if (autoColumn.water()) {
+            if (autoColumn.water() || autoWalkSwimOverride) {
                 phase = "swim-descend";
                 BlockPos feet = mc.player.getBlockPos();
                 BlockPos below1 = feet.down();
@@ -3595,6 +4103,15 @@ public class SpawnerDetector extends Module {
             Utils.setPressed(mc.options.sneakKey, horiz <= 0.15);
         }
 
+        if ((autoColumn.water() || autoWalkSwimOverride) && (phase.equals("swim-descend") || phase.equals("sink"))) {
+            tickSwimStuckBreak();
+        } else {
+            autoWalkDirectSwimStuckTicks = 0;
+            autoWalkDirectSwimStuckPos = null;
+            autoWalkDirectSwimBreaking = false;
+            autoWalkDirectSwimBreakTarget = null;
+        }
+
         int feetY = mc.player.getBlockPos().getY();
         boolean feetOk = Math.abs(feetY - autoColumn.startY()) <= 1
             || feetY <= autoSite.room.cy() + 3;
@@ -3605,6 +4122,78 @@ public class SpawnerDetector extends Module {
         }
 
         logNavTelemetry("WALK " + phase, new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z()), 0);
+    }
+
+    private void tickSwimStuckBreak() {
+        if (autoWalkDirectSwimBreaking) {
+            swimBreakStep();
+            return;
+        }
+        BlockPos curPos = mc.player.getBlockPos();
+        if (mc.player.horizontalCollision && curPos.equals(autoWalkDirectSwimStuckPos)) {
+            autoWalkDirectSwimStuckTicks++;
+        } else {
+            autoWalkDirectSwimStuckTicks = 0;
+        }
+        autoWalkDirectSwimStuckPos = curPos;
+        if (autoWalkDirectSwimStuckTicks >= 45 && autoWalkDirectSwimBrokenTotal < 6) {
+            autoWalkDirectSwimBreaking = true;
+            autoWalkDirectSwimBreakStage = 0;
+            autoWalkDirectSwimBreakTarget = null;
+        }
+    }
+
+    private BlockPos swimBlockedCell(int stage) {
+        BlockPos feet = mc.player.getBlockPos();
+        int nx = feet.getX();
+        int nz = feet.getZ();
+        if (feet.getX() != autoColumn.x()) nx += Integer.signum(autoColumn.x() - feet.getX());
+        else nz += Integer.signum(autoColumn.z() - feet.getZ());
+        return new BlockPos(nx, feet.getY() + stage, nz);
+    }
+
+    private void swimBreakStep() {
+        BlockPos target = swimBlockedCell(autoWalkDirectSwimBreakStage);
+        BlockState state = mc.world.getBlockState(target);
+        if (isOpenState(state, target)) {
+            if (target.equals(autoWalkDirectSwimBreakTarget)) {
+                autoWalkDirectSwimBrokenTotal++;
+                autoLog("WALK", autoSite.center, String.format("swim blocked, broken %d,%d,%d block=%s",
+                    target.getX(), target.getY(), target.getZ(), autoWalkDirectSwimBreakBlockName));
+            }
+            autoWalkDirectSwimBreakTarget = null;
+            if (autoWalkDirectSwimBreakStage == 0) {
+                autoWalkDirectSwimBreakStage = 1;
+                return;
+            }
+            autoWalkDirectSwimBreaking = false;
+            autoWalkDirectSwimStuckTicks = 0;
+            autoWalkDirectSwimStuckPos = null;
+            return;
+        }
+        if (autoWalkDirectSwimBrokenTotal >= 6 || isLavaNearShaft(target, target)) {
+            autoWalkDirectSwimBreaking = false;
+            autoWalkDirectSwimStuckTicks = 0;
+            autoWalkDirectSwimStuckPos = null;
+            autoWalkDirectSwimBreakTarget = null;
+            return;
+        }
+        autoWalkDirectSwimBreakTarget = target;
+        autoWalkDirectSwimBreakBlockName = Registries.BLOCK.getId(state.getBlock()).getPath();
+        autoMineTick("WALK", target, false);
+    }
+
+    private boolean waterAllTheWayToGoal() {
+        int x = autoColumn.x();
+        int z = autoColumn.z();
+        int startY = autoColumn.startY();
+        int top = MathHelper.floor(mc.player.getY());
+        if (top <= startY) return false;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int y = Math.min(top, startY + 40); y > startY; y--) {
+            if (!mc.world.getFluidState(cursor.set(x, y, z)).isIn(FluidTags.WATER)) return false;
+        }
+        return true;
     }
 
     private void tickWalkBaritone() {
@@ -3651,39 +4240,157 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (rim != null) {
-            double rdx = (rim.getX() + 0.5) - mc.player.getX();
-            double rdz = (rim.getZ() + 0.5) - mc.player.getZ();
+        BlockPos gateRim = mc.player.getBlockPos().getY() > autoColumn.startY() + 3 ? rim : null;
+
+        if (gateRim != null) {
+            double rdx = (gateRim.getX() + 0.5) - mc.player.getX();
+            double rdz = (gateRim.getZ() + 0.5) - mc.player.getZ();
             double rHoriz = Math.hypot(rdx, rdz);
-            if (mc.player.isOnGround() && mc.player.getBlockPos().getY() == rim.getY() && rHoriz <= 0.5) {
+            if (mc.player.isOnGround() && mc.player.getBlockPos().getY() == gateRim.getY() && rHoriz <= 0.5) {
                 if (bt != null) bt.getPathingBehavior().cancelEverything();
                 releaseAllAutoKeys();
                 autoWalkStepping = true;
-                autoLog("WALK", autoSite.center, String.format("step into hole from rim %d,%d,%d", rim.getX(), rim.getY(), rim.getZ()));
+                autoLog("WALK", autoSite.center, String.format("step into hole from rim %d,%d,%d", gateRim.getX(), gateRim.getY(), gateRim.getZ()));
                 return;
             }
         }
 
         boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
-        if (!pathing && stateTicks > 20 && autoBaritoneRetries < 3) {
+        if (!pathing && mc.player.isTouchingWater() && waterAllTheWayToGoal()) {
+            releaseAllAutoKeys();
+            autoWalkDirect = true;
+            autoWalkSwimOverride = true;
+            autoWalkDirectDryTicks = 0;
+            autoWalkDirectStuckTicks = 0;
+            autoLog("WALK", autoSite.center, "baritone stopped in water, swimming to goal");
+            return;
+        }
+        if (autoColumn.water() && mc.player.isTouchingWater() && horiz <= 2.0
+            && !pathing && (bt == null || !bt.getCustomGoalProcess().isActive())) {
+            releaseAllAutoKeys();
+            autoWalkDirect = true;
+            autoWalkDirectDryTicks = 0;
+            autoWalkDirectStuckTicks = 0;
+            autoWalkDirectSwimStuckTicks = 0;
+            autoWalkDirectSwimStuckPos = null;
+            autoWalkDirectSwimBreaking = false;
+            autoWalkDirectSwimBreakStage = 0;
+            autoWalkDirectSwimBreakTarget = null;
+            autoLog("WALK", autoSite.center, "near water hole, swimming down");
+            return;
+        }
+        boolean grounded = mc.player.isOnGround() || mc.player.isTouchingWater() || mc.player.isClimbing();
+        boolean baritoneGaveUp = bt == null || !bt.getCustomGoalProcess().isActive();
+        if (!pathing && baritoneGaveUp && grounded && stateTicks > 20 && autoBaritoneRetries < 3) {
             autoBaritoneRetries++;
             if (bt != null) {
-                BlockPos goal = rim != null ? rim : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
+                BlockPos goal = gateRim != null ? gateRim : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
                 bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
             }
-        } else if (!pathing && autoBaritoneRetries >= 3) {
-            int keyX = rim != null ? rim.getX() : autoColumn.x();
-            int keyZ = rim != null ? rim.getZ() : autoColumn.z();
+        } else if (!pathing && baritoneGaveUp && autoBaritoneRetries >= 3) {
+            int keyX = gateRim != null ? gateRim.getX() : autoColumn.x();
+            int keyZ = gateRim != null ? gateRim.getZ() : autoColumn.z();
             if (!autoWalkKeyLogged) {
                 autoWalkKeyLogged = true;
                 autoLog("WALK", autoSite.center, String.format("baritone gave up, walking to %d,%d", keyX, keyZ));
             }
-            Utils.setPressed(mc.options.sneakKey, false);
-            recenterDig(keyX, keyZ, 0.2);
-            Utils.setPressed(mc.options.jumpKey, mc.player.isOnGround() && mc.player.horizontalCollision);
+            if (autoWalkStuckBreaking) {
+                Utils.setPressed(mc.options.forwardKey, false);
+                Utils.setPressed(mc.options.jumpKey, false);
+                Utils.setPressed(mc.options.sneakKey, false);
+                BlockState breakState = mc.world.getBlockState(autoWalkStuckBreakPos);
+                if (isOpenState(breakState, autoWalkStuckBreakPos)) {
+                    autoLog("WALK", autoSite.center, String.format("walk stuck, broken %d,%d,%d block=%s",
+                        autoWalkStuckBreakPos.getX(), autoWalkStuckBreakPos.getY(), autoWalkStuckBreakPos.getZ(), autoWalkStuckBreakLabel));
+                    autoWalkStuckBreaking = false;
+                    autoWalkStuckBreakPos = null;
+                    autoWalkStuckTicks = 0;
+                    autoWalkStuckLastDist = -1;
+                } else {
+                    autoMineTick("WALK", autoWalkStuckBreakPos, false);
+                }
+            } else {
+                Utils.setPressed(mc.options.sneakKey, false);
+                recenterDig(keyX, keyZ, 0.2);
+                Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision && (mc.player.isOnGround() || mc.player.isTouchingWater()));
+
+                autoWalkStuckTicks++;
+                if (autoWalkStuckTicks >= 40) {
+                    double dist = Math.hypot((keyX + 0.5) - mc.player.getX(), (keyZ + 0.5) - mc.player.getZ());
+                    if (autoWalkStuckLastDist >= 0 && autoWalkStuckLastDist - dist < 0.5) {
+                        if (!autoWalkStuckUseBreak) {
+                            autoBaritoneRetries = 0;
+                            autoWalkKeyLogged = false;
+                            autoWalkStuckUseBreak = true;
+                            releaseAllAutoKeys();
+                            autoLog("WALK", autoSite.center, "walk stuck, baritone again");
+                        } else {
+                            BlockPos obstacle = findWalkStuckObstacle(keyX, keyZ);
+                            if (obstacle != null) {
+                                BlockState obstacleState = mc.world.getBlockState(obstacle);
+                                autoWalkStuckBreaking = true;
+                                autoWalkStuckBreakPos = obstacle;
+                                autoWalkStuckBreakLabel = Registries.BLOCK.getId(obstacleState.getBlock()).getPath();
+                                autoWalkStuckUseBreak = false;
+                                autoLog("WALK", autoSite.center, String.format("walk stuck, breaking %d,%d,%d block=%s",
+                                    obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoWalkStuckBreakLabel));
+                            } else {
+                                autoBaritoneRetries = 0;
+                                autoWalkKeyLogged = false;
+                                releaseAllAutoKeys();
+                                autoLog("WALK", autoSite.center, "walk stuck, baritone again");
+                            }
+                        }
+                        autoWalkStuckTicks = 0;
+                        autoWalkStuckLastDist = -1;
+                    } else {
+                        autoWalkStuckLastDist = dist;
+                        autoWalkStuckTicks = 0;
+                    }
+                }
+            }
         }
 
         logNavTelemetry("WALK", new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z()), autoBaritoneRetries);
+    }
+
+    private boolean canBreakWalkStuckObstacle(BlockPos obstacle) {
+        BlockState obstacleState = mc.world.getBlockState(obstacle);
+        return obstacleState.getBlock() != Blocks.SPAWNER
+            && !isContainerPresent(obstacle)
+            && !isLava(obstacleState)
+            && !isLavaNearShaft(obstacle, obstacle.up())
+            && obstacle.getY() >= mc.player.getBlockPos().getY()
+            && mc.player.getEyePos().distanceTo(Vec3d.ofCenter(obstacle)) <= 4.2;
+    }
+
+    private BlockPos walkStuckCandidate(BlockPos feet, int stepX, int stepZ) {
+        BlockPos cell = feet.add(stepX, 0, stepZ);
+        BlockPos headCell = cell.up();
+        if (!isOpenState(mc.world.getBlockState(headCell), headCell) && canBreakWalkStuckObstacle(headCell)) {
+            return headCell;
+        }
+        if (!isOpenState(mc.world.getBlockState(cell), cell) && canBreakWalkStuckObstacle(cell)) {
+            return cell;
+        }
+        return null;
+    }
+
+    private BlockPos findWalkStuckObstacle(int keyX, int keyZ) {
+        BlockPos feet = mc.player.getBlockPos();
+        int dx = keyX - feet.getX();
+        int dz = keyZ - feet.getZ();
+        if (dx == 0 && dz == 0) return null;
+        boolean xFirst = Math.abs(dx) >= Math.abs(dz);
+        BlockPos candidate = xFirst
+            ? walkStuckCandidate(feet, Integer.signum(dx), 0)
+            : walkStuckCandidate(feet, 0, Integer.signum(dz));
+        if (candidate == null && dx != 0 && dz != 0) {
+            candidate = xFirst
+                ? walkStuckCandidate(feet, 0, Integer.signum(dz))
+                : walkStuckCandidate(feet, Integer.signum(dx), 0);
+        }
+        return candidate;
     }
 
     private void recenterDig(int x, int z) {
@@ -3708,10 +4415,12 @@ public class SpawnerDetector extends Module {
         BlockPos pos = mc.player.getBlockPos();
 
         if (entry != null && (pos.getX() != columnX || pos.getZ() != columnZ)) {
-            boolean axisX = entry.getX() != columnX;
-            int fixedCoord = axisX ? entry.getZ() : entry.getX();
+            boolean angled = entry.getX() != columnX && entry.getZ() != columnZ;
+            boolean stageOne = angled && pos.getZ() != columnZ;
+            boolean axisX = angled ? !stageOne : entry.getX() != columnX;
+            int fixedCoord = angled ? (stageOne ? entry.getX() : columnZ) : (axisX ? entry.getZ() : entry.getX());
+            int alongTarget = angled ? (stageOne ? columnZ : columnX) : (axisX ? columnX : columnZ);
             int alongPos = axisX ? pos.getX() : pos.getZ();
-            int alongTarget = axisX ? columnX : columnZ;
             int offAxisPos = axisX ? pos.getZ() : pos.getX();
 
             int nextAlong = (offAxisPos == fixedCoord && alongPos != alongTarget)
@@ -3725,9 +4434,9 @@ public class SpawnerDetector extends Module {
                 autoLog("EXIT", autoSite.center, String.format("exit path step %d x=%d,z=%d", autoExitPathStep, nx, nz));
             }
 
-            Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
+            Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && !mc.player.isOnGround() && !mc.player.horizontalCollision);
             recenterDig(nx, nz, 0.3);
-            Utils.setPressed(mc.options.jumpKey, mc.player.isOnGround() && mc.player.horizontalCollision);
+            Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision && (mc.player.isTouchingWater() || mc.player.isOnGround()));
             return false;
         }
 
@@ -3821,15 +4530,22 @@ public class SpawnerDetector extends Module {
         Room room = autoSite.room;
         int bx = MathHelper.floor(x);
         int bz = MathHelper.floor(z);
-        return bx >= room.minX() - 2 && bx <= room.maxX() + 2
-            && bz >= room.minZ() - 2 && bz <= room.maxZ() + 2
-            && y >= room.minY() - 2 && y <= room.maxY() + 2;
+        return bx >= room.minX() - 6 && bx <= room.maxX() + 6
+            && bz >= room.minZ() - 6 && bz <= room.maxZ() + 6
+            && y >= room.minY() - 6 && y <= room.maxY() + 6;
     }
 
     private boolean shaftSkeletonChaseable(Entity target) {
-        return target instanceof AbstractSkeletonEntity
+        return (target instanceof AbstractSkeletonEntity || target instanceof WitchEntity)
             && insideRoomBounds(target.getX(), target.getY(), target.getZ())
             && insideRoomBounds(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+    }
+
+    private boolean shaftSkeletonAiming(Entity target) {
+        return target instanceof AbstractSkeletonEntity skeleton
+            && skeleton.isAlive()
+            && skeleton.isAttacking()
+            && skeleton.canSee(mc.player);
     }
 
     private void moveTowardShaftTarget(Entity target) {
@@ -3857,7 +4573,17 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean handleShaftCombat() {
-        boolean inCombat = autoLastHitMs != 0 && (System.currentTimeMillis() - autoLastHitMs) < 3000L;
+        boolean recentHit = autoLastHitMs != 0 && (System.currentTimeMillis() - autoLastHitMs) < 3000L;
+        boolean skeletonChaseable = false;
+        for (Entity entity : mc.world.getEntities()) {
+            boolean known = autoHostileIds.contains(entity.getId());
+            if ((known || shaftSkeletonAiming(entity)) && entity.isAlive() && shaftSkeletonChaseable(entity)) {
+                if (!known) autoHostileIds.add(entity.getId());
+                skeletonChaseable = true;
+                break;
+            }
+        }
+        boolean inCombat = recentHit || skeletonChaseable;
 
         if (!inCombat) {
             if (autoPaused) endAutoPause();
@@ -3885,15 +4611,22 @@ public class SpawnerDetector extends Module {
             return true;
         }
 
-        Entity target = null;
-        double bestDistSq = Double.MAX_VALUE;
-        for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof AbstractSkeletonEntity) || !entity.isAlive()) continue;
-            if (!shaftSkeletonChaseable(entity)) continue;
-            double distSq = entity.squaredDistanceTo(mc.player);
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq;
-                target = entity;
+        DamageSource recentSource = mc.player.getRecentDamageSource();
+        Entity attacker = recentSource != null ? recentSource.getAttacker() : null;
+        Entity target = ((attacker instanceof AbstractSkeletonEntity || attacker instanceof WitchEntity) && attacker.isAlive() && shaftSkeletonChaseable(attacker))
+            ? attacker : null;
+        double bestDistSq = target != null ? target.squaredDistanceTo(mc.player) : Double.MAX_VALUE;
+        if (target == null) {
+            for (Entity entity : mc.world.getEntities()) {
+                boolean known = autoHostileIds.contains(entity.getId());
+                if ((!known && !shaftSkeletonAiming(entity)) || !entity.isAlive()) continue;
+                if (!shaftSkeletonChaseable(entity)) continue;
+                if (!known) autoHostileIds.add(entity.getId());
+                double distSq = entity.squaredDistanceTo(mc.player);
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    target = entity;
+                }
             }
         }
 
@@ -4065,7 +4798,7 @@ public class SpawnerDetector extends Module {
         long totalTimeout = Math.max(120_000L, 4_000L * autoDigBlocksPlanned) * mult;
         if (System.currentTimeMillis() - autoDigTotalStartMs > totalTimeout) { abort("dig timeout"); return; }
 
-        recenterDig(autoColumn.x(), autoColumn.z(), mc.player.isTouchingWater() ? 0.12 : 0.25);
+        recenterDig(autoColumn.x(), autoColumn.z(), 0.12);
 
         int feetY = mc.player.getBlockPos().getY();
         int roomCy = autoSite.room.cy();
@@ -4297,6 +5030,11 @@ public class SpawnerDetector extends Module {
             if (state.getBlock() == Blocks.SPAWNER) continue;
             if (isContainerPresent(pos)) continue;
 
+            HitResult losHit = mc.world.raycast(new RaycastContext(
+                eye, Vec3d.ofCenter(pos), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+            if (losHit instanceof BlockHitResult && losHit.getType() == HitResult.Type.BLOCK
+                && !((BlockHitResult) losHit).getBlockPos().equals(pos)) continue;
+
             if (autoRoomDebrisIgnored.contains(pos)) continue;
             sawDebris = true;
             if (autoRoomDebrisDeferred.contains(pos)) continue;
@@ -4440,6 +5178,9 @@ public class SpawnerDetector extends Module {
             autoApproachTarget = target;
             autoApproachCell = null;
             autoApproachTicks = 0;
+            autoApproachBreakPos = null;
+            autoApproachBreakLabel = null;
+            autoApproachBreakCount = 0;
         }
 
         Set<BlockPos> bad = autoApproachBadCells.computeIfAbsent(target, t -> new java.util.HashSet<>());
@@ -4449,7 +5190,7 @@ public class SpawnerDetector extends Module {
 
         if (autoApproachTicks == 1) {
             autoApproachBaselineDist = eyeDist;
-        } else if (autoApproachTicks % 100 == 0) {
+        } else if (autoApproachBreakPos == null && autoApproachTicks % 100 == 0) {
             if (autoApproachBaselineDist - eyeDist < 0.5) {
                 BlockPos stuckCell = autoApproachCell != null ? autoApproachCell : target;
                 bad.add(stuckCell);
@@ -4473,6 +5214,49 @@ public class SpawnerDetector extends Module {
         }
 
         BlockPos aimAt = autoApproachCell != null ? autoApproachCell : target;
+
+        if (autoApproachBreakPos != null) {
+            BlockState breakState = mc.world.getBlockState(autoApproachBreakPos);
+            if (isOpenState(breakState, autoApproachBreakPos)) {
+                autoLog("ROOM", target, String.format("approach blocked, broken %d,%d,%d block=%s",
+                    autoApproachBreakPos.getX(), autoApproachBreakPos.getY(), autoApproachBreakPos.getZ(), autoApproachBreakLabel));
+                autoApproachBreakCount++;
+                autoApproachBreakPos = null;
+                autoApproachBaselineDist = eyeDist;
+                autoApproachTicks = 1;
+            } else {
+                Utils.setPressed(mc.options.forwardKey, false);
+                Utils.setPressed(mc.options.jumpKey, false);
+                Utils.setPressed(mc.options.sneakKey, false);
+                autoMineTick("ROOM", autoApproachBreakPos, false);
+                return;
+            }
+        } else {
+            HitResult obstacleHit = mc.world.raycast(new RaycastContext(
+                mc.player.getEyePos(), Vec3d.ofCenter(aimAt), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+            BlockPos obstacle = null;
+            if (obstacleHit instanceof BlockHitResult && obstacleHit.getType() == HitResult.Type.BLOCK) {
+                BlockPos hitPos = ((BlockHitResult) obstacleHit).getBlockPos();
+                if (canBreakApproachObstacle(hitPos, target, aimAt)) {
+                    obstacle = hitPos;
+                }
+            }
+            if (obstacle == null && mc.player.horizontalCollision) {
+                obstacle = findApproachFallbackObstacle(target, aimAt);
+            }
+            if (obstacle != null) {
+                BlockState obstacleState = mc.world.getBlockState(obstacle);
+                autoApproachBreakPos = obstacle;
+                autoApproachBreakLabel = Registries.BLOCK.getId(obstacleState.getBlock()).getPath();
+                autoLog("ROOM", target, String.format("approach blocked at %d,%d,%d block=%s, breaking",
+                    obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoApproachBreakLabel));
+                Utils.setPressed(mc.options.forwardKey, false);
+                Utils.setPressed(mc.options.jumpKey, false);
+                autoMineTick("ROOM", autoApproachBreakPos, false);
+                return;
+            }
+        }
+
         Vec3d cellCenter = Vec3d.ofCenter(aimAt);
         double dx = cellCenter.x - mc.player.getX();
         double dz = cellCenter.z - mc.player.getZ();
@@ -4497,6 +5281,48 @@ public class SpawnerDetector extends Module {
         }
     }
 
+    private boolean canBreakApproachObstacle(BlockPos obstacle, BlockPos target, BlockPos aimAt) {
+        if (obstacle.equals(target) || obstacle.equals(aimAt)) return false;
+        BlockState obstacleState = mc.world.getBlockState(obstacle);
+        boolean falling = obstacleState.getBlock() instanceof net.minecraft.block.FallingBlock;
+        return obstacleState.getBlock() != Blocks.SPAWNER
+            && !isContainerPresent(obstacle)
+            && !isLava(obstacleState)
+            && !isLavaNearShaft(obstacle, obstacle.up())
+            && obstacle.getY() >= mc.player.getBlockPos().getY()
+            && mc.player.getEyePos().distanceTo(Vec3d.ofCenter(obstacle)) <= 4.2
+            && (!falling || autoApproachBreakCount < 16);
+    }
+
+    private BlockPos approachFallbackCandidate(BlockPos feet, int stepX, int stepZ, BlockPos target, BlockPos aimAt) {
+        BlockPos cell = feet.add(stepX, 0, stepZ);
+        if (!isOpenState(mc.world.getBlockState(cell), cell) && canBreakApproachObstacle(cell, target, aimAt)) {
+            return cell;
+        }
+        BlockPos headCell = cell.up();
+        if (!isOpenState(mc.world.getBlockState(headCell), headCell) && canBreakApproachObstacle(headCell, target, aimAt)) {
+            return headCell;
+        }
+        return null;
+    }
+
+    private BlockPos findApproachFallbackObstacle(BlockPos target, BlockPos aimAt) {
+        BlockPos feet = mc.player.getBlockPos();
+        int dx = aimAt.getX() - feet.getX();
+        int dz = aimAt.getZ() - feet.getZ();
+        if (dx == 0 && dz == 0) return null;
+        boolean xFirst = Math.abs(dx) >= Math.abs(dz);
+        BlockPos candidate = xFirst
+            ? approachFallbackCandidate(feet, Integer.signum(dx), 0, target, aimAt)
+            : approachFallbackCandidate(feet, 0, Integer.signum(dz), target, aimAt);
+        if (candidate == null && dx != 0 && dz != 0) {
+            candidate = xFirst
+                ? approachFallbackCandidate(feet, 0, Integer.signum(dz), target, aimAt)
+                : approachFallbackCandidate(feet, Integer.signum(dx), 0, target, aimAt);
+        }
+        return candidate;
+    }
+
     private void tickRoomSpawner() {
         if (autoRoomSpawnerPos == null || mc.world.getBlockState(autoRoomSpawnerPos).getBlock() != Blocks.SPAWNER) {
             if (autoRoomSpawnerPos != null) statSpawnersBroken++;
@@ -4509,7 +5335,7 @@ public class SpawnerDetector extends Module {
         double moved = autoRoomSpawnerAnchor == null ? 0.0
             : Math.hypot(mc.player.getX() - autoRoomSpawnerAnchor.x, mc.player.getZ() - autoRoomSpawnerAnchor.z);
 
-        if (!autoRoomSpawnerRepositioning && (moved > 1.0 || distSq > 4.2 * 4.2)) {
+        if (!autoRoomSpawnerRepositioning && (moved > 1.0 || distSq > 4.4 * 4.4)) {
             autoRoomSpawnerRepositioning = true;
             Utils.setPressed(mc.options.attackKey, false);
             if (autoRoomSpawnerAnchor != null) mc.interactionManager.cancelBlockBreaking();
@@ -4517,7 +5343,8 @@ public class SpawnerDetector extends Module {
         }
 
         if (autoRoomSpawnerRepositioning) {
-            if (distSq <= 3.0 * 3.0 && mc.player.isOnGround()) {
+            boolean readyToResume = distSq <= 4.2 * 4.2 && (mc.player.isOnGround() || mc.player.isTouchingWater());
+            if (readyToResume) {
                 releaseAllAutoKeys();
                 autoRoomSpawnerRepositioning = false;
                 autoRoomSpawnerAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
@@ -4621,6 +5448,8 @@ public class SpawnerDetector extends Module {
 
         BlockPos target = autoRoomQueue.get(autoRoomIndex);
 
+        if (tickStepOffContainer(target)) return;
+
         if (autoRoomSubState == 5) {
             tickRoomContainerBreak(target);
             return;
@@ -4629,6 +5458,8 @@ public class SpawnerDetector extends Module {
         if (!isContainerPresent(target)) {
             autoRoomIndex++;
             autoRoomSubState = 0;
+            autoRoomPillarTarget = null;
+            autoRoomPillarPhase = 0;
             return;
         }
 
@@ -4637,13 +5468,17 @@ public class SpawnerDetector extends Module {
                 autoRoomSubStateStartMs = System.currentTimeMillis();
                 autoRoomOpenAttempts = 0;
                 double distSq = mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(target));
-                autoRoomSubState = distSq > 4.4 * 4.4 ? 1 : 2;
+                autoRoomSubState = distSq > 4.2 * 4.2 ? 1 : 2;
             }
             case 1 -> {
                 double distSq = mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(target));
                 if (distSq <= 4.2 * 4.2) {
                     releaseAllAutoKeys();
+                    autoRoomPillarTarget = null;
+                    autoRoomPillarPhase = 0;
                     autoRoomSubState = 2;
+                } else if (tickRoomContainerPillar(target)) {
+                    return;
                 } else {
                     approachBlock(target);
                 }
@@ -4680,6 +5515,8 @@ public class SpawnerDetector extends Module {
                 if (kept) {
                     autoRoomIndex++;
                     autoRoomSubState = 0;
+                    autoRoomPillarTarget = null;
+                    autoRoomPillarPhase = 0;
                 } else {
                     autoRoomBreakStartMs = System.currentTimeMillis();
                     autoRoomBreakTicks = 0;
@@ -4706,6 +5543,8 @@ public class SpawnerDetector extends Module {
                 autoLog("ROOM", target, "broken in " + autoRoomBreakTicks + " ticks");
                 autoRoomIndex++;
                 autoRoomSubState = 0;
+                autoRoomPillarTarget = null;
+                autoRoomPillarPhase = 0;
                 return;
             }
         } else {
@@ -4715,7 +5554,7 @@ public class SpawnerDetector extends Module {
             double moved = autoRoomBreakAnchor == null ? 0.0
                 : Math.hypot(mc.player.getX() - autoRoomBreakAnchor.x, mc.player.getZ() - autoRoomBreakAnchor.z);
 
-            if (!autoRoomBreakRepositioning && (moved > 1.0 || distSq > 4.2 * 4.2)) {
+            if (!autoRoomBreakRepositioning && (moved > 1.0 || distSq > 4.4 * 4.4)) {
                 autoRoomBreakRepositioning = true;
                 Utils.setPressed(mc.options.attackKey, false);
                 mc.interactionManager.cancelBlockBreaking();
@@ -4723,15 +5562,15 @@ public class SpawnerDetector extends Module {
             }
 
             if (autoRoomBreakRepositioning) {
-                boolean readyToResume = mc.player.isTouchingWater()
-                    ? distSq <= 4.0 * 4.0
-                    : distSq <= 3.0 * 3.0 && mc.player.isOnGround();
+                boolean readyToResume = distSq <= 4.2 * 4.2 && (mc.player.isOnGround() || mc.player.isTouchingWater());
                 if (readyToResume) {
                     releaseAllAutoKeys();
                     autoRoomBreakRepositioning = false;
                     autoRoomBreakAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
                     autoRoomBreakStartMs = System.currentTimeMillis();
                     autoLog("ROOM", target, "repositioned, breaking again");
+                } else if (tickRoomContainerPillar(target)) {
+                    return;
                 } else {
                     approachBlock(target);
                     return;
@@ -4748,6 +5587,215 @@ public class SpawnerDetector extends Module {
         }
 
         autoMineTick("ROOM", target, false);
+    }
+
+    private boolean containerOutOfReachHigh(BlockPos target) {
+        double eyeY = mc.player.getEyePos().y;
+        double centerY = target.getY() + 0.5;
+        if (centerY - eyeY <= 3.9) return false;
+        if (!mc.player.isOnGround()) return false;
+        double dx = (target.getX() + 0.5) - mc.player.getX();
+        double dz = (target.getZ() + 0.5) - mc.player.getZ();
+        return Math.hypot(dx, dz) <= 1.5;
+    }
+
+    private int ensureThrowawayInHotbar() {
+        for (Item item : AUTO_THROWAWAY) {
+            FindItemResult hotbar = InvUtils.findInHotbar(item);
+            if (hotbar.found() && !hotbar.isOffhand()) return hotbar.slot();
+        }
+        for (Item item : AUTO_THROWAWAY) {
+            FindItemResult inv = InvUtils.find(item);
+            if (!inv.found()) continue;
+            int target = -1;
+            for (int i = 0; i < 9; i++) {
+                if (mc.player.getInventory().getStack(i).isEmpty()) { target = i; break; }
+            }
+            if (target < 0) {
+                for (int i = 0; i < 9; i++) {
+                    ItemStack s = mc.player.getInventory().getStack(i);
+                    if (!s.isIn(ItemTags.PICKAXES) && s.getItem() != Items.FIREWORK_ROCKET && s.getItem() != Items.OBSIDIAN) {
+                        target = i;
+                        break;
+                    }
+                }
+            }
+            if (target < 0) continue;
+            InvUtils.move().from(inv.slot()).to(target);
+            return target;
+        }
+        return -1;
+    }
+
+    private boolean tickRoomContainerPillar(BlockPos target) {
+        boolean inProgress = target.equals(autoRoomPillarTarget);
+        if (!inProgress) {
+            if (!containerOutOfReachHigh(target)) return false;
+            releaseAllAutoKeys();
+            autoRoomPillarTarget = target;
+            autoRoomPillarPhase = 0;
+        }
+
+        BlockPos feet = mc.player.getBlockPos();
+
+        mc.player.setPitch(90.0f);
+        Utils.setPressed(mc.options.forwardKey, false);
+        Utils.setPressed(mc.options.sprintKey, false);
+
+        if (autoRoomPillarPhase == 0) {
+            if (hasBlockAbove(feet.getX(), feet.getY() + 1, feet.getZ(), 2)) {
+                autoRoomPillarTarget = null;
+                return false;
+            }
+
+            int slot = ensureObsidianInHotbar();
+            if (slot < 0) slot = ensureThrowawayInHotbar();
+            if (slot < 0) {
+                autoLog("ROOM", target, "container out of reach, no block to pillar");
+                autoRoomPillarTarget = null;
+                autoRoomPillarPhase = 0;
+                autoRoomIndex++;
+                autoRoomSubState = 0;
+                return true;
+            }
+            InvUtils.swap(slot, false);
+
+            autoRoomPillarFeetX = feet.getX();
+            autoRoomPillarFeetY = feet.getY();
+            autoRoomPillarFeetZ = feet.getZ();
+            autoRoomPillarPhase = 1;
+        }
+
+        if (autoRoomPillarPhase == 1) {
+            if (mc.player.getY() < autoRoomPillarFeetY + 1.0) {
+                Utils.setPressed(mc.options.jumpKey, true);
+                return true;
+            }
+            Utils.setPressed(mc.options.jumpKey, false);
+            BlockPos supportPos = new BlockPos(autoRoomPillarFeetX, autoRoomPillarFeetY - 1, autoRoomPillarFeetZ);
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, new BlockHitResult(
+                new Vec3d(autoRoomPillarFeetX + 0.5, autoRoomPillarFeetY - 1 + 1.0, autoRoomPillarFeetZ + 0.5),
+                Direction.UP, supportPos, false));
+            mc.player.swingHand(Hand.MAIN_HAND);
+            autoLog("ROOM", target, "container pillar placed y=" + autoRoomPillarFeetY);
+            autoRoomPillarPhase = 2;
+        }
+
+        if (!mc.player.isOnGround()) return true;
+
+        autoRoomPillarPhase = 0;
+        if (containerOutOfReachHigh(target)) return true;
+        autoRoomPillarTarget = null;
+        return false;
+    }
+
+    private boolean standingOnContainer(BlockPos target) {
+        if (!mc.player.isOnGround()) return false;
+        double y = mc.player.getY();
+        if (y < target.getY() + 0.5 || y > target.getY() + 1.2) return false;
+        double dx = mc.player.getX() - (target.getX() + 0.5);
+        double dz = mc.player.getZ() - (target.getZ() + 0.5);
+        return Math.abs(dx) < 0.8 && Math.abs(dz) < 0.8;
+    }
+
+    private boolean isValidStepOffCell(BlockPos c, BlockPos target) {
+        BlockPos below = new BlockPos(c.getX(), c.getY() - 1, c.getZ());
+        BlockState belowState = mc.world.getBlockState(below);
+        if (isOpenState(belowState, below) || !belowState.getFluidState().isEmpty()) return false;
+        if (isContainerPresent(below) || belowState.getBlock() == Blocks.SPAWNER) return false;
+        if (isLava(belowState) || isLavaNearShaft(below, c)) return false;
+        if (!isOpenState(mc.world.getBlockState(c), c)) return false;
+        BlockPos head = c.up();
+        if (!isOpenState(mc.world.getBlockState(head), head)) return false;
+        Vec3d eyes = new Vec3d(c.getX() + 0.5, c.getY() + 1.62, c.getZ() + 0.5);
+        return eyes.squaredDistanceTo(Vec3d.ofCenter(target)) <= 4.2 * 4.2;
+    }
+
+    private BlockPos findStepOffCell(BlockPos target, Set<BlockPos> excluded) {
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                if (dx * dx + dz * dz > 9) continue;
+                BlockPos c = new BlockPos(target.getX() + dx, target.getY(), target.getZ() + dz);
+                if (excluded.contains(c)) continue;
+                if (!isValidStepOffCell(c, target)) continue;
+                double distSq = c.getSquaredDistance(mc.player.getBlockPos());
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = c;
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean tickStepOffContainer(BlockPos target) {
+        boolean walking = target.equals(autoRoomStepOffTarget);
+        if (!walking && !standingOnContainer(target)) return false;
+
+        if (!walking) {
+            Utils.setPressed(mc.options.attackKey, false);
+            mc.interactionManager.cancelBlockBreaking();
+            autoRoomStepOffTarget = target;
+            autoRoomStepOffTried = new java.util.HashSet<>();
+            autoRoomStepOffCell = findStepOffCell(target, autoRoomStepOffTried);
+            autoRoomStepOffTicks = 0;
+            autoRoomStepOffBaselineDist = Double.MAX_VALUE;
+            if (autoRoomStepOffCell != null) {
+                autoLog("ROOM", target, String.format("stepping off container to %d,%d,%d",
+                    autoRoomStepOffCell.getX(), autoRoomStepOffCell.getY(), autoRoomStepOffCell.getZ()));
+            }
+        }
+
+        Utils.setPressed(mc.options.attackKey, false);
+
+        if (autoRoomStepOffCell == null) {
+            if (!target.equals(autoRoomStepOffNoCellLoggedTarget)) {
+                autoLog("ROOM", target, "standing on container, no cell to step off");
+                autoRoomStepOffNoCellLoggedTarget = target;
+            }
+            autoRoomStepOffTarget = null;
+            return false;
+        }
+
+        BlockPos feet = mc.player.getBlockPos();
+        if (feet.getX() == autoRoomStepOffCell.getX() && feet.getZ() == autoRoomStepOffCell.getZ() && mc.player.isOnGround()) {
+            releaseAllAutoKeys();
+            autoRoomStepOffTarget = null;
+            autoRoomStepOffCell = null;
+            return false;
+        }
+
+        double dist = Math.hypot((autoRoomStepOffCell.getX() + 0.5) - mc.player.getX(),
+            (autoRoomStepOffCell.getZ() + 0.5) - mc.player.getZ());
+        autoRoomStepOffTicks++;
+        if (autoRoomStepOffTicks == 1) {
+            autoRoomStepOffBaselineDist = dist;
+        } else if (autoRoomStepOffTicks % 40 == 0) {
+            if (autoRoomStepOffBaselineDist - dist < 0.3) {
+                autoRoomStepOffTried.add(autoRoomStepOffCell);
+                autoRoomStepOffCell = findStepOffCell(target, autoRoomStepOffTried);
+                autoRoomStepOffTicks = 0;
+                if (autoRoomStepOffCell == null) {
+                    if (!target.equals(autoRoomStepOffNoCellLoggedTarget)) {
+                        autoLog("ROOM", target, "standing on container, no cell to step off");
+                        autoRoomStepOffNoCellLoggedTarget = target;
+                    }
+                    autoRoomStepOffTarget = null;
+                    return false;
+                }
+                autoLog("ROOM", target, String.format("stepping off container to %d,%d,%d",
+                    autoRoomStepOffCell.getX(), autoRoomStepOffCell.getY(), autoRoomStepOffCell.getZ()));
+            } else {
+                autoRoomStepOffBaselineDist = dist;
+            }
+        }
+
+        recenterDig(autoRoomStepOffCell.getX(), autoRoomStepOffCell.getZ(), 0.2);
+        Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision);
+        return true;
     }
 
     private void finishRoomAndAscend() {
@@ -5094,7 +6142,7 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks == 1) {
             int feetY = mc.player.getBlockPos().getY();
-            if (feetY < autoSite.room.cy()) {
+            if (feetY < autoSite.room.cy() - 2) {
                 enterState(AutoState.ROOM_CLIMB, "feet below room floor");
                 return;
             }
@@ -5113,6 +6161,10 @@ public class SpawnerDetector extends Module {
             autoRoomSpawnerRepositioning = false;
             autoRoomIndex = 0;
             autoRoomSubState = 0;
+            autoRoomPillarTarget = null;
+            autoRoomPillarPhase = 0;
+            autoRoomStepOffTarget = null;
+            autoRoomStepOffCell = null;
             autoRoomDebrisDeferred.clear();
             autoRoomDebrisBreaks.clear();
             autoRoomDebrisIgnored.clear();
@@ -5125,7 +6177,7 @@ public class SpawnerDetector extends Module {
             autoPausedTicks = 0;
         }
 
-        if (mc.player.isOnGround() && mc.player.getBlockPos().getY() < autoSite.room.cy()) {
+        if ((mc.player.isOnGround() || mc.player.isSubmergedInWater()) && mc.player.getBlockPos().getY() < autoSite.room.cy() - 2) {
             if (mc.currentScreen instanceof GenericContainerScreen || mc.currentScreen instanceof ShulkerBoxScreen) {
                 mc.player.closeHandledScreen();
             }
@@ -5164,12 +6216,15 @@ public class SpawnerDetector extends Module {
         if (stateTicks == 1) {
             autoRoomClimbMode = 0;
             autoRoomClimbPillarPhase = 0;
-            autoRoomClimbJumpTapTicks = 0;
+            autoRoomClimbPillarStallTicks = 0;
             autoRoomClimbWater = false;
             autoRoomClimbStartMs = System.currentTimeMillis();
             autoRoomClimbBaritoneCandidates = List.of();
             autoRoomClimbBaritoneIndex = 0;
             autoRoomClimbBaritoneTryStartMs = 0;
+            autoRoomClimbSwimTarget = null;
+            autoRoomClimbSwimIsFloorHole = false;
+            autoRoomClimbSwimStartMs = 0;
             autoPaused = false;
             autoPauseReason = null;
             autoPauseStartMs = 0;
@@ -5205,6 +6260,31 @@ public class SpawnerDetector extends Module {
         return best;
     }
 
+    private BlockPos findRoomClimbLedge() {
+        Room room = autoSite.room;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int x = room.cx() - room.k(); x <= room.cx() + room.k(); x++) {
+            for (int z = room.cz() - room.p(); z <= room.cz() + room.p(); z++) {
+                cursor.set(x, room.cy() - 1, z);
+                BlockState floorState = mc.world.getBlockState(cursor);
+                if (isOpenState(floorState, cursor) || !floorState.getFluidState().isEmpty()) continue;
+                cursor.set(x, room.cy(), z);
+                if (!isOpenState(mc.world.getBlockState(cursor), cursor)) continue;
+                cursor.set(x, room.cy() + 1, z);
+                if (!isOpenState(mc.world.getBlockState(cursor), cursor)) continue;
+                double dx = (x + 0.5) - mc.player.getX(), dz = (z + 0.5) - mc.player.getZ();
+                double distSq = dx * dx + dz * dz;
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = new BlockPos(x, room.cy(), z);
+                }
+            }
+        }
+        return best;
+    }
+
     private void tickRoomClimbPillar() {
         BlockPos feet = mc.player.getBlockPos();
         if (autoRoomClimbPillarPhase == 0 && feet.getY() >= autoSite.room.cy() && mc.player.isOnGround()) {
@@ -5223,27 +6303,69 @@ public class SpawnerDetector extends Module {
 
         if (autoRoomClimbWater) {
             autoRoomClimbPillarPhase = 0;
-            if (feet.getY() >= autoSite.room.cy()) {
+
+            if (autoRoomClimbSwimStartMs == 0) {
+                BlockPos.Mutable underCursor = new BlockPos.Mutable();
+                underCursor.set(feet.getX(), autoSite.room.minY(), feet.getZ());
+                boolean underOpening = isOpenState(mc.world.getBlockState(underCursor), underCursor);
+                if (underOpening) {
+                    autoRoomClimbSwimTarget = findRoomClimbLedge();
+                    autoRoomClimbSwimIsFloorHole = false;
+                    if (autoRoomClimbSwimTarget == null) {
+                        autoRoomClimbSwimTarget = findRoomFloorHole();
+                        autoRoomClimbSwimIsFloorHole = true;
+                    }
+                } else {
+                    autoRoomClimbSwimTarget = findRoomFloorHole();
+                    autoRoomClimbSwimIsFloorHole = true;
+                    if (autoRoomClimbSwimTarget == null) {
+                        autoRoomClimbSwimTarget = findRoomClimbLedge();
+                        autoRoomClimbSwimIsFloorHole = false;
+                    }
+                }
+                autoRoomClimbSwimStartMs = System.currentTimeMillis();
+                if (autoRoomClimbSwimTarget == null) {
+                    abandonRoomClimbPillar("no ledge");
+                    return;
+                }
+                autoLog("ROOM_CLIMB", autoSite.center, (autoRoomClimbSwimIsFloorHole ? "swimming to floor hole " : "swimming to ledge ")
+                    + autoRoomClimbSwimTarget.getX() + "," + autoRoomClimbSwimTarget.getY() + "," + autoRoomClimbSwimTarget.getZ());
+            }
+
+            if (autoRoomClimbSwimIsFloorHole && feet.getX() == autoRoomClimbSwimTarget.getX()
+                    && feet.getZ() == autoRoomClimbSwimTarget.getZ() && feet.getY() >= autoSite.room.minY()) {
+                BlockPos ledge = findRoomClimbLedge();
+                if (ledge == null) {
+                    autoRoomClimbSwimIsFloorHole = false;
+                } else {
+                    autoRoomClimbSwimTarget = ledge;
+                    autoRoomClimbSwimIsFloorHole = false;
+                    autoLog("ROOM_CLIMB", autoSite.center, "swimming to ledge " + autoRoomClimbSwimTarget.getX()
+                        + "," + autoRoomClimbSwimTarget.getY() + "," + autoRoomClimbSwimTarget.getZ());
+                }
+            }
+
+            if ((mc.player.isOnGround() && !mc.player.isTouchingWater()) || feet.getY() >= autoSite.room.cy()) {
                 releaseAllAutoKeys();
-                enterState(AutoState.ROOM, "climb complete");
+                enterState(AutoState.ROOM, "climb complete (swim)");
                 return;
             }
-            BlockPos hole = findRoomFloorHole();
-            if (hole != null) {
-                double hdx = (hole.getX() + 0.5) - mc.player.getX();
-                double hdz = (hole.getZ() + 0.5) - mc.player.getZ();
-                if (Math.hypot(hdx, hdz) > 0.3) {
-                    mc.player.setYaw((float) Math.toDegrees(Math.atan2(-hdx, hdz)));
-                }
+
+            if (System.currentTimeMillis() - autoRoomClimbSwimStartMs > 10_000L) {
+                abandonRoomClimbPillar("swim timeout");
+                return;
+            }
+
+            double sdx = (autoRoomClimbSwimTarget.getX() + 0.5) - mc.player.getX();
+            double sdz = (autoRoomClimbSwimTarget.getZ() + 0.5) - mc.player.getZ();
+            if (Math.hypot(sdx, sdz) > 0.3) {
+                mc.player.setYaw((float) Math.toDegrees(Math.atan2(-sdx, sdz)));
             }
             mc.player.setPitch(-30.0f);
             Utils.setPressed(mc.options.sneakKey, false);
             Utils.setPressed(mc.options.sprintKey, false);
             Utils.setPressed(mc.options.forwardKey, true);
             Utils.setPressed(mc.options.jumpKey, true);
-            if (System.currentTimeMillis() - autoRoomClimbStartMs > 20_000L) {
-                abandonRoomClimbPillar("timeout");
-            }
             return;
         }
 
@@ -5258,6 +6380,7 @@ public class SpawnerDetector extends Module {
             }
 
             int slot = ensureObsidianInHotbar();
+            if (slot < 0) slot = ensureThrowawayInHotbar();
             if (slot < 0) {
                 abandonRoomClimbPillar("no obsidian");
                 return;
@@ -5267,7 +6390,7 @@ public class SpawnerDetector extends Module {
             autoRoomClimbFeetX = feet.getX();
             autoRoomClimbFeetY = feet.getY();
             autoRoomClimbFeetZ = feet.getZ();
-            autoRoomClimbJumpTapTicks = 1;
+            autoRoomClimbPillarStallTicks = 0;
             autoRoomClimbPillarPhase = 1;
         }
 
@@ -5282,11 +6405,24 @@ public class SpawnerDetector extends Module {
             autoRoomClimbPillarPhase = 0;
         }
 
-        if (autoRoomClimbJumpTapTicks > 0) {
-            Utils.setPressed(mc.options.jumpKey, true);
-            autoRoomClimbJumpTapTicks--;
+        if (autoRoomClimbPillarPhase == 1) {
+            if (mc.player.getY() < autoRoomClimbFeetY + 1.0) {
+                Utils.setPressed(mc.options.jumpKey, true);
+                if (mc.player.isOnGround()) {
+                    autoRoomClimbPillarStallTicks++;
+                    if (autoRoomClimbPillarStallTicks >= 20) {
+                        abandonRoomClimbPillar("jump blocked");
+                        return;
+                    }
+                } else {
+                    autoRoomClimbPillarStallTicks = 0;
+                }
+            } else {
+                Utils.setPressed(mc.options.jumpKey, false);
+            }
         } else {
             Utils.setPressed(mc.options.jumpKey, false);
+            autoRoomClimbPillarStallTicks = 0;
         }
 
         if (System.currentTimeMillis() - autoRoomClimbStartMs > 20_000L) {
@@ -5316,6 +6452,8 @@ public class SpawnerDetector extends Module {
 
         if (autoRoomClimbBaritoneTryStartMs == 0) {
             autoRoomClimbBaritoneTryStartMs = System.currentTimeMillis();
+            autoRoomClimbBaritoneMoveAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+            autoRoomClimbBaritoneMoveAnchorMs = System.currentTimeMillis();
             autoBaritoneRetries = 0;
             autoLog("ROOM_CLIMB", autoSite.center, "climb baritone try " + (autoRoomClimbBaritoneIndex + 1)
                 + " goal=" + goal.getX() + "," + goal.getY() + "," + goal.getZ());
@@ -5328,7 +6466,7 @@ public class SpawnerDetector extends Module {
         boolean inInterior = feet.getX() >= room.cx() - room.k() && feet.getX() <= room.cx() + room.k()
             && feet.getZ() >= room.cz() - room.p() && feet.getZ() <= room.cz() + room.p();
 
-        if (feet.getY() == room.cy() && inInterior && mc.player.isOnGround()) {
+        if (feet.getY() >= room.cy() && feet.getY() <= room.cy() + 2 && inInterior && mc.player.isOnGround()) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             releaseAllAutoKeys();
             BaritoneHelper.stopAllPathing();
@@ -5336,8 +6474,16 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        double movedFromAnchor = autoRoomClimbBaritoneMoveAnchor == null ? 0.0
+            : autoRoomClimbBaritoneMoveAnchor.distanceTo(new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()));
+        if (movedFromAnchor >= 1.0) {
+            autoRoomClimbBaritoneMoveAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+            autoRoomClimbBaritoneMoveAnchorMs = System.currentTimeMillis();
+        }
+
         long tryElapsed = System.currentTimeMillis() - autoRoomClimbBaritoneTryStartMs;
-        if (tryElapsed > 30_000L) {
+        boolean stalled = System.currentTimeMillis() - autoRoomClimbBaritoneMoveAnchorMs >= 10_000L;
+        if (tryElapsed > 30_000L && stalled) {
             BaritoneHelper.stopAllPathing();
             autoRoomClimbBaritoneIndex++;
             autoRoomClimbBaritoneTryStartMs = 0;
@@ -5346,8 +6492,16 @@ public class SpawnerDetector extends Module {
 
         IBaritone bt = primaryBaritone();
         boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
-        if (!pathing && tryElapsed > 1000L && autoBaritoneRetries < 3) {
+        boolean goalActive = bt != null && bt.getCustomGoalProcess().isActive();
+        if (!pathing && !goalActive && tryElapsed > 1000L) {
             autoBaritoneRetries++;
+            if (autoBaritoneRetries >= 3) {
+                BaritoneHelper.stopAllPathing();
+                autoRoomClimbBaritoneIndex++;
+                autoRoomClimbBaritoneTryStartMs = 0;
+                logNavTelemetry("ROOM_CLIMB", goal, autoBaritoneRetries);
+                return;
+            }
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
         }
 
@@ -5368,6 +6522,10 @@ public class SpawnerDetector extends Module {
 
         for (int x = room.cx() - room.k(); x <= room.cx() + room.k(); x++) {
             for (int z = room.cz() - room.p(); z <= room.cz() + room.p(); z++) {
+                cursor.set(x, room.cy() - 1, z);
+                BlockState floorState = mc.world.getBlockState(cursor);
+                if (isOpenState(floorState, cursor) || !floorState.getFluidState().isEmpty()) continue;
+                if (isContainerPresent(cursor) || floorState.getBlock() == Blocks.SPAWNER) continue;
                 cursor.set(x, room.cy(), z);
                 if (!isOpenState(mc.world.getBlockState(cursor), cursor)) continue;
                 cursor.set(x, room.cy() + 1, z);
@@ -5449,9 +6607,17 @@ public class SpawnerDetector extends Module {
 
         autoSite = chainSite;
         autoColumn = chainPlan;
+        autoChestplateAllowed = !chainPlan.water();
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
         autoRoomFoundItems = 0;
+        autoClimbLostGlideRetries = 0;
+        autoTakeoffRetries = 0;
+        autoAscendFailedPoints.clear();
+        autoAscendRadius = 0;
+        autoAscendSurfacedCount = 0;
+        autoWalkReapproach = false;
+        autoWalkReapproachCount = 0;
 
         enterState(AutoState.WALK, String.format("chained from %d,%d,%d dist=%.1f",
             from.getX(), from.getY(), from.getZ(), chainDist));
@@ -5477,7 +6643,13 @@ public class SpawnerDetector extends Module {
             if (stateTicks == 1) {
                 boolean roomWater = mc.player.isTouchingWater()
                     && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY());
-                autoExitReturning = farDxz > 4.0 && !roomWater;
+                autoExitReturning = farDxz > 4.0 && !roomWater && autoExitShaft.entry() == null;
+                autoExitNoPathChecks = 0;
+                autoExitSelfWalk = false;
+                autoExitSelfBestDist = farDxz;
+                autoExitSelfStuckTicks = 0;
+                autoExitBreakPos = null;
+                autoExitBreakLabel = null;
                 if (autoExitReturning) {
                     autoBaritoneRetries = 0;
                     resetBreach();
@@ -5505,10 +6677,85 @@ public class SpawnerDetector extends Module {
                     enterAscendOrSwimUp("return to shaft timeout");
                     return;
                 }
+
+                if (autoExitSelfWalk) {
+                    if (mc.player.isTouchingWater()
+                        && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY())) {
+                        releaseAllAutoKeys();
+                        autoExitReturning = false;
+                        autoExitSelfWalk = false;
+                        enterState(AutoState.SWIM_UP, "water on the way back");
+                        return;
+                    }
+
+                    if (autoExitBreakPos != null) {
+                        BlockState breakState = mc.world.getBlockState(autoExitBreakPos);
+                        if (isOpenState(breakState, autoExitBreakPos)) {
+                            autoLog("EXIT", autoSite.center, String.format("exit blocked, broken %d,%d,%d block=%s",
+                                autoExitBreakPos.getX(), autoExitBreakPos.getY(), autoExitBreakPos.getZ(), autoExitBreakLabel));
+                            autoExitBreakPos = null;
+                            autoExitSelfStuckTicks = 0;
+                            autoExitSelfBestDist = farDxz;
+                        } else {
+                            Utils.setPressed(mc.options.forwardKey, false);
+                            Utils.setPressed(mc.options.jumpKey, false);
+                            Utils.setPressed(mc.options.sneakKey, false);
+                            autoMineTick("EXIT", autoExitBreakPos, false);
+                            return;
+                        }
+                    }
+
+                    Utils.setPressed(mc.options.sneakKey, false);
+                    recenterDig(autoExitShaft.x(), autoExitShaft.z(), 0.3);
+                    Utils.setPressed(mc.options.jumpKey, mc.player.isOnGround() && mc.player.horizontalCollision);
+
+                    if (farDxz <= autoExitSelfBestDist - 0.3) {
+                        autoExitSelfBestDist = farDxz;
+                        autoExitSelfStuckTicks = 0;
+                    } else if (mc.player.horizontalCollision) {
+                        autoExitSelfStuckTicks++;
+                    }
+                    if (autoExitSelfStuckTicks >= 40) {
+                        BlockPos obstacle = findApproachFallbackObstacle(shaftBottom, shaftBottom);
+                        if (obstacle != null) {
+                            autoExitBreakPos = obstacle;
+                            autoExitBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(obstacle).getBlock()).getPath();
+                            autoLog("EXIT", autoSite.center, String.format("exit blocked at %d,%d,%d block=%s, breaking",
+                                obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoExitBreakLabel));
+                            autoExitSelfStuckTicks = 0;
+                            Utils.setPressed(mc.options.forwardKey, false);
+                            Utils.setPressed(mc.options.jumpKey, false);
+                            autoMineTick("EXIT", autoExitBreakPos, false);
+                            return;
+                        } else if (autoExitSelfStuckTicks >= 200) {
+                            releaseAllAutoKeys();
+                            autoExitReturning = false;
+                            autoExitSelfWalk = false;
+                            enterAscendOrSwimUp("walk back stuck");
+                            return;
+                        }
+                    }
+
+                    logNavTelemetry("EXIT return", shaftBottom, autoBaritoneRetries);
+                    return;
+                }
+
                 boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
                 if (!pathing && autoBreachPos == null && stateTicks > 20 && stateTicks % 40 == 0) {
+                    autoExitNoPathChecks++;
+                    if (autoExitNoPathChecks >= 2 && !autoExitSelfWalk) {
+                        if (bt != null) bt.getPathingBehavior().cancelEverything();
+                        releaseAllAutoKeys();
+                        autoExitSelfWalk = true;
+                        autoApproachBreakCount = 0;
+                        autoExitSelfBestDist = farDxz;
+                        autoLog("EXIT", autoSite.center, String.format("baritone found no path, walking to the shaft dist=%.1f", farDxz));
+                        return;
+                    }
                     autoBaritoneRetries++;
                     if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(shaftBottom));
+                } else if (pathing && stateTicks % 40 == 0) {
+                    autoExitNoPathChecks = 0;
                 }
                 tickBreach("EXIT", shaftBottom);
                 logNavTelemetry("EXIT return", shaftBottom, autoBaritoneRetries);
@@ -5609,7 +6856,10 @@ public class SpawnerDetector extends Module {
             autoShaftReturning = false;
         }
 
-        if (handleShaftCombat()) return;
+        if (handleShaftCombat()) {
+            autoShaftAlignCenteredTicks = 0;
+            return;
+        }
 
         double alignDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
         BlockPos shaftBottom = new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z());
@@ -5768,6 +7018,12 @@ public class SpawnerDetector extends Module {
         stateTicks++;
 
         if (stateTicks == 1) {
+            double centerDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
+            if (centerDist > 0.2) {
+                releaseAllAutoKeys();
+                enterState(AutoState.SHAFT_ALIGN, String.format("realign before takeoff dist=%.2f", centerDist));
+                return;
+            }
             autoShaftFlyYaw = mc.player.getYaw();
             autoShaftFlyOutcome = 0;
             autoShaftFlyRocketCount = 0;
@@ -6104,11 +7360,22 @@ public class SpawnerDetector extends Module {
         if (autoAreaLoaderWasOn && stateTicks > 20 && !mc.player.isSubmergedInWater()
             && mc.player.getY() < swimUpExitY - 3
             && mc.player.getBlockX() == swimUpX && mc.player.getBlockZ() == swimUpZ
-            && dryOpenColumn(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 2, swimUpExitY)) {
+            && dryOpenColumn(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY)) {
             releaseAllAutoKeys();
-            autoWaterJumpAttempts = 0;
-            autoWaterJumpVertical = true;
-            enterState(AutoState.WATER_JUMP, "pool under dry shaft");
+            boolean shaftFlyEligible = !mc.player.isTouchingWater()
+                && autoShaftFly.get()
+                && autoExitShaft != null
+                && !autoExitShaft.skyBlocked()
+                && countRockets() >= 4;
+            if (shaftFlyEligible) {
+                autoShaftFlyAttempts = 0;
+                autoShaftFlyRerouteAttempts = 0;
+                enterState(AutoState.SHAFT_ALIGN, "pool under dry shaft, shaft-fly");
+            } else {
+                autoWaterJumpAttempts = 0;
+                autoWaterJumpVertical = true;
+                enterState(AutoState.WATER_JUMP, "pool under dry shaft");
+            }
         }
     }
 
@@ -6137,6 +7404,67 @@ public class SpawnerDetector extends Module {
         }
         if (allLoaded) monumentCache.put(center, false);
         return false;
+    }
+
+    private static final int NO_JUNGLE_TEMPLE = Integer.MAX_VALUE;
+    private final Map<BlockPos, Integer> jungleTempleLowestYCache = new HashMap<>();
+
+    private boolean jungleTempleChunksLoaded(BlockPos center) {
+        int ccx = center.getX() >> 4, ccz = center.getZ() >> 4;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (!mc.world.getChunkManager().isChunkLoaded(ccx + dx, ccz + dz)) return false;
+            }
+        }
+        return true;
+    }
+
+    private Integer jungleTempleLowestY(BlockPos center) {
+        Integer cached = jungleTempleLowestYCache.get(center);
+        if (cached != null) return cached == NO_JUNGLE_TEMPLE ? null : cached;
+
+        int ccx = center.getX() >> 4, ccz = center.getZ() >> 4;
+        boolean allLoaded = true;
+        int lowest = NO_JUNGLE_TEMPLE;
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                WorldChunk chunk = mc.world.getChunkManager().getWorldChunk(ccx + dx, ccz + dz);
+                if (chunk == null) {
+                    allLoaded = false;
+                    continue;
+                }
+                ChunkSection[] sections = chunk.getSectionArray();
+                int bottomY = chunk.getBottomY();
+                for (int si = 0; si < sections.length; si++) {
+                    ChunkSection section = sections[si];
+                    if (section == null || section.isEmpty()) continue;
+                    if (!section.hasAny(st -> st.isOf(Blocks.STICKY_PISTON) || st.isOf(Blocks.TRIPWIRE_HOOK))) continue;
+
+                    int sectionBaseY = bottomY + si * 16;
+                    for (int ly = 0; ly < 16 && sectionBaseY + ly < lowest; ly++) {
+                        for (int lx = 0; lx < 16; lx++) {
+                            for (int lz = 0; lz < 16; lz++) {
+                                Block b = section.getBlockState(lx, ly, lz).getBlock();
+                                if (b == Blocks.STICKY_PISTON || b == Blocks.TRIPWIRE_HOOK) {
+                                    lowest = Math.min(lowest, sectionBaseY + ly);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (allLoaded) jungleTempleLowestYCache.put(center, lowest);
+        return lowest == NO_JUNGLE_TEMPLE ? null : lowest;
+    }
+
+    private boolean isJunglePyramidSite(Site site) {
+        if (site.hasSpawner) return false;
+        Integer lowestY = jungleTempleLowestY(site.center);
+        if (lowestY == null) return false;
+        return site.room.maxY() >= lowestY - 3;
     }
 
     private boolean dryOpenColumn(int x, int z, int fromY, int toY) {
@@ -6205,6 +7533,8 @@ public class SpawnerDetector extends Module {
             autoClimbLastHeight = mc.player.getY();
             autoClimbStuckAttempts = 0;
             autoClimbStuck = false;
+            autoClimbWindowY = mc.player.getY();
+            autoClimbWindowTick = stateTicks + 20;
         }
 
         if (autoClimbStuck) {
@@ -6227,6 +7557,26 @@ public class SpawnerDetector extends Module {
         mc.player.setPitch(-90.0f);
 
         if (!mc.player.isGliding()) {
+            if (autoAreaLoaderWasOn && !isClearSkyHere()) {
+                if (!(mc.player.isOnGround() || mc.player.isTouchingWater())) return;
+                autoClimbLostGlideRetries++;
+                boolean dryShaftFly = autoClimbLostGlideRetries < 4 && autoExitShaft != null
+                    && !mc.player.isTouchingWater()
+                    && mc.player.getBlockX() == autoExitShaft.x() && mc.player.getBlockZ() == autoExitShaft.z()
+                    && !autoExitShaft.skyBlocked() && autoShaftFly.get() && countRockets() >= 4;
+                boolean water = autoClimbLostGlideRetries < 4 && mc.player.isTouchingWater();
+                AutoState next = dryShaftFly ? AutoState.SHAFT_ALIGN : water ? AutoState.SWIM_UP : AutoState.ASCEND;
+                if (next == AutoState.ASCEND && autoAscendArrivedAt != null && autoClimbLostGlideRetries >= 4) {
+                    autoAscendFailedPoints.add(autoAscendArrivedAt);
+                }
+                autoLog("CLIMB", autoSite.center, "lost glide, retry " + autoClimbLostGlideRetries + " via " + next.name());
+                if (next == AutoState.SHAFT_ALIGN) {
+                    autoShaftFlyAttempts = 0;
+                    autoShaftFlyRerouteAttempts = 0;
+                }
+                enterState(next, "");
+                return;
+            }
             autoLog("CLIMB", autoSite.center, "not gliding");
             enterState(AutoState.RESUME, "");
             return;
@@ -6247,23 +7597,24 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        if (stateTicks == autoClimbWindowTick) autoClimbWindowY = y;
+        if (stateTicks - autoClimbWindowTick >= 20) {
+            if (y - autoClimbWindowY < 0.5) {
+                autoLog("CLIMB", autoSite.center, String.format("climb stuck x=%.1f z=%.1f y=%.1f",
+                    mc.player.getX(), mc.player.getZ(), y));
+                autoClimbStuck = true;
+                autoClimbStuckStartTick = stateTicks;
+                autoClimbStuckAttempts = 3;
+                return;
+            } else {
+                autoClimbWindowY = y;
+                autoClimbWindowTick = stateTicks;
+            }
+        }
+
         if (vy < 0.8 && stateTicks - autoClimbLastRocketTick >= 10 && !ownRocketActive()) {
             if (fireShaftRocket()) {
                 autoClimbLastRocketTick = stateTicks;
-                if (y - autoClimbLastHeight < 1.0) {
-                    autoClimbStuckAttempts++;
-                } else {
-                    autoClimbStuckAttempts = 0;
-                }
-                autoClimbLastHeight = y;
-
-                if (autoClimbStuckAttempts >= 3) {
-                    autoLog("CLIMB", autoSite.center, String.format("climb stuck x=%.1f z=%.1f y=%.1f",
-                        mc.player.getX(), mc.player.getZ(), y));
-                    autoClimbStuck = true;
-                    autoClimbStuckStartTick = stateTicks;
-                    return;
-                }
             }
         }
 
@@ -6344,10 +7695,11 @@ public class SpawnerDetector extends Module {
 
     private void obsidianPlatformFailed(String reason) {
         autoLog("OBSIDIAN_PLATFORM", autoSite.center, "abandoning: " + reason);
+        autoAscendFromAbort = true;
         if (findAscendTakeoffPoints(autoColumn.x(), autoColumn.z(), 48).isEmpty()) {
-            fail("stuck in ocean");
+            autoAscendRadius = 96;
+            enterState(AutoState.ASCEND, "stuck in ocean, wider radius");
         } else {
-            autoAscendFromAbort = true;
             enterState(AutoState.ASCEND, reason);
         }
     }
@@ -6444,6 +7796,7 @@ public class SpawnerDetector extends Module {
                 if (!autoAreaLoaderWasOn) {
                     enterState(AutoState.RESUME, "staying on foot");
                 } else {
+                    autoAscendArrivedAt = null;
                     enterState(AutoState.TAKEOFF, "");
                 }
                 return;
@@ -6498,7 +7851,10 @@ public class SpawnerDetector extends Module {
                     cursor.set(x, groundY + dy, z);
                     if (!isOpenState(mc.world.getBlockState(cursor), cursor)) open = false;
                 }
-                if (open && isClearTakeoffGround(x, z, groundY)) candidates.add(new BlockPos(x, groundY, z));
+                if (open && isClearTakeoffGround(x, z, groundY)) {
+                    BlockPos candidate = new BlockPos(x, groundY, z);
+                    if (!autoAscendFailedPoints.contains(candidate)) candidates.add(candidate);
+                }
             }
         }
 
@@ -6507,11 +7863,17 @@ public class SpawnerDetector extends Module {
     }
 
     private Goal buildAscendGoal() {
-        if (autoAscendTargets.isEmpty()) {
+        List<BlockPos> targets = autoAscendTargets;
+        if (!autoAscendFailedPoints.isEmpty()) {
+            List<BlockPos> filtered = new ArrayList<>();
+            for (BlockPos p : targets) if (!autoAscendFailedPoints.contains(p)) filtered.add(p);
+            if (!filtered.isEmpty()) targets = filtered;
+        }
+        if (targets.isEmpty()) {
             return new GoalBlock(new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z()));
         }
-        Goal[] goals = new Goal[autoAscendTargets.size()];
-        for (int i = 0; i < autoAscendTargets.size(); i++) goals[i] = new GoalBlock(autoAscendTargets.get(i));
+        Goal[] goals = new Goal[targets.size()];
+        for (int i = 0; i < targets.size(); i++) goals[i] = new GoalBlock(targets.get(i));
         return new GoalComposite(goals);
     }
 
@@ -6521,7 +7883,19 @@ public class SpawnerDetector extends Module {
         if (stateTicks == 1) {
             BaritoneAPI.getSettings().allowPlace.value = true;
             autoBaritoneRetries = 0;
-            int ascendRadius = autoColumn.water() ? 48 : 16;
+            autoAscendStuckPos = null;
+            autoAscendStuckTicks = 0;
+            autoAscendBreakingUp = false;
+            autoAscendBreakPos = null;
+            autoAscendBreakLabel = null;
+            autoAscendTowerActive = false;
+            autoAscendPillarPhase = 0;
+            autoAscendFallingBrokenCount = 0;
+            autoAscendTimeoutBaseTick = stateTicks;
+            autoAscendTowerHoldUntil = 0;
+            autoTakeoffRetries = 0;
+            int ascendRadius = autoAscendRadius > 0 ? autoAscendRadius : (autoColumn.water() ? 48 : 16);
+            autoAscendRadius = ascendRadius;
             autoAscendTargets = findAscendTakeoffPoints(mc.player.getBlockX(), mc.player.getBlockZ(), ascendRadius);
             BlockPos nearest = autoAscendTargets.isEmpty() ? null : autoAscendTargets.get(0);
             autoLog("ASCEND", autoSite.center, "takeoff points found=" + autoAscendTargets.size()
@@ -6530,9 +7904,33 @@ public class SpawnerDetector extends Module {
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
         }
 
-        if (stateTicks > 120 * 20) { fail("ascend timeout"); return; }
+        if (stateTicks - autoAscendTimeoutBaseTick > 120 * 20) {
+            if (autoAscendTowerActive) {
+                double feetY = mc.player.getY();
+                if (feetY > autoAscendTowerBestY) {
+                    autoAscendTowerBestY = feetY;
+                    autoAscendTimeoutBaseTick = stateTicks;
+                } else {
+                    autoAscendTowerActive = false;
+                    ascendRetryBiggerRadius();
+                    autoLog("ASCEND", autoSite.center, "retry after timeout");
+                    return;
+                }
+            } else {
+                ascendRetryBiggerRadius();
+                autoLog("ASCEND", autoSite.center, "retry after timeout");
+                return;
+            }
+        }
 
-        if (autoAreaLoaderWasOn && mc.player.isTouchingWater() && !mc.player.isSubmergedInWater() && isClearSkyHere()) {
+        if (autoAscendTowerActive) {
+            tickAscendTowerUp();
+            return;
+        }
+
+        if (autoAreaLoaderWasOn && mc.player.isTouchingWater() && !mc.player.isSubmergedInWater() && isClearSkyHere()
+            && autoAscendSurfacedCount < 2) {
+            autoAscendSurfacedCount++;
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             IBaritone surfacedBt = primaryBaritone();
             if (surfacedBt != null) surfacedBt.getPathingBehavior().cancelEverything();
@@ -6542,6 +7940,45 @@ public class SpawnerDetector extends Module {
             enterState(AutoState.WATER_JUMP, "surfaced during ascend");
             return;
         }
+
+        if (autoAscendBreakingUp) {
+            BlockPos breakFeet = mc.player.getBlockPos();
+            recenterDig(breakFeet.getX(), breakFeet.getZ(), 0.2);
+            Utils.setPressed(mc.options.jumpKey, mc.player.isTouchingWater());
+            Utils.setPressed(mc.options.sneakKey, false);
+
+            BlockPos target = new BlockPos(breakFeet.getX(), breakFeet.getY() + 2, breakFeet.getZ());
+            if (autoAscendBreakPos == null || !autoAscendBreakPos.equals(target)) {
+                autoAscendBreakPos = target;
+                autoAscendBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
+            }
+
+            BlockState targetState = mc.world.getBlockState(autoAscendBreakPos);
+            boolean solid = !isOpenState(targetState, autoAscendBreakPos) && !targetState.getFluidState().isIn(FluidTags.LAVA);
+
+            if (isLavaNearShaft(autoAscendBreakPos, autoAscendBreakPos.up())) {
+                autoAscendBreakingUp = false;
+                autoBaritoneRetries = 0;
+                autoAscendStuckPos = null;
+                autoAscendStuckTicks = 0;
+                return;
+            }
+
+            if (solid) {
+                if (autoMineTick("ASCEND", autoAscendBreakPos, false)) {
+                    autoLog("ASCEND", autoSite.center, String.format("broken %d,%d,%d block=%s",
+                        autoAscendBreakPos.getX(), autoAscendBreakPos.getY(), autoAscendBreakPos.getZ(), autoAscendBreakLabel));
+                }
+            } else if (!mc.player.isTouchingWater()) {
+                autoAscendBreakingUp = false;
+                autoBaritoneRetries = 0;
+                autoAscendStuckPos = null;
+                autoAscendStuckTicks = 0;
+            }
+            return;
+        }
+
+        if (stateTicks < autoAscendTowerHoldUntil) return;
 
         boolean arrived = false;
         BlockPos arrivedAt = null;
@@ -6568,7 +8005,7 @@ public class SpawnerDetector extends Module {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             autoLog("ASCEND", autoSite.center, "reached " + arrivedAt.getX() + "," + arrivedAt.getY() + "," + arrivedAt.getZ());
 
-            if (!autoAscendFromAbort && tryChainWalk(autoSite)) return;
+            if (!autoAscendFromAbort && !autoWalkReapproach && tryChainWalk(autoSite)) return;
 
             if (!autoAreaLoaderWasOn) {
                 enterState(AutoState.RESUME, "staying on foot");
@@ -6576,26 +8013,182 @@ public class SpawnerDetector extends Module {
             }
 
             if (!autoAscendTargets.isEmpty()) {
+                autoAscendArrivedAt = arrivedAt;
                 enterState(AutoState.TAKEOFF, "");
                 return;
             }
 
             boolean blocked = autoColumn.skyBlocked() || hasBlockAbove(autoColumn.x(), autoColumn.exitY(), autoColumn.z(), SKY_CHECK_HEIGHT);
-            if (blocked) enterState(AutoState.TAKEOFF_SPOT, "");
-            else enterState(AutoState.TAKEOFF, "");
+            if (blocked) {
+                if (autoAscendRadius >= 96) {
+                    autoAscendTowerActive = true;
+                    autoAscendPillarPhase = 0;
+                    autoAscendTowerBestY = mc.player.getY();
+                    autoAscendTimeoutBaseTick = stateTicks;
+                    autoLog("ASCEND", autoSite.center, "tower up, no takeoff spot");
+                } else {
+                    enterState(AutoState.TAKEOFF_SPOT, "");
+                }
+            } else {
+                autoAscendArrivedAt = arrivedAt;
+                enterState(AutoState.TAKEOFF, "");
+            }
             return;
         }
 
         IBaritone bt = primaryBaritone();
         boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
-        if (!pathing && stateTicks > 20 && autoBaritoneRetries < 5) {
+        boolean grounded = mc.player.isOnGround() || mc.player.isTouchingWater() || mc.player.isClimbing();
+        boolean baritoneGaveUp = bt == null || !bt.getCustomGoalProcess().isActive();
+        if (!pathing && grounded && baritoneGaveUp && stateTicks > 20 && autoBaritoneRetries < 5) {
             autoBaritoneRetries++;
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+        } else if (!pathing && grounded && baritoneGaveUp && autoBaritoneRetries >= 5) {
+            BlockPos stuckFeet = mc.player.getBlockPos();
+            if (autoAscendStuckPos != null && autoAscendStuckPos.equals(stuckFeet)) {
+                autoAscendStuckTicks++;
+            } else {
+                autoAscendStuckPos = stuckFeet;
+                autoAscendStuckTicks = 0;
+            }
+
+            if (autoAscendStuckTicks >= 100) {
+                boolean waterAbove = false;
+                for (int dx = -1; dx <= 1 && !waterAbove; dx++) {
+                    for (int dz = -1; dz <= 1 && !waterAbove; dz++) {
+                        if (columnHasWater(stuckFeet.getX() + dx, stuckFeet.getZ() + dz, stuckFeet.getY() + 1, stuckFeet.getY() + 4)) {
+                            waterAbove = true;
+                        }
+                    }
+                }
+                if (waterAbove) {
+                    autoAscendBreakingUp = true;
+                    if (bt != null) bt.getPathingBehavior().cancelEverything();
+                    releaseAllAutoKeys();
+                    autoLog("ASCEND", autoSite.center, "baritone stopped under water, breaking up");
+                } else {
+                    autoAscendTowerActive = true;
+                    autoAscendPillarPhase = 0;
+                    autoAscendFallingBrokenCount = 0;
+                    autoAscendTowerBestY = mc.player.getY();
+                    autoAscendTimeoutBaseTick = stateTicks;
+                    if (bt != null) bt.getPathingBehavior().cancelEverything();
+                    releaseAllAutoKeys();
+                    autoLog("ASCEND", autoSite.center, "baritone stuck, towering up");
+                }
+            }
+        } else {
+            autoAscendStuckPos = null;
+            autoAscendStuckTicks = 0;
         }
 
         logNavTelemetry("ASCEND", autoAscendTargets.isEmpty()
             ? new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z())
             : autoAscendTargets.get(0), autoBaritoneRetries);
+    }
+
+    private void ascendRetryBiggerRadius() {
+        IBaritone bt = primaryBaritone();
+        if (bt != null) bt.getPathingBehavior().cancelEverything();
+        releaseAllAutoKeys();
+        autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+        autoAscendTargets = findAscendTakeoffPoints(mc.player.getBlockX(), mc.player.getBlockZ(), autoAscendRadius);
+        autoBaritoneRetries = 0;
+        autoAscendStuckPos = null;
+        autoAscendStuckTicks = 0;
+        autoAscendTowerActive = false;
+        autoAscendPillarPhase = 0;
+        autoAscendFallingBrokenCount = 0;
+        autoAscendTimeoutBaseTick = stateTicks;
+        if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+    }
+
+    private void tickAscendTowerUp() {
+        BlockPos feet = mc.player.getBlockPos();
+
+        if (isClearSkyHere() && mc.player.isOnGround()) {
+            autoAscendTowerActive = false;
+            autoAscendPillarPhase = 0;
+            BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
+            autoLog("ASCEND", autoSite.center, "tower up done, clear sky");
+            autoAscendArrivedAt = null;
+            enterState(AutoState.TAKEOFF, "");
+            return;
+        }
+
+        mc.player.setPitch(90.0f);
+        Utils.setPressed(mc.options.forwardKey, false);
+        Utils.setPressed(mc.options.sprintKey, false);
+
+        BlockPos above = feet.up(2);
+        BlockState aboveState = mc.world.getBlockState(above);
+        BlockPos above3 = feet.up(3);
+        BlockState above3State = mc.world.getBlockState(above3);
+
+        if (aboveState.getBlock() instanceof net.minecraft.block.FallingBlock
+            || above3State.getBlock() instanceof net.minecraft.block.FallingBlock) {
+            autoAscendTowerActive = false;
+            autoAscendTowerHoldUntil = stateTicks + 200;
+            ascendRetryBiggerRadius();
+            autoLog("ASCEND", autoSite.center, "tower up blocked by falling block");
+            return;
+        }
+
+        boolean breakable = !isOpenState(aboveState, above) && !isLava(aboveState)
+            && !isLavaNearShaft(above, above.up())
+            && !isContainerPresent(above) && aboveState.getBlock() != Blocks.SPAWNER;
+
+        if (breakable) {
+            Utils.setPressed(mc.options.jumpKey, false);
+            if (autoAscendBreakPos == null || !autoAscendBreakPos.equals(above)) {
+                autoAscendBreakPos = above;
+                autoAscendBreakLabel = Registries.BLOCK.getId(aboveState.getBlock()).getPath();
+            }
+            if (autoMineTick("ASCEND", autoAscendBreakPos, false)) {
+                autoLog("ASCEND", autoSite.center, String.format("tower up broken %d,%d,%d block=%s",
+                    autoAscendBreakPos.getX(), autoAscendBreakPos.getY(), autoAscendBreakPos.getZ(), autoAscendBreakLabel));
+                autoAscendBreakPos = null;
+            }
+            return;
+        }
+        autoAscendBreakPos = null;
+
+        if (!mc.player.isOnGround()) {
+            Utils.setPressed(mc.options.jumpKey, false);
+            return;
+        }
+
+        if (autoAscendPillarPhase == 0) {
+            int slot = ensureObsidianInHotbar();
+            if (slot < 0) slot = ensureThrowawayInHotbar();
+            if (slot < 0) {
+                autoAscendTowerActive = false;
+                autoAscendTowerHoldUntil = stateTicks + 200;
+                ascendRetryBiggerRadius();
+                autoLog("ASCEND", autoSite.center, "retry radius=" + autoAscendRadius);
+                return;
+            }
+            InvUtils.swap(slot, false);
+            autoAscendPillarFeetX = feet.getX();
+            autoAscendPillarFeetY = feet.getY();
+            autoAscendPillarFeetZ = feet.getZ();
+            autoAscendPillarPhase = 1;
+        }
+
+        if (autoAscendPillarPhase == 1 && mc.player.getY() >= autoAscendPillarFeetY + 1.0) {
+            BlockPos supportPos = new BlockPos(autoAscendPillarFeetX, autoAscendPillarFeetY - 1, autoAscendPillarFeetZ);
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, new BlockHitResult(
+                new Vec3d(autoAscendPillarFeetX + 0.5, autoAscendPillarFeetY - 1 + 1.0, autoAscendPillarFeetZ + 0.5),
+                Direction.UP, supportPos, false));
+            mc.player.swingHand(Hand.MAIN_HAND);
+            autoLog("ASCEND", autoSite.center, "tower up placed y=" + autoAscendPillarFeetY);
+            autoAscendPillarPhase = 0;
+            return;
+        }
+
+        if (autoAscendPillarPhase == 1) {
+            Utils.setPressed(mc.options.jumpKey, true);
+        }
     }
 
     private BlockPos findTakeoffSpot() {
@@ -6610,6 +8203,8 @@ public class SpawnerDetector extends Module {
                 if (distSq > 256 || distSq >= bestDistSq) continue;
                 int x = cx + dx, z = cz + dz;
                 int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                BlockPos candidate = new BlockPos(x, groundY, z);
+                if (autoAscendFailedPoints.contains(candidate)) continue;
                 boolean open = true;
                 for (int dy = 0; dy < 12 && open; dy++) {
                     cursor.set(x, groundY + dy, z);
@@ -6617,7 +8212,7 @@ public class SpawnerDetector extends Module {
                 }
                 if (!open) continue;
                 if (!isClearTakeoffGround(x, z, groundY)) continue;
-                best = new BlockPos(x, groundY, z);
+                best = candidate;
                 bestDistSq = distSq;
             }
         }
@@ -6630,7 +8225,11 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks == 1) {
             BlockPos spot = findTakeoffSpot();
-            if (spot == null) { fail("no takeoff spot"); return; }
+            if (spot == null) {
+                autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+                enterState(AutoState.ASCEND, "no takeoff spot");
+                return;
+            }
             autoTakeoffSpot = spot;
             autoLog("TAKEOFF_SPOT", autoSite.center, String.format("spot=%d,%d,%d dist=%.1f",
                 spot.getX(), spot.getY(), spot.getZ(),
@@ -6641,12 +8240,17 @@ public class SpawnerDetector extends Module {
             if (bt != null && !alreadyThere) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(spot));
         }
 
-        if (stateTicks > 30 * 20) { fail("takeoff spot timeout"); return; }
+        if (stateTicks > 30 * 20) {
+            autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+            enterState(AutoState.ASCEND, "takeoff spot timeout");
+            return;
+        }
 
         double dist = Math.hypot((autoTakeoffSpot.getX() + 0.5) - mc.player.getX(), (autoTakeoffSpot.getZ() + 0.5) - mc.player.getZ());
         if (dist <= 1.0 && Math.abs(mc.player.getY() - autoTakeoffSpot.getY()) <= 1.5 && mc.player.isOnGround()) {
             IBaritone bt = primaryBaritone();
             if (bt != null) bt.getPathingBehavior().cancelEverything();
+            autoAscendArrivedAt = autoTakeoffSpot;
             enterState(AutoState.TAKEOFF, "");
             return;
         }
@@ -6682,14 +8286,72 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickTakeoff() {
+        boolean takeoffPending = !takeoff.isActive() && autoTakeoffOutcome == 0 && mc.player.isOnGround();
+        if (takeoffPending) {
+            DamageSource recentSource = mc.player.getRecentDamageSource();
+            Entity attacker = recentSource != null ? recentSource.getAttacker() : null;
+            boolean fighting = autoLastHitMs != 0 && (System.currentTimeMillis() - autoLastHitMs) < 3000L
+                && (attacker instanceof AbstractSkeletonEntity || attacker instanceof WitchEntity) && attacker.isAlive();
+
+            if (fighting) {
+                double dist = Math.sqrt(attacker.squaredDistanceTo(mc.player));
+                if (attacker != autoShaftChaseTarget) {
+                    cancelShaftChaseBaritone();
+                    autoShaftChaseTarget = attacker;
+                    autoShaftChaseLastDist = dist;
+                    autoShaftChaseStuckTicks = 0;
+                    autoLog("TAKEOFF", autoSite.center, String.format("chase id=%d dist=%.1f", attacker.getId(), dist));
+                } else if (dist <= autoShaftChaseLastDist - 0.5) {
+                    autoShaftChaseLastDist = dist;
+                    autoShaftChaseStuckTicks = 0;
+                } else {
+                    autoShaftChaseStuckTicks++;
+                }
+
+                BlockPos targetPos = attacker.getBlockPos();
+                if (!autoShaftChaseBaritoneActive && autoShaftChaseStuckTicks >= 40) {
+                    IBaritone bt = primaryBaritone();
+                    if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalNear(targetPos, 2));
+                    autoShaftChaseBaritoneActive = true;
+                    autoShaftChaseBaritoneGoalPos = targetPos;
+                    autoLog("TAKEOFF", autoSite.center, String.format("chase via baritone id=%d dist=%.1f", attacker.getId(), dist));
+                }
+
+                if (autoShaftChaseBaritoneActive) {
+                    if (autoShaftChaseBaritoneGoalPos == null || targetPos.getSquaredDistance(autoShaftChaseBaritoneGoalPos) > 4.0) {
+                        IBaritone bt = primaryBaritone();
+                        if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalNear(targetPos, 2));
+                        autoShaftChaseBaritoneGoalPos = targetPos;
+                    }
+                    releaseAllAutoKeys();
+                } else {
+                    moveTowardShaftTarget(attacker);
+                }
+                autoTakeoffFought = true;
+                return;
+            }
+        }
+
+        if (autoTakeoffFought) {
+            cancelShaftChaseBaritone();
+            releaseAllAutoKeys();
+            autoTakeoffFought = false;
+            enterState(AutoState.ASCEND, "back to takeoff point after combat");
+            return;
+        }
+
         if (waitingForElytra("TAKEOFF")) return;
         stateTicks++;
 
         if (stateTicks == 1) {
             autoTakeoffYaw = mc.player.getYaw();
             int slot = ensureRocketInHotbar();
-            if (slot < 0) { fail("no rockets for takeoff"); return; }
+            if (slot < 0) {
+                enterState(AutoState.RESUME, "no rockets, staying on foot");
+                return;
+            }
             autoTakeoffOutcome = 0;
+            autoTakeoffFought = false;
             takeoff.start(slot, new ElytraTakeoff.Listener() {
                 @Override
                 public void onTakeoffSuccess(double speedBps) {
@@ -6714,19 +8376,33 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks > 40 * 20) {
             if (takeoff.isActive()) takeoff.cancel();
-            fail("takeoff timeout");
+            takeoffFailedRetryOrAscend("takeoff timeout");
             return;
         }
 
         if (autoTakeoffOutcome == 1) {
             autoTakeoffOutcome = 0;
+            autoTakeoffRetries = 0;
             autoClimbTargetY = mc.player.getY() + climbHeight.get();
             enterState(AutoState.CLIMB, "takeoff done");
         } else if (autoTakeoffOutcome == 2) {
             String r = autoTakeoffFailReason;
             autoTakeoffOutcome = 0;
-            fail("takeoff failed: " + r);
+            takeoffFailedRetryOrAscend("takeoff failed: " + r);
         }
+    }
+
+    private void takeoffFailedRetryOrAscend(String reason) {
+        autoTakeoffRetries++;
+        if (autoTakeoffRetries <= 3) {
+            autoLog("TAKEOFF", autoSite.center, "retry " + autoTakeoffRetries + " reason=" + reason);
+            enterState(AutoState.TAKEOFF, "");
+            return;
+        }
+        autoTakeoffRetries = 0;
+        if (autoAscendArrivedAt != null) autoAscendFailedPoints.add(autoAscendArrivedAt);
+        autoLog("TAKEOFF", autoSite.center, "giving up spot, reason=" + reason);
+        enterState(AutoState.ASCEND, "");
     }
 
     private String autoRunOutcome() {
@@ -6750,6 +8426,17 @@ public class SpawnerDetector extends Module {
 
     private void tickResume() {
         stateTicks++;
+
+        if (autoWalkReapproach) {
+            autoWalkReapproach = false;
+            autoLandSpotAttempts = 0;
+            autoLandSpotGaveUpLogged = false;
+            autoWaterDiveClearTicks = 0;
+            autoLandSpot = autoColumn.water() ? null : chooseLandSpot(autoColumn, LAND_RING_RADIUS);
+            autoLog("RESUME", autoSite.center, "re-approach airborne, back to APPROACH");
+            enterState(AutoState.APPROACH, "");
+            return;
+        }
 
         if (stateTicks == 1 && autoAreaLoaderWasOn && !isClearSkyHere()) {
             releaseAllAutoKeys();
@@ -6844,7 +8531,10 @@ public class SpawnerDetector extends Module {
                 boolean blocked = autoColumn.skyBlocked()
                     || hasBlockAbove(mc.player.getBlockPos().getX(), feetY, mc.player.getBlockPos().getZ(), SKY_CHECK_HEIGHT);
                 if (blocked) enterState(AutoState.TAKEOFF_SPOT, "from ABORT (" + reason + ")");
-                else enterState(AutoState.TAKEOFF, "from ABORT (" + reason + ")");
+                else {
+                    autoAscendArrivedAt = null;
+                    enterState(AutoState.TAKEOFF, "from ABORT (" + reason + ")");
+                }
             }
         } else {
             autoAscendFromAbort = true;
@@ -6870,7 +8560,19 @@ public class SpawnerDetector extends Module {
         BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
 
         state = AutoState.FAILED;
+        setChestplateHold(false);
         stateTicks = 0;
+    }
+
+    private void tickFailed() {
+        stateTicks++;
+        if (stateTicks < 20) return;
+        if (autoSite != null) {
+            autoLog("FAILED", autoSite.center, "FAILED -> IDLE");
+        } else if (log.get()) {
+            HunterBuddyAddon.LOG.info("[SpawnerDetector/auto] FAILED -> IDLE");
+        }
+        resetAutoState();
     }
 
     private SettingColor colorOf(Category category) {
@@ -6929,6 +8631,7 @@ public class SpawnerDetector extends Module {
         public int mobCount;
         public boolean tunnel;
         public DugHoles.Feature tunnelFeature;
+        public List<DugHoles.Feature> entryShafts = List.of();
         public boolean air;
         public int airCount;
         public int score;
