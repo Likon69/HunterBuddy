@@ -539,6 +539,14 @@ public class SpawnerDetector extends Module {
     private int autoApproachBreakCount;
 
     private boolean autoExitWalkingLogged;
+    private int autoExitIdleTicks;
+    private int autoExitStuckTicks;
+    private int autoExitStuckCount;
+    private Vec3d autoExitStuckAnchor;
+    private boolean autoExitStuckBreaking;
+    private BlockPos autoExitStuckBreakPos;
+    private String autoExitStuckBreakLabel;
+    private int autoExitStuckBreakTicks;
 
     private double autoClimbTargetY;
     private int autoResumeClimbTries;
@@ -562,6 +570,7 @@ public class SpawnerDetector extends Module {
     private int autoWalkDirectSwimBrokenTotal;
     private boolean autoWalkKeyLogged;
     private int autoWalkStuckTicks;
+    private int autoWalkIdleTicks;
     private double autoWalkStuckLastDist;
     private boolean autoWalkStuckUseBreak;
     private boolean autoWalkStuckBreaking;
@@ -4098,6 +4107,7 @@ public class SpawnerDetector extends Module {
             autoWalkDirectSwimBrokenTotal = 0;
             autoWalkKeyLogged = false;
             autoWalkStuckTicks = 0;
+            autoWalkIdleTicks = 0;
             autoWalkStuckLastDist = -1;
             autoWalkStuckUseBreak = false;
             autoWalkStuckBreaking = false;
@@ -4393,18 +4403,32 @@ public class SpawnerDetector extends Module {
         }
         boolean grounded = mc.player.isOnGround() || mc.player.isTouchingWater() || mc.player.isClimbing();
         boolean baritoneGaveUp = bt == null || !bt.getCustomGoalProcess().isActive();
-        if (!pathing && baritoneGaveUp && grounded && stateTicks > 20 && autoBaritoneRetries < 3) {
+        int nearKeyX = gateRim != null ? gateRim.getX() : autoColumn.x();
+        int nearKeyZ = gateRim != null ? gateRim.getZ() : autoColumn.z();
+        boolean nearHole = Math.hypot((nearKeyX + 0.5) - mc.player.getX(), (nearKeyZ + 0.5) - mc.player.getZ()) <= 3.0;
+        if (!pathing && !baritoneGaveUp) {
+            autoWalkIdleTicks++;
+            if (nearHole || autoWalkIdleTicks >= 100) {
+                bt.getPathingBehavior().cancelEverything();
+                baritoneGaveUp = true;
+                autoWalkIdleTicks = 0;
+                if (!nearHole) autoLog("WALK", autoSite.center, "baritone idle 5s, restarting");
+            }
+        } else {
+            autoWalkIdleTicks = 0;
+        }
+        if (!pathing && baritoneGaveUp && grounded && stateTicks > 20 && autoBaritoneRetries < 3 && !nearHole) {
             autoBaritoneRetries++;
             if (bt != null) {
                 BlockPos goal = gateRim != null ? gateRim : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
                 bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
             }
-        } else if (!pathing && baritoneGaveUp && autoBaritoneRetries >= 3) {
-            int keyX = gateRim != null ? gateRim.getX() : autoColumn.x();
-            int keyZ = gateRim != null ? gateRim.getZ() : autoColumn.z();
+        } else if (!pathing && baritoneGaveUp && (autoBaritoneRetries >= 3 || nearHole)) {
+            int keyX = nearKeyX;
+            int keyZ = nearKeyZ;
             if (!autoWalkKeyLogged) {
                 autoWalkKeyLogged = true;
-                autoLog("WALK", autoSite.center, String.format("baritone gave up, walking to %d,%d", keyX, keyZ));
+                autoLog("WALK", autoSite.center, String.format(nearHole ? "near hole, walking straight to %d,%d" : "baritone gave up, walking to %d,%d", keyX, keyZ));
             }
             if (autoWalkStuckBreaking) {
                 Utils.setPressed(mc.options.forwardKey, false);
@@ -4430,7 +4454,7 @@ public class SpawnerDetector extends Module {
                 if (autoWalkStuckTicks >= 40) {
                     double dist = Math.hypot((keyX + 0.5) - mc.player.getX(), (keyZ + 0.5) - mc.player.getZ());
                     if (autoWalkStuckLastDist >= 0 && autoWalkStuckLastDist - dist < 0.5) {
-                        if (!autoWalkStuckUseBreak) {
+                        if (!autoWalkStuckUseBreak && !nearHole) {
                             autoBaritoneRetries = 0;
                             autoWalkKeyLogged = false;
                             autoWalkStuckUseBreak = true;
@@ -6900,6 +6924,14 @@ public class SpawnerDetector extends Module {
             autoShaftFlyRerouteAttempts = 0;
             autoExitWalkingLogged = false;
             autoExitPathCell = null;
+            autoExitIdleTicks = 0;
+            autoExitStuckTicks = 0;
+            autoExitStuckCount = 0;
+            autoExitStuckAnchor = null;
+            autoExitStuckBreaking = false;
+            autoExitStuckBreakPos = null;
+            autoExitStuckBreakLabel = null;
+            autoExitStuckBreakTicks = 0;
             autoExitPathStep = 0;
             if (!autoAreaLoaderWasOn) {
                 enterAscendOrSwimUp("no flight module, staying on foot");
@@ -6941,13 +6973,78 @@ public class SpawnerDetector extends Module {
 
         IBaritone bt = primaryBaritone();
         boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
-        if (!pathing && autoBaritoneRetries >= 3) {
+        boolean exitBaritoneGaveUp = bt == null || !bt.getCustomGoalProcess().isActive();
+        boolean exitGrounded = mc.player.isOnGround() || mc.player.isTouchingWater() || mc.player.isClimbing();
+        boolean nearShaft = dxz <= 3.0;
+        if (!pathing && !exitBaritoneGaveUp) {
+            autoExitIdleTicks++;
+            if (nearShaft || autoExitIdleTicks >= 100) {
+                bt.getPathingBehavior().cancelEverything();
+                exitBaritoneGaveUp = true;
+                autoExitIdleTicks = 0;
+                if (!nearShaft) autoLog("EXIT", autoSite.center, "baritone idle 5s, restarting");
+            }
+        } else {
+            autoExitIdleTicks = 0;
+        }
+        if (!pathing && exitBaritoneGaveUp && (autoBaritoneRetries >= 3 || nearShaft)) {
             if (!autoExitWalkingLogged) {
                 autoExitWalkingLogged = true;
-                autoLog("EXIT", autoSite.center, "baritone gave up, walking to shaft");
+                autoLog("EXIT", autoSite.center, nearShaft ? "near shaft, walking straight to it" : "baritone gave up, walking to shaft");
             }
-            navigateExitColumn(autoExitShaft.x(), autoExitShaft.z(), 0.3, autoExitShaft.entry(), false);
-        } else if (!pathing && stateTicks > 20 && autoBaritoneRetries < 3) {
+            if (autoExitStuckBreaking) {
+                Utils.setPressed(mc.options.forwardKey, false);
+                Utils.setPressed(mc.options.jumpKey, false);
+                Utils.setPressed(mc.options.sneakKey, false);
+                BlockState exitBreakState = mc.world.getBlockState(autoExitStuckBreakPos);
+                if (isOpenState(exitBreakState, autoExitStuckBreakPos)) {
+                    autoLog("EXIT", autoSite.center, String.format("exit stuck, broken %d,%d,%d block=%s",
+                        autoExitStuckBreakPos.getX(), autoExitStuckBreakPos.getY(), autoExitStuckBreakPos.getZ(), autoExitStuckBreakLabel));
+                    autoExitStuckBreaking = false;
+                    autoExitStuckBreakPos = null;
+                    autoExitStuckTicks = 0;
+                    autoExitStuckAnchor = null;
+                } else if (++autoExitStuckBreakTicks >= 200) {
+                    autoLog("EXIT", autoSite.center, "exit stuck, break timeout");
+                    autoExitStuckBreaking = false;
+                    autoExitStuckBreakPos = null;
+                    autoExitStuckTicks = 0;
+                    autoExitStuckAnchor = null;
+                } else {
+                    autoMineTick("EXIT", autoExitStuckBreakPos, false);
+                }
+            } else {
+                navigateExitColumn(autoExitShaft.x(), autoExitShaft.z(), 0.3, autoExitShaft.entry(), false);
+                autoExitStuckTicks++;
+                if (autoExitStuckTicks >= 40) {
+                    Vec3d here = new Vec3d(mc.player.getX(), 0.0, mc.player.getZ());
+                    boolean stuck = autoExitStuckAnchor != null && here.distanceTo(autoExitStuckAnchor) < 0.3 && (dxz > 0.5 || dy > 0.5);
+                    if (stuck) {
+                        autoExitStuckCount++;
+                        int targetX = autoExitPathCell != null ? autoExitPathCell.getX() : autoExitShaft.x();
+                        int targetZ = autoExitPathCell != null ? autoExitPathCell.getZ() : autoExitShaft.z();
+                        BlockPos obstacle = autoExitStuckCount <= 3 ? findWalkStuckObstacle(targetX, targetZ) : null;
+                        if (obstacle != null) {
+                            autoExitStuckBreaking = true;
+                            autoExitStuckBreakPos = obstacle;
+                            autoExitStuckBreakTicks = 0;
+                            autoExitStuckBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(obstacle).getBlock()).getPath();
+                            releaseAllAutoKeys();
+                            autoLog("EXIT", autoSite.center, String.format("exit stuck, breaking %d,%d,%d block=%s",
+                                obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoExitStuckBreakLabel));
+                        } else if (autoExitStuckCount >= 2) {
+                            releaseAllAutoKeys();
+                            enterAscendOrSwimUp("exit stuck, nothing to break");
+                            return;
+                        }
+                    } else if (autoExitStuckAnchor != null && here.distanceTo(autoExitStuckAnchor) >= 0.3) {
+                        autoExitStuckCount = 0;
+                    }
+                    autoExitStuckAnchor = here;
+                    autoExitStuckTicks = 0;
+                }
+            }
+        } else if (!pathing && exitBaritoneGaveUp && exitGrounded && stateTicks > 20 && autoBaritoneRetries < 3) {
             autoBaritoneRetries++;
             if (bt != null) {
                 bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(
