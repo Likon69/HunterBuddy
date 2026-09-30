@@ -6276,10 +6276,17 @@ public class SpawnerDetector extends Module {
                 mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos))));
         }
 
+        if (System.currentTimeMillis() - autoRoomDebrisStartMs > 10_000L) {
+            releaseAllAutoKeys();
+            autoRoomDebrisIgnored.add(pos);
+            autoLog("ROOM", pos, "debris not broken in 10s, ignored");
+            autoRoomDebrisCurrent = null;
+            return;
+        }
+
         double eyeDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
         if (eyeDist > 4.2) {
             Utils.setPressed(mc.options.attackKey, false);
-            autoRoomDebrisStartMs = System.currentTimeMillis();
             approachBlock(pos);
             return;
         }
@@ -6295,12 +6302,6 @@ public class SpawnerDetector extends Module {
                 autoLog("ROOM", autoSite.center, "debris cleared n=" + autoRoomDebrisBroken);
             }
             return;
-        }
-
-        if (System.currentTimeMillis() - autoRoomDebrisStartMs > 10_000L) {
-            autoRoomDebrisDeferred.add(pos);
-            autoLog("ROOM", pos, "debris deferred");
-            autoRoomDebrisCurrent = null;
         }
     }
 
