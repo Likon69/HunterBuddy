@@ -44,6 +44,12 @@ import java.util.function.Predicate;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.BlockEventS2CPacket;
+import net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
@@ -205,6 +211,13 @@ public class SpawnerDetector extends Module {
         .name("log")
         .description("Write detection and auto-farm lines to latest.log.")
         .defaultValue(false).build());
+
+    private final Setting<Boolean> logSpawnerData = sgGeneral.add(new BoolSetting.Builder()
+        .name("log-spawner-data")
+        .description("Write to latest.log the raw spawner data the server sends: with the chunk, on each update when it changes, and every spawner block event.")
+        .defaultValue(false).build());
+
+    private final Map<BlockPos, String> spawnerDataLogged = new ConcurrentHashMap<>();
 
     private final Setting<Integer> weightLight = sgScore.add(new IntSetting.Builder()
         .name("weight-light")
@@ -751,6 +764,28 @@ public class SpawnerDetector extends Module {
         jungleTempleSkipLogged.clear();
         jungleTempleLowestYCache.clear();
         monumentCache.clear();
+    }
+
+    @EventHandler
+    private void onSpawnerDataPacket(PacketEvent.Receive event) {
+        if (!logSpawnerData.get()) return;
+        if (event.packet instanceof ChunkDataS2CPacket packet) {
+            packet.getChunkData().getBlockEntities(packet.getChunkX(), packet.getChunkZ()).accept((pos, type, nbt) -> {
+                if (type == BlockEntityType.MOB_SPAWNER) logSpawnerData("chunk", pos, nbt);
+            });
+        } else if (event.packet instanceof BlockEntityUpdateS2CPacket packet && packet.getBlockEntityType() == BlockEntityType.MOB_SPAWNER) {
+            logSpawnerData("update", packet.getPos(), packet.getNbt());
+        } else if (event.packet instanceof BlockEventS2CPacket packet && packet.getBlock() == Blocks.SPAWNER) {
+            BlockPos pos = packet.getPos();
+            HunterBuddyAddon.LOG.info("[SpawnerDetector/spawner-data] event {} {} {} type={} data={}",
+                pos.getX(), pos.getY(), pos.getZ(), packet.getType(), packet.getData());
+        }
+    }
+
+    private void logSpawnerData(String source, BlockPos pos, NbtCompound nbt) {
+        String text = nbt == null ? "null" : nbt.toString();
+        if (text.equals(spawnerDataLogged.put(pos.toImmutable(), text))) return;
+        HunterBuddyAddon.LOG.info("[SpawnerDetector/spawner-data] {} {} {} {} nbt={}", source, pos.getX(), pos.getY(), pos.getZ(), text);
     }
 
     @Override
