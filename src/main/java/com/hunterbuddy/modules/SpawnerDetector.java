@@ -3501,7 +3501,7 @@ public class SpawnerDetector extends Module {
 
         if (countRockets() < autoMinRockets.get()) return QualResult.reject("not enough rockets");
         if (!hasPickaxe()) return QualResult.reject("no pickaxe");
-        if (mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() != Items.ELYTRA) return QualResult.reject("elytra not worn");
+        if (!underground && mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() != Items.ELYTRA) return QualResult.reject("elytra not worn");
 
         if (underground) return QualResult.ok(null);
 
