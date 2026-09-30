@@ -6342,6 +6342,7 @@ public class SpawnerDetector extends Module {
                 return;
             }
 
+            autoSite.roomContainers = computeRoomContainers(autoSite.room);
             autoRoomQueue = new ArrayList<>(autoSite.roomContainers);
             autoRoomQueue.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(mc.player.getBlockPos())));
             autoRoomFoundShulkers = 0;
