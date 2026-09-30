@@ -6271,6 +6271,7 @@ public class SpawnerDetector extends Module {
         if (!pos.equals(autoRoomDebrisCurrent)) {
             autoRoomDebrisCurrent = pos;
             autoRoomDebrisStartMs = System.currentTimeMillis();
+            if (mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos)) <= 4.2) autoRoomDebrisBreaks.merge(pos, 1, Integer::sum);
             autoLog("ROOM", pos, String.format("debris block=%s dist=%.2f",
                 Registries.BLOCK.getId(mc.world.getBlockState(pos).getBlock()).getPath(),
                 mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos))));
@@ -6288,7 +6289,6 @@ public class SpawnerDetector extends Module {
         Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
 
         if (autoMineTick("ROOM", pos, false)) {
-            autoRoomDebrisBreaks.merge(pos, 1, Integer::sum);
             autoRoomDebrisBroken++;
             autoRoomDebrisCurrent = null;
             if (findRoomDebris() == null) {
