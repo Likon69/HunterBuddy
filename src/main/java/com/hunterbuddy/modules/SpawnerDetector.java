@@ -6139,7 +6139,7 @@ public class SpawnerDetector extends Module {
             if (goal == null) {
                 BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
                 autoLog("TUNNEL", autoSite.center, "tunnel failed: no floor cell");
-                markVisited(autoSite.center, "aborted:tunnel");
+                autoRunAbandoned = true;
                 enterState(AutoState.EXIT, "");
                 return;
             }
