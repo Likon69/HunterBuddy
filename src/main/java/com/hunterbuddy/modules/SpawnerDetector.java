@@ -6983,7 +6983,7 @@ public class SpawnerDetector extends Module {
         double dxz = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
         double dy = Math.abs(mc.player.getY() - autoExitShaft.bottomY());
 
-        if (dxz <= 0.5 && dy <= 0.5) {
+        if (dxz <= 0.5) {
             IBaritone bt = primaryBaritone();
             if (bt != null) bt.getPathingBehavior().cancelEverything();
             releaseAllAutoKeys();
