@@ -347,7 +347,7 @@ public class SpawnerDetector extends Module {
     private final Setting<Integer> autoMaxDistance = sgAuto.add(new IntSetting.Builder()
         .name("auto-max-distance")
         .description("Maximum horizontal distance to a triggered dungeon to leave for it, in blocks.")
-        .defaultValue(256).min(32).max(512).sliderRange(32, 512).build());
+        .defaultValue(256).min(32).max(1000).sliderRange(32, 1000).build());
 
     private final Setting<Double> autoMinHealth = sgAuto.add(new DoubleSetting.Builder()
         .name("auto-min-health")
