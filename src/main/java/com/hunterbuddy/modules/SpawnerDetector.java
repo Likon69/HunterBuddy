@@ -6837,7 +6837,7 @@ public class SpawnerDetector extends Module {
                     enterState(AutoState.EXIT, "back at shaft");
                     return;
                 }
-                if (stateTicks > 180 * 20) {
+                if (stateTicks > 60 * 20) {
                     if (bt != null) bt.getPathingBehavior().cancelEverything();
                     releaseAllAutoKeys();
                     autoExitReturning = false;
@@ -6855,7 +6855,7 @@ public class SpawnerDetector extends Module {
                         return;
                     }
 
-                    if (farDxz <= 1.5) {
+                    if (farDxz <= 1.5 && mc.player.getY() < autoExitShaft.bottomY()) {
                         releaseAllAutoKeys();
                         autoExitSelfWalk = false;
                         autoExitBreakPos = null;
@@ -6919,7 +6919,8 @@ public class SpawnerDetector extends Module {
                 boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
                 if (!pathing && autoBreachPos == null && stateTicks > 20 && stateTicks % 40 == 0) {
                     autoExitNoPathChecks++;
-                    if (autoExitNoPathChecks >= 2 && !autoExitSelfWalk && farDxz > 1.5) {
+                    if (autoExitNoPathChecks >= 2 && !autoExitSelfWalk
+                        && (farDxz > 1.5 || mc.player.getY() >= autoExitShaft.bottomY())) {
                         if (bt != null) bt.getPathingBehavior().cancelEverything();
                         releaseAllAutoKeys();
                         autoExitSelfWalk = true;
