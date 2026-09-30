@@ -6855,6 +6855,15 @@ public class SpawnerDetector extends Module {
                         return;
                     }
 
+                    if (farDxz <= 1.5) {
+                        releaseAllAutoKeys();
+                        autoExitSelfWalk = false;
+                        autoExitBreakPos = null;
+                        autoExitNoPathChecks = 0;
+                        autoLog("EXIT", autoSite.center, String.format("under the shaft dy=%.1f, back to baritone and breach", rdy));
+                        return;
+                    }
+
                     if (autoExitBreakPos != null) {
                         BlockState breakState = mc.world.getBlockState(autoExitBreakPos);
                         if (isOpenState(breakState, autoExitBreakPos)) {
@@ -6910,7 +6919,7 @@ public class SpawnerDetector extends Module {
                 boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
                 if (!pathing && autoBreachPos == null && stateTicks > 20 && stateTicks % 40 == 0) {
                     autoExitNoPathChecks++;
-                    if (autoExitNoPathChecks >= 2 && !autoExitSelfWalk) {
+                    if (autoExitNoPathChecks >= 2 && !autoExitSelfWalk && farDxz > 1.5) {
                         if (bt != null) bt.getPathingBehavior().cancelEverything();
                         releaseAllAutoKeys();
                         autoExitSelfWalk = true;
