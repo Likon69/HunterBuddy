@@ -463,6 +463,7 @@ public class SpawnerDetector extends Module {
     private final Map<BlockPos, Long> autoSkipLoggedAt = new HashMap<>();
     private String roomRejectInfo;
     private double roomRejectFit = -1;
+    private String spawnerlessLossInfo;
 
     private AutoState state = AutoState.IDLE;
     private int stateTicks;
@@ -1255,8 +1256,9 @@ public class SpawnerDetector extends Module {
 
         BlockPos center = new BlockPos(best.cx(), best.cy(), best.cz());
         if (sites.containsKey(center) || pendingEval.containsKey(center)) return;
+        spawnerlessLossInfo = null;
         if (!spawnerlessCandidateWins(best)) {
-            logSkipOnce(center, "spawnerless loses to an overlapping room");
+            logSkipOnce(center, spawnerlessLossInfo != null ? spawnerlessLossInfo : "spawnerless loses to an overlapping room");
             return;
         }
         removeOverlapping(best);
@@ -1320,17 +1322,30 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean spawnerlessCandidateWins(Room room) {
+        spawnerlessLossInfo = null;
         for (Site s : sites.values()) {
             if (boxesOverlap(room, s.room) && (s.hasSpawner || s.room.fit() >= room.fit() || isVisited(s.center)
-                || (state != AutoState.IDLE && autoSite != null && autoSite.center.equals(s.center)))) return false;
+                || (state != AutoState.IDLE && autoSite != null && autoSite.center.equals(s.center)))) {
+                spawnerlessLossInfo = String.format("spawnerless loses to site %d,%d,%d spawner=%s",
+                    s.center.getX(), s.center.getY(), s.center.getZ(), s.hasSpawner ? "yes" : "no");
+                return false;
+            }
         }
         for (PendingSite ps : pendingEval.values()) {
-            if (boxesOverlap(room, ps.room()) && (ps.hasSpawner() || ps.room().fit() >= room.fit())) return false;
+            if (boxesOverlap(room, ps.room()) && (ps.hasSpawner() || ps.room().fit() >= room.fit())) {
+                BlockPos pos = ps.center();
+                spawnerlessLossInfo = String.format("spawnerless loses to pending %d,%d,%d spawner=%s",
+                    pos.getX(), pos.getY(), pos.getZ(), ps.hasSpawner() ? "yes" : "no");
+                return false;
+            }
         }
         for (VisitedEntry e : visitedEntries) {
             if (e.x() >= room.minX() && e.x() <= room.maxX()
                 && e.y() >= room.minY() && e.y() <= room.maxY()
-                && e.z() >= room.minZ() && e.z() <= room.maxZ()) return false;
+                && e.z() >= room.minZ() && e.z() <= room.maxZ()) {
+                spawnerlessLossInfo = String.format("spawnerless loses to visited %d,%d,%d", e.x(), e.y(), e.z());
+                return false;
+            }
         }
         return true;
     }
@@ -1419,8 +1434,9 @@ public class SpawnerDetector extends Module {
                     fallback = new Room(cx, cy, cz, k, p, floorMinX, cy - 1, floorMinZ, floorMaxX, cy + 4, floorMaxZ, fallbackModern, anyFit);
                 }
 
+                boolean legacyRoomWithoutWalls = c >= 0.9 * aireSol && m >= 0.5 * c && iCount >= 0.9 * volumeInterieur;
                 String shapeFail = c < 0.5 * aireSol ? "floor" : m < mMin ? "mossy" : iCount < 0.6 * volumeInterieur ? "interior"
-                    : w < 0.35 * casesAnneau ? "walls" : null;
+                    : w < 0.35 * casesAnneau && !legacyRoomWithoutWalls ? "walls" : null;
                 if (shapeFail != null && !spawnerAtCenter && anyFit > roomRejectFit) {
                     roomRejectFit = anyFit;
                     roomRejectInfo = String.format("center=%d,%d,%d size=%dx%d fail=%s floor=%d/%d mossy=%d/%d open=%d/%d walls=%d/%d",
@@ -1430,7 +1446,7 @@ public class SpawnerDetector extends Module {
                 if (c < 0.5 * aireSol) continue;
                 if (m < mMin) continue;
                 if (iCount < 0.6 * volumeInterieur) continue;
-                if (w < 0.35 * casesAnneau) continue;
+                if (w < 0.35 * casesAnneau && !legacyRoomWithoutWalls) continue;
 
                 int ceilingClosed = 0;
                 for (int x = interiorMinX; x <= interiorMaxX; x++) {
