@@ -461,6 +461,8 @@ public class SpawnerDetector extends Module {
     private final List<VisitedEntry> visitedEntries = new ArrayList<>();
     private final Set<Long> exitLootedKeys = new java.util.HashSet<>();
     private final Map<BlockPos, Long> autoSkipLoggedAt = new HashMap<>();
+    private String roomRejectInfo;
+    private double roomRejectFit = -1;
 
     private AutoState state = AutoState.IDLE;
     private int stateTicks;
@@ -1197,7 +1199,10 @@ public class SpawnerDetector extends Module {
                     }
                 }
 
-                if (group.size() < minGroupSize) continue;
+                if (group.size() < minGroupSize) {
+                    logSkipOnce(plane.get(group.get(0)), "spawnerless mossy group n=" + group.size() + " need " + minGroupSize);
+                    continue;
+                }
 
                 int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
                 int minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
@@ -1231,6 +1236,8 @@ public class SpawnerDetector extends Module {
         }
 
         Room best = null;
+        roomRejectFit = -1;
+        roomRejectInfo = null;
 
         for (int dx = -4; dx <= 4; dx++) {
             for (int dz = -4; dz <= 4; dz++) {
@@ -1240,12 +1247,18 @@ public class SpawnerDetector extends Module {
         }
 
         if (best == null) best = findLooseBoxRoom(baseCx, cy, baseCz);
-        if (best == null) return;
+        if (best == null) {
+            logSkipOnce(new BlockPos(baseCx, cy, baseCz), "spawnerless no room " + (roomRejectInfo != null ? roomRejectInfo : "no shape"));
+            return;
+        }
         if (roomHasSpawnerBlock(best)) return;
 
         BlockPos center = new BlockPos(best.cx(), best.cy(), best.cz());
         if (sites.containsKey(center) || pendingEval.containsKey(center)) return;
-        if (!spawnerlessCandidateWins(best)) return;
+        if (!spawnerlessCandidateWins(best)) {
+            logSkipOnce(center, "spawnerless loses to an overlapping room");
+            return;
+        }
         removeOverlapping(best);
 
         pendingEval.put(center, new PendingSite(center, false, null, best));
@@ -1406,6 +1419,14 @@ public class SpawnerDetector extends Module {
                     fallback = new Room(cx, cy, cz, k, p, floorMinX, cy - 1, floorMinZ, floorMaxX, cy + 4, floorMaxZ, fallbackModern, anyFit);
                 }
 
+                String shapeFail = c < 0.5 * aireSol ? "floor" : m < mMin ? "mossy" : iCount < 0.6 * volumeInterieur ? "interior"
+                    : w < 0.35 * casesAnneau ? "walls" : null;
+                if (shapeFail != null && !spawnerAtCenter && anyFit > roomRejectFit) {
+                    roomRejectFit = anyFit;
+                    roomRejectInfo = String.format("center=%d,%d,%d size=%dx%d fail=%s floor=%d/%d mossy=%d/%d open=%d/%d walls=%d/%d",
+                        cx, cy, cz, 2 * k + 1, 2 * p + 1, shapeFail, c, aireSol, m, mMin, iCount, volumeInterieur, w, casesAnneau);
+                }
+
                 if (c < 0.5 * aireSol) continue;
                 if (m < mMin) continue;
                 if (iCount < 0.6 * volumeInterieur) continue;
@@ -1422,7 +1443,14 @@ public class SpawnerDetector extends Module {
                     }
                 }
                 int openCeiling = interiorArea - ceilingClosed;
-                if (!spawnerAtCenter && ceilingClosed < 0.6 * interiorArea && !(fallen >= 3 && fallen * 2 >= openCeiling)) continue;
+                if (!spawnerAtCenter && ceilingClosed < 0.6 * interiorArea && !(fallen >= 3 && fallen * 2 >= openCeiling)) {
+                    if (anyFit > roomRejectFit) {
+                        roomRejectFit = anyFit;
+                        roomRejectInfo = String.format("center=%d,%d,%d size=%dx%d fail=ceiling ceiling=%d/%d fallen=%d floor=%d/%d walls=%d/%d",
+                            cx, cy, cz, 2 * k + 1, 2 * p + 1, ceilingClosed, interiorArea, fallen, c, aireSol, w, casesAnneau);
+                    }
+                    continue;
+                }
 
                 double fit = (double) c / aireSol + (double) w / casesAnneau;
                 if (fit > bestFit) {
