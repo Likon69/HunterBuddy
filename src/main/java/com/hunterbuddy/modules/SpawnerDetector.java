@@ -7358,11 +7358,7 @@ public class SpawnerDetector extends Module {
             autoExitStuckBreakLabel = null;
             autoExitStuckBreakTicks = 0;
             autoExitPathStep = 0;
-            if (autoSoloMode) {
-                enterAscendOrSwimUp("solo exit climb");
-                return;
-            }
-            if (!autoAreaLoaderWasOn) {
+            if (!autoAreaLoaderWasOn && !autoSoloMode) {
                 enterAscendOrSwimUp("no flight module, staying on foot");
                 return;
             }
