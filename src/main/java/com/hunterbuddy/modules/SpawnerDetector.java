@@ -417,6 +417,16 @@ public class SpawnerDetector extends Module {
         .description("How many blocks to climb with rockets after leaving the hole, before handing over to the flight module.")
         .defaultValue(100).min(0).max(300).sliderRange(0, 300).build());
 
+    private final Setting<Integer> soloCruiseRocketInterval = sgAuto.add(new IntSetting.Builder()
+        .name("solo-cruise-rocket-interval")
+        .description("Minimum ticks between cruise rockets in solo mode.")
+        .defaultValue(60).min(20).max(200).sliderRange(20, 120).build());
+
+    private final Setting<Integer> soloCruiseStuckTime = sgAuto.add(new IntSetting.Builder()
+        .name("solo-cruise-stuck-time")
+        .description("Seconds without meaningful cruise progress before a solo target is skipped.")
+        .defaultValue(20).min(5).max(120).sliderRange(5, 60).build());
+
     private final Setting<Boolean> autoChainUnderground = sgAuto.add(new BoolSetting.Builder()
         .name("auto-chain-underground")
         .description("Walk underground to a qualifying neighbour room instead of ascending and re-diving, when one is close enough.")
@@ -440,6 +450,7 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> lowGlideLogged = new java.util.HashSet<>();
     private final Set<BlockPos> floatingBlockLogged = new java.util.HashSet<>();
     private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> autoSoloRejectedThisSession = new java.util.HashSet<>();
 
     private long totalTicks;
     private int scanCooldown;
@@ -447,7 +458,7 @@ public class SpawnerDetector extends Module {
 
     private enum AutoState {
         IDLE, PREPARE, APPROACH, FINAL, WALK, DIG, SIDE_DIG, ROOM, ROOM_CLIMB, TUNNEL, EXIT, SHAFT_ALIGN, SHAFT_FLY,
-        SWIM_UP, WATER_JUMP, CLIMB, OBSIDIAN_PLATFORM, ASCEND, TAKEOFF_SPOT, TAKEOFF, RESUME, FAILED
+        SWIM_UP, WATER_JUMP, CLIMB, OBSIDIAN_PLATFORM, ASCEND, TAKEOFF_SPOT, TAKEOFF, SOLO_CRUISE, RESUME, FAILED
     }
 
     private record ColumnPlan(int x, int z, int startY, int exitY, boolean water,
@@ -499,6 +510,14 @@ public class SpawnerDetector extends Module {
     private ExitShaft autoExitShaft;
     private Site autoStackedPartner;
     private boolean autoRunAbandoned;
+    private boolean autoSoloMode;
+    private boolean autoSoloTransitOnly;
+    private Site autoSoloTarget;
+    private double autoSoloBestDistSq;
+    private int autoSoloBestDistTick;
+    private int autoSoloNearUnloadedTicks;
+    private int autoSoloLastRocketTick;
+    private double autoSoloCruiseAltitude;
 
     private int statRoomsFarmed;
     private int statSpawnersBroken;
@@ -776,6 +795,7 @@ public class SpawnerDetector extends Module {
         lowGlideLogged.clear();
         floatingBlockLogged.clear();
         jungleTempleSkipLogged.clear();
+        autoSoloRejectedThisSession.clear();
         jungleTempleLowestYCache.clear();
         monumentCache.clear();
     }
@@ -817,6 +837,14 @@ public class SpawnerDetector extends Module {
         autoExitShaft = null;
         autoStackedPartner = null;
         autoRunAbandoned = false;
+        autoSoloMode = false;
+        autoSoloTransitOnly = false;
+        autoSoloTarget = null;
+        autoSoloBestDistSq = Double.MAX_VALUE;
+        autoSoloBestDistTick = 0;
+        autoSoloNearUnloadedTicks = 0;
+        autoSoloLastRocketTick = -100;
+        autoSoloCruiseAltitude = 0.0;
         autoResumeClimbTries = 0;
         autoClimbStuckWaterReturns = 0;
         autoWaterJumpVertical = false;
@@ -3663,6 +3691,79 @@ public class SpawnerDetector extends Module {
         return QualResult.ok(plan);
     }
 
+    private boolean configuredSoloMode() {
+        Module fm = selectedFlightModule();
+        return flightModule.get() == FlightModule.None || fm == null || !fm.isActive();
+    }
+
+    private boolean soloMemoryCandidate(Site site) {
+        if (!qualifiesForAuto(site)) return false;
+        if (isVisited(site.center)) return false;
+        if (autoSoloRejectedThisSession.contains(site.center)) return false;
+        if (site.room.cy() < 0) return false;
+        double dx = site.center.getX() + 0.5 - mc.player.getX();
+        double dz = site.center.getZ() + 0.5 - mc.player.getZ();
+        return Math.hypot(dx, dz) <= autoMaxDistance.get();
+    }
+
+    private int soloMemoryTargetCount() {
+        int count = 0;
+        for (Site site : sites.values()) {
+            if (soloMemoryCandidate(site)) count++;
+        }
+        return count;
+    }
+
+    private Site findSoloMemoryTarget() {
+        Site best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Site site : sites.values()) {
+            if (!soloMemoryCandidate(site)) continue;
+            double dx = site.center.getX() + 0.5 - mc.player.getX();
+            double dz = site.center.getZ() + 0.5 - mc.player.getZ();
+            double distSq = dx * dx + dz * dz;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = site;
+            }
+        }
+        return best;
+    }
+
+    private ColumnPlan soloTravelColumn() {
+        BlockPos feet = mc.player.getBlockPos();
+        int y = feet.getY();
+        return new ColumnPlan(feet.getX(), feet.getZ(), y, y, false, 0, 0, 0, false, y, null, false, null);
+    }
+
+    private void startSoloTravel(Site target, String details) {
+        autoSoloMode = true;
+        autoSoloTransitOnly = true;
+        autoSoloTarget = target;
+        autoSite = target;
+        autoColumn = soloTravelColumn();
+        autoChestplateAllowed = false;
+        autoSoloBestDistSq = Double.MAX_VALUE;
+        autoSoloBestDistTick = 0;
+        autoSoloNearUnloadedTicks = 0;
+        autoSoloLastRocketTick = -100;
+        autoSoloCruiseAltitude = Math.max(mc.player.getY(), autoClimbTargetY);
+        autoLog("SOLO", target.center, String.format("target %d,%d,%d remaining=%d %s",
+            target.center.getX(), target.center.getY(), target.center.getZ(), soloMemoryTargetCount(), details));
+        if (mc.player.isGliding()) {
+            enterState(AutoState.SOLO_CRUISE, details);
+        } else if (mc.player.isTouchingWater()) {
+            autoWaterJumpAttempts = 0;
+            autoWaterJumpVertical = false;
+            enterState(AutoState.WATER_JUMP, "solo water takeoff");
+        } else if (isClearSkyHere()) {
+            autoAscendArrivedAt = null;
+            enterState(AutoState.TAKEOFF, "solo takeoff");
+        } else {
+            enterState(AutoState.TAKEOFF_SPOT, "solo takeoff spot");
+        }
+    }
+
     private void tryStartAutoFarm() {
         if (state != AutoState.IDLE) return;
         if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
@@ -3695,7 +3796,13 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        if (best == null) return;
+        if (best == null) {
+            if (configuredSoloMode()) {
+                Site target = findSoloMemoryTarget();
+                if (target != null) startSoloTravel(target, "from idle");
+            }
+            return;
+        }
 
         Site partner = findStackedPartner(best);
         if (partner != null) {
@@ -3718,6 +3825,9 @@ public class SpawnerDetector extends Module {
     private void startAutoRun(Site site, ColumnPlan plan) {
         autoSite = site;
         autoColumn = plan;
+        autoSoloMode = configuredSoloMode();
+        autoSoloTransitOnly = false;
+        autoSoloTarget = null;
         autoHostileIds.clear();
         autoChestplateAllowed = !plan.water();
         autoRunAbandoned = false;
@@ -3814,6 +3924,7 @@ public class SpawnerDetector extends Module {
                 case ASCEND -> tickAscend();
                 case TAKEOFF_SPOT -> tickTakeoffSpot();
                 case TAKEOFF -> tickTakeoff();
+                case SOLO_CRUISE -> tickSoloCruise();
                 case RESUME -> tickResume();
                 case FAILED -> tickFailed();
                 default -> {}
@@ -3838,7 +3949,7 @@ public class SpawnerDetector extends Module {
             Pitch40 p40 = pitch40Module();
             ElytraRecast er = elytraRecastModule();
             boolean fmOn = fm != null && fm.isActive();
-            autoAreaLoaderWasOn = fmOn || flightModule.get() == FlightModule.None;
+            autoAreaLoaderWasOn = fmOn;
             autoPitch40WasOn = p40 != null && p40.isActive();
             autoElytraRecastWasOn = er != null && er.isActive();
             if (fmOn) fm.toggle();
@@ -4277,7 +4388,7 @@ public class SpawnerDetector extends Module {
         }
 
         if (stateTicks - autoWalkBestDistTick > 60 * 20) {
-            if (!autoAreaLoaderWasOn || autoWalkReapproachCount >= 3) {
+            if (!(autoAreaLoaderWasOn || autoSoloMode) || autoWalkReapproachCount >= 3) {
                 abort("walk timeout");
                 return;
             }
@@ -7109,6 +7220,10 @@ public class SpawnerDetector extends Module {
             autoExitStuckBreakLabel = null;
             autoExitStuckBreakTicks = 0;
             autoExitPathStep = 0;
+            if (autoSoloMode) {
+                enterAscendOrSwimUp("solo exit climb");
+                return;
+            }
             if (!autoAreaLoaderWasOn) {
                 enterAscendOrSwimUp("no flight module, staying on foot");
                 return;
@@ -7743,7 +7858,11 @@ public class SpawnerDetector extends Module {
         if (surfaced) {
             releaseAllAutoKeys();
             autoLog("SWIM_UP", autoSite.center, String.format("surfaced x=%.1f z=%.1f", mc.player.getX(), mc.player.getZ()));
-            if (!autoAreaLoaderWasOn) {
+            if (autoSoloMode) {
+                autoWaterJumpAttempts = 0;
+                autoWaterJumpVertical = false;
+                enterState(AutoState.WATER_JUMP, "solo surfaced");
+            } else if (!autoAreaLoaderWasOn) {
                 enterState(AutoState.OBSIDIAN_PLATFORM, "no flight module, platform only");
             } else {
                 autoWaterJumpAttempts = 0;
@@ -7753,7 +7872,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (autoAreaLoaderWasOn && stateTicks > 20 && !mc.player.isSubmergedInWater()
+        if ((autoAreaLoaderWasOn || autoSoloMode) && stateTicks > 20 && !mc.player.isSubmergedInWater()
             && mc.player.getY() < swimUpExitY - 3
             && mc.player.getBlockX() == swimUpX && mc.player.getBlockZ() == swimUpZ
             && dryOpenColumn(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY)) {
@@ -7953,6 +8072,17 @@ public class SpawnerDetector extends Module {
         mc.player.setPitch(-90.0f);
 
         if (!mc.player.isGliding()) {
+            if (autoSoloMode) {
+                autoLog("CLIMB", autoSite.center, "solo lost glide");
+                if (mc.player.isTouchingWater()) {
+                    autoWaterJumpAttempts = 0;
+                    autoWaterJumpVertical = false;
+                    enterState(AutoState.WATER_JUMP, "solo climb lost glide in water");
+                } else {
+                    enterState(AutoState.ASCEND, "solo climb lost glide");
+                }
+                return;
+            }
             if (autoAreaLoaderWasOn && !isClearSkyHere()) {
                 if (!(mc.player.isOnGround() || mc.player.isTouchingWater())) return;
                 autoClimbLostGlideRetries++;
@@ -7984,11 +8114,19 @@ public class SpawnerDetector extends Module {
         if (y >= autoClimbTargetY) {
             mc.player.setPitch(-35.0f);
             autoLog("CLIMB", autoSite.center, "climb done y=" + String.format("%.1f", y));
+            if (autoSoloMode) {
+                beginSoloCruise("climb done");
+                return;
+            }
             enterState(AutoState.RESUME, "");
             return;
         }
 
         if (stateTicks > 20 * 20) {
+            if (autoSoloMode) {
+                beginSoloCruise("climb timeout");
+                return;
+            }
             enterState(AutoState.RESUME, "climb timeout");
             return;
         }
@@ -8189,7 +8327,10 @@ public class SpawnerDetector extends Module {
 
             if (onTarget) {
                 releaseAllAutoKeys();
-                if (!autoAreaLoaderWasOn) {
+                if (autoSoloMode) {
+                    autoAscendArrivedAt = null;
+                    enterState(AutoState.TAKEOFF, "solo platform done");
+                } else if (!autoAreaLoaderWasOn) {
                     enterState(AutoState.RESUME, "staying on foot");
                 } else {
                     autoAscendArrivedAt = null;
@@ -8326,7 +8467,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (autoAreaLoaderWasOn && mc.player.isTouchingWater() && !mc.player.isSubmergedInWater() && isClearSkyHere()
+        if ((autoAreaLoaderWasOn || autoSoloMode) && mc.player.isTouchingWater() && !mc.player.isSubmergedInWater() && isClearSkyHere()
             && autoAscendSurfacedCount < 2) {
             autoAscendSurfacedCount++;
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
@@ -8405,7 +8546,7 @@ public class SpawnerDetector extends Module {
 
             if (!autoAscendFromAbort && !autoWalkReapproach && tryChainWalk(autoSite)) return;
 
-            if (!autoAreaLoaderWasOn) {
+            if (!autoSoloMode && !autoAreaLoaderWasOn) {
                 enterState(AutoState.RESUME, "staying on foot");
                 return;
             }
@@ -8746,6 +8887,12 @@ public class SpawnerDetector extends Module {
             autoTakeoffYaw = mc.player.getYaw();
             int slot = ensureRocketInHotbar();
             if (slot < 0) {
+                if (autoSoloMode) {
+                    autoLog("SOLO", autoSite.center, "out of rockets, staying with flight-module None behavior");
+                    autoRunAbandoned = true;
+                    enterState(AutoState.RESUME, "solo out of rockets");
+                    return;
+                }
                 enterState(AutoState.RESUME, "no rockets, staying on foot");
                 return;
             }
@@ -8821,6 +8968,146 @@ public class SpawnerDetector extends Module {
             }
         }
         return true;
+    }
+
+    private void completeRunBeforeSoloCruise() {
+        if (autoSoloTransitOnly || autoSite == null) return;
+        BlockPos finished = autoSite.center;
+        if (!autoRunAbandoned) {
+            markVisited(finished, autoRunOutcome());
+            statRoomsFarmed++;
+        }
+        autoLog("IDLE", finished, "run complete");
+        autoRunAbandoned = true;
+        autoSoloTransitOnly = true;
+    }
+
+    private void beginSoloCruise(String details) {
+        completeRunBeforeSoloCruise();
+        Site target = findSoloMemoryTarget();
+        if (target == null) {
+            autoLog("SOLO", autoSite != null ? autoSite.center : mc.player.getBlockPos(), "no targets, staying with flight-module None behavior");
+            autoRunAbandoned = true;
+            enterState(AutoState.RESUME, "solo no targets");
+            return;
+        }
+        startSoloTravel(target, details);
+    }
+
+    private void tickSoloCruise() {
+        stateTicks++;
+        if (autoSoloTarget == null || !soloMemoryCandidate(autoSoloTarget)) {
+            Site target = findSoloMemoryTarget();
+            if (target == null) {
+                autoLog("SOLO", autoSite != null ? autoSite.center : mc.player.getBlockPos(), "no targets, staying with flight-module None behavior");
+                autoRunAbandoned = true;
+                enterState(AutoState.RESUME, "solo no targets");
+                return;
+            }
+            autoSoloTarget = target;
+            autoSite = target;
+            autoSoloBestDistSq = Double.MAX_VALUE;
+            autoSoloBestDistTick = stateTicks;
+            autoSoloNearUnloadedTicks = 0;
+            autoLog("SOLO", target.center, String.format("target %d,%d,%d remaining=%d",
+                target.center.getX(), target.center.getY(), target.center.getZ(), soloMemoryTargetCount()));
+        }
+
+        if (!mc.player.isGliding()) {
+            releaseAllAutoKeys();
+            if (mc.player.isTouchingWater()) {
+                autoWaterJumpAttempts = 0;
+                autoWaterJumpVertical = false;
+                enterState(AutoState.WATER_JUMP, "solo cruise lost glide in water");
+            } else if (isClearSkyHere()) {
+                autoAscendArrivedAt = null;
+                enterState(AutoState.TAKEOFF, "solo cruise lost glide");
+            } else {
+                enterState(AutoState.TAKEOFF_SPOT, "solo cruise lost glide");
+            }
+            return;
+        }
+
+        Site target = autoSoloTarget;
+        double dx = target.center.getX() + 0.5 - mc.player.getX();
+        double dz = target.center.getZ() + 0.5 - mc.player.getZ();
+        double distSq = dx * dx + dz * dz;
+        double dist = Math.sqrt(distSq);
+
+        if (stateTicks == 1 || autoSoloBestDistSq == Double.MAX_VALUE) {
+            autoSoloBestDistSq = distSq;
+            autoSoloBestDistTick = stateTicks;
+            autoSoloNearUnloadedTicks = 0;
+            autoSoloCruiseAltitude = Math.max(autoSoloCruiseAltitude, mc.player.getY());
+            autoLog("SOLO", target.center, String.format("cruise target=%d,%d,%d remaining=%d dist=%.1f altitude=%.1f",
+                target.center.getX(), target.center.getY(), target.center.getZ(), soloMemoryTargetCount(), dist, autoSoloCruiseAltitude));
+        }
+
+        if (mc.world.getChunkManager().isChunkLoaded(target.center.getX() >> 4, target.center.getZ() >> 4)) {
+            autoLog("SOLO", target.center, String.format("target loaded, requalifying %d,%d,%d",
+                target.center.getX(), target.center.getY(), target.center.getZ()));
+            QualResult qr = evaluateQualification(target);
+            if (qr.reject() == null) {
+                startAutoRun(target, qr.plan());
+                return;
+            }
+            autoSoloRejectedThisSession.add(target.center);
+            autoLog("SOLO", target.center, String.format("target rejected %d,%d,%d reason=%s",
+                target.center.getX(), target.center.getY(), target.center.getZ(), qr.reject()));
+            autoSoloTarget = null;
+            return;
+        }
+
+        if (dist < 96.0) {
+            autoSoloNearUnloadedTicks++;
+            if (autoSoloNearUnloadedTicks > 15 * 20) {
+                autoSoloRejectedThisSession.add(target.center);
+                autoLog("SOLO", target.center, String.format("chunk did not load, skip %d,%d,%d",
+                    target.center.getX(), target.center.getY(), target.center.getZ()));
+                autoSoloTarget = null;
+                return;
+            }
+        } else {
+            autoSoloNearUnloadedTicks = 0;
+        }
+
+        if (distSq <= autoSoloBestDistSq - 64.0) {
+            autoSoloBestDistSq = distSq;
+            autoSoloBestDistTick = stateTicks;
+        } else if (stateTicks - autoSoloBestDistTick > soloCruiseStuckTime.get() * 20) {
+            autoSoloRejectedThisSession.add(target.center);
+            autoLog("SOLO", target.center, String.format("no progress, skip %d,%d,%d",
+                target.center.getX(), target.center.getY(), target.center.getZ()));
+            autoSoloTarget = null;
+            return;
+        }
+
+        Vec3d vel = mc.player.getVelocity();
+        double speedH = Math.hypot(vel.x, vel.z);
+        double y = mc.player.getY();
+        if ((speedH < 1.2 || y < autoSoloCruiseAltitude - 35.0) && dist > 96.0
+            && stateTicks - autoSoloLastRocketTick >= soloCruiseRocketInterval.get() && !ownRocketActive()) {
+            if (countRockets() <= autoMinRockets.get()) {
+                autoLog("SOLO", target.center, "out of rockets, staying with flight-module None behavior");
+                autoRunAbandoned = true;
+                enterState(AutoState.RESUME, "solo out of rockets");
+                return;
+            }
+            if (fireShaftRocket()) {
+                autoSoloLastRocketTick = stateTicks;
+                autoLog("SOLO", target.center, String.format("rocket speedH=%.2f y=%.1f altitude=%.1f", speedH, y, autoSoloCruiseAltitude));
+            }
+        }
+
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = y < autoSoloCruiseAltitude - 35.0 ? -25.0f : y > autoSoloCruiseAltitude + 20.0 ? 8.0f : -5.0f;
+        applyGlideRotation(yaw, pitch);
+        if (log.get() && stateTicks % 20 == 0) {
+            HunterBuddyAddon.LOG.info("[SpawnerDetector/auto] SOLO site={},{},{} D={} y={} speedH={} rockets={} remaining={}",
+                target.center.getX(), target.center.getY(), target.center.getZ(),
+                String.format("%.1f", dist), String.format("%.1f", y), String.format("%.2f", speedH),
+                countRockets(), soloMemoryTargetCount());
+        }
     }
 
     private void tickResume() {
@@ -8913,7 +9200,11 @@ public class SpawnerDetector extends Module {
                 enterAscendOrSwimUp("from ABORT (" + reason + ")");
             } else {
                 autoAscendFromAbort = true;
-                if (!autoAreaLoaderWasOn) {
+                if (autoSoloMode) {
+                    autoWaterJumpAttempts = 0;
+                    autoWaterJumpVertical = false;
+                    enterState(AutoState.WATER_JUMP, "solo from ABORT (" + reason + ")");
+                } else if (!autoAreaLoaderWasOn) {
                     enterState(AutoState.OBSIDIAN_PLATFORM, "no flight module, platform only");
                 } else {
                     autoWaterJumpAttempts = 0;
@@ -8922,9 +9213,20 @@ public class SpawnerDetector extends Module {
                 }
             }
         } else if (gliding) {
-            enterState(AutoState.RESUME, "from ABORT (" + reason + ")");
+            if (autoSoloMode) {
+                beginSoloCruise("from ABORT (" + reason + ")");
+            } else {
+                enterState(AutoState.RESUME, "from ABORT (" + reason + ")");
+            }
         } else if (feetY >= autoColumn.exitY() - 1) {
-            if (!autoAreaLoaderWasOn) {
+            if (autoSoloMode) {
+                if (isClearSkyHere()) {
+                    autoAscendArrivedAt = null;
+                    enterState(AutoState.TAKEOFF, "solo from ABORT (" + reason + ")");
+                } else {
+                    enterState(AutoState.TAKEOFF_SPOT, "solo from ABORT (" + reason + ")");
+                }
+            } else if (!autoAreaLoaderWasOn) {
                 enterState(AutoState.RESUME, "staying on foot");
             } else {
                 boolean blocked = autoColumn.skyBlocked()
