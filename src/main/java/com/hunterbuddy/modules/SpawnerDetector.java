@@ -92,6 +92,7 @@ import net.minecraft.block.entity.TrialSpawnerBlockEntity;
 import net.minecraft.block.enums.TrialSpawnerState;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
@@ -120,6 +121,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -144,6 +146,7 @@ public class SpawnerDetector extends Module {
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgAuto = settings.createGroup("Auto farm");
+    private final SettingGroup sgSounds = settings.createGroup("Sounds");
 
     private final Setting<Boolean> detectTorches = sgGeneral.add(new BoolSetting.Builder()
         .name("detect-torches")
@@ -437,6 +440,29 @@ public class SpawnerDetector extends Module {
         .description("Walk underground to a qualifying neighbour room instead of ascending and re-diving, when one is close enough.")
         .defaultValue(true).build());
 
+    private final Setting<Boolean> soundFound = sgSounds.add(new BoolSetting.Builder()
+        .name("sound-found")
+        .description("Play a sound when a room worth farming is found.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> soundFailed = sgSounds.add(new BoolSetting.Builder()
+        .name("sound-failed")
+        .description("Play a sound when a room run is aborted or fails.")
+        .defaultValue(true).build());
+
+    private final Setting<Boolean> soundShulker = sgSounds.add(new BoolSetting.Builder()
+        .name("sound-shulker")
+        .description("Play a sound when a chest holds full shulkers.")
+        .defaultValue(true).build());
+
+    private final Setting<Double> soundVolume = sgSounds.add(new DoubleSetting.Builder()
+        .name("sound-volume")
+        .description("Volume of SpawnerDetector sounds.")
+        .defaultValue(0.8)
+        .min(0.0)
+        .sliderRange(0.0, 1.0)
+        .build());
+
     private final Set<BlockPos> trialPending = ConcurrentHashMap.newKeySet();
     private final Map<BlockPos, Detection> trialFound = new ConcurrentHashMap<>();
 
@@ -456,6 +482,8 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> floatingBlockLogged = new java.util.HashSet<>();
     private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
     private final Set<BlockPos> autoSoloRejectedThisSession = new java.util.HashSet<>();
+    private final Set<BlockPos> autoSoundedSites = new java.util.HashSet<>();
+    private final Map<String, Long> autoSoundLastPlayed = new HashMap<>();
 
     private long totalTicks;
     private int scanCooldown;
@@ -823,8 +851,24 @@ public class SpawnerDetector extends Module {
         floatingBlockLogged.clear();
         jungleTempleSkipLogged.clear();
         autoSoloRejectedThisSession.clear();
+        autoSoundedSites.clear();
         jungleTempleLowestYCache.clear();
         monumentCache.clear();
+    }
+
+    private void playAutoSound(String name, Setting<Boolean> toggle) {
+        if (!toggle.get() || mc.player == null) return;
+
+        long now = System.currentTimeMillis();
+        Long last = autoSoundLastPlayed.get(name);
+        if (last != null && now - last < 3_000L) return;
+        autoSoundLastPlayed.put(name, now);
+
+        mc.getSoundManager().play(PositionedSoundInstance.master(
+            SoundEvent.of(Identifier.of("hunterbuddy", name)),
+            1.0f,
+            soundVolume.get().floatValue()
+        ));
     }
 
     @Override
@@ -1740,6 +1784,9 @@ public class SpawnerDetector extends Module {
 
         long evalMs = (System.nanoTime() - t0) / 1_000_000;
         logSite(site, evalMs);
+        if (qualifiesForAuto(site) && !isVisited(site.center) && autoSoundedSites.add(site.center)) {
+            playAutoSound("spawner_found", soundFound);
+        }
 
         return false;
     }
@@ -1760,6 +1807,9 @@ public class SpawnerDetector extends Module {
                 site.mobs = true;
                 recomputeScoreAndCategory(site);
                 logSite(site, evalMs);
+                if (qualifiesForAuto(site) && !isVisited(site.center) && autoSoundedSites.add(site.center)) {
+                    playAutoSound("spawner_found", soundFound);
+                }
             }
         }
     }
@@ -4104,6 +4154,7 @@ public class SpawnerDetector extends Module {
             try { BaritoneHelper.stopAllPathing(); } catch (Exception ignored) {}
             try { BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace; } catch (Exception ignored) {}
             try { if (takeoff.isActive()) takeoff.cancel(); } catch (Exception ignored) {}
+            playAutoSound("spawner_failed", soundFailed);
             state = AutoState.FAILED;
             setChestplateHold(false);
             stateTicks = 0;
@@ -5682,6 +5733,7 @@ public class SpawnerDetector extends Module {
         String kindLabel = isShulkerScreen ? "shulker_box" : Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
         boolean keep = fullShulkers > 0;
         if (keep) {
+            playAutoSound("shulker_found", soundShulker);
             autoRoomFoundShulkers += fullShulkers;
             autoRoomFoundItems += piles;
             XaeroWaypointManager.addWaypoint("SpawnerDetector", target, "Dungeon shulkers " + fullShulkers, "DS", MapUtil.WpColor.Purple, false);
@@ -9692,6 +9744,7 @@ public class SpawnerDetector extends Module {
         }
 
         AutoState from = state;
+        playAutoSound("spawner_failed", soundFailed);
         autoLog("ABORT", autoSite.center, "state=" + from + " reason=" + reason + " player=" + playerPosLabel());
 
         BaritoneHelper.stopAllPathing();
@@ -9769,6 +9822,7 @@ public class SpawnerDetector extends Module {
         BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
 
         state = AutoState.FAILED;
+        playAutoSound("spawner_failed", soundFailed);
         setChestplateHold(false);
         stateTicks = 0;
     }

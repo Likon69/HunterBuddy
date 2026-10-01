@@ -1,0 +1,17 @@
+{
+  "spawner_found": {
+    "sounds": [
+      "hunterbuddy:spawner_found"
+    ]
+  },
+  "spawner_failed": {
+    "sounds": [
+      "hunterbuddy:spawner_failed"
+    ]
+  },
+  "shulker_found": {
+    "sounds": [
+      "hunterbuddy:shulker_found"
+    ]
+  }
+}
