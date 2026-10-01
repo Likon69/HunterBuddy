@@ -947,7 +947,7 @@ public class MlepMine extends Module {
     */
    private void feedGrimBalance(Send event) {
       if (event.isCancelled()) return;
-      if (!(Boolean)this.grimConfig.get() || !(Boolean)this.grimBalanceLog.get()) return;
+      if (!(Boolean)this.grimConfig.get()) return;
 
       long now = System.currentTimeMillis();
 
@@ -1549,7 +1549,9 @@ public class MlepMine extends Module {
             this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.START_DESTROY_BLOCK, data.getPos(), data.getDirection()));
          }
 
-         this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+         if (!this.grimBalance.burstWouldFlag(breakDelta)) {
+            this.mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(Action.STOP_DESTROY_BLOCK, data.getPos(), data.getDirection()));
+         }
 
          // The first of the three becomes a real swing when an animation is asked
          // for: a bare packet is seen by everyone except you, which is the wrong
