@@ -526,6 +526,7 @@ public class SpawnerDetector extends Module {
     private static final int SKY_CHECK_HEIGHT = 200;
     private static final int DETACHED_TUNNEL_MIN_LENGTH = 8;
     private static final int LAND_RING_RADIUS = 8;
+    private static final int MOSSY_SCAN_CHUNKS_PER_PASS = 64;
 
     private static final Set<Item> AUTO_THROWAWAY = Set.of(
         Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.DIRT, Items.NETHERRACK);
@@ -1181,7 +1182,7 @@ public class SpawnerDetector extends Module {
         long scanStart = System.nanoTime();
 
         int i = len == 0 ? 0 : mossyScanCursor % len;
-        for (int steps = 0; steps < len && examined < 8; steps++) {
+        for (int steps = 0; steps < len && examined < MOSSY_SCAN_CHUNKS_PER_PASS; steps++) {
             if (System.nanoTime() - scanStart > 4_000_000L) break;
 
             WorldChunk chunk = chunks.get(i);
