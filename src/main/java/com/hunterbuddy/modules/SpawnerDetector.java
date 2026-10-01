@@ -8756,7 +8756,7 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks - autoSwimUpProgressTick > 60 * 20) {
             releaseAllAutoKeys();
-            enterState(AutoState.ASCEND, "swim up timeout");
+            enterState(AutoState.SELF_ASCEND, "swim up timeout");
             return;
         }
 
@@ -8770,7 +8770,7 @@ public class SpawnerDetector extends Module {
         navigateExitColumn(swimUpX, swimUpZ, 0.2, swimUpEntry, true);
 
         double swimUpY = mc.player.getY();
-        if (swimUpY > autoSwimUpLastY + 0.02) {
+        if (swimUpY >= autoSwimUpLastY + 0.5) {
             autoSwimUpLastY = swimUpY;
             autoSwimUpProgressTick = stateTicks;
         }
@@ -8835,10 +8835,11 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if ((autoAreaLoaderWasOn || autoSoloMode) && stateTicks > 20 && !mc.player.isSubmergedInWater()
+        boolean poolUnderDryShaft = (autoAreaLoaderWasOn || autoSoloMode) && stateTicks > 20 && !mc.player.isSubmergedInWater()
             && mc.player.getY() < swimUpExitY - 3
             && mc.player.getBlockX() == swimUpX && mc.player.getBlockZ() == swimUpZ
-            && dryOpenColumn(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY)) {
+            && dryOpenColumn(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY);
+        if (poolUnderDryShaft) {
             releaseAllAutoKeys();
             boolean shaftFlyEligible = !mc.player.isTouchingWater()
                 && autoShaftFly.get()
@@ -8855,6 +8856,14 @@ public class SpawnerDetector extends Module {
                 autoWaterJumpVertical = true;
                 enterState(AutoState.WATER_JUMP, "pool under dry shaft");
             }
+            return;
+        }
+
+        if (onSwimUpColumn && !mc.player.isSubmergedInWater() && mc.player.getY() < swimUpExitY - 1
+            && stateTicks - autoSwimUpProgressTick >= 60) {
+            releaseAllAutoKeys();
+            autoLog("SWIM_UP", autoSite.center, "surface stall, self ascend");
+            enterState(AutoState.SELF_ASCEND, "surface stall");
             return;
         }
 
