@@ -466,6 +466,10 @@ public class SpawnerDetector extends Module {
         SWIM_UP, WATER_JUMP, CLIMB, OBSIDIAN_PLATFORM, ASCEND, TAKEOFF_SPOT, TAKEOFF, SOLO_CRUISE, RESUME, FAILED
     }
 
+    private enum ShaftDryPhase {
+        NONE, UNDER_JUMP, SIDE_PLACE, SIDE_MOVE, BRIDGE_PLACE, SHAFT_MOVE
+    }
+
     private record ColumnPlan(int x, int z, int startY, int exitY, boolean water,
                                int blocksToBreak, int waterCells, int maxGap, boolean skyBlocked,
                                int holeTopY, BlockPos rim, boolean side, BlockPos sideEntry) {}
@@ -714,6 +718,21 @@ public class SpawnerDetector extends Module {
     private int autoShaftFlyPivotX;
     private int autoShaftFlyPivotZ;
     private boolean autoShaftFlyPivotNoEscapeLogged;
+    private ShaftDryPhase autoShaftDryPhase = ShaftDryPhase.NONE;
+    private int autoShaftDryStartTick;
+    private int autoShaftDryUnderPlacements;
+    private boolean autoShaftDryBridgeUsed;
+    private int autoShaftDryBridgeBlocks;
+    private BlockPos autoShaftDryPlacePos;
+    private BlockPos autoShaftDrySidePos;
+    private BlockPos autoShaftDryBridgePos;
+    private BlockPos autoShaftDryVerifyPos;
+    private String autoShaftDryVerifyKind;
+    private ShaftDryPhase autoShaftDryVerifyNextPhase = ShaftDryPhase.NONE;
+    private int autoShaftDryVerifyTick;
+    private int autoShaftDryVerifyRetries;
+    private String autoShaftDryBlockLabel;
+    private boolean autoShaftDryPlaceHardFail;
 
     private int autoShaftAlignCenteredTicks;
 
@@ -876,6 +895,7 @@ public class SpawnerDetector extends Module {
         autoShaftChaseStuckTicks = 0;
         autoShaftChaseBaritoneActive = false;
         autoShaftChaseBaritoneGoalPos = null;
+        resetShaftDryRecovery();
         autoShaftReturning = false;
         autoLandSpot = null;
         autoLandSpotAttempts = 0;
@@ -7335,6 +7355,7 @@ public class SpawnerDetector extends Module {
                 return;
             }
             autoBaritoneRetries = 0;
+            resetShaftDryRecovery();
             IBaritone bt = primaryBaritone();
             if (bt != null) {
                 bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(
@@ -7441,6 +7462,298 @@ public class SpawnerDetector extends Module {
         }
 
         logNavTelemetry("EXIT", new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z()), autoBaritoneRetries);
+    }
+
+    private void resetShaftDryRecovery() {
+        autoShaftDryPhase = ShaftDryPhase.NONE;
+        autoShaftDryStartTick = 0;
+        autoShaftDryUnderPlacements = 0;
+        autoShaftDryBridgeUsed = false;
+        autoShaftDryBridgeBlocks = 0;
+        autoShaftDryPlacePos = null;
+        autoShaftDrySidePos = null;
+        autoShaftDryBridgePos = null;
+        autoShaftDryVerifyPos = null;
+        autoShaftDryVerifyKind = null;
+        autoShaftDryVerifyNextPhase = ShaftDryPhase.NONE;
+        autoShaftDryVerifyTick = 0;
+        autoShaftDryVerifyRetries = 0;
+        autoShaftDryBlockLabel = null;
+        autoShaftDryPlaceHardFail = false;
+    }
+
+    private void clearActiveShaftDryRecovery() {
+        autoShaftDryPhase = ShaftDryPhase.NONE;
+        autoShaftDryStartTick = 0;
+        autoShaftDryBridgeBlocks = 0;
+        autoShaftDryPlacePos = null;
+        autoShaftDrySidePos = null;
+        autoShaftDryBridgePos = null;
+        autoShaftDryVerifyPos = null;
+        autoShaftDryVerifyKind = null;
+        autoShaftDryVerifyNextPhase = ShaftDryPhase.NONE;
+        autoShaftDryVerifyTick = 0;
+        autoShaftDryVerifyRetries = 0;
+        autoShaftDryBlockLabel = null;
+        autoShaftDryPlaceHardFail = false;
+    }
+
+    private boolean shaftFlyWaterAtBottom() {
+        BlockPos feet = mc.player.getBlockPos();
+        return mc.player.isTouchingWater() || mc.world.getFluidState(feet).isIn(FluidTags.WATER);
+    }
+
+    private int ensureShaftRecoveryBlockInHotbar() {
+        int slot = ensureThrowawayInHotbar();
+        if (slot < 0) slot = ensureObsidianInHotbar();
+        return slot;
+    }
+
+    private String blockItemLabel(int slot) {
+        ItemStack stack = mc.player.getInventory().getStack(slot);
+        Item item = stack.getItem();
+        if (item instanceof BlockItem blockItem) return Registries.BLOCK.getId(blockItem.getBlock()).getPath();
+        return Registries.ITEM.getId(item).getPath();
+    }
+
+    private String shaftRecoveryPlacementIssue(BlockPos pos) {
+        BlockState target = mc.world.getBlockState(pos);
+        if (!isOpenState(target, pos)) return "target blocked";
+        if (target.getFluidState().isIn(FluidTags.LAVA)) return "lava";
+        BlockState head = mc.world.getBlockState(pos.up());
+        if (!isOpenState(head, pos.up())) return "head blocked";
+        BlockState support = mc.world.getBlockState(pos.down());
+        if (isOpenState(support, pos.down()) || !support.getFluidState().isEmpty()) return "no support";
+        return null;
+    }
+
+    private boolean placeShaftRecoveryBlock(BlockPos pos, String kind) {
+        autoShaftDryPlaceHardFail = false;
+        String issue = shaftRecoveryPlacementIssue(pos);
+        if (issue != null) {
+            autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=" + issue);
+            autoShaftDryPlaceHardFail = true;
+            return false;
+        }
+        int slot = ensureShaftRecoveryBlockInHotbar();
+        if (slot < 0) {
+            autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=no block");
+            autoShaftDryPlaceHardFail = true;
+            return false;
+        }
+        InvUtils.swap(slot, false);
+        autoShaftDryBlockLabel = blockItemLabel(slot);
+        BlockPos supportPos = pos.down();
+        Vec3d lookTarget = new Vec3d(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+        BlockHitResult hit = new BlockHitResult(lookTarget, Direction.UP, supportPos, false);
+        if ("under".equals(kind)) {
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+        } else if (!interactWhenAligned(lookTarget, hit)) {
+            return false;
+        }
+        mc.player.swingHand(Hand.MAIN_HAND);
+        if ("under".equals(kind)) {
+            autoLog("SHAFT_FLY", autoSite.center, String.format("water at the bottom, placed %s at %d,%d,%d",
+                autoShaftDryBlockLabel, pos.getX(), pos.getY(), pos.getZ()));
+        } else if ("side".equals(kind)) {
+            autoLog("SHAFT_FLY", autoSite.center, String.format("side step placed at %d,%d,%d",
+                pos.getX(), pos.getY(), pos.getZ()));
+        } else {
+            autoShaftDryBridgeBlocks++;
+            autoLog("SHAFT_FLY", autoSite.center, String.format("bridge block %d at %d,%d,%d",
+                autoShaftDryBridgeBlocks, pos.getX(), pos.getY(), pos.getZ()));
+        }
+        return true;
+    }
+
+    private void verifyShaftRecoveryBlock(BlockPos pos, String kind, ShaftDryPhase nextPhase) {
+        autoShaftDryVerifyPos = pos;
+        autoShaftDryVerifyKind = kind;
+        autoShaftDryVerifyNextPhase = nextPhase;
+        autoShaftDryVerifyTick = stateTicks;
+        autoShaftDryVerifyRetries = 0;
+    }
+
+    private boolean shaftRecoveryBlockPlaced(BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        return !isOpenState(state, pos) && state.getFluidState().isEmpty();
+    }
+
+    private boolean tickShaftRecoveryVerify() {
+        if (autoShaftDryVerifyPos == null) return false;
+        if (stateTicks - autoShaftDryVerifyTick < 5) return true;
+        if (shaftRecoveryBlockPlaced(autoShaftDryVerifyPos)) {
+            autoShaftDryVerifyPos = null;
+            autoShaftDryVerifyKind = null;
+            autoShaftDryPhase = autoShaftDryVerifyNextPhase;
+            autoShaftDryVerifyNextPhase = ShaftDryPhase.NONE;
+            return true;
+        }
+        if (autoShaftDryVerifyRetries >= 1) {
+            failShaftFlyWaterRecovery("not placed");
+            return true;
+        }
+        autoShaftDryVerifyRetries++;
+        if (placeShaftRecoveryBlock(autoShaftDryVerifyPos, autoShaftDryVerifyKind)) {
+            autoShaftDryVerifyTick = stateTicks;
+        } else if (autoShaftDryPlaceHardFail) {
+            failShaftFlyWaterRecovery("not placed");
+        }
+        return true;
+    }
+
+    private BlockPos findShaftRecoverySideStep(BlockPos shaftPos) {
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos side = shaftPos.offset(dir);
+            if (shaftRecoveryPlacementIssue(side) == null) return side;
+        }
+        return null;
+    }
+
+    private boolean startShaftFlyBridgeRecovery(BlockPos shaftPos) {
+        if (autoShaftDryBridgeUsed) {
+            autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=bridge already used");
+            return false;
+        }
+        if (ensureShaftRecoveryBlockInHotbar() < 0) {
+            autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=no block");
+            return false;
+        }
+        BlockPos side = findShaftRecoverySideStep(shaftPos);
+        if (side == null) {
+            autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=no side step");
+            return false;
+        }
+        autoShaftDryBridgeUsed = true;
+        autoShaftDrySidePos = side;
+        autoShaftDryBridgePos = shaftPos;
+        autoShaftDryBridgeBlocks = 0;
+        autoShaftDryPhase = ShaftDryPhase.SIDE_PLACE;
+        return true;
+    }
+
+    private boolean startShaftFlyWaterRecovery() {
+        if (!shaftFlyWaterAtBottom() || autoExitShaft == null) return false;
+        BlockPos shaftPos = new BlockPos(autoExitShaft.x(), mc.player.getBlockPos().getY(), autoExitShaft.z());
+        autoShaftDryStartTick = stateTicks;
+        if (autoShaftDryUnderPlacements < 3) {
+            if (ensureShaftRecoveryBlockInHotbar() < 0) {
+                autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=no block");
+                return false;
+            }
+            autoShaftDryUnderPlacements++;
+            autoShaftDryPlacePos = shaftPos;
+            autoShaftDryPhase = ShaftDryPhase.UNDER_JUMP;
+            return true;
+        }
+        return startShaftFlyBridgeRecovery(shaftPos);
+    }
+
+    private boolean dryAboveShaft() {
+        if (autoExitShaft == null || autoShaftDryBridgePos == null) return false;
+        BlockPos feet = mc.player.getBlockPos();
+        return feet.getX() == autoExitShaft.x() && feet.getZ() == autoExitShaft.z()
+            && feet.getY() >= autoShaftDryBridgePos.getY() + 1
+            && !mc.player.isTouchingWater()
+            && !mc.world.getFluidState(feet).isIn(FluidTags.WATER);
+    }
+
+    private void finishShaftFlyRerouteAttempt() {
+        autoShaftFlyRerouteAttempts++;
+        if (autoShaftFlyRerouteAttempts >= 5) {
+            enterState(AutoState.ASCEND, "shaft fly retries exhausted");
+        } else {
+            enterState(AutoState.SHAFT_ALIGN, "shaft fly retry " + autoShaftFlyRerouteAttempts);
+        }
+    }
+
+    private void failShaftFlyWaterRecovery(String reason) {
+        autoLog("SHAFT_FLY", autoSite.center, "could not place, reason=" + reason);
+        clearActiveShaftDryRecovery();
+        finishShaftFlyRerouteAttempt();
+    }
+
+    private void tickShaftFlyWaterRecovery() {
+        if (stateTicks - autoShaftDryStartTick > 20 * 20) {
+            failShaftFlyWaterRecovery("timeout");
+            return;
+        }
+
+        Utils.setPressed(mc.options.sprintKey, false);
+        if (tickShaftRecoveryVerify()) return;
+
+        if (autoShaftDryPhase == ShaftDryPhase.UNDER_JUMP) {
+            mc.player.setPitch(90.0f);
+            Utils.setPressed(mc.options.forwardKey, false);
+            if (mc.player.getY() >= autoShaftDryPlacePos.getY() + 1.0) {
+                Utils.setPressed(mc.options.jumpKey, false);
+                if (placeShaftRecoveryBlock(autoShaftDryPlacePos, "under")) {
+                    autoShaftDryBridgePos = autoShaftDryPlacePos;
+                    verifyShaftRecoveryBlock(autoShaftDryPlacePos, "under", ShaftDryPhase.SHAFT_MOVE);
+                } else if (autoShaftDryPlaceHardFail && !startShaftFlyBridgeRecovery(autoShaftDryPlacePos)) {
+                    clearActiveShaftDryRecovery();
+                    finishShaftFlyRerouteAttempt();
+                }
+            } else if (stateTicks - autoShaftDryStartTick >= 20) {
+                Utils.setPressed(mc.options.jumpKey, false);
+                if (!startShaftFlyBridgeRecovery(autoShaftDryPlacePos)) {
+                    clearActiveShaftDryRecovery();
+                    finishShaftFlyRerouteAttempt();
+                }
+            } else {
+                Utils.setPressed(mc.options.jumpKey, true);
+            }
+            return;
+        }
+
+        if (autoShaftDryPhase == ShaftDryPhase.SIDE_PLACE) {
+            Utils.setPressed(mc.options.forwardKey, false);
+            Utils.setPressed(mc.options.jumpKey, false);
+            if (placeShaftRecoveryBlock(autoShaftDrySidePos, "side")) {
+                verifyShaftRecoveryBlock(autoShaftDrySidePos, "side", ShaftDryPhase.SIDE_MOVE);
+            } else if (autoShaftDryPlaceHardFail) {
+                clearActiveShaftDryRecovery();
+                finishShaftFlyRerouteAttempt();
+            }
+            return;
+        }
+
+        if (autoShaftDryPhase == ShaftDryPhase.SIDE_MOVE) {
+            boolean centered = recenterDig(autoShaftDrySidePos.getX(), autoShaftDrySidePos.getZ(), 0.25);
+            Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision || mc.player.isTouchingWater());
+            BlockPos feet = mc.player.getBlockPos();
+            if (centered && feet.getX() == autoShaftDrySidePos.getX() && feet.getZ() == autoShaftDrySidePos.getZ()
+                && feet.getY() >= autoShaftDrySidePos.getY() + 1) {
+                releaseAllAutoKeys();
+                autoShaftDryPhase = ShaftDryPhase.BRIDGE_PLACE;
+            }
+            return;
+        }
+
+        if (autoShaftDryPhase == ShaftDryPhase.BRIDGE_PLACE) {
+            if (autoShaftDryBridgeBlocks >= 4) {
+                failShaftFlyWaterRecovery("bridge limit");
+                return;
+            }
+            if (placeShaftRecoveryBlock(autoShaftDryBridgePos, "bridge")) {
+                verifyShaftRecoveryBlock(autoShaftDryBridgePos, "bridge", ShaftDryPhase.SHAFT_MOVE);
+            } else if (autoShaftDryPlaceHardFail) {
+                clearActiveShaftDryRecovery();
+                finishShaftFlyRerouteAttempt();
+            }
+            return;
+        }
+
+        if (autoShaftDryPhase == ShaftDryPhase.SHAFT_MOVE) {
+            boolean centered = recenterDig(autoExitShaft.x(), autoExitShaft.z(), 0.12);
+            Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision || mc.player.isTouchingWater());
+            if (centered && dryAboveShaft()) {
+                releaseAllAutoKeys();
+                autoLog("SHAFT_FLY", autoSite.center, "dry above the shaft, retry");
+                clearActiveShaftDryRecovery();
+                enterState(AutoState.SHAFT_ALIGN, "dry above shaft");
+            }
+        }
     }
 
     private int shaftBlockedY(ExitShaft shaft) {
@@ -7625,6 +7938,11 @@ public class SpawnerDetector extends Module {
         if (waitingForElytra("SHAFT_FLY")) return;
         stateTicks++;
 
+        if (autoShaftDryPhase != ShaftDryPhase.NONE) {
+            tickShaftFlyWaterRecovery();
+            return;
+        }
+
         if (stateTicks == 1) {
             double centerDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
             if (centerDist > 0.2) {
@@ -7699,12 +8017,8 @@ public class SpawnerDetector extends Module {
             autoShaftFlyReroute = false;
             if (takeoff.isActive()) takeoff.cancel();
             releaseAllAutoKeys();
-            autoShaftFlyRerouteAttempts++;
-            if (autoShaftFlyRerouteAttempts >= 5) {
-                enterState(AutoState.ASCEND, "shaft fly retries exhausted");
-            } else {
-                enterState(AutoState.SHAFT_ALIGN, "shaft fly retry " + autoShaftFlyRerouteAttempts);
-            }
+            if (startShaftFlyWaterRecovery()) return;
+            finishShaftFlyRerouteAttempt();
             return;
         }
 
@@ -7982,6 +8296,7 @@ public class SpawnerDetector extends Module {
             if (shaftFlyEligible) {
                 autoShaftFlyAttempts = 0;
                 autoShaftFlyRerouteAttempts = 0;
+                resetShaftDryRecovery();
                 enterState(AutoState.SHAFT_ALIGN, "pool under dry shaft, shaft-fly");
             } else {
                 autoWaterJumpAttempts = 0;
@@ -8196,6 +8511,7 @@ public class SpawnerDetector extends Module {
                 if (next == AutoState.SHAFT_ALIGN) {
                     autoShaftFlyAttempts = 0;
                     autoShaftFlyRerouteAttempts = 0;
+                    resetShaftDryRecovery();
                 }
                 enterState(next, "");
                 return;
