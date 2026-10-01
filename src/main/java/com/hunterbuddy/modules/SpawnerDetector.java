@@ -692,6 +692,8 @@ public class SpawnerDetector extends Module {
     private Set<BlockPos> autoAscendFailedPoints = new java.util.HashSet<>();
 
     private BlockPos autoTunnelGoal;
+    private double autoTunnelBestDist;
+    private int autoTunnelBestElapsed;
 
     private double autoBreachBestDist;
     private int autoBreachBestElapsed;
@@ -6516,6 +6518,8 @@ public class SpawnerDetector extends Module {
                 return;
             }
             autoTunnelGoal = goal;
+            autoTunnelBestDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(autoTunnelGoal));
+            autoTunnelBestElapsed = 0;
             IBaritone bt = primaryBaritone();
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
         }
@@ -6547,10 +6551,24 @@ public class SpawnerDetector extends Module {
 
         IBaritone bt = primaryBaritone();
         boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
+        int elapsed = stateTicks - autoPausedTicks;
+        double tunnelDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(autoTunnelGoal));
+        if (tunnelDist < autoTunnelBestDist - 1.0) {
+            autoTunnelBestDist = tunnelDist;
+            autoTunnelBestElapsed = elapsed;
+        }
 
         if (!pathing && autoBreachPos == null && stateTicks > 20 && autoBaritoneRetries < 3) {
             autoBaritoneRetries++;
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
+        }
+        if (!pathing && autoBaritoneRetries >= 3 && elapsed - autoTunnelBestElapsed >= 10 * 20) {
+            BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
+            autoLog("TUNNEL", autoSite.center, "tunnel failed: no path");
+            autoRunAbandoned = true;
+            releaseAllAutoKeys();
+            enterState(AutoState.EXIT, "");
+            return;
         }
 
         tickBreach("TUNNEL", autoTunnelGoal);
@@ -6584,7 +6602,8 @@ public class SpawnerDetector extends Module {
 
         BlockPos feet = mc.player.getBlockPos();
         BlockPos target;
-        if (goal.getY() > feet.getY() + 1) {
+        double horizontalToGoal = Math.hypot(goal.getX() - feet.getX(), goal.getZ() - feet.getZ());
+        if (goal.getY() > feet.getY() + 1 && horizontalToGoal <= 2.0) {
             target = feet.up(2);
             int top = Math.min(goal.getY() + 1, feet.getY() + 9);
             for (int y = feet.getY() + 2; y <= top; y++) {
