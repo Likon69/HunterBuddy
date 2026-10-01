@@ -3503,13 +3503,12 @@ public class SpawnerDetector extends Module {
         if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return null;
 
         int y = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
-        y = descendPastFloatingBlocks(siteCenter, x, z, y, cy - 2, true, cursor);
+        y = descendPastFloatingBlocks(siteCenter, x, z, y, cy - 13, true, cursor);
         BlockState state = mc.world.getBlockState(cursor.set(x, y, z));
 
         if (isLava(state)) return new SideHoleCost(y + 1, 0, 0, 0, 0, "lava");
 
         int bottomFeet = y + 1;
-        if (bottomFeet < cy) return new SideHoleCost(bottomFeet, 0, 0, 0, 0, "too deep");
 
         int tx = Math.max(cx - k, Math.min(cx + k, x));
         int tz = Math.max(cz - p, Math.min(cz + p, z));
@@ -3520,6 +3519,13 @@ public class SpawnerDetector extends Module {
         }
         tx = entry.getX();
         tz = entry.getZ();
+
+        if (bottomFeet < cy) {
+            if (bottomFeet < cy - 12) return new SideHoleCost(bottomFeet, tx, tz, 0, 0, "too deep");
+            SideHoleCost deep = computeDeepSideHoleCost(room, x, z, bottomFeet, tx, tz, cursor);
+            if (deep.rejectReason() != null) return deep;
+            return deep;
+        }
 
         List<BlockPos> horizCells = new ArrayList<>();
         int hx = x, hz = z;
@@ -3605,6 +3611,30 @@ public class SpawnerDetector extends Module {
         if (cobwebFound) return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, "cobweb");
 
         return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, null);
+    }
+
+    private SideHoleCost computeDeepSideHoleCost(Room room, int x, int z, int bottomFeet, int tx, int tz, BlockPos.Mutable cursor) {
+        int cy = room.cy();
+        RimResult rr = computeRim(x, z, bottomFeet);
+        int entryY = rr.rim() != null ? rr.rim().getY() : bottomFeet;
+        int fallRun = 0;
+        int entryBlocks = 0;
+        for (int vy = entryY - 1; vy >= bottomFeet; vy--) {
+            BlockState shaftState = mc.world.getBlockState(cursor.set(x, vy, z));
+            if (isLava(shaftState)) return new SideHoleCost(bottomFeet, tx, tz, 0, entryBlocks, "lava");
+            if (shaftState.getBlock() == Blocks.COBWEB) return new SideHoleCost(bottomFeet, tx, tz, 0, entryBlocks, "cobweb");
+            if (shaftState.getFluidState().isIn(FluidTags.WATER)) {
+                fallRun = 0;
+            } else if (isOpenState(shaftState, cursor)) {
+                fallRun++;
+            } else {
+                entryBlocks++;
+            }
+            if (fallRun > autoMaxFall.get()) return new SideHoleCost(bottomFeet, tx, tz, 0, entryBlocks, "fall");
+        }
+        int horizontal = Math.abs(x - tx) + Math.abs(z - tz);
+        int cost = entryBlocks + (cy - bottomFeet) + horizontal;
+        return new SideHoleCost(bottomFeet, tx, tz, cost, entryBlocks, null);
     }
 
     private BlockPos resolveSideHoleEntry(Room room, int x, int z, int tx, int tz, BlockPos.Mutable cursor) {
@@ -5640,6 +5670,7 @@ public class SpawnerDetector extends Module {
         ColumnPlan col = autoColumn;
         Room room = autoSite.room;
         int cy = room.cy();
+        boolean deepSide = isDeepSidePlan(col, room);
         BlockPos feet = mc.player.getBlockPos();
         int feetY = feet.getY();
 
@@ -5656,8 +5687,8 @@ public class SpawnerDetector extends Module {
         String phase;
         BlockPos targetCell;
 
-        if (feetY > cy) {
-            phase = "descend";
+        if (feetY > (deepSide ? col.startY() : cy)) {
+            phase = deepSide ? "deep-descend" : "descend";
             recenterDig(col.x(), col.z(), mc.player.isTouchingWater() ? 0.12 : 0.25);
             double gap = Math.hypot((col.x() + 0.5) - mc.player.getX(), (col.z() + 0.5) - mc.player.getZ());
             Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && gap <= 0.15);
@@ -5667,6 +5698,14 @@ public class SpawnerDetector extends Module {
             if (!isOpenState(belowState, below) && mc.player.isOnGround()) {
                 trackSideDigBlock(below);
                 autoMineTick("SIDE_DIG", below, true);
+            }
+        } else if (deepSide) {
+            phase = "deep-bottom";
+            targetCell = new BlockPos(col.x(), feetY, col.z());
+            recenterDig(col.x(), col.z(), mc.player.isTouchingWater() ? 0.12 : 0.25);
+            if (feetY < cy && (mc.player.isOnGround() || mc.player.isTouchingWater())) {
+                enterTunnelFromDeepSideShaft(col, room, feetY);
+                return;
             }
         } else if (feetY == cy) {
             phase = "horizontal";
@@ -5708,6 +5747,38 @@ public class SpawnerDetector extends Module {
                 feet.getX(), feet.getY(), feet.getZ(), phase,
                 targetCell.getX(), targetCell.getY(), targetCell.getZ(), mc.player.isTouchingWater()));
         }
+    }
+
+    private boolean isDeepSidePlan(ColumnPlan plan, Room room) {
+        return plan.side() && plan.startY() < room.cy();
+    }
+
+    private void enterTunnelFromDeepSideShaft(ColumnPlan col, Room room, int feetY) {
+        releaseAllAutoKeys();
+        boolean water = col.water() || mc.player.isTouchingWater() || columnHasWater(col.x(), col.z(), col.startY(), col.holeTopY());
+        autoExitShaft = new ExitShaft(col.x(), col.z(), feetY, col.exitY(), water, col.skyBlocked(), null);
+        autoExitShaftForeign = false;
+        autoTunnelTrail.clear();
+        BlockPos goal = findTunnelGoal(room);
+        if (goal == null) {
+            autoRunAbandoned = true;
+            autoLog("SIDE_DIG", autoSite.center, "deep shaft no tunnel goal, exiting");
+            enterState(AutoState.EXIT, "deep shaft no tunnel goal");
+            return;
+        }
+        autoBaritoneRetries = 0;
+        autoPaused = false;
+        autoPauseReason = null;
+        autoPauseStartMs = 0;
+        autoPausedTicks = 0;
+        resetBreach();
+        BaritoneAPI.getSettings().allowPlace.value = true;
+        autoTunnelGoal = goal;
+        autoTunnelBestDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(autoTunnelGoal));
+        autoTunnelBestElapsed = 0;
+        IBaritone bt = primaryBaritone();
+        if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
+        enterState(AutoState.TUNNEL, "deep side shaft bottom");
     }
 
     private void trackSideDigBlock(BlockPos target) {
