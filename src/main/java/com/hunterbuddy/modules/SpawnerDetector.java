@@ -547,6 +547,7 @@ public class SpawnerDetector extends Module {
     private ColumnPlan autoColumn;
     private boolean autoChestplateAllowed;
     private ExitShaft autoExitShaft;
+    private boolean autoExitShaftForeign;
     private Site autoStackedPartner;
     private boolean autoRunAbandoned;
     private boolean autoSoloMode;
@@ -793,6 +794,7 @@ public class SpawnerDetector extends Module {
 
     private double autoSwimUpLastY;
     private int autoSwimUpProgressTick;
+    private int autoSwimUpOutOfWaterTicks;
     private BlockPos autoSwimUpBreakPos;
     private String autoSwimUpBreakLabel;
 
@@ -907,6 +909,7 @@ public class SpawnerDetector extends Module {
         autoSite = null;
         autoColumn = null;
         autoExitShaft = null;
+        autoExitShaftForeign = false;
         autoStackedPartner = null;
         autoRunAbandoned = false;
         autoSoloMode = false;
@@ -5433,6 +5436,7 @@ public class SpawnerDetector extends Module {
                 || columnHasWater(autoColumn.x(), autoColumn.z(), roomCy, autoColumn.holeTopY());
             autoExitShaft = new ExitShaft(autoColumn.x(), autoColumn.z(), roomCy,
                 autoColumn.holeTopY(), water, autoColumn.skyBlocked(), null);
+            autoExitShaftForeign = false;
             enterState(AutoState.ROOM, "");
             return;
         }
@@ -5539,6 +5543,7 @@ public class SpawnerDetector extends Module {
             releaseAllAutoKeys();
             boolean water = col.water() || columnHasWater(col.x(), col.z(), cy, col.holeTopY());
             autoExitShaft = new ExitShaft(col.x(), col.z(), cy, col.holeTopY(), water, col.skyBlocked(), col.sideEntry());
+            autoExitShaftForeign = false;
             enterState(AutoState.ROOM, "side tunnel done");
             return;
         }
@@ -6648,6 +6653,7 @@ public class SpawnerDetector extends Module {
             && (dxz <= 1.0 || insideInterior(autoSite.room, feet.getX(), feet.getZ()))) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             releaseAllAutoKeys();
+            autoExitShaftForeign = autoExitShaft != null;
             enterState(AutoState.ROOM, "");
             return;
         }
@@ -7289,6 +7295,11 @@ public class SpawnerDetector extends Module {
     }
 
     private void enterAscendOrSwimUp(String details) {
+        if (autoExitShaftForeign && autoExitShaft != null
+            && Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ()) > 4.0) {
+            enterState(AutoState.ASCEND, details);
+            return;
+        }
         boolean water = (autoExitShaft != null && autoExitShaft.water()) || autoColumn.water();
         if (water) {
             enterState(AutoState.SWIM_UP, details);
@@ -7305,7 +7316,20 @@ public class SpawnerDetector extends Module {
             double farDxz = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
 
             if (stateTicks == 1) {
-                autoExitReturning = farDxz > 4.0 && autoExitShaft.entry() == null;
+                boolean foreign = autoExitShaftForeign && farDxz > 4.0;
+                if (foreign) {
+                    autoExitReturning = autoExitShaft.entry() == null && !autoExitShaft.water();
+                    if (!autoExitReturning) {
+                        releaseAllAutoKeys();
+                        autoLog("EXIT", autoSite.center, "exit shaft belongs to the previous room, ascend");
+                        enterState(AutoState.ASCEND, "exit shaft belongs to the previous room");
+                        return;
+                    }
+                } else {
+                    boolean roomWater = mc.player.isTouchingWater()
+                        && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY());
+                    autoExitReturning = farDxz > 4.0 && !roomWater && autoExitShaft.entry() == null;
+                }
                 autoExitNoPathChecks = 0;
                 autoExitSelfWalk = false;
                 autoExitSelfBestDist = farDxz;
@@ -8349,6 +8373,7 @@ public class SpawnerDetector extends Module {
         if (stateTicks == 1) {
             autoSwimUpLastY = mc.player.getY();
             autoSwimUpProgressTick = 0;
+            autoSwimUpOutOfWaterTicks = 0;
             autoSwimUpBreakPos = null;
             autoSwimUpBreakLabel = null;
             autoExitPathCell = null;
@@ -8449,6 +8474,18 @@ public class SpawnerDetector extends Module {
                 autoWaterJumpVertical = true;
                 enterState(AutoState.WATER_JUMP, "pool under dry shaft");
             }
+            return;
+        }
+
+        if (!mc.player.isTouchingWater() && !mc.player.isSubmergedInWater() && mc.player.getY() < swimUpExitY - 3) {
+            autoSwimUpOutOfWaterTicks++;
+        } else {
+            autoSwimUpOutOfWaterTicks = 0;
+        }
+        if (autoSwimUpOutOfWaterTicks >= 100) {
+            releaseAllAutoKeys();
+            autoLog("SWIM_UP", autoSite.center, "swim up out of water");
+            enterState(AutoState.ASCEND, "swim up out of water");
         }
     }
 
