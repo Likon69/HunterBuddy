@@ -139,6 +139,7 @@ import net.minecraft.world.chunk.WorldChunk;
 
 public class SpawnerDetector extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgRoomShape = settings.createGroup("Room shape");
     private final SettingGroup sgScore = settings.createGroup("Score");
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgColors = settings.createGroup("Colors");
@@ -205,6 +206,31 @@ public class SpawnerDetector extends Module {
         .name("log")
         .description("Write detection and auto-farm lines to latest.log.")
         .defaultValue(false).build());
+
+    private final Setting<Integer> roomFloorMin = sgRoomShape.add(new IntSetting.Builder()
+        .name("room-floor-min")
+        .description("Minimum cobblestone or mossy cobblestone floor coverage for room shape matching, in percent.")
+        .defaultValue(50).min(0).max(100).sliderRange(0, 100).build());
+
+    private final Setting<Integer> roomMossyMin = sgRoomShape.add(new IntSetting.Builder()
+        .name("room-mossy-min")
+        .description("Minimum mossy cobblestone count for room shape matching at y 63 and above.")
+        .defaultValue(3).min(0).max(16).sliderRange(0, 10).build());
+
+    private final Setting<Integer> roomInteriorMin = sgRoomShape.add(new IntSetting.Builder()
+        .name("room-interior-min")
+        .description("Minimum open or replaceable room interior coverage for room shape matching, in percent.")
+        .defaultValue(60).min(0).max(100).sliderRange(0, 100).build());
+
+    private final Setting<Integer> roomWallsMin = sgRoomShape.add(new IntSetting.Builder()
+        .name("room-walls-min")
+        .description("Minimum cobblestone wall coverage for room shape matching, in percent.")
+        .defaultValue(35).min(0).max(100).sliderRange(0, 100).build());
+
+    private final Setting<Integer> roomCeilingMin = sgRoomShape.add(new IntSetting.Builder()
+        .name("room-ceiling-min")
+        .description("Minimum closed ceiling coverage for spawnerless room shape matching, in percent.")
+        .defaultValue(60).min(0).max(100).sliderRange(0, 100).build());
 
     private final Setting<Integer> weightLight = sgScore.add(new IntSetting.Builder()
         .name("weight-light")
@@ -1078,6 +1104,7 @@ public class SpawnerDetector extends Module {
         while (it.hasNext()) {
             BlockPos pos = it.next();
             if (!mc.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) {
+                logSkipOnce(pos, "spawnerless waiting chunk unloaded");
                 it.remove();
             } else if (spawnerlessChunksLoaded(pos.getX(), pos.getZ())) {
                 it.remove();
@@ -1175,7 +1202,7 @@ public class SpawnerDetector extends Module {
 
         for (List<BlockPos> plane : byY.values()) {
             boolean[] used = new boolean[plane.size()];
-            int minGroupSize = plane.get(0).getY() < 63 ? 1 : 3;
+            int minGroupSize = plane.get(0).getY() < 63 ? 1 : roomMossyMin.get();
 
             for (int i = 0; i < plane.size(); i++) {
                 if (used[i]) continue;
@@ -1222,17 +1249,26 @@ public class SpawnerDetector extends Module {
     }
 
     private void considerSpawnerlessCandidate(int baseCx, int cy, int baseCz) {
+        BlockPos basePos = new BlockPos(baseCx, cy, baseCz);
         for (Site s : sites.values()) {
             if (baseCx >= s.room.minX() + 1 && baseCx <= s.room.maxX() - 1 && baseCz >= s.room.minZ() + 1 && baseCz <= s.room.maxZ() - 1
-                && ((cy - 1 >= s.room.minY() && cy - 1 <= s.room.maxY()) || (cy >= s.room.minY() && cy <= s.room.maxY()))) return;
+                && ((cy - 1 >= s.room.minY() && cy - 1 <= s.room.maxY()) || (cy >= s.room.minY() && cy <= s.room.maxY()))) {
+                logSkipOnce(basePos, String.format("spawnerless inside site %d,%d,%d", s.center.getX(), s.center.getY(), s.center.getZ()));
+                return;
+            }
         }
         for (PendingSite ps : pendingEval.values()) {
             if (baseCx >= ps.room().minX() + 1 && baseCx <= ps.room().maxX() - 1 && baseCz >= ps.room().minZ() + 1 && baseCz <= ps.room().maxZ() - 1
-                && ((cy - 1 >= ps.room().minY() && cy - 1 <= ps.room().maxY()) || (cy >= ps.room().minY() && cy <= ps.room().maxY()))) return;
+                && ((cy - 1 >= ps.room().minY() && cy - 1 <= ps.room().maxY()) || (cy >= ps.room().minY() && cy <= ps.room().maxY()))) {
+                BlockPos pos = ps.center();
+                logSkipOnce(basePos, String.format("spawnerless inside pending %d,%d,%d", pos.getX(), pos.getY(), pos.getZ()));
+                return;
+            }
         }
 
         if (!spawnerlessChunksLoaded(baseCx, baseCz)) {
-            spawnerlessWaiting.add(new BlockPos(baseCx, cy, baseCz));
+            logSkipOnce(basePos, "spawnerless waiting chunks not loaded");
+            spawnerlessWaiting.add(basePos);
             return;
         }
 
@@ -1252,10 +1288,20 @@ public class SpawnerDetector extends Module {
             logSkipOnce(new BlockPos(baseCx, cy, baseCz), "spawnerless no room " + (roomRejectInfo != null ? roomRejectInfo : "no shape"));
             return;
         }
-        if (roomHasSpawnerBlock(best)) return;
-
         BlockPos center = new BlockPos(best.cx(), best.cy(), best.cz());
-        if (sites.containsKey(center) || pendingEval.containsKey(center)) return;
+        if (roomHasSpawnerBlock(best)) {
+            logSkipOnce(center, String.format("spawnerless room has spawner block center=%d,%d,%d", center.getX(), center.getY(), center.getZ()));
+            return;
+        }
+
+        if (sites.containsKey(center)) {
+            logSkipOnce(center, String.format("spawnerless center already site %d,%d,%d", center.getX(), center.getY(), center.getZ()));
+            return;
+        }
+        if (pendingEval.containsKey(center)) {
+            logSkipOnce(center, String.format("spawnerless center already pending %d,%d,%d", center.getX(), center.getY(), center.getZ()));
+            return;
+        }
         spawnerlessLossInfo = null;
         if (!spawnerlessCandidateWins(best)) {
             logSkipOnce(center, spawnerlessLossInfo != null ? spawnerlessLossInfo : "spawnerless loses to an overlapping room");
@@ -1372,7 +1418,11 @@ public class SpawnerDetector extends Module {
         Room fallback = null;
         double fallbackFit = -1;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
-        int mMin = cy - 1 < 63 ? 1 : 3;
+        int mMin = cy - 1 < 63 ? 1 : roomMossyMin.get();
+        double floorMin = roomFloorMin.get() / 100.0;
+        double interiorMin = roomInteriorMin.get() / 100.0;
+        double wallsMin = roomWallsMin.get() / 100.0;
+        double ceilingMin = roomCeilingMin.get() / 100.0;
 
         for (int k = 2; k <= 3; k++) {
             for (int p = 2; p <= 3; p++) {
@@ -1435,18 +1485,18 @@ public class SpawnerDetector extends Module {
                 }
 
                 boolean legacyRoomWithoutWalls = c >= 0.9 * aireSol && m >= 0.5 * c && iCount >= 0.9 * volumeInterieur;
-                String shapeFail = c < 0.5 * aireSol ? "floor" : m < mMin ? "mossy" : iCount < 0.6 * volumeInterieur ? "interior"
-                    : w < 0.35 * casesAnneau && !legacyRoomWithoutWalls ? "walls" : null;
+                String shapeFail = c < floorMin * aireSol ? "floor" : m < mMin ? "mossy" : iCount < interiorMin * volumeInterieur ? "interior"
+                    : w < wallsMin * casesAnneau && !legacyRoomWithoutWalls ? "walls" : null;
                 if (shapeFail != null && !spawnerAtCenter && anyFit > roomRejectFit) {
                     roomRejectFit = anyFit;
                     roomRejectInfo = String.format("center=%d,%d,%d size=%dx%d fail=%s floor=%d/%d mossy=%d/%d open=%d/%d walls=%d/%d",
                         cx, cy, cz, 2 * k + 1, 2 * p + 1, shapeFail, c, aireSol, m, mMin, iCount, volumeInterieur, w, casesAnneau);
                 }
 
-                if (c < 0.5 * aireSol) continue;
+                if (c < floorMin * aireSol) continue;
                 if (m < mMin) continue;
-                if (iCount < 0.6 * volumeInterieur) continue;
-                if (w < 0.35 * casesAnneau && !legacyRoomWithoutWalls) continue;
+                if (iCount < interiorMin * volumeInterieur) continue;
+                if (w < wallsMin * casesAnneau && !legacyRoomWithoutWalls) continue;
 
                 int ceilingClosed = 0;
                 for (int x = interiorMinX; x <= interiorMaxX; x++) {
@@ -1459,7 +1509,7 @@ public class SpawnerDetector extends Module {
                     }
                 }
                 int openCeiling = interiorArea - ceilingClosed;
-                if (!spawnerAtCenter && ceilingClosed < 0.6 * interiorArea && !(fallen >= 3 && fallen * 2 >= openCeiling)) {
+                if (!spawnerAtCenter && ceilingClosed < ceilingMin * interiorArea && !(fallen >= 3 && fallen * 2 >= openCeiling)) {
                     if (anyFit > roomRejectFit) {
                         roomRejectFit = anyFit;
                         roomRejectInfo = String.format("center=%d,%d,%d size=%dx%d fail=ceiling ceiling=%d/%d fallen=%d floor=%d/%d walls=%d/%d",
