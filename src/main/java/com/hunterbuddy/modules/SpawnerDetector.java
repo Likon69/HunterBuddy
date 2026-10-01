@@ -7366,7 +7366,7 @@ public class SpawnerDetector extends Module {
             boolean eligible = autoShaftFly.get()
                 && autoExitShaft != null
                 && !autoExitShaft.water()
-                && !autoExitShaft.skyBlocked()
+                && (!autoExitShaft.skyBlocked() || shaftExitHasPivotEscape(autoExitShaft))
                 && countRockets() >= 4;
             if (!eligible) {
                 enterAscendOrSwimUp("shaft-fly not eligible");
@@ -7952,6 +7952,34 @@ public class SpawnerDetector extends Module {
         return best;
     }
 
+    private boolean shaftExitHasPivotEscape(ExitShaft s) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int obstacleY = Integer.MIN_VALUE;
+        for (int y = s.exitY() + 1; y <= s.exitY() + SKY_CHECK_HEIGHT; y++) {
+            cursor.set(s.x(), y, s.z());
+            if (!isOpenState(mc.world.getBlockState(cursor), cursor)) {
+                obstacleY = y;
+                break;
+            }
+        }
+
+        if (obstacleY == Integer.MIN_VALUE) return true;
+
+        if (obstacleY - 2 < s.exitY()) return false;
+
+        int minFeetY = Math.max(obstacleY - 4, s.exitY() - 1);
+        int maxFeetY = obstacleY - 2;
+        BlockPos lowestEscape = null;
+        for (int h = minFeetY; h <= maxFeetY; h++) {
+            BlockPos escape = findShaftPivotEscape(s.x(), h, s.z());
+            if (escape == null) return false;
+            if (lowestEscape == null) lowestEscape = escape;
+        }
+
+        autoLog("SHAFT_FLY", autoSite.center, "sky blocked at y=" + obstacleY + " escape " + lowestEscape.getX() + "," + lowestEscape.getZ() + ", shaft fly anyway");
+        return true;
+    }
+
     private void tickShaftFly() {
         if (waitingForElytra("SHAFT_FLY")) return;
         stateTicks++;
@@ -8309,7 +8337,7 @@ public class SpawnerDetector extends Module {
             boolean shaftFlyEligible = !mc.player.isTouchingWater()
                 && autoShaftFly.get()
                 && autoExitShaft != null
-                && !autoExitShaft.skyBlocked()
+                && (!autoExitShaft.skyBlocked() || shaftExitHasPivotEscape(autoExitShaft))
                 && countRockets() >= 4;
             if (shaftFlyEligible) {
                 autoShaftFlyAttempts = 0;
@@ -8519,7 +8547,7 @@ public class SpawnerDetector extends Module {
                 boolean dryShaftFly = autoClimbLostGlideRetries < 4 && autoExitShaft != null
                     && !mc.player.isTouchingWater()
                     && mc.player.getBlockX() == autoExitShaft.x() && mc.player.getBlockZ() == autoExitShaft.z()
-                    && !autoExitShaft.skyBlocked() && autoShaftFly.get() && countRockets() >= 4;
+                    && (!autoExitShaft.skyBlocked() || shaftExitHasPivotEscape(autoExitShaft)) && autoShaftFly.get() && countRockets() >= 4;
                 boolean water = autoClimbLostGlideRetries < 4 && mc.player.isTouchingWater();
                 AutoState next = dryShaftFly ? AutoState.SHAFT_ALIGN : water ? AutoState.SWIM_UP : AutoState.ASCEND;
                 if (next == AutoState.ASCEND && autoAscendArrivedAt != null && autoClimbLostGlideRetries >= 4) {
