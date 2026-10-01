@@ -2751,10 +2751,10 @@ public class SpawnerDetector extends Module {
     }
 
     private ColumnEval evaluateColumnResult(Room room, int x, int z, int maxFallAllowed) {
-        return evaluateColumnResult(null, room, x, z, maxFallAllowed);
+        return evaluateColumnResult(null, room, x, z, maxFallAllowed, false);
     }
 
-    private ColumnEval evaluateColumnResult(BlockPos siteCenter, Room room, int x, int z, int maxFallAllowed) {
+    private ColumnEval evaluateColumnResult(BlockPos siteCenter, Room room, int x, int z, int maxFallAllowed, boolean ignoreCobweb) {
         if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return new ColumnEval(null, "chunk not loaded");
         BlockPos.Mutable cursor = new BlockPos.Mutable();
 
@@ -2817,6 +2817,7 @@ public class SpawnerDetector extends Module {
             }
 
             BlockState center = mc.world.getBlockState(cursor.set(x, y, z));
+            if (!ignoreCobweb && center.getBlock() == Blocks.COBWEB) return new ColumnEval(null, "cobweb");
             boolean isFluidWater = center.getFluidState().isIn(FluidTags.WATER);
 
             if (isFluidWater) {
@@ -2979,20 +2980,28 @@ public class SpawnerDetector extends Module {
                     if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: open floor below", sx, sz));
                     continue;
                 }
-                shaftPlan = evaluateColumnResult(site.center, room, sx, sz, autoMaxFall.get()).plan();
+                ColumnEval shaftEval = evaluateColumnResult(site.center, room, sx, sz, autoMaxFall.get(), false);
+                shaftPlan = shaftEval.plan();
                 if (shaftPlan == null) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: plan null", sx, sz));
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
+                        shaftEval.rejectReason() != null ? shaftEval.rejectReason() : "plan null"));
                     continue;
                 }
                 BlockPos.Mutable fallCursor = new BlockPos.Mutable();
                 int fallRun = 0;
+                boolean shaftCobweb = false;
                 for (int fy = (shaftPlan.rim() != null ? shaftPlan.rim().getY() : shaftPlan.holeTopY()) - 1; fy >= shaftPlan.startY(); fy--) {
                     BlockState fallState = mc.world.getBlockState(fallCursor.set(sx, fy, sz));
+                    if (fallState.getBlock() == Blocks.COBWEB) shaftCobweb = true;
                     if (fallState.getFluidState().isIn(FluidTags.WATER)) {
                         fallRun = 0;
                     } else if (isOpenState(fallState, fallCursor)) {
                         fallRun++;
                     }
+                }
+                if (shaftCobweb) {
+                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: cobweb", sx, sz));
+                    continue;
                 }
                 if (fallRun > autoMaxFall.get()) {
                     if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: fall", sx, sz));
@@ -3036,26 +3045,33 @@ public class SpawnerDetector extends Module {
         ColumnPlan fallFallback = null;
         String fallFallbackReason = null;
         ColumnPlan openFloorFallback = null;
+        ColumnPlan cobwebFallback = null;
+        boolean cobwebOnlyFallback = true;
         for (int[] c : candidates) {
             if (floorOpenBelow(room, c[0], c[1])) {
                 columnRejects.add(new ColumnReject(c[0], c[1], "open floor below"));
+                cobwebOnlyFallback = false;
                 if (openFloorFallback == null) {
-                    ColumnPlan plan = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get()).plan();
+                    ColumnPlan plan = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get(), false).plan();
                     if (plan != null) openFloorFallback = plan;
                 }
                 continue;
             }
-            ColumnEval eval = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get());
+            ColumnEval eval = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get(), false);
             ColumnPlan plan = eval.plan();
             if (plan == null) {
                 String reason = eval.rejectReason() != null ? eval.rejectReason() : "no plan";
                 columnRejects.add(new ColumnReject(c[0], c[1], reason));
+                if (!"cobweb".equals(reason)) cobwebOnlyFallback = false;
                 if (fallFallback == null && reason.startsWith("fall ")) {
-                    ColumnPlan retry = evaluateColumnResult(site.center, room, c[0], c[1], Integer.MAX_VALUE).plan();
+                    ColumnPlan retry = evaluateColumnResult(site.center, room, c[0], c[1], Integer.MAX_VALUE, false).plan();
                     if (retry != null) {
                         fallFallback = retry;
                         fallFallbackReason = reason;
                     }
+                } else if (cobwebFallback == null && "cobweb".equals(reason)) {
+                    ColumnPlan retry = evaluateColumnResult(site.center, room, c[0], c[1], autoMaxFall.get(), true).plan();
+                    if (retry != null) cobwebFallback = retry;
                 }
                 continue;
             }
@@ -3084,8 +3100,9 @@ public class SpawnerDetector extends Module {
         }
 
         if (column == null) {
-            ColumnPlan fallback = fallFallback != null ? fallFallback : openFloorFallback;
-            String fallbackReason = fallFallback != null ? fallFallbackReason : "open floor below";
+            ColumnPlan fallback = fallFallback != null ? fallFallback : openFloorFallback != null ? openFloorFallback
+                : cobwebOnlyFallback ? cobwebFallback : null;
+            String fallbackReason = fallFallback != null ? fallFallbackReason : openFloorFallback != null ? "open floor below" : "cobweb";
             if (noSafeColumnLogged.add(site.center)) {
                 for (ColumnReject reject : columnRejects) {
                     autoLog("PLAN", site.center, String.format("column %d,%d refused: %s", reject.x(), reject.z(), reject.reason()));
@@ -3115,7 +3132,7 @@ public class SpawnerDetector extends Module {
         SideHoleCost sc = computeSideHoleCost(siteCenter, room, x, z);
         if (sc == null) return new SideHoleAttempt(null, null);
         if (sc.rejectReason() != null) return new SideHoleAttempt(null, sc.rejectReason());
-        return finishSideHolePlan(siteCenter, room, x, z, sc);
+        return finishSideHolePlan(siteCenter, room, x, z, sc, false);
     }
 
     private SideHoleCost computeSideHoleCost(Room room, int x, int z) {
@@ -3171,6 +3188,7 @@ public class SpawnerDetector extends Module {
         boolean lavaFound = false;
         boolean fallReject = false;
         int vertBlocksToBreak = 0, vertAirRun = 0;
+        boolean cobwebFound = false;
 
         outer:
         for (int vy = bottomFeet - 1; vy >= cy; vy--) {
@@ -3178,6 +3196,7 @@ public class SpawnerDetector extends Module {
                 if (isLava(mc.world.getBlockState(cursor.set(x + n[0], vy, z + n[1])))) { lavaFound = true; break outer; }
             }
             BlockState vCenter = mc.world.getBlockState(cursor.set(x, vy, z));
+            if (vCenter.getBlock() == Blocks.COBWEB) cobwebFound = true;
             if (isOpenState(vCenter, cursor)) {
                 vertAirRun++;
             } else {
@@ -3216,21 +3235,24 @@ public class SpawnerDetector extends Module {
         for (BlockPos hc : horizCells) {
             for (int dyy = 0; dyy <= 1; dyy++) {
                 cursor.set(hc.getX(), cy + dyy, hc.getZ());
-                if (!isOpenState(mc.world.getBlockState(cursor), cursor)) tunnelBlocksToBreak++;
+                BlockState tunnelState = mc.world.getBlockState(cursor);
+                if (tunnelState.getBlock() == Blocks.COBWEB) cobwebFound = true;
+                if (!isOpenState(tunnelState, cursor)) tunnelBlocksToBreak++;
             }
         }
 
         int cost = vertBlocksToBreak + tunnelBlocksToBreak;
         if (cost > 20) return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, "cost cap");
+        if (cobwebFound) return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, "cobweb");
 
         return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, null);
     }
 
     private SideHoleAttempt finishSideHolePlan(Room room, int x, int z, SideHoleCost sc) {
-        return finishSideHolePlan(null, room, x, z, sc);
+        return finishSideHolePlan(null, room, x, z, sc, false);
     }
 
-    private SideHoleAttempt finishSideHolePlan(BlockPos siteCenter, Room room, int x, int z, SideHoleCost sc) {
+    private SideHoleAttempt finishSideHolePlan(BlockPos siteCenter, Room room, int x, int z, SideHoleCost sc, boolean ignoreCobweb) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
         topY = descendPastFloatingBlockTop(siteCenter, x, z, topY, room.cy() - 2, cursor);
@@ -3258,6 +3280,7 @@ public class SpawnerDetector extends Module {
         int fallRun = 0;
         for (int fy = entryY - 1; fy >= sc.bottomFeet(); fy--) {
             BlockState fallState = mc.world.getBlockState(cursor.set(x, fy, z));
+            if (!ignoreCobweb && fallState.getBlock() == Blocks.COBWEB) return new SideHoleAttempt(null, "cobweb");
             if (fallState.getFluidState().isIn(FluidTags.WATER)) {
                 fallRun = 0;
             } else if (isOpenState(fallState, cursor)) {
@@ -3277,6 +3300,10 @@ public class SpawnerDetector extends Module {
         ColumnPlan best = null;
         int bestCost = Integer.MAX_VALUE;
         double bestDistSq = Double.MAX_VALUE;
+        ColumnPlan cobwebFallback = null;
+        int cobwebFallbackCost = Integer.MAX_VALUE;
+        double cobwebFallbackDistSq = Double.MAX_VALUE;
+        boolean cobwebOnlyFallback = true;
         List<SideHoleReject> rejects = new ArrayList<>();
 
         for (int x = cx - k - 7; x <= cx + k + 7; x++) {
@@ -3290,6 +3317,19 @@ public class SpawnerDetector extends Module {
                 if (sc == null) continue;
                 if (sc.rejectReason() != null) {
                     rejects.add(new SideHoleReject(x, z, sc.bottomFeet(), sc.rejectReason()));
+                    if (!"cobweb".equals(sc.rejectReason())) cobwebOnlyFallback = false;
+                    if ("cobweb".equals(sc.rejectReason())) {
+                        double dx = x - mc.player.getX(), dz = z - mc.player.getZ();
+                        double distSq = dx * dx + dz * dz;
+                        if (sc.cost() < cobwebFallbackCost || (sc.cost() == cobwebFallbackCost && distSq < cobwebFallbackDistSq)) {
+                            SideHoleAttempt retry = finishSideHolePlan(site.center, room, x, z, sc, true);
+                            if (retry.plan() != null) {
+                                cobwebFallbackCost = sc.cost();
+                                cobwebFallbackDistSq = distSq;
+                                cobwebFallback = retry.plan();
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -3297,9 +3337,18 @@ public class SpawnerDetector extends Module {
                 double distSq = dx * dx + dz * dz;
 
                 if (sc.cost() < bestCost || (sc.cost() == bestCost && distSq < bestDistSq)) {
-                    SideHoleAttempt attempt = finishSideHolePlan(site.center, room, x, z, sc);
+                    SideHoleAttempt attempt = finishSideHolePlan(site.center, room, x, z, sc, false);
                     if (attempt.plan() == null) {
                         rejects.add(new SideHoleReject(x, z, sc.bottomFeet(), attempt.rejectReason()));
+                        if (!"cobweb".equals(attempt.rejectReason())) cobwebOnlyFallback = false;
+                        if ("cobweb".equals(attempt.rejectReason())) {
+                            SideHoleAttempt retry = finishSideHolePlan(site.center, room, x, z, sc, true);
+                            if (retry.plan() != null) {
+                                cobwebFallbackCost = sc.cost();
+                                cobwebFallbackDistSq = distSq;
+                                cobwebFallback = retry.plan();
+                            }
+                        }
                         continue;
                     }
                     bestCost = sc.cost();
@@ -3308,6 +3357,7 @@ public class SpawnerDetector extends Module {
                 }
             }
         }
+        if (best == null && cobwebOnlyFallback) best = cobwebFallback;
 
         if (sideHoleLogged.add(site.center)) {
             List<SideHoleReject> loggable = new ArrayList<>();
@@ -6891,7 +6941,8 @@ public class SpawnerDetector extends Module {
                 }
 
                 if (autoExitSelfWalk) {
-                    if (mc.player.isTouchingWater()
+                    boolean shaftWaterExit = farDxz <= 1.5 || mc.player.isSubmergedInWater();
+                    if (mc.player.isTouchingWater() && shaftWaterExit
                         && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY())) {
                         releaseAllAutoKeys();
                         autoExitReturning = false;
@@ -8110,7 +8161,8 @@ public class SpawnerDetector extends Module {
             for (int dz = -1; dz <= 1; dz++) {
                 int nx = x + dx, nz = z + dz;
                 if (!mc.world.getChunkManager().isChunkLoaded(nx >> 4, nz >> 4)) return false;
-                int ng = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, nx, nz);
+                int ng = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, nx, nz) - 1;
+                ng = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, nx, nz, ng, groundY - 1, false, cursor) + 1;
                 if (ng > groundY + 1) return false;
                 for (int dy = 1; dy <= 2; dy++) {
                     cursor.set(nx, groundY + dy, nz);
@@ -8130,7 +8182,8 @@ public class SpawnerDetector extends Module {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radiusSq) continue;
                 int x = cx + dx, z = cz + dz;
-                int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+                groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, groundY, mc.world.getBottomY(), false, cursor) + 1;
 
                 cursor.set(x, groundY - 1, z);
                 BlockState belowState = mc.world.getBlockState(cursor);
@@ -8497,7 +8550,8 @@ public class SpawnerDetector extends Module {
                 double distSq = dx * dx + dz * dz;
                 if (distSq > 256 || distSq >= bestDistSq) continue;
                 int x = cx + dx, z = cz + dz;
-                int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+                groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, groundY, mc.world.getBottomY(), false, cursor) + 1;
                 BlockPos candidate = new BlockPos(x, groundY, z);
                 if (autoAscendFailedPoints.contains(candidate)) continue;
                 boolean open = true;
