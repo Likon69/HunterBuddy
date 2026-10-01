@@ -6534,9 +6534,11 @@ public class SpawnerDetector extends Module {
         }
 
         double dxz = Math.hypot((autoTunnelGoal.getX() + 0.5) - mc.player.getX(), (autoTunnelGoal.getZ() + 0.5) - mc.player.getZ());
-        int feetY = mc.player.getBlockPos().getY();
+        BlockPos feet = mc.player.getBlockPos();
+        int feetY = feet.getY();
 
-        if (dxz <= 1.0 && mc.player.isOnGround() && feetY >= autoSite.room.cy() && feetY <= autoSite.room.cy() + 3) {
+        if (mc.player.isOnGround() && feetY >= autoSite.room.cy() && feetY <= autoSite.room.cy() + 3
+            && (dxz <= 1.0 || insideInterior(autoSite.room, feet.getX(), feet.getZ()))) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             releaseAllAutoKeys();
             enterState(AutoState.ROOM, "");
