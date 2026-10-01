@@ -4696,17 +4696,36 @@ public class SpawnerDetector extends Module {
                 boolean onFloor = !isOpenState(mc.world.getBlockState(below1), below1);
                 boolean nearFloor = onFloor || !isOpenState(mc.world.getBlockState(below2), below2);
                 boolean horizCollision = mc.player.horizontalCollision;
-                Utils.setPressed(mc.options.jumpKey, horizCollision || onFloor);
-                Utils.setPressed(mc.options.sneakKey, !horizCollision && !nearFloor && !mc.player.isOnGround());
+                boolean sprintSwim = horiz > 2.0
+                    && mc.player.isTouchingWater()
+                    && mc.player.getHungerManager().getFoodLevel() > 6;
+                if (sprintSwim) {
+                    Vec3d eye = mc.player.getEyePos();
+                    double pitchX = (autoColumn.x() + 0.5) - eye.x;
+                    double pitchY = (autoColumn.startY() + 1.0) - eye.y;
+                    double pitchZ = (autoColumn.z() + 0.5) - eye.z;
+                    float pitch = MathHelper.wrapDegrees((float) -Math.toDegrees(Math.atan2(pitchY, Math.hypot(pitchX, pitchZ))));
+                    mc.player.setPitch(MathHelper.clamp(pitch, -90.0f, 90.0f));
+                    Utils.setPressed(mc.options.sprintKey, true);
+                    Utils.setPressed(mc.options.forwardKey, true);
+                    Utils.setPressed(mc.options.sneakKey, false);
+                    Utils.setPressed(mc.options.jumpKey, horizCollision);
+                } else {
+                    Utils.setPressed(mc.options.sprintKey, false);
+                    Utils.setPressed(mc.options.jumpKey, horizCollision || onFloor);
+                    Utils.setPressed(mc.options.sneakKey, !horizCollision && !nearFloor && !mc.player.isOnGround());
+                }
             } else {
                 phase = "swim";
                 boolean headUnderwater = mc.player.isSubmergedInWater();
                 boolean holdJump = mc.player.horizontalCollision || headUnderwater;
+                Utils.setPressed(mc.options.sprintKey, false);
                 Utils.setPressed(mc.options.jumpKey, holdJump);
                 Utils.setPressed(mc.options.sneakKey, false);
             }
         } else {
             phase = "sink";
+            Utils.setPressed(mc.options.sprintKey, false);
             Utils.setPressed(mc.options.jumpKey, false);
             Utils.setPressed(mc.options.sneakKey, horiz <= 0.15);
         }
