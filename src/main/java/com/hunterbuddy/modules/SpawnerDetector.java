@@ -7305,9 +7305,7 @@ public class SpawnerDetector extends Module {
             double farDxz = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
 
             if (stateTicks == 1) {
-                boolean roomWater = mc.player.isTouchingWater()
-                    && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY());
-                autoExitReturning = farDxz > 4.0 && !roomWater && autoExitShaft.entry() == null;
+                autoExitReturning = farDxz > 4.0 && autoExitShaft.entry() == null;
                 autoExitNoPathChecks = 0;
                 autoExitSelfWalk = false;
                 autoExitSelfBestDist = farDxz;
