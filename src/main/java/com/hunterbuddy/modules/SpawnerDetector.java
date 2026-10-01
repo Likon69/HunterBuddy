@@ -1989,6 +1989,8 @@ public class SpawnerDetector extends Module {
         List<DugHoles.Feature> features = DugHoles.analyze(src, minX, minZ, sizeX, sizeZ, 4, minY, maxY, params);
 
         boolean hit = false;
+        boolean hitOverlaps = false;
+        int hitDistSq = Integer.MAX_VALUE;
         DugHoles.Feature hitFeature = null;
         List<DugHoles.Feature> entryShafts = new ArrayList<>();
 
@@ -1996,17 +1998,23 @@ public class SpawnerDetector extends Module {
             boolean overlaps = f.minX() - 1 <= room.maxX() && f.maxX() + 1 >= room.minX()
                 && f.minY() - 1 <= room.maxY() && f.maxY() + 1 >= room.minY()
                 && f.minZ() - 1 <= room.maxZ() && f.maxZ() + 1 >= room.minZ();
+            int distX = f.maxX() < room.minX() ? room.minX() - f.maxX() : (f.minX() > room.maxX() ? f.minX() - room.maxX() : 0);
+            int distZ = f.maxZ() < room.minZ() ? room.minZ() - f.maxZ() : (f.minZ() > room.maxZ() ? f.minZ() - room.maxZ() : 0);
+            int distSq = distX * distX + distZ * distZ;
 
-            if (overlaps && f.kind() != DugHoles.Kind.POCKET && !hit) {
+            if (f.kind() != DugHoles.Kind.POCKET
+                && (!hit || (!hitOverlaps && (overlaps || distSq < hitDistSq)))) {
                 hit = true;
+                hitOverlaps = overlaps;
+                hitDistSq = distSq;
                 hitFeature = f;
             }
 
             if (f.kind() == DugHoles.Kind.SHAFT) {
                 int sx = f.minX(), sz = f.minZ();
-                int distX = sx < room.minX() ? room.minX() - sx : (sx > room.maxX() ? sx - room.maxX() : 0);
-                int distZ = sz < room.minZ() ? room.minZ() - sz : (sz > room.maxZ() ? sz - room.maxZ() : 0);
-                if (Math.max(distX, distZ) <= 3 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
+                int shaftDistX = sx < room.minX() ? room.minX() - sx : (sx > room.maxX() ? sx - room.maxX() : 0);
+                int shaftDistZ = sz < room.minZ() ? room.minZ() - sz : (sz > room.maxZ() ? sz - room.maxZ() : 0);
+                if (Math.max(shaftDistX, shaftDistZ) <= 3 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
                     entryShafts.add(f);
                 }
             }
