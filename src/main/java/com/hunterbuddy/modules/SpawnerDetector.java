@@ -3043,6 +3043,12 @@ public class SpawnerDetector extends Module {
             && z >= room.cz() - room.p() && z <= room.cz() + room.p();
     }
 
+    private static double horizontalDistanceToRoomBox(Room room, double x, double z) {
+        double dx = Math.max(Math.max(room.cx() - room.k() - x, 0.0), x - (room.cx() + room.k() + 1.0));
+        double dz = Math.max(Math.max(room.cz() - room.p() - z, 0.0), z - (room.cz() + room.p() + 1.0));
+        return Math.hypot(dx, dz);
+    }
+
     private ColumnPlan evaluateColumn(Room room, int x, int z) {
         return evaluateColumn(room, x, z, autoMaxFall.get());
     }
@@ -6649,8 +6655,10 @@ public class SpawnerDetector extends Module {
         BlockPos feet = mc.player.getBlockPos();
         int feetY = feet.getY();
 
-        if (mc.player.isOnGround() && feetY >= autoSite.room.cy() && feetY <= autoSite.room.cy() + 3
-            && (dxz <= 1.0 || insideInterior(autoSite.room, feet.getX(), feet.getZ()))) {
+        boolean tunnelArrivalY = feetY >= autoSite.room.cy() && feetY <= autoSite.room.cy() + 3;
+        boolean tunnelArrivalSupport = mc.player.isOnGround() || mc.player.isTouchingWater();
+        boolean tunnelArrivalBox = dxz <= 1.0 || insideInterior(autoSite.room, feet.getX(), feet.getZ());
+        if (tunnelArrivalSupport && tunnelArrivalY && tunnelArrivalBox) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             releaseAllAutoKeys();
             autoExitShaftForeign = autoExitShaft != null;
@@ -6671,7 +6679,13 @@ public class SpawnerDetector extends Module {
             autoBaritoneRetries++;
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
         }
-        if (!pathing && autoBaritoneRetries >= 3 && elapsed - autoTunnelBestElapsed >= 10 * 20) {
+        boolean nearRoomBox = feetY >= autoSite.room.cy() - 1 && feetY <= autoSite.room.cy() + 3
+            && horizontalDistanceToRoomBox(autoSite.room, mc.player.getX(), mc.player.getZ()) <= 4.0;
+        if (nearRoomBox && !pathing && autoBaritoneRetries >= 3) {
+            approachBlock(autoTunnelGoal);
+            return;
+        }
+        if (!nearRoomBox && !pathing && autoBaritoneRetries >= 3 && elapsed - autoTunnelBestElapsed >= 10 * 20) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             autoLog("TUNNEL", autoSite.center, "tunnel failed: no path");
             autoRunAbandoned = true;
