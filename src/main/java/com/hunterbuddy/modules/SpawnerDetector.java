@@ -2178,7 +2178,7 @@ public class SpawnerDetector extends Module {
                 int sx = f.minX(), sz = f.minZ();
                 int shaftDistX = sx < room.minX() ? room.minX() - sx : (sx > room.maxX() ? sx - room.maxX() : 0);
                 int shaftDistZ = sz < room.minZ() ? room.minZ() - sz : (sz > room.maxZ() ? sz - room.maxZ() : 0);
-                if (Math.max(shaftDistX, shaftDistZ) <= 3 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
+                if (Math.max(shaftDistX, shaftDistZ) <= 5 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
                     entryShafts.add(f);
                 }
             }
@@ -3420,8 +3420,11 @@ public class SpawnerDetector extends Module {
                 }
                 continue;
             }
-            if (!plan.skyBlocked()) { column = plan; break; }
-            if (bestBlocked == null) bestBlocked = plan;
+            if (!plan.skyBlocked()) {
+                if (column == null || betterColumnPlan(room, plan, column)) column = plan;
+            } else if (bestBlocked == null || betterColumnPlan(room, plan, bestBlocked)) {
+                bestBlocked = plan;
+            }
         }
         if (column == null) column = bestBlocked;
 
@@ -3463,6 +3466,15 @@ public class SpawnerDetector extends Module {
         return column;
     }
 
+    private boolean betterColumnPlan(Room room, ColumnPlan candidate, ColumnPlan current) {
+        if (candidate.blocksToBreak() != current.blocksToBreak()) return candidate.blocksToBreak() < current.blocksToBreak();
+        int cdx = candidate.x() - room.cx();
+        int cdz = candidate.z() - room.cz();
+        int bdx = current.x() - room.cx();
+        int bdz = current.z() - room.cz();
+        return cdx * cdx + cdz * cdz < bdx * bdx + bdz * bdz;
+    }
+
     private boolean floorOpenBelow(Room room, int x, int z) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         BlockState floorState = mc.world.getBlockState(cursor.set(x, room.cy() - 1, z));
@@ -3502,10 +3514,12 @@ public class SpawnerDetector extends Module {
         int tx = Math.max(cx - k, Math.min(cx + k, x));
         int tz = Math.max(cz - p, Math.min(cz + p, z));
 
-        BlockState entryState = mc.world.getBlockState(cursor.set(tx, cy, tz));
-        if (entryState.getBlock() == Blocks.SPAWNER || isContainerPresent(cursor)) {
+        BlockPos entry = resolveSideHoleEntry(room, x, z, tx, tz, cursor);
+        if (entry == null) {
             return new SideHoleCost(bottomFeet, tx, tz, 0, 0, "entry blocked");
         }
+        tx = entry.getX();
+        tz = entry.getZ();
 
         List<BlockPos> horizCells = new ArrayList<>();
         int hx = x, hz = z;
@@ -3593,6 +3607,32 @@ public class SpawnerDetector extends Module {
         return new SideHoleCost(bottomFeet, tx, tz, cost, vertBlocksToBreak, null);
     }
 
+    private BlockPos resolveSideHoleEntry(Room room, int x, int z, int tx, int tz, BlockPos.Mutable cursor) {
+        if (!sideHoleEntryBlocked(tx, room.cy(), tz, cursor)) return new BlockPos(tx, room.cy(), tz);
+
+        int axisX = 0;
+        int axisZ = 0;
+        boolean outsideX = x < room.cx() - room.k() || x > room.cx() + room.k();
+        boolean outsideZ = z < room.cz() - room.p() || z > room.cz() + room.p();
+        if (outsideZ && (!outsideX || Math.abs(z - room.cz()) >= Math.abs(x - room.cx()))) axisX = 1;
+        else axisZ = 1;
+
+        int[][] tries = {{axisX, axisZ}, {-axisX, -axisZ}};
+        for (int[] t : tries) {
+            int nx = tx + t[0];
+            int nz = tz + t[1];
+            if (nx < room.cx() - room.k() || nx > room.cx() + room.k() || nz < room.cz() - room.p() || nz > room.cz() + room.p()) continue;
+            if (!sideHoleEntryBlocked(nx, room.cy(), nz, cursor)) return new BlockPos(nx, room.cy(), nz);
+        }
+        return null;
+    }
+
+    private boolean sideHoleEntryBlocked(int x, int y, int z, BlockPos.Mutable cursor) {
+        cursor.set(x, y, z);
+        BlockState state = mc.world.getBlockState(cursor);
+        return state.getBlock() == Blocks.SPAWNER || isContainerPresent(cursor);
+    }
+
     private SideHoleAttempt finishSideHolePlan(Room room, int x, int z, SideHoleCost sc) {
         return finishSideHolePlan(null, room, x, z, sc, false);
     }
@@ -3620,7 +3660,6 @@ public class SpawnerDetector extends Module {
         if (skyBlocked) return new SideHoleAttempt(null, "sky blocked");
 
         int entryY = rim != null ? rim.getY() : holeTopY;
-        if (!water && rim == null) return new SideHoleAttempt(null, "covered");
 
         int fallRun = 0;
         for (int fy = entryY - 1; fy >= sc.bottomFeet(); fy--) {
