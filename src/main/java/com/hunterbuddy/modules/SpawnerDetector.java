@@ -496,6 +496,7 @@ public class SpawnerDetector extends Module {
     private record VisitedEntry(int x, int y, int z, String outcome, long time) {}
 
     private static final int SKY_CHECK_HEIGHT = 200;
+    private static final int DETACHED_TUNNEL_MIN_LENGTH = 8;
     private static final int LAND_RING_RADIUS = 8;
 
     private static final Set<Item> AUTO_THROWAWAY = Set.of(
@@ -1999,6 +2000,51 @@ public class SpawnerDetector extends Module {
 
     private record TunnelResult(boolean hit, DugHoles.Feature feature, List<DugHoles.Feature> entryShafts) {}
 
+    private static int tunnelFeatureLength(DugHoles.Feature f, List<DugHoles.Feature> features) {
+        return switch (f.kind()) {
+            case SHAFT -> f.maxY() - f.minY() + 1;
+            case TUNNEL -> Math.max(f.maxX() - f.minX(), f.maxZ() - f.minZ()) + 1;
+            case STAIRS -> stairChainLength(f, features);
+            case POCKET -> 0;
+        };
+    }
+
+    private static int stairChainLength(DugHoles.Feature f, List<DugHoles.Feature> features) {
+        boolean[] seen = new boolean[features.size()];
+        int[] stack = new int[features.size()];
+        int top = 0;
+        int count = 0;
+
+        for (int i = 0; i < features.size(); i++) {
+            if (features.get(i) == f) {
+                seen[i] = true;
+                stack[top++] = i;
+                break;
+            }
+        }
+
+        while (top > 0) {
+            DugHoles.Feature current = features.get(stack[--top]);
+            count++;
+            for (int i = 0; i < features.size(); i++) {
+                DugHoles.Feature next = features.get(i);
+                if (!seen[i] && stairStepsTouch(current, next)) {
+                    seen[i] = true;
+                    stack[top++] = i;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static boolean stairStepsTouch(DugHoles.Feature a, DugHoles.Feature b) {
+        if (a.kind() != DugHoles.Kind.STAIRS || b.kind() != DugHoles.Kind.STAIRS) return false;
+        boolean adjacentX = Math.abs(a.minX() - b.minX()) == 1 && a.minZ() == b.minZ();
+        boolean adjacentZ = Math.abs(a.minZ() - b.minZ()) == 1 && a.minX() == b.minX();
+        return (adjacentX || adjacentZ) && Math.abs(a.minY() - b.minY()) == 1;
+    }
+
     private TunnelResult computeTunnel(Room room) {
         int minX = room.minX() - 15, maxX = room.maxX() + 15;
         int minZ = room.minZ() - 15, maxZ = room.maxZ() + 15;
@@ -2025,7 +2071,10 @@ public class SpawnerDetector extends Module {
             int distZ = f.maxZ() < room.minZ() ? room.minZ() - f.maxZ() : (f.minZ() > room.maxZ() ? f.minZ() - room.maxZ() : 0);
             int distSq = distX * distX + distZ * distZ;
 
-            if (f.kind() != DugHoles.Kind.POCKET
+            boolean hitEligible = f.kind() != DugHoles.Kind.POCKET
+                && (overlaps || tunnelFeatureLength(f, features) >= DETACHED_TUNNEL_MIN_LENGTH);
+
+            if (hitEligible
                 && (!hit || (!hitOverlaps && (overlaps || distSq < hitDistSq)))) {
                 hit = true;
                 hitOverlaps = overlaps;
