@@ -262,6 +262,11 @@ public class SpawnerDetector extends Module {
         .description("Score weight of the tunnel signal.")
         .defaultValue(3).min(0).max(10).sliderRange(0, 10).build());
 
+    private final Setting<Integer> weightFilled = sgScore.add(new IntSetting.Builder()
+        .name("weight-filled")
+        .description("Score weight of the filled-shaft signal.")
+        .defaultValue(3).min(0).max(10).sliderRange(0, 10).build());
+
     private final Setting<Integer> weightAir = sgScore.add(new IntSetting.Builder()
         .name("weight-air")
         .description("Score weight of the air signal.")
@@ -1674,6 +1679,7 @@ public class SpawnerDetector extends Module {
         boolean ender = computeEnderChest(room);
         PlayerBlocksResult pbr = computePlayerBlocks(room);
         TunnelResult tr = computeTunnel(room);
+        FilledShaftResult filled = computeFilledShaft(room);
         int airCount = room.modern() ? countStrayAir(room) : 0;
         boolean air = room.modern() && airCount > 0;
 
@@ -1689,6 +1695,8 @@ public class SpawnerDetector extends Module {
         site.tunnel = tr.hit();
         site.tunnelFeature = tr.feature();
         site.entryShafts = tr.entryShafts();
+        site.filled = filled.hit();
+        site.filledShaft = filled;
         site.air = air;
         site.airCount = airCount;
         site.roomContainers = computeRoomContainers(room);
@@ -1769,6 +1777,7 @@ public class SpawnerDetector extends Module {
         if (site.broken) score += weightBrokenSpawner.get();
         if (site.mobs) score += weightMobs.get();
         if (site.tunnel) score += weightTunnel.get();
+        if (site.filled) score += weightFilled.get();
         if (site.air) score += weightAir.get();
         site.score = score;
 
@@ -1968,8 +1977,8 @@ public class SpawnerDetector extends Module {
     private record TunnelResult(boolean hit, DugHoles.Feature feature, List<DugHoles.Feature> entryShafts) {}
 
     private TunnelResult computeTunnel(Room room) {
-        int minX = room.minX() - 8, maxX = room.maxX() + 8;
-        int minZ = room.minZ() - 8, maxZ = room.maxZ() + 8;
+        int minX = room.minX() - 15, maxX = room.maxX() + 15;
+        int minZ = room.minZ() - 15, maxZ = room.maxZ() + 15;
         int sizeX = maxX - minX + 1, sizeZ = maxZ - minZ + 1;
         int minY = room.cy() - 7, maxY = room.cy() + 28;
 
@@ -2004,6 +2013,78 @@ public class SpawnerDetector extends Module {
         }
 
         return new TunnelResult(hit, hitFeature, entryShafts);
+    }
+
+    private record FilledShaftResult(boolean hit, int x, int minY, int maxY, int z, String block, int length) {}
+
+    private FilledShaftResult computeFilledShaft(Room room) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int bestLen = 0;
+        int bestX = 0, bestZ = 0, bestMinY = 0, bestMaxY = 0;
+        String bestBlock = "none";
+        int minY = room.cy() + 5;
+
+        for (int x = room.minX() - 2; x <= room.maxX() + 2; x++) {
+            for (int z = room.minZ() - 2; z <= room.maxZ() + 2; z++) {
+                int maxY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
+                int runStart = 0, runLen = 0, cobble = 0, netherrack = 0, deepslate = 0;
+                for (int y = minY; y <= maxY; y++) {
+                    cursor.set(x, y, z);
+                    Block block = countedFilledBlock(mc.world.getBlockState(cursor), cursor);
+                    if (block == null) {
+                        if (runLen > bestLen) {
+                            bestLen = runLen;
+                            bestX = x;
+                            bestZ = z;
+                            bestMinY = runStart;
+                            bestMaxY = y - 1;
+                            bestBlock = filledBlockLabel(cobble, netherrack, deepslate);
+                        }
+                        runLen = 0;
+                        cobble = 0;
+                        netherrack = 0;
+                        deepslate = 0;
+                        continue;
+                    }
+                    if (runLen == 0) runStart = y;
+                    runLen++;
+                    if (block == Blocks.COBBLESTONE) cobble++;
+                    else if (block == Blocks.NETHERRACK) netherrack++;
+                    else deepslate++;
+                }
+                if (runLen > bestLen) {
+                    bestLen = runLen;
+                    bestX = x;
+                    bestZ = z;
+                    bestMinY = runStart;
+                    bestMaxY = maxY;
+                    bestBlock = filledBlockLabel(cobble, netherrack, deepslate);
+                }
+            }
+        }
+
+        if (bestLen < 4) return new FilledShaftResult(false, 0, 0, 0, 0, "none", 0);
+        return new FilledShaftResult(true, bestX, bestMinY, bestMaxY, bestZ, bestBlock, bestLen);
+    }
+
+    private Block countedFilledBlock(BlockState state, BlockPos pos) {
+        Block block = state.getBlock();
+        if (block != Blocks.COBBLESTONE && block != Blocks.NETHERRACK && block != Blocks.COBBLED_DEEPSLATE) return null;
+        return waterOrLavaAdjacent(pos) ? null : block;
+    }
+
+    private boolean waterOrLavaAdjacent(BlockPos pos) {
+        for (Direction dir : Direction.values()) {
+            BlockPos side = pos.offset(dir);
+            if (mc.world.getFluidState(side).isIn(FluidTags.WATER) || mc.world.getFluidState(side).isIn(FluidTags.LAVA)) return true;
+        }
+        return false;
+    }
+
+    private String filledBlockLabel(int cobble, int netherrack, int deepslate) {
+        if (netherrack > cobble && netherrack >= deepslate) return Registries.BLOCK.getId(Blocks.NETHERRACK).getPath();
+        if (deepslate > cobble && deepslate > netherrack) return Registries.BLOCK.getId(Blocks.COBBLED_DEEPSLATE).getPath();
+        return Registries.BLOCK.getId(Blocks.COBBLESTONE).getPath();
     }
 
     private int countStrayAir(Room room) {
@@ -2164,6 +2245,7 @@ public class SpawnerDetector extends Module {
         if (site.broken) sb.append('B');
         if (site.mobs) sb.append('M');
         if (site.tunnel) sb.append('T');
+        if (site.filled) sb.append('F');
         if (site.air) sb.append('A');
         return sb.toString();
     }
@@ -2173,6 +2255,13 @@ public class SpawnerDetector extends Module {
         DugHoles.Feature f = site.tunnelFeature;
         return f.kind() + "@" + f.minX() + "," + f.minY() + "," + f.minZ()
             + "-" + f.maxX() + "," + f.maxY() + "," + f.maxZ();
+    }
+
+    private String filledLogValue(Site site) {
+        if (!site.filled || site.filledShaft == null) return "none";
+        FilledShaftResult f = site.filledShaft;
+        return f.x() + "," + f.minY() + ".." + f.maxY() + "," + f.z()
+            + " block=" + f.block() + " n=" + f.length();
     }
 
     private String lightLogValue(Site site) {
@@ -2186,11 +2275,11 @@ public class SpawnerDetector extends Module {
         String roomSize = (2 * site.room.k() + 1) + "x" + (2 * site.room.p() + 1);
 
         if (log.get()) HunterBuddyAddon.LOG.info(
-            "[SpawnerDetector] site {} {} {} mob={} spawner={} room={} modern={} chests={} roomChests={} score={} signals={} light={} blocks={} mobs={} tunnel={} air={} category={} evalMs={}",
+            "[SpawnerDetector] site {} {} {} mob={} spawner={} room={} modern={} chests={} roomChests={} score={} signals={} light={} blocks={} mobs={} tunnel={} filled={} air={} category={} evalMs={}",
             c.getX(), c.getY(), c.getZ(), mobLabel, site.hasSpawner ? "yes" : "no", roomSize,
             site.modern ? "yes" : "no", site.containers, site.roomContainers.size(), site.score,
             signalLetters(site), lightLogValue(site), site.playerBlockTypes, site.mobCount,
-            tunnelLogValue(site), site.airCount, site.category.label, evalMs);
+            tunnelLogValue(site), filledLogValue(site), site.airCount, site.category.label, evalMs);
     }
 
     public Collection<Site> sites() {
@@ -9333,6 +9422,8 @@ public class SpawnerDetector extends Module {
         public boolean tunnel;
         public DugHoles.Feature tunnelFeature;
         public List<DugHoles.Feature> entryShafts = List.of();
+        public boolean filled;
+        public FilledShaftResult filledShaft;
         public boolean air;
         public int airCount;
         public int score;
