@@ -969,6 +969,7 @@ public class SpawnerDetector extends Module {
     public BlockPos getAutoTakeoffSpot() { return autoTakeoffSpot; }
     public int getAutoBaritoneRetries() { return autoBaritoneRetries; }
 
+    public boolean isAutoAreaLoaderHandoff() { return autoAreaLoaderWasOn && flightModule.get() == FlightModule.AreaLoader; }
     public boolean isAutoPaused() { return autoPaused; }
     public String getAutoPauseReason() { return autoPauseReason; }
     public Entity getAutoShaftChaseTarget() { return autoShaftChaseTarget; }

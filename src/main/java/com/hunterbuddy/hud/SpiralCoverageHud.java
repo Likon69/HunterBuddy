@@ -102,9 +102,9 @@ public class SpiralCoverageHud extends HudElement {
         AreaLoader loader = Modules.get().get(AreaLoader.class);
         SpawnerDetector detector = Modules.get().get(SpawnerDetector.class);
         boolean loaderActive = loader != null && loader.isActive();
-        boolean spawnerBusy = spawnerBusy(detector);
+        boolean areaLoaderHandoff = areaLoaderHandoff(detector);
         if (loader != null && MeteorClient.mc.player != null
-            && (loaderActive || (!hideWhenInactive.get() && !spawnerBusy))) {
+            && (loaderActive || !hideWhenInactive.get())) {
             preview = loader.currentMode().coveragePreview();
             if (loaderActive && validPreview(preview)) {
                 lastPreview = preview;
@@ -113,7 +113,7 @@ public class SpiralCoverageHud extends HudElement {
         }
 
         boolean stale = false;
-        if (!loaderActive && spawnerBusy && validPreview(lastPreview)) {
+        if (!loaderActive && areaLoaderHandoff && validPreview(lastPreview)) {
             preview = lastPreview;
             stale = true;
         }
@@ -428,7 +428,7 @@ public class SpiralCoverageHud extends HudElement {
                 preview.recovering ? HudGlowPanel.Severity.WARN : HudGlowPanel.Severity.OK, false, 0L);
         }
 
-        if (spawnerBusy(detector)) {
+        if (areaLoaderHandoff(detector)) {
             String badge;
             if (detector.isAutoPaused()) {
                 String reason = safeText(detector.getAutoPauseReason());
@@ -449,6 +449,10 @@ public class SpiralCoverageHud extends HudElement {
         if (detector == null || !detector.isActive()) return false;
         String state = detector.getAutoStateName();
         return state != null && !"IDLE".equals(state);
+    }
+
+    private static boolean areaLoaderHandoff(SpawnerDetector detector) {
+        return spawnerBusy(detector) && detector.isAutoAreaLoaderHandoff();
     }
 
     private static String safeText(String s) {
