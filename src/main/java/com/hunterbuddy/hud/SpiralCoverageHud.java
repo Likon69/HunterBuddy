@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.SpawnerDetector;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoaderMode;
 import com.hunterbuddy.util.HudGlowPanel;
@@ -82,6 +83,8 @@ public class SpiralCoverageHud extends HudElement {
     private double animTime;
     private boolean hidden = true;
     private long appearNanos;
+    private AreaLoaderMode.CoveragePreview lastPreview;
+    private long lastPreviewMillis;
 
     public SpiralCoverageHud() {
         super(INFO);
@@ -90,18 +93,32 @@ public class SpiralCoverageHud extends HudElement {
     @Override
     public void render(HudRenderer renderer) {
         long now = System.nanoTime();
+        long nowMs = System.currentTimeMillis();
         double dt = lastFrameNanos == 0L ? 0.016 : Math.min(0.25, (now - lastFrameNanos) / 1_000_000_000.0);
         lastFrameNanos = now;
 
         AreaLoaderMode.CoveragePreview preview = null;
 
         AreaLoader loader = Modules.get().get(AreaLoader.class);
+        SpawnerDetector detector = Modules.get().get(SpawnerDetector.class);
+        boolean loaderActive = loader != null && loader.isActive();
+        boolean spawnerBusy = spawnerBusy(detector);
         if (loader != null && MeteorClient.mc.player != null
-            && (loader.isActive() || !hideWhenInactive.get())) {
+            && (loaderActive || (!hideWhenInactive.get() && !spawnerBusy))) {
             preview = loader.currentMode().coveragePreview();
+            if (loaderActive && validPreview(preview)) {
+                lastPreview = preview;
+                lastPreviewMillis = nowMs;
+            }
         }
 
-        if (preview == null) {
+        boolean stale = false;
+        if (!loaderActive && spawnerBusy && validPreview(lastPreview)) {
+            preview = lastPreview;
+            stale = true;
+        }
+
+        if (!validPreview(preview)) {
             if (isInEditor()) {
                 preview = demoPreview();
             } else {
@@ -112,11 +129,6 @@ public class SpiralCoverageHud extends HudElement {
         }
 
         List<double[]> pts = preview.points;
-        if (pts == null || pts.size() < 2) {
-            hidden = true;
-            setSize(0.0, 0.0);
-            return;
-        }
 
         if (hidden) {
             pulse.clear();
@@ -124,11 +136,11 @@ public class SpiralCoverageHud extends HudElement {
             hidden = false;
         }
 
-        renderPreview(renderer, now, dt, preview, pts);
+        renderPreview(renderer, now, dt, preview, pts, hudState(loaderActive, detector, preview, stale, nowMs));
     }
 
     private void renderPreview(HudRenderer renderer, long now, double dt, AreaLoaderMode.CoveragePreview preview,
-                               List<double[]> pts) {
+                               List<double[]> pts, HudState state) {
         boolean shadow = textShadow.get();
         double scale = textScale.get();
         boolean anim = animations.get();
@@ -151,10 +163,12 @@ public class SpiralCoverageHud extends HudElement {
         double rawMinZ = curZ;
         double rawMaxZ = curZ;
         for (double[] p : pts) {
-            rawMinX = Math.min(rawMinX, p[0]);
-            rawMaxX = Math.max(rawMaxX, p[0]);
-            rawMinZ = Math.min(rawMinZ, p[1]);
-            rawMaxZ = Math.max(rawMaxZ, p[1]);
+            if (validPoint(p)) {
+                rawMinX = Math.min(rawMinX, p[0]);
+                rawMaxX = Math.max(rawMaxX, p[0]);
+                rawMinZ = Math.min(rawMinZ, p[1]);
+                rawMaxZ = Math.max(rawMaxZ, p[1]);
+            }
         }
 
         double minX = anim ? pulse.ease("boundsMinX", rawMinX, dt, 0.6) : rawMinX;
@@ -165,14 +179,20 @@ public class SpiralCoverageHud extends HudElement {
         double pad = panel.padding();
         double box = boxSize.get();
         double lineH = renderer.textHeight(shadow, scale);
-        double w = Math.max(box, renderer.textWidth("zigzag · 88888/88888 · turn 88888 b", shadow, scale));
-        double h = box + 2.0 + lineH;
+        double gap = 3.0 * scale;
+        double barH = Math.max(3.0, 4.0 * scale);
+        double w = box;
+        w = Math.max(w, renderer.textWidth("ZIGZAG PAUSED COMBAT 999s next 88888 b", shadow, scale));
+        w = Math.max(w, renderer.textWidth("turns 88888 lines 88888 88888/88888", shadow, scale));
+        w = Math.max(w, renderer.textWidth("spawn 8888.8 km · origin 8888.8 km · flown 8888.8 km", shadow, scale));
+        w = Math.max(w, renderer.textWidth("progress 100%", shadow, scale));
+        double h = lineH + gap + box + gap + lineH * 3.0 + gap + barH;
 
-        HudGlowPanel.Severity severity = preview.recovering ? HudGlowPanel.Severity.WARN : HudGlowPanel.Severity.OK;
-        panel.draw(renderer, x + pad, y + pad, w, h, severity);
+        panel.draw(renderer, x + pad, y + pad, w, h, state.severity);
 
         double left = x + pad + (w - box) / 2.0;
-        double top = y + pad;
+        double headerY = y + pad;
+        double top = headerY + lineH + gap;
 
         double span = Math.max(1.0, Math.max(maxX - minX, maxZ - minZ));
         double margin = 8.0;
@@ -181,14 +201,42 @@ public class SpiralCoverageHud extends HudElement {
         double offZ = top + margin - minZ * fit + (box - margin * 2.0 - (maxZ - minZ) * fit) / 2.0;
 
         int segCount = pts.size() - 1;
-        int curSeg = Math.max(0, Math.min(preview.flownSegments, segCount - 1));
+        int curSeg = clampSegment(preview.flownSegments, segCount);
+        double progress = segmentProgress(pts, curSeg, curX, curZ);
+        double easedProgress = anim ? pulse.ease("progress", progress, dt, 0.25) : progress;
+        int turns = Math.max(0, preview.flownSegments);
+        String mode = modeName(preview.label);
+        String detail = safeText(preview.detail);
+        String distanceLine = distanceLine(preview, pts, curSeg, progress);
+        String progressLine = "progress " + Math.round(progress * 100.0) + "%";
+        float turnFresh = anim ? pulse.freshness("turns", String.valueOf(turns), 900L) : 0.0f;
+        float badgeFresh = anim ? pulse.freshness("badge", state.badge, 900L) : 0.0f;
+        Color turnColor = HudPulse.tint(HudPulse.Style.Subtle, valueColor.get(), currentColor.get(), turnFresh);
+        Color badgeColor = HudPulse.tint(HudPulse.Style.Subtle, valueColor.get(), currentColor.get(), badgeFresh);
 
         double thin = Math.max(1.0, scale);
         double thick = Math.max(1.4, 1.8 * scale);
 
+        double tx = x + pad;
+        tx = value(renderer, mode, tx, headerY, shadow, scale, appear);
+        tx = label(renderer, " ", tx, headerY, shadow, scale, appear);
+        renderer.text(state.badge, tx, headerY, fade(badgeColor, appear), shadow, scale);
+        tx += renderer.textWidth(state.badge, shadow, scale);
+        if (state.stale) {
+            tx = label(renderer, " ", tx, headerY, shadow, scale, appear);
+            tx = value(renderer, state.ageSeconds + "s", tx, headerY, shadow, scale, appear);
+        }
+        if (preview.nextTurnDistance >= 0.0) {
+            tx = label(renderer, " next ", tx, headerY, shadow, scale, appear);
+            value(renderer, formatDistance(preview.nextTurnDistance), tx, headerY, shadow, scale, appear);
+        }
+
         for (int i = 0; i < segCount; i++) {
             double[] a = pts.get(i);
             double[] b = pts.get(i + 1);
+            if (!validPoint(a) || !validPoint(b)) {
+                continue;
+            }
             double ax = a[0] * fit + offX;
             double ay = a[1] * fit + offZ;
             double bx = b[0] * fit + offX;
@@ -218,6 +266,9 @@ public class SpiralCoverageHud extends HudElement {
 
         for (int i = 0; i < pts.size(); i++) {
             double[] p = pts.get(i);
+            if (!validPoint(p)) {
+                continue;
+            }
             double px = p[0] * fit + offX;
             double py = p[1] * fit + offZ;
             SettingColor markColor = i <= curSeg ? flownColor.get() : planColor.get();
@@ -246,18 +297,176 @@ public class SpiralCoverageHud extends HudElement {
             new Color(self.r, self.g, self.b, (int) (self.a * appear)));
         disc(renderer, markerX, markerY, 2.2 * scale, fade(self, appear));
 
-        double ty = top + box + 2.0;
-        double tx = x + pad;
-        tx = label(renderer, preview.label + " · ", tx, ty, shadow, scale, appear);
-        tx = value(renderer, preview.detail, tx, ty, shadow, scale, appear);
-        if (preview.recovering) {
-            label(renderer, " · recovering", tx, ty, shadow, scale, appear);
-        } else if (preview.nextTurnDistance >= 0.0) {
-            tx = label(renderer, " · turn ", tx, ty, shadow, scale, appear);
-            value(renderer, String.format("%.0f b", preview.nextTurnDistance), tx, ty, shadow, scale, appear);
+        double ty = top + box + gap;
+        tx = x + pad;
+        tx = label(renderer, "turns ", tx, ty, shadow, scale, appear);
+        renderer.text(String.valueOf(turns), tx, ty, fade(turnColor, appear), shadow, scale);
+        tx += renderer.textWidth(String.valueOf(turns), shadow, scale);
+        if (!modeMetric(mode, preview, turns).isEmpty()) {
+            tx = value(renderer, modeMetric(mode, preview, turns), tx, ty, shadow, scale, appear);
+        }
+        if (!detail.isEmpty()) {
+            tx = label(renderer, " ", tx, ty, shadow, scale, appear);
+            value(renderer, detail, tx, ty, shadow, scale, appear);
         }
 
+        ty += lineH;
+        value(renderer, distanceLine, x + pad, ty, shadow, scale, appear);
+
+        ty += lineH;
+        value(renderer, progressLine, x + pad, ty, shadow, scale, appear);
+
+        double barY = ty + lineH + gap;
+        SettingColor pc = planColor.get();
+        SettingColor cc = currentColor.get();
+        renderer.quad(x + pad, barY, w, barH, new Color(pc.r, pc.g, pc.b, (int) (Math.min(90, pc.a) * appear)));
+        renderer.quad(x + pad, barY, w * easedProgress, barH, new Color(cc.r, cc.g, cc.b, (int) (cc.a * appear)));
+
         setSize(w + pad * 2.0, h + pad * 2.0);
+    }
+
+    private boolean validPreview(AreaLoaderMode.CoveragePreview preview) {
+        if (preview == null || preview.points == null || preview.points.size() < 2) return false;
+        if (!Double.isFinite(preview.currentX) || !Double.isFinite(preview.currentZ)) return false;
+
+        int valid = 0;
+        for (double[] p : preview.points) {
+            if (validPoint(p)) valid++;
+            if (valid >= 2) return true;
+        }
+
+        return false;
+    }
+
+    private static boolean validPoint(double[] p) {
+        return p != null && p.length >= 2 && Double.isFinite(p[0]) && Double.isFinite(p[1]);
+    }
+
+    private static int clampSegment(int flownSegments, int segCount) {
+        if (segCount <= 1) return 0;
+        return Math.max(0, Math.min(flownSegments, segCount - 1));
+    }
+
+    private static double segmentProgress(List<double[]> pts, int curSeg, double curX, double curZ) {
+        if (pts == null || curSeg < 0 || curSeg + 1 >= pts.size()) return 0.0;
+        double[] a = pts.get(curSeg);
+        double[] b = pts.get(curSeg + 1);
+        if (!validPoint(a) || !validPoint(b)) return 0.0;
+
+        double dx = b[0] - a[0];
+        double dz = b[1] - a[1];
+        double lenSq = dx * dx + dz * dz;
+        if (lenSq <= 1.0e-6) return 0.0;
+
+        return MathHelper.clamp(((curX - a[0]) * dx + (curZ - a[1]) * dz) / lenSq, 0.0, 1.0);
+    }
+
+    private static double pathLength(List<double[]> pts, int curSeg, double progress) {
+        if (pts == null || pts.size() < 2) return 0.0;
+
+        double length = 0.0;
+        int lastFull = Math.max(0, Math.min(curSeg, pts.size() - 1));
+        for (int i = 0; i < lastFull; i++) {
+            length += segmentLength(pts.get(i), pts.get(i + 1));
+        }
+
+        if (curSeg >= 0 && curSeg + 1 < pts.size()) {
+            length += segmentLength(pts.get(curSeg), pts.get(curSeg + 1)) * MathHelper.clamp(progress, 0.0, 1.0);
+        }
+
+        return length;
+    }
+
+    private static double segmentLength(double[] a, double[] b) {
+        if (!validPoint(a) || !validPoint(b)) return 0.0;
+        return Math.hypot(b[0] - a[0], b[1] - a[1]);
+    }
+
+    private static String modeName(String label) {
+        String s = safeText(label).toLowerCase();
+        return switch (s) {
+            case "spiral" -> "SPIRAL";
+            case "zigzag" -> "ZIGZAG";
+            case "rect" -> "RECT";
+            case "circle" -> "CIRCLE";
+            default -> s.isEmpty() ? "MODE" : s.toUpperCase();
+        };
+    }
+
+    private static String modeMetric(String mode, AreaLoaderMode.CoveragePreview preview, int turns) {
+        if ("SPIRAL".equals(mode)) return " laps " + turns / 4;
+        if ("ZIGZAG".equals(mode)) return " lines " + Math.max(0, preview.modeCounter);
+        return "";
+    }
+
+    private static String distanceLine(AreaLoaderMode.CoveragePreview preview, List<double[]> pts, int curSeg, double progress) {
+        double spawn = Math.hypot(preview.currentX, preview.currentZ);
+        double origin = validPoint(pts.get(0)) ? Math.hypot(preview.currentX - pts.get(0)[0], preview.currentZ - pts.get(0)[1]) : 0.0;
+        String s = "spawn " + formatDistance(spawn) + " · origin " + formatDistance(origin);
+        if (hasFlownDistance(preview.label)) {
+            s += " · flown " + formatDistance(pathLength(pts, curSeg, progress));
+        }
+        return s;
+    }
+
+    private static boolean hasFlownDistance(String label) {
+        String s = safeText(label).toLowerCase();
+        return "zigzag".equals(s) || "rect".equals(s) || "circle".equals(s);
+    }
+
+    private static String formatDistance(double blocks) {
+        if (!Double.isFinite(blocks)) return "--";
+        double b = Math.max(0.0, blocks);
+        if (b < 1000.0) return String.format("%.0f b", b);
+        return String.format("%.1f km", b / 1000.0);
+    }
+
+    private HudState hudState(boolean loaderActive, SpawnerDetector detector, AreaLoaderMode.CoveragePreview preview,
+                              boolean stale, long nowMs) {
+        if (loaderActive) {
+            return new HudState(preview.recovering ? "RECOVER" : "OK",
+                preview.recovering ? HudGlowPanel.Severity.WARN : HudGlowPanel.Severity.OK, false, 0L);
+        }
+
+        if (spawnerBusy(detector)) {
+            String badge;
+            if (detector.isAutoPaused()) {
+                String reason = safeText(detector.getAutoPauseReason());
+                badge = reason.isEmpty() ? "PAUSED" : "PAUSED " + reason.toUpperCase();
+            } else {
+                badge = safeText(detector.getAutoStateName());
+                if (badge.isEmpty()) badge = "SPAWNER";
+            }
+
+            long age = lastPreviewMillis > 0L ? Math.max(0L, (nowMs - lastPreviewMillis) / 1000L) : 0L;
+            return new HudState(badge, HudGlowPanel.Severity.WARN, stale, age);
+        }
+
+        return new HudState("OFF", HudGlowPanel.Severity.OK, false, 0L);
+    }
+
+    private static boolean spawnerBusy(SpawnerDetector detector) {
+        if (detector == null || !detector.isActive()) return false;
+        String state = detector.getAutoStateName();
+        return state != null && !"IDLE".equals(state);
+    }
+
+    private static String safeText(String s) {
+        return s == null ? "" : s;
+    }
+
+    private static final class HudState {
+        final String badge;
+        final HudGlowPanel.Severity severity;
+        final boolean stale;
+        final long ageSeconds;
+
+        HudState(String badge, HudGlowPanel.Severity severity, boolean stale, long ageSeconds) {
+            this.badge = badge;
+            this.severity = severity;
+            this.stale = stale;
+            this.ageSeconds = ageSeconds;
+        }
     }
 
     private double label(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale,

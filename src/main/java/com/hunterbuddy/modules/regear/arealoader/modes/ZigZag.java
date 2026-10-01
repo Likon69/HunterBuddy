@@ -429,7 +429,7 @@ public class ZigZag extends AreaLoaderMode {
          ? Math.hypot(this.nextWaypointTarget.getX() - curX, this.nextWaypointTarget.getZ() - curZ) : -1.0;
 
       return new AreaLoaderMode.CoveragePreview(points, flown, curX, curZ, "zigzag",
-         legLength + "/" + rowGap, nextTurn, this.recovering);
+         legLength + "/" + rowGap, nextTurn, this.recovering, this.pd.legsCompleted);
    }
 
    private static double[] yawStep(float yaw) {

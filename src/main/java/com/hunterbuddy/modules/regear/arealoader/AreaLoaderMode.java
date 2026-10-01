@@ -661,10 +661,17 @@ public abstract class AreaLoaderMode {
       public final String detail;
       public final double nextTurnDistance;
       public final boolean recovering;
+      public final int modeCounter;
+
+      public CoveragePreview(java.util.List<double[]> points, int flownSegments, double currentX,
+                              double currentZ, String label, String detail, double nextTurnDistance,
+                              boolean recovering) {
+         this(points, flownSegments, currentX, currentZ, label, detail, nextTurnDistance, recovering, -1);
+      }
 
       public CoveragePreview(java.util.List<double[]> points, int flownSegments, double currentX,
                              double currentZ, String label, String detail, double nextTurnDistance,
-                             boolean recovering) {
+                             boolean recovering, int modeCounter) {
          this.points = points;
          this.flownSegments = flownSegments;
          this.currentX = currentX;
@@ -673,6 +680,7 @@ public abstract class AreaLoaderMode {
          this.detail = detail;
          this.nextTurnDistance = nextTurnDistance;
          this.recovering = recovering;
+         this.modeCounter = modeCounter;
       }
    }
 
