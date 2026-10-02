@@ -4841,7 +4841,7 @@ public class SpawnerDetector extends Module {
                 if (sprintSwim) {
                     Vec3d eye = mc.player.getEyePos();
                     double pitchX = (autoColumn.x() + 0.5) - eye.x;
-                    double pitchY = (autoColumn.startY() + 1.0) - eye.y;
+                    double pitchY = (autoColumn.exitY() - 1.0) - eye.y;
                     double pitchZ = (autoColumn.z() + 0.5) - eye.z;
                     float pitch = MathHelper.wrapDegrees((float) -Math.toDegrees(Math.atan2(pitchY, Math.hypot(pitchX, pitchZ))));
                     mc.player.setPitch(MathHelper.clamp(pitch, -90.0f, 90.0f));
@@ -9240,6 +9240,14 @@ public class SpawnerDetector extends Module {
                     resetShaftDryRecovery();
                 }
                 enterState(next, "");
+                return;
+            }
+            if (mc.player.isTouchingWater() && autoClimbLostGlideRetries < 4) {
+                autoClimbLostGlideRetries++;
+                autoWaterJumpAttempts = 0;
+                autoWaterJumpVertical = false;
+                autoLog("CLIMB", autoSite.center, "lost glide in water, water jump");
+                enterState(AutoState.WATER_JUMP, "lost glide in water");
                 return;
             }
             autoLog("CLIMB", autoSite.center, "not gliding");
