@@ -4818,6 +4818,23 @@ public class SpawnerDetector extends Module {
         }
     }
 
+    private int waterHoleMouthY(ColumnPlan c) {
+        int highestFloorY = Integer.MIN_VALUE;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            int nx = c.x() + dir.getOffsetX();
+            int nz = c.z() + dir.getOffsetZ();
+            for (int y = c.exitY() - 1; y >= c.startY(); y--) {
+                cursor.set(nx, y, nz);
+                BlockState state = mc.world.getBlockState(cursor);
+                if (state.getFluidState().isIn(FluidTags.WATER) || isOpenState(state, cursor)) continue;
+                if (state.getFluidState().isEmpty()) highestFloorY = Math.max(highestFloorY, y);
+                break;
+            }
+        }
+        return highestFloorY != Integer.MIN_VALUE ? highestFloorY + 1 : c.startY() + 1;
+    }
+
     private void tickWalkDirect() {
         double dx = (autoColumn.x() + 0.5) - mc.player.getX();
         double dz = (autoColumn.z() + 0.5) - mc.player.getZ();
@@ -4841,7 +4858,7 @@ public class SpawnerDetector extends Module {
                 if (sprintSwim) {
                     Vec3d eye = mc.player.getEyePos();
                     double pitchX = (autoColumn.x() + 0.5) - eye.x;
-                    double pitchY = (autoColumn.exitY() - 1.0) - eye.y;
+                    double pitchY = (waterHoleMouthY(autoColumn) + 0.5) - eye.y;
                     double pitchZ = (autoColumn.z() + 0.5) - eye.z;
                     float pitch = MathHelper.wrapDegrees((float) -Math.toDegrees(Math.atan2(pitchY, Math.hypot(pitchX, pitchZ))));
                     mc.player.setPitch(MathHelper.clamp(pitch, -90.0f, 90.0f));
