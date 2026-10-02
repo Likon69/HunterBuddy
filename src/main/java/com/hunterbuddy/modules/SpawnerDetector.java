@@ -482,6 +482,7 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> lowGlideLogged = new java.util.HashSet<>();
     private final Set<BlockPos> floatingBlockLogged = new java.util.HashSet<>();
     private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> autoAbandonedOnce = new java.util.HashSet<>();
     private final Set<BlockPos> autoSoloRejectedThisSession = new java.util.HashSet<>();
     private final Set<BlockPos> autoSoundedSites = new java.util.HashSet<>();
     private final Map<String, Long> autoSoundLastPlayed = new HashMap<>();
@@ -3336,6 +3337,7 @@ public class SpawnerDetector extends Module {
     private ColumnPlan planColumn(Site site) {
         Room room = site.room;
         boolean logShafts = entryShaftLogged.add(site.center);
+        boolean straightDown = autoAbandonedOnce.contains(site.center);
 
         ColumnPlan bestShaftPlan = null;
         String bestShaftLabel = null;
@@ -3388,6 +3390,7 @@ public class SpawnerDetector extends Module {
                     continue;
                 }
             } else {
+                if (straightDown) continue;
                 label = "beside";
                 SideHoleAttempt attempt = evaluateSideHolePosition(site.center, room, sx, sz);
                 if (attempt.plan() == null) {
@@ -3474,7 +3477,7 @@ public class SpawnerDetector extends Module {
                 bestShaftPlan.x(), bestShaftPlan.z(), bestShaftPlan.blocksToBreak(), column.blocksToBreak()));
         }
 
-        ColumnPlan side = findSideHole(site);
+        ColumnPlan side = straightDown ? null : findSideHole(site);
         if (side != null && (column == null || column.skyBlocked() || side.blocksToBreak() + 10 <= column.blocksToBreak())) {
             if (sideHoleUseLogged.add(site.center)) autoLog("PLAN", site.center, String.format("using side hole %d,%d cost=%d instead of column cost=%s",
                 side.x(), side.z(), side.blocksToBreak(),
@@ -10488,6 +10491,13 @@ public class SpawnerDetector extends Module {
         if (!autoRunAbandoned) {
             markVisited(finished, autoRunOutcome());
             statRoomsFarmed++;
+        } else {
+            if (autoAbandonedOnce.add(finished)) {
+                autoLog("IDLE", finished, "abandoned, next try digs straight down from above");
+            } else {
+                markVisited(finished, "abandoned twice");
+                autoLog("IDLE", finished, "abandoned twice, marked failed");
+            }
         }
         autoLog("IDLE", finished, "run complete");
         autoRunAbandoned = true;
@@ -10681,6 +10691,13 @@ public class SpawnerDetector extends Module {
             if (!autoRunAbandoned) {
                 markVisited(finished, autoRunOutcome());
                 statRoomsFarmed++;
+            } else if (!autoSoloTransitOnly) {
+                if (autoAbandonedOnce.add(finished)) {
+                    autoLog("IDLE", finished, "abandoned, next try digs straight down from above");
+                } else {
+                    markVisited(finished, "abandoned twice");
+                    autoLog("IDLE", finished, "abandoned twice, marked failed");
+                }
             }
             autoLog("IDLE", finished, "run complete");
             resetAutoState();
