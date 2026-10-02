@@ -8457,7 +8457,8 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        Utils.setPressed(mc.options.sneakKey, alignDist > 0.12 && alignDist < 0.6 && mc.player.isOnGround() && !mc.player.isTouchingWater());
+        Utils.setPressed(mc.options.sneakKey, alignDist > 0.12 && alignDist < 0.6 && mc.player.isOnGround() && !mc.player.isTouchingWater()
+            && mc.player.getBlockPos().getY() <= autoExitShaft.bottomY());
         boolean centered = recenterDig(autoExitShaft.x(), autoExitShaft.z(), 0.12);
         double speedH = Math.hypot(mc.player.getVelocity().x, mc.player.getVelocity().z);
         autoShaftAlignCenteredTicks = (centered && speedH < 0.02) ? autoShaftAlignCenteredTicks + 1 : 0;
