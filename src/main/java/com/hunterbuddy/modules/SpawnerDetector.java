@@ -7564,12 +7564,12 @@ public class SpawnerDetector extends Module {
     private void enterAscendOrSwimUp(String details) {
         if (autoExitShaftForeign && autoExitShaft != null) {
             double farDxz = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
-            if (!autoTunnelTrail.isEmpty() && farDxz > 4.0) {
+            if (farDxz > 4.0 && !autoTunnelTrail.isEmpty()) {
                 enterState(AutoState.EXIT, details);
                 return;
             }
-            if (autoTunnelTrail.isEmpty() && farDxz > 4.0) {
-                enterState(AutoState.SELF_ASCEND, details);
+            if (farDxz > 4.0) {
+                enterState(AutoState.ASCEND, details);
                 return;
             }
         }
@@ -7614,7 +7614,7 @@ public class SpawnerDetector extends Module {
         double dz = (target.getZ() + 0.5) - mc.player.getZ();
         double dxz = Math.hypot(dx, dz);
         int dy = target.getY() - feet.getY();
-        if (feet.equals(target) || (dxz <= 0.5 && Math.abs(dy) <= 1)) {
+        if (feet.getX() == target.getX() && feet.getZ() == target.getZ() && Math.abs(dy) <= 1) {
             autoTunnelTrail.remove(autoTunnelTrail.size() - 1);
             autoExitTrailTicks = 0;
             autoExitTrailSkipped = 0;
@@ -7671,11 +7671,30 @@ public class SpawnerDetector extends Module {
             }
         }
 
+        if (!mc.player.isTouchingWater() && target.getY() > feet.getY() && dxz <= 0.7) {
+            BlockPos belowTarget = target.down();
+            BlockState belowTargetState = mc.world.getBlockState(belowTarget);
+            if (isOpenState(belowTargetState, belowTarget) || target.getY() - feet.getY() >= 2) {
+                Utils.setPressed(mc.options.forwardKey, false);
+                Utils.setPressed(mc.options.sprintKey, false);
+                Utils.setPressed(mc.options.sneakKey, false);
+                Utils.setPressed(mc.options.jumpKey, true);
+                mc.player.setPitch(90.0f);
+                if (!mc.player.isOnGround() && mc.player.getVelocity().y <= 0.05) {
+                    BlockPos placePos = mc.player.getBlockPos().down();
+                    BlockState placeState = mc.world.getBlockState(placePos);
+                    if (isOpenState(placeState, placePos) && placeState.getFluidState().isEmpty() && ensureThrowawayInHotbar() >= 0) {
+                        tickSelfAscendPlaceStep(placePos);
+                    }
+                }
+                return;
+            }
+        }
+
         mc.player.setYaw((float) Math.toDegrees(Math.atan2(-dx, dz)));
         Utils.setPressed(mc.options.forwardKey, true);
         Utils.setPressed(mc.options.sprintKey, false);
-        Utils.setPressed(mc.options.jumpKey, target.getY() > feet.getY() || mc.player.horizontalCollision
-            || (mc.player.isTouchingWater() && target.getY() >= feet.getY()));
+        Utils.setPressed(mc.options.jumpKey, target.getY() > feet.getY() || mc.player.horizontalCollision);
         Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && target.getY() < feet.getY());
     }
 
@@ -7686,7 +7705,7 @@ public class SpawnerDetector extends Module {
     private void finishExitTunnelTrail(boolean selfAscend, String details) {
         autoExitRetracingTrail = false;
         autoTunnelTrail.clear();
-        autoExitShaftForeign = false;
+        autoExitShaftForeign = selfAscend;
         autoExitTrailTicks = 0;
         autoExitTrailSkipped = 0;
         autoExitTrailTotalTicks = 0;
@@ -7694,7 +7713,7 @@ public class SpawnerDetector extends Module {
         autoExitTrailBreakPos = null;
         autoExitTrailBreakLabel = null;
         releaseAllAutoKeys();
-        enterState(selfAscend ? AutoState.SELF_ASCEND : AutoState.EXIT, details);
+        enterState(AutoState.EXIT, details);
     }
 
     private BlockPos findTrailRetraceObstacle(BlockPos target) {
@@ -7706,10 +7725,12 @@ public class SpawnerDetector extends Module {
             else dx = 0;
         }
         if (dx == 0 && dz == 0) {
+            if (target.getY() >= feet.getY() + 2) return trailRetraceCandidate(feet.up(2));
             if (target.getY() > feet.getY()) return trailRetraceCandidate(feet.up());
             if (target.getY() < feet.getY()) return trailRetraceCandidate(feet.down());
             return null;
         }
+        if (target.getY() >= feet.getY() + 2) return null;
         BlockPos side = new BlockPos(feet.getX() + dx, feet.getY(), feet.getZ() + dz);
         BlockPos candidate = trailRetraceCandidate(side);
         if (candidate != null) return candidate;
@@ -7752,11 +7773,11 @@ public class SpawnerDetector extends Module {
                         autoExitTrailBudgetTicks = autoTunnelTrail.size() * 20 + 600;
                         autoLog("EXIT", autoSite.center, "retracing tunnel trail n=" + autoTunnelTrail.size());
                     } else {
-                        autoExitReturning = autoExitShaft.entry() == null && !autoExitShaft.water();
+                        autoExitReturning = autoExitShaft.entry() == null;
                         if (!autoExitReturning) {
                             releaseAllAutoKeys();
-                            autoLog("EXIT", autoSite.center, "exit shaft belongs to the previous room, self ascend");
-                            enterState(AutoState.SELF_ASCEND, "exit shaft belongs to the previous room");
+                            autoLog("EXIT", autoSite.center, "exit shaft belongs to the previous room, ascend");
+                            enterState(AutoState.ASCEND, "exit shaft belongs to the previous room");
                             return;
                         }
                     }
@@ -7800,21 +7821,25 @@ public class SpawnerDetector extends Module {
                     if (bt != null) bt.getPathingBehavior().cancelEverything();
                     releaseAllAutoKeys();
                     autoExitReturning = false;
+                    if (farDxz > 4.0) {
+                        enterState(AutoState.ASCEND, "return to shaft timeout");
+                        return;
+                    }
+                    autoExitShaftForeign = false;
                     enterAscendOrSwimUp("return to shaft timeout");
                     return;
                 }
 
-                if (autoExitSelfWalk) {
-                    boolean shaftWaterExit = farDxz <= 1.5 || mc.player.isSubmergedInWater();
-                    if (mc.player.isTouchingWater() && shaftWaterExit
-                        && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY())) {
-                        releaseAllAutoKeys();
-                        autoExitReturning = false;
-                        autoExitSelfWalk = false;
-                        enterState(AutoState.SWIM_UP, "water on the way back");
-                        return;
-                    }
+                if (farDxz <= 1.5 && mc.player.isTouchingWater()
+                    && columnHasWater(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), autoExitShaft.exitY())) {
+                    releaseAllAutoKeys();
+                    autoExitReturning = false;
+                    autoExitSelfWalk = false;
+                    enterState(AutoState.SWIM_UP, "water on the way back");
+                    return;
+                }
 
+                if (autoExitSelfWalk) {
                     if (farDxz <= 1.5 && mc.player.getY() < autoExitShaft.bottomY()) {
                         releaseAllAutoKeys();
                         autoExitSelfWalk = false;
@@ -7867,6 +7892,11 @@ public class SpawnerDetector extends Module {
                             releaseAllAutoKeys();
                             autoExitReturning = false;
                             autoExitSelfWalk = false;
+                            if (farDxz > 4.0) {
+                                enterState(AutoState.ASCEND, "walk back stuck");
+                                return;
+                            }
+                            autoExitShaftForeign = false;
                             enterAscendOrSwimUp("walk back stuck");
                             return;
                         }
@@ -8853,7 +8883,7 @@ public class SpawnerDetector extends Module {
 
         if (stateTicks - autoSwimUpProgressTick > 60 * 20) {
             releaseAllAutoKeys();
-            enterState(AutoState.SELF_ASCEND, "swim up timeout");
+            enterState(AutoState.ASCEND, "swim up timeout");
             return;
         }
 
@@ -8969,8 +8999,8 @@ public class SpawnerDetector extends Module {
         if (onSwimUpColumn && !mc.player.isSubmergedInWater() && mc.player.getY() < swimUpExitY - 1
             && stateTicks - autoSwimUpProgressTick >= 60) {
             releaseAllAutoKeys();
-            autoLog("SWIM_UP", autoSite.center, "surface stall, self ascend");
-            enterState(AutoState.SELF_ASCEND, "surface stall");
+            autoLog("SWIM_UP", autoSite.center, "surface stall, ascend");
+            enterState(AutoState.ASCEND, "surface stall");
             return;
         }
 
@@ -8983,7 +9013,7 @@ public class SpawnerDetector extends Module {
         if (autoSwimUpOutOfWaterTicks >= 100) {
             releaseAllAutoKeys();
             autoLog("SWIM_UP", autoSite.center, "swim up out of water");
-            enterState(AutoState.SELF_ASCEND, "swim up out of water");
+            enterState(AutoState.ASCEND, "swim up out of water");
         }
     }
 
