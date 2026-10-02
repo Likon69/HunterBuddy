@@ -2215,7 +2215,7 @@ public class SpawnerDetector extends Module {
                 int sx = f.minX(), sz = f.minZ();
                 int shaftDistX = sx < room.minX() ? room.minX() - sx : (sx > room.maxX() ? sx - room.maxX() : 0);
                 int shaftDistZ = sz < room.minZ() ? room.minZ() - sz : (sz > room.maxZ() ? sz - room.maxZ() : 0);
-                if (Math.max(shaftDistX, shaftDistZ) <= 5 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
+                if (Math.max(shaftDistX, shaftDistZ) <= 8 && f.maxY() >= room.cy() + 3 && f.minY() <= room.cy() + 6) {
                     entryShafts.add(f);
                 }
             }
@@ -7814,6 +7814,21 @@ public class SpawnerDetector extends Module {
                 }
                 boolean foreign = autoExitShaftForeign && farDxz > 4.0;
                 if (foreign) {
+                    ColumnPlan own = planColumn(autoSite);
+                    int ownCy = autoSite.room.cy();
+                    if (own != null && !own.side() && !own.water() && own.waterCells() == 0 && !own.skyBlocked()
+                        && own.blocksToBreak() <= 2 && own.startY() <= ownCy + 6 && own.holeTopY() > own.startY()) {
+                        autoExitShaft = new ExitShaft(own.x(), own.z(), ownCy, own.holeTopY(), false, false, null);
+                        autoExitShaftForeign = false;
+                        autoTunnelTrail.clear();
+                        releaseAllAutoKeys();
+                        IBaritone bt = primaryBaritone();
+                        if (bt != null) bt.getPathingBehavior().cancelEverything();
+                        autoLog("EXIT", autoSite.center, String.format("own shaft %d,%d missing=%d top=%d, exit through it",
+                            own.x(), own.z(), own.blocksToBreak(), own.holeTopY()));
+                        enterState(AutoState.EXIT, "own shaft");
+                        return;
+                    }
                     if (!autoTunnelTrail.isEmpty()) {
                         releaseAllAutoKeys();
                         IBaritone bt = primaryBaritone();
@@ -8538,7 +8553,7 @@ public class SpawnerDetector extends Module {
 
     private boolean shaftRoomBlockedClearable(BlockPos pos, BlockState state) {
         if (autoExitShaft == null) return false;
-        if (pos.getY() < autoExitShaft.bottomY() || pos.getY() > autoExitShaft.bottomY() + 3) return false;
+        if (pos.getY() < autoExitShaft.bottomY() || pos.getY() > autoExitShaft.bottomY() + 5) return false;
         if (pos.getX() != autoExitShaft.x() || pos.getZ() != autoExitShaft.z()) return false;
         if (mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos)) > 4.2) return false;
         return roomColumnClearable(pos, state);
