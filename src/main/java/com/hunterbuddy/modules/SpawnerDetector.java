@@ -7640,6 +7640,13 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        if (!mc.player.isTouchingWater() && dy >= 2 && mc.world.getFluidState(target).isEmpty()) {
+            autoLog("EXIT", autoSite.center, String.format("trail climbs dy=%d to %d,%d,%d, back with baritone",
+                dy, target.getX(), target.getY(), target.getZ()));
+            finishExitTunnelTrail(true, "trail climb, baritone");
+            return;
+        }
+
         autoExitTrailTicks++;
         if (autoExitTrailTicks >= 200) {
             autoLog("EXIT", autoSite.center, String.format("trail skip %d,%d,%d",
