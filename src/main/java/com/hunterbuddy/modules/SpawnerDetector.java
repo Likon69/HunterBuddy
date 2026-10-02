@@ -3852,7 +3852,6 @@ public class SpawnerDetector extends Module {
         if (site.modern) return false;
         if (site.room.cy() < 0) return false;
         if (!mc.world.getChunkManager().isChunkLoaded(site.center.getX() >> 4, site.center.getZ() >> 4)) return false;
-        if (isRoomFlooded(site.room)) return false;
         return true;
     }
 
