@@ -675,6 +675,8 @@ public class SpawnerDetector extends Module {
     private String autoWalkStuckBreakLabel;
     private double autoWalkBestDist;
     private int autoWalkBestDistTick;
+    private int autoWalkSinkBestY;
+    private int autoWalkSinkBestTick;
     private boolean autoWalkReapproach;
     private int autoWalkReapproachCount;
     private boolean autoFinalBlockedLogged;
@@ -991,6 +993,7 @@ public class SpawnerDetector extends Module {
         resetSelfAscendState(true);
         autoWalkBestDist = -1;
         autoWalkBestDistTick = 0;
+        autoWalkSinkBestTick = -1;
         autoWalkReapproach = false;
         autoWalkReapproachCount = 0;
     }
@@ -4740,6 +4743,7 @@ public class SpawnerDetector extends Module {
             autoWalkStuckBreakLabel = null;
             autoWalkBestDist = -1;
             autoWalkBestDistTick = stateTicks;
+            autoWalkSinkBestTick = -1;
             if (autoWalkDirect) {
                 autoLog("WALK", autoSite.center, "water direct");
             } else if (autoColumn.water()) {
@@ -4755,8 +4759,18 @@ public class SpawnerDetector extends Module {
             autoWalkBestDist = walkHoriz;
             autoWalkBestDistTick = stateTicks;
         }
+        int sinkFeetY = mc.player.getBlockPos().getY();
+        if (autoWalkDirect && (autoColumn.water() || autoWalkSwimOverride) && walkHoriz <= 0.5) {
+            if (autoWalkSinkBestTick < 0 || sinkFeetY < autoWalkSinkBestY) {
+                autoWalkSinkBestY = sinkFeetY;
+                autoWalkSinkBestTick = stateTicks;
+            }
+        } else {
+            autoWalkSinkBestTick = -1;
+        }
+        boolean sinkStuck = autoWalkSinkBestTick >= 0 && sinkFeetY > autoColumn.startY() + 1 && stateTicks - autoWalkSinkBestTick > 100;
 
-        if (stateTicks - autoWalkBestDistTick > 60 * 20) {
+        if (stateTicks - autoWalkBestDistTick > 60 * 20 || sinkStuck) {
             if (!(autoAreaLoaderWasOn || autoSoloMode) || autoWalkReapproachCount >= 3) {
                 abort("walk timeout");
                 return;
@@ -4766,7 +4780,9 @@ public class SpawnerDetector extends Module {
             releaseAllAutoKeys();
             IBaritone walkBt = primaryBaritone();
             if (walkBt != null) walkBt.getPathingBehavior().cancelEverything();
-            autoLog("WALK", autoSite.center, "no progress 60s, re-approach " + autoWalkReapproachCount + " by air");
+            autoLog("WALK", autoSite.center, sinkStuck
+                ? String.format("sink stuck 5s at y=%d, re-approach %d by air", sinkFeetY, autoWalkReapproachCount)
+                : "no progress 60s, re-approach " + autoWalkReapproachCount + " by air");
             if (isClearSkyHere()) {
                 if (mc.player.isTouchingWater()) {
                     autoWaterJumpAttempts = 0;
