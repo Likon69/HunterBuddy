@@ -5067,8 +5067,15 @@ public class SpawnerDetector extends Module {
         int nearKeyX = gateRim != null ? gateRim.getX() : autoColumn.x();
         int nearKeyZ = gateRim != null ? gateRim.getZ() : autoColumn.z();
         int nearKeyY = gateRim != null ? gateRim.getY() : autoColumn.startY();
+        int feetY = mc.player.getBlockPos().getY();
         boolean nearHole = Math.hypot((nearKeyX + 0.5) - mc.player.getX(), (nearKeyZ + 0.5) - mc.player.getZ()) <= 3.0
-            && mc.player.getBlockPos().getY() == nearKeyY;
+            && (feetY == nearKeyY || (gateRim == null && feetY == nearKeyY - 1));
+        if (pathing && nearHole && stateTicks - autoWalkBestDistTick > 100) {
+            bt.getPathingBehavior().cancelEverything();
+            releaseAllAutoKeys();
+            autoLog("WALK", autoSite.center, "near hole, baritone no progress 5s");
+            return;
+        }
         if (!pathing && !baritoneGaveUp) {
             autoWalkIdleTicks++;
             if (nearHole || autoWalkIdleTicks >= 100) {
@@ -6917,6 +6924,8 @@ public class SpawnerDetector extends Module {
         if (tunnelArrivalSupport && tunnelArrivalY && tunnelArrivalBox) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             releaseAllAutoKeys();
+            IBaritone bt = primaryBaritone();
+            if (bt != null) bt.getPathingBehavior().cancelEverything();
             autoExitShaftForeign = autoExitShaft != null;
             enterState(AutoState.ROOM, "");
             return;
@@ -7791,6 +7800,8 @@ public class SpawnerDetector extends Module {
                 if (foreign) {
                     if (!autoTunnelTrail.isEmpty()) {
                         releaseAllAutoKeys();
+                        IBaritone bt = primaryBaritone();
+                        if (bt != null) bt.getPathingBehavior().cancelEverything();
                         autoExitRetracingTrail = true;
                         autoExitReturning = false;
                         autoExitTrailBudgetTicks = autoTunnelTrail.size() * 20 + 600;
