@@ -2276,7 +2276,17 @@ public class SpawnerDetector extends Module {
     private Block countedFilledBlock(BlockState state, BlockPos pos) {
         Block block = state.getBlock();
         if (block != Blocks.COBBLESTONE && block != Blocks.NETHERRACK && block != Blocks.COBBLED_DEEPSLATE) return null;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (isFilledShaftWallBlock(mc.world.getBlockState(pos.offset(dir)).getBlock())) return null;
+        }
         return waterOrLavaAdjacent(pos) ? null : block;
+    }
+
+    private boolean isFilledShaftWallBlock(Block block) {
+        return block == Blocks.COBBLESTONE
+            || block == Blocks.MOSSY_COBBLESTONE
+            || block == Blocks.NETHERRACK
+            || block == Blocks.COBBLED_DEEPSLATE;
     }
 
     private boolean waterOrLavaAdjacent(BlockPos pos) {
