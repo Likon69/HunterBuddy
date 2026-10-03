@@ -4927,7 +4927,10 @@ public class SpawnerDetector extends Module {
         int feetY = mc.player.getBlockPos().getY();
         boolean feetOk = Math.abs(feetY - autoColumn.startY()) <= 1
             || feetY <= autoSite.room.cy() + 3;
-        if (mc.player.isOnGround() && feetOk && centered) {
+        BlockPos sinkBelow = new BlockPos(autoColumn.x(), feetY - 1, autoColumn.z());
+        BlockState sinkBelowState = mc.world.getBlockState(sinkBelow);
+        boolean onColumnBlock = !isOpenState(sinkBelowState, sinkBelow) && sinkBelowState.getFluidState().isEmpty();
+        if (mc.player.isOnGround() && (feetOk || onColumnBlock) && centered) {
             releaseAllAutoKeys();
             enterDigState("");
             return;
