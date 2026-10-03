@@ -3234,7 +3234,8 @@ public class SpawnerDetector extends Module {
     private RimResult computeRim(int x, int z, int startY) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         BlockPos rim = null;
-        int rimFeet = Integer.MIN_VALUE;
+        int rimFeet = Integer.MAX_VALUE;
+        int topFeet = Integer.MIN_VALUE;
         double rimDistSq = Double.MAX_VALUE;
         int[][] rimNeighbors = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
@@ -3266,14 +3267,15 @@ public class SpawnerDetector extends Module {
 
             double dx = nx - mc.player.getX(), dz = nz - mc.player.getZ();
             double distSq = dx * dx + dz * dz;
-            if (feet > rimFeet || (feet == rimFeet && distSq < rimDistSq)) {
+            topFeet = Math.max(topFeet, feet);
+            if (feet < rimFeet || (feet == rimFeet && distSq < rimDistSq)) {
                 rimFeet = feet;
                 rimDistSq = distSq;
                 rim = new BlockPos(nx, feet, nz);
             }
         }
 
-        int holeTopY = rim != null ? Math.max(startY, rim.getY()) : startY;
+        int holeTopY = rim != null ? Math.max(startY, topFeet) : startY;
         return new RimResult(rim, holeTopY);
     }
 
