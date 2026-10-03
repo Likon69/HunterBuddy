@@ -568,6 +568,7 @@ public class SpawnerDetector extends Module {
     private int statShulkersFound;
 
     private boolean autoAreaLoaderWasOn, autoPitch40WasOn, autoElytraRecastWasOn;
+    private boolean autoMemoryChaseFromFlightModule;
     private boolean autoSavedAllowPlace;
     private int autoBaritoneRetries;
     private boolean autoAscendFromAbort;
@@ -949,6 +950,7 @@ public class SpawnerDetector extends Module {
         autoSoloNearUnloadedTicks = 0;
         autoSoloLastRocketTick = -100;
         autoSoloCruiseAltitude = 0.0;
+        autoMemoryChaseFromFlightModule = false;
         autoResumeClimbTries = 0;
         autoClimbStuckWaterReturns = 0;
         autoWaterJumpVertical = false;
@@ -4171,6 +4173,16 @@ public class SpawnerDetector extends Module {
             if (configuredSoloMode()) {
                 Site target = findSoloMemoryTarget();
                 if (target != null) startSoloTravel(target, "from idle");
+            } else {
+                Module fm = selectedFlightModule();
+                Site target = findSoloMemoryTarget();
+                if (fm != null && fm.isActive() && target != null) {
+                    fm.toggle();
+                    autoMemoryChaseFromFlightModule = true;
+                    autoAreaLoaderWasOn = true;
+                    autoLog("SOLO", target.center, "remembered target within auto-max-distance, " + fm.name + " paused");
+                    startSoloTravel(target, "from " + fm.name);
+                }
             }
             return;
         }
@@ -4322,7 +4334,7 @@ public class SpawnerDetector extends Module {
             Pitch40 p40 = pitch40Module();
             ElytraRecast er = elytraRecastModule();
             boolean fmOn = fm != null && fm.isActive();
-            autoAreaLoaderWasOn = fmOn;
+            autoAreaLoaderWasOn = fmOn || autoMemoryChaseFromFlightModule;
             autoPitch40WasOn = p40 != null && p40.isActive();
             autoElytraRecastWasOn = er != null && er.isActive();
             if (fmOn) fm.toggle();
@@ -10695,6 +10707,7 @@ public class SpawnerDetector extends Module {
                     autoLog("RESUME", autoSite.center, "re-enabled " + fm.name);
                 }
             }
+            autoMemoryChaseFromFlightModule = false;
             return;
         }
 
