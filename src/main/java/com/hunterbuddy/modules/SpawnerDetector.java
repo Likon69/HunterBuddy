@@ -5627,6 +5627,7 @@ public class SpawnerDetector extends Module {
         if (System.currentTimeMillis() - autoDigTotalStartMs > totalTimeout) { abort("dig timeout"); return; }
 
         recenterDig(autoColumn.x(), autoColumn.z(), 0.12);
+        if (mc.player.isTouchingWater()) { Utils.setPressed(mc.options.sprintKey, false); mc.player.setSprinting(false); }
 
         int feetY = mc.player.getBlockPos().getY();
         int roomCy = autoSite.room.cy();
