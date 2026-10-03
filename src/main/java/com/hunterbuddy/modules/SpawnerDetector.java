@@ -8994,6 +8994,27 @@ public class SpawnerDetector extends Module {
                 autoSwimUpBreakLabel = null;
                 autoSwimUpProgressTick = stateTicks;
             }
+        } else if (!onSwimUpColumn && mc.player.horizontalCollision && stateTicks - autoSwimUpProgressTick >= 40) {
+            int keyX = autoExitPathCell != null ? autoExitPathCell.getX() : swimUpX;
+            int keyZ = autoExitPathCell != null ? autoExitPathCell.getZ() : swimUpZ;
+            BlockPos target = findWalkStuckObstacle(keyX, keyZ);
+            if (target != null && (autoSwimUpBreakPos == null || !autoSwimUpBreakPos.equals(target))) {
+                autoSwimUpBreakPos = target;
+                autoSwimUpBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
+            } else if (target == null) {
+                autoSwimUpBreakPos = null;
+                autoSwimUpBreakLabel = null;
+            }
+            if (autoSwimUpBreakPos != null) {
+                Utils.setPressed(mc.options.jumpKey, false);
+                if (autoMineTick("SWIM_UP", autoSwimUpBreakPos, false)) {
+                    autoLog("SWIM_UP", autoSite.center, String.format("path broken %d,%d,%d block=%s",
+                        autoSwimUpBreakPos.getX(), autoSwimUpBreakPos.getY(), autoSwimUpBreakPos.getZ(), autoSwimUpBreakLabel));
+                    autoSwimUpBreakPos = null;
+                    autoSwimUpBreakLabel = null;
+                    autoSwimUpProgressTick = stateTicks;
+                }
+            }
         } else {
             autoSwimUpBreakPos = null;
             autoSwimUpBreakLabel = null;
