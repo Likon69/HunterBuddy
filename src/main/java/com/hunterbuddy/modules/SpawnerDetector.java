@@ -9646,7 +9646,8 @@ public class SpawnerDetector extends Module {
                 boolean open = true;
                 for (int dy = 0; dy < 12 && open; dy++) {
                     cursor.set(x, groundY + dy, z);
-                    if (!isOpenState(mc.world.getBlockState(cursor), cursor)) open = false;
+                    BlockState state = mc.world.getBlockState(cursor);
+                    if (!isOpenState(state, cursor) || state.isIn(BlockTags.CLIMBABLE)) open = false;
                 }
                 if (open && isClearTakeoffGround(x, z, groundY)) {
                     BlockPos candidate = new BlockPos(x, groundY, z);
@@ -9722,7 +9723,7 @@ public class SpawnerDetector extends Module {
                 double dxz = Math.hypot((p.getX() + 0.5) - mc.player.getX(), (p.getZ() + 0.5) - mc.player.getZ());
                 double dy = Math.abs(mc.player.getY() - p.getY());
                 if (dxz <= 1.0 && dy <= 1.0) {
-                    arrived = mc.player.isOnGround() && !hasBlockAbove(feet.getX(), feet.getY(), feet.getZ(), SKY_CHECK_HEIGHT);
+                    arrived = mc.player.isOnGround() && !mc.player.isClimbing() && !hasBlockAbove(feet.getX(), feet.getY(), feet.getZ(), SKY_CHECK_HEIGHT);
                     arrivedAt = p;
                     break;
                 }
@@ -10304,7 +10305,8 @@ public class SpawnerDetector extends Module {
                 boolean open = true;
                 for (int dy = 0; dy < 12 && open; dy++) {
                     cursor.set(x, groundY + dy, z);
-                    if (!isOpenState(mc.world.getBlockState(cursor), cursor)) open = false;
+                    BlockState state = mc.world.getBlockState(cursor);
+                    if (!isOpenState(state, cursor) || state.isIn(BlockTags.CLIMBABLE)) open = false;
                 }
                 if (!open) continue;
                 if (!isClearTakeoffGround(x, z, groundY)) continue;
@@ -10495,8 +10497,9 @@ public class SpawnerDetector extends Module {
     }
 
     private void takeoffFailedRetryOrAscend(String reason) {
+        if (mc.player.isClimbing()) autoTakeoffRetries = 3;
         autoTakeoffRetries++;
-        if (autoTakeoffRetries <= 3) {
+        if (autoTakeoffRetries <= 1) {
             autoLog("TAKEOFF", autoSite.center, "retry " + autoTakeoffRetries + " reason=" + reason);
             enterState(AutoState.TAKEOFF, "");
             return;
