@@ -5126,10 +5126,19 @@ public class SpawnerDetector extends Module {
                 if (isOpenState(breakState, autoWalkStuckBreakPos)) {
                     autoLog("WALK", autoSite.center, String.format("walk stuck, broken %d,%d,%d block=%s",
                         autoWalkStuckBreakPos.getX(), autoWalkStuckBreakPos.getY(), autoWalkStuckBreakPos.getZ(), autoWalkStuckBreakLabel));
-                    autoWalkStuckBreaking = false;
-                    autoWalkStuckBreakPos = null;
-                    autoWalkStuckTicks = 0;
-                    autoWalkStuckLastDist = -1;
+                    BlockPos next = findWalkStuckObstacle(keyX, keyZ);
+                    if (next != null) {
+                        BlockState nextState = mc.world.getBlockState(next);
+                        autoWalkStuckBreakPos = next;
+                        autoWalkStuckBreakLabel = Registries.BLOCK.getId(nextState.getBlock()).getPath();
+                        autoLog("WALK", autoSite.center, String.format("walk stuck, breaking %d,%d,%d block=%s (next)",
+                            next.getX(), next.getY(), next.getZ(), autoWalkStuckBreakLabel));
+                    } else {
+                        autoWalkStuckBreaking = false;
+                        autoWalkStuckBreakPos = null;
+                        autoWalkStuckTicks = 0;
+                        autoWalkStuckLastDist = -1;
+                    }
                 } else {
                     autoMineTick("WALK", autoWalkStuckBreakPos, false);
                 }
@@ -5142,7 +5151,7 @@ public class SpawnerDetector extends Module {
                 if (autoWalkStuckTicks >= 40) {
                     double dist = Math.hypot((keyX + 0.5) - mc.player.getX(), (keyZ + 0.5) - mc.player.getZ());
                     if (autoWalkStuckLastDist >= 0 && autoWalkStuckLastDist - dist < 0.5) {
-                        if (!autoWalkStuckUseBreak && !nearHole) {
+                        if (!autoWalkStuckUseBreak && !nearHole && dist > 3.0) {
                             autoBaritoneRetries = 0;
                             autoWalkKeyLogged = false;
                             autoWalkStuckUseBreak = true;
