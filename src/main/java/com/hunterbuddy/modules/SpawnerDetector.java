@@ -905,10 +905,6 @@ public class SpawnerDetector extends Module {
         totalTicks = 0;
         scanCooldown = 0;
         resetAutoState();
-        statRoomsFarmed = 0;
-        statSpawnersBroken = 0;
-        statChestsBroken = 0;
-        statShulkersFound = 0;
         loadVisited();
         retryAbandonedSites();
     }
