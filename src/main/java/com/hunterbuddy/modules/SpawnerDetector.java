@@ -765,6 +765,7 @@ public class SpawnerDetector extends Module {
     private int autoShaftFlyPivotX;
     private int autoShaftFlyPivotZ;
     private boolean autoShaftFlyPivotNoEscapeLogged;
+    private int autoShaftFlyPivotCollisionTicks;
     private ShaftDryPhase autoShaftDryPhase = ShaftDryPhase.NONE;
     private int autoShaftDryStartTick;
     private int autoShaftDryUnderPlacements;
@@ -8554,6 +8555,13 @@ public class SpawnerDetector extends Module {
             if (blockedByWater) {
                 enterState(AutoState.SWIM_UP, "shaft blocked by water");
             } else {
+                ExitShaft lowered = new ExitShaft(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), blockedY - 3, autoExitShaft.water(), true, autoExitShaft.entry());
+                if (blockedY - 4 > autoExitShaft.bottomY() && shaftExitHasPivotEscape(lowered)) {
+                    autoExitShaft = lowered;
+                    autoShaftAlignCenteredTicks = 0;
+                    autoLog("SHAFT_ALIGN", autoSite.center, String.format("shaft blocked at y=%d, side escape below it, shaft fly with pivot (exitY=%d)", blockedY, lowered.exitY()));
+                    return;
+                }
                 enterState(AutoState.ASCEND, "shaft blocked");
             }
             return;
@@ -8732,6 +8740,7 @@ public class SpawnerDetector extends Module {
             autoShaftFlyPivotX = 0;
             autoShaftFlyPivotZ = 0;
             autoShaftFlyPivotNoEscapeLogged = false;
+            autoShaftFlyPivotCollisionTicks = 0;
             autoShaftFlyReroute = false;
 
             int slot = ensureRocketInHotbar();
@@ -8805,7 +8814,7 @@ public class SpawnerDetector extends Module {
             double vy = mc.player.getVelocity().y;
             boolean onGround = mc.player.isOnGround();
 
-            if (y >= autoExitShaft.exitY() + 4) {
+            if (!autoShaftFlyPivot && y >= autoExitShaft.exitY() + 4) {
                 mc.player.setPitch(-90.0f);
                 autoLog("SHAFT_FLY", autoSite.center, "out of shaft");
                 if (takeoff.isActive()) takeoff.cancel();
@@ -8875,6 +8884,7 @@ public class SpawnerDetector extends Module {
                         BlockPos escape = findShaftPivotEscape(px, feetY, pz);
                         if (escape != null) {
                             autoShaftFlyPivot = true;
+                            autoShaftFlyPivotCollisionTicks = 0;
                             autoShaftFlyPivotX = escape.getX();
                             autoShaftFlyPivotZ = escape.getZ();
                             double dist = Math.sqrt((double) escape.getSquaredDistance(new BlockPos(px, feetY, pz)));
@@ -8893,6 +8903,19 @@ public class SpawnerDetector extends Module {
             if (autoShaftFlyPivot) {
                 double pdx = (autoShaftFlyPivotX + 0.5) - mc.player.getX();
                 double pdz = (autoShaftFlyPivotZ + 0.5) - mc.player.getZ();
+                if (mc.player.horizontalCollision) {
+                    autoShaftFlyPivotCollisionTicks++;
+                } else {
+                    autoShaftFlyPivotCollisionTicks = 0;
+                }
+                if (autoShaftFlyPivotCollisionTicks >= 5) {
+                    autoShaftFlyPivot = false;
+                    autoLog("SHAFT_FLY", autoSite.center, "pivot blocked by a wall, ascend");
+                    if (takeoff.isActive()) takeoff.cancel();
+                    releaseAllAutoKeys();
+                    enterState(AutoState.ASCEND, "pivot blocked by a wall");
+                    return;
+                }
                 mc.player.setYaw((float) Math.toDegrees(Math.atan2(-pdx, pdz)));
                 mc.player.setPitch(-10.0f);
 
