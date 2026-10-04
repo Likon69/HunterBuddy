@@ -6770,6 +6770,7 @@ public class SpawnerDetector extends Module {
 
         BlockPos from = autoSite.center;
         markVisited(from, autoRunOutcome());
+        if (!autoRunAbandoned) statRoomsFarmed++;
         autoLog("CHAIN", from, String.format("vertical next=%d,%d,%d",
             lower.center.getX(), lower.center.getY(), lower.center.getZ()));
 
@@ -6853,6 +6854,7 @@ public class SpawnerDetector extends Module {
         BlockPos from = finishedSite.center;
         double chainDist = Math.sqrt(bestDistSq);
         markVisited(from, autoRunOutcome());
+        if (!autoRunAbandoned) statRoomsFarmed++;
         autoLog("CHAIN", from, String.format("underground next=%d,%d,%d dist=%.1f",
             chainSite.center.getX(), chainSite.center.getY(), chainSite.center.getZ(), chainDist));
 
@@ -7607,6 +7609,7 @@ public class SpawnerDetector extends Module {
 
         BlockPos from = finishedSite.center;
         markVisited(from, autoRunOutcome());
+        if (!autoRunAbandoned) statRoomsFarmed++;
         autoLog("CHAIN", from, String.format("next=%d,%d,%d dist=%.1f",
             chainSite.center.getX(), chainSite.center.getY(), chainSite.center.getZ(), chainDist));
 
