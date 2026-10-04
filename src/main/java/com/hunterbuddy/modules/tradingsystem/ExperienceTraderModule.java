@@ -120,7 +120,7 @@ public class ExperienceTraderModule extends Module {
             .max(10)
             .sliderMin(1)
             .sliderMax(10)
-            .defaultValue(1)
+            .defaultValue(5)
             .build()
     );
 

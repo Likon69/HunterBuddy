@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.tradingsystem.stages;
 
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.MerchantScreen;
 import net.minecraft.util.Hand;
 import net.minecraft.util.PlayerInput;
@@ -19,6 +20,10 @@ public class OpenTradeMenu extends Stage {
     @Override
     public boolean work() {
         if (!this.isPacketSent) {
+            if (client.currentScreen instanceof HandledScreen<?>) {
+                client.player.closeHandledScreen();
+                return false;
+            }
             var player = getPlayer();
             var target = requireNonNull(super.mainModule.getTarget());
             var interactionManager = requireNonNull(client.interactionManager);
