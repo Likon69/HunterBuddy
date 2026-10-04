@@ -573,6 +573,7 @@ public class SpawnerDetector extends Module {
     private boolean autoMemoryChaseFromFlightModule;
     private boolean autoSavedAllowPlace;
     private int autoBaritoneRetries;
+    private int autoFailRecoveries;
     private boolean autoAscendFromAbort;
 
     private boolean autoWalkDirect;
@@ -957,6 +958,7 @@ public class SpawnerDetector extends Module {
         autoSoloCruiseAltitude = 0.0;
         autoMemoryChaseFromFlightModule = false;
         autoTrailYawSaved = false;
+        autoFailRecoveries = 0;
         autoResumeClimbTries = 0;
         autoClimbStuckWaterReturns = 0;
         autoWaterJumpVertical = false;
@@ -10953,6 +10955,18 @@ public class SpawnerDetector extends Module {
     private void tickFailed() {
         stateTicks++;
         if (stateTicks < 20) return;
+        if (autoSite != null && autoColumn != null && autoFailRecoveries < 2) {
+            autoFailRecoveries++;
+            autoRunAbandoned = true;
+            autoLog("FAILED", autoSite.center, "FAILED recovering, climbing out before handing over (try " + autoFailRecoveries + ")");
+            if (mc.player.isGliding()) {
+                autoClimbTargetY = mc.player.getY() + climbHeight.get();
+                enterState(AutoState.CLIMB, "after failure");
+            } else {
+                enterAscendOrSwimUp("after failure");
+            }
+            return;
+        }
         if (autoSite != null) {
             autoLog("FAILED", autoSite.center, "FAILED -> IDLE");
         } else if (log.get()) {
