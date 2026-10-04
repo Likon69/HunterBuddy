@@ -504,6 +504,7 @@ public class AutoFlyingRegear extends Module {
    private float savedPitch = 0.0F;
    private boolean hadBaritoneGoal = false;
    private int lavaPostponeTicks = 0;
+   private int regearPostponeTicks;
    private String savedBaritoneCommand = null;
    private int startupDelayTicks = 0;
    private boolean startupComplete = false;
@@ -593,6 +594,7 @@ public class AutoFlyingRegear extends Module {
       this.wallNoProgressRounds = 0;
       this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
+      this.regearPostponeTicks = 0;
       this.savedYaw = 0.0F;
       this.currentClearingPos = null;
       this.clearingProgress = 0;
@@ -682,6 +684,7 @@ public class AutoFlyingRegear extends Module {
       this.wallNoProgressRounds = 0;
       this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
+      this.regearPostponeTicks = 0;
       this.cleanupBlocks.clear();
       this.cleanupBlockIndex = 0;
       this.cleanupInitialized = false;
@@ -698,6 +701,10 @@ public class AutoFlyingRegear extends Module {
 
    public boolean isRunning() {
       return this.isActive() && this.state != AutoFlyingRegear.FlyingRegearState.IDLE;
+   }
+
+   public boolean wantsRegear() {
+      return this.isActive() && this.state == AutoFlyingRegear.FlyingRegearState.IDLE && this.lowSupplyTicks > 0;
    }
 
    @EventHandler
@@ -1019,10 +1026,18 @@ public class AutoFlyingRegear extends Module {
             }
 
             this.lowSupplyTicks = 0;
+            this.regearPostponeTicks = 0;
             this.solidGroundTicks = 0;
          }
 
          if (this.lowSupplyTicks >= 20) {
+            SpawnerDetector sd = Modules.get().get(SpawnerDetector.class);
+            if (sd != null && sd.isBusyFarming()) {
+               if (this.regearPostponeTicks == 0) this.event("SpawnerDetector busy, regear postponed");
+               this.regearPostponeTicks++;
+               this.solidGroundTicks = 0;
+               return;
+            }
             // Never regear over lava, ever, and no time cap: the bot flies the Nether fine, so
             // when there is lava (or unreadable ground) below we simply do not start the regear —
             // Baritone keeps flying until real, solid (or water) ground is under us, and only then
@@ -5667,6 +5682,7 @@ public class AutoFlyingRegear extends Module {
       this.wallNoProgressRounds = 0;
       this.wallMineQueued.clear();
       this.lowSupplyTicks = 0;
+      this.regearPostponeTicks = 0;
       this.rocketShulkersTaken = 0;
       AutoFlyingRegear.Run run = new AutoFlyingRegear.Run();
       run.mode = this.elytraMode.get();

@@ -375,6 +375,8 @@ public class TrailFollower extends Module {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TrailFollower", "Automatically follows trails in all dimensions.");
     }
 
+    public float headingYaw() { return (float) (followingTrail ? committedYaw : targetYaw); }
+
     void resetTrail() {
         this.baritoneSetGoalTicks = 0;
         this.followingTrail = false;

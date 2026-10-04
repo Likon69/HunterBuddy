@@ -414,7 +414,7 @@ public class SpawnerDetector extends Module {
         .description("Exit through the dig shaft on rockets instead of walking back to the surface, when the shaft has no water and is not sky-blocked.")
         .defaultValue(true).build());
 
-    public enum FlightModule { AreaLoader, RocketFly, WaypointFollower, None }
+    public enum FlightModule { AreaLoader, RocketFly, WaypointFollower, TrailFollower, None }
 
     private final Setting<FlightModule> flightModule = sgAuto.add(new EnumSetting.Builder<FlightModule>()
         .name("flight-module")
@@ -568,6 +568,8 @@ public class SpawnerDetector extends Module {
     private int statShulkersFound;
 
     private boolean autoAreaLoaderWasOn, autoPitch40WasOn, autoElytraRecastWasOn;
+    private float autoTrailYaw;
+    private boolean autoTrailYawSaved;
     private boolean autoMemoryChaseFromFlightModule;
     private boolean autoSavedAllowPlace;
     private int autoBaritoneRetries;
@@ -954,6 +956,7 @@ public class SpawnerDetector extends Module {
         autoSoloLastRocketTick = -100;
         autoSoloCruiseAltitude = 0.0;
         autoMemoryChaseFromFlightModule = false;
+        autoTrailYawSaved = false;
         autoResumeClimbTries = 0;
         autoClimbStuckWaterReturns = 0;
         autoWaterJumpVertical = false;
@@ -1070,6 +1073,7 @@ public class SpawnerDetector extends Module {
     public int getAutoBaritoneRetries() { return autoBaritoneRetries; }
 
     public boolean isAutoAreaLoaderHandoff() { return autoAreaLoaderWasOn && flightModule.get() == FlightModule.AreaLoader; }
+    public boolean isBusyFarming() { return isActive() && state != AutoState.IDLE; }
     public boolean isAutoPaused() { return autoPaused; }
     public boolean isAutoSoloTransitOnly() { return autoSoloTransitOnly; }
     public String getAutoPauseReason() { return autoPauseReason; }
@@ -2857,6 +2861,7 @@ public class SpawnerDetector extends Module {
             case AreaLoader -> Modules.get().get(AreaLoader.class);
             case RocketFly -> Modules.get().get(RocketFly.class);
             case WaypointFollower -> Modules.get().get(WaypointFollower.class);
+            case TrailFollower -> Modules.get().get(TrailFollower.class);
             case None -> null;
         };
     }
@@ -4034,9 +4039,14 @@ public class SpawnerDetector extends Module {
 
         AutoFlyingRegear regear = autoFlyingRegearModule();
         if (regear != null && regear.isRunning()) return QualResult.reject("AutoFlyingRegear running");
+        if (regear != null && regear.wantsRegear()) return QualResult.reject("AutoFlyingRegear pending");
         WaypointFollower wf = waypointFollowerModule();
         if (wf != null && wf.isActive() && flightModule.get() != FlightModule.WaypointFollower) {
             return QualResult.reject("WaypointFollower active");
+        }
+        TrailFollower tf = Modules.get().get(TrailFollower.class);
+        if (tf != null && tf.isActive() && flightModule.get() != FlightModule.TrailFollower) {
+            return QualResult.reject("TrailFollower active");
         }
 
         MlepMine mine = mlepMineModule();
@@ -4074,6 +4084,10 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean soloMemoryCandidate(Site site) {
+        AutoFlyingRegear regear = autoFlyingRegearModule();
+        if (regear != null && regear.wantsRegear()) return false;
+        TrailFollower tf = Modules.get().get(TrailFollower.class);
+        if (tf != null && tf.isActive() && flightModule.get() != FlightModule.TrailFollower) return false;
         if (!qualifiesForAuto(site)) return false;
         if (isVisited(site.center)) return false;
         if (autoSoloRejectedThisSession.contains(site.center)) return false;
@@ -4181,6 +4195,10 @@ public class SpawnerDetector extends Module {
                 Module fm = selectedFlightModule();
                 Site target = findSoloMemoryTarget();
                 if (fm != null && fm.isActive() && target != null) {
+                    if (fm instanceof TrailFollower tf && fm.isActive()) {
+                        autoTrailYaw = tf.headingYaw();
+                        autoTrailYawSaved = true;
+                    }
                     fm.toggle();
                     autoMemoryChaseFromFlightModule = true;
                     autoAreaLoaderWasOn = true;
@@ -4283,11 +4301,13 @@ public class SpawnerDetector extends Module {
             AutoFlyingRegear regear = autoFlyingRegearModule();
             if (regear != null && regear.isRunning()) {
                 boolean tellAreaLoader = autoAreaLoaderWasOn;
+                Module fm = selectedFlightModule();
                 autoLog("YIELD", autoSite != null ? autoSite.center : mc.player.getBlockPos(), "AutoFlyingRegear took over");
                 releaseAllAutoKeys();
                 if (takeoff.isActive()) takeoff.cancel();
+                BaritoneHelper.stopAllPathing();
                 resetAutoState();
-                if (tellAreaLoader) warning("AutoFlyingRegear started - restart AreaLoader by hand if it was running.");
+                if (tellAreaLoader && fm != null) warning("AutoFlyingRegear started - restart " + fm.name + " by hand if it was running.");
                 return;
             }
 
@@ -4339,9 +4359,15 @@ public class SpawnerDetector extends Module {
             ElytraRecast er = elytraRecastModule();
             boolean fmOn = fm != null && fm.isActive();
             autoAreaLoaderWasOn = fmOn || autoMemoryChaseFromFlightModule;
-            autoPitch40WasOn = p40 != null && p40.isActive();
+            autoPitch40WasOn = p40 != null && p40.isActive() && !(fmOn && fm instanceof TrailFollower);
             autoElytraRecastWasOn = er != null && er.isActive();
-            if (fmOn) fm.toggle();
+            if (fmOn) {
+                if (fm instanceof TrailFollower tf && fm.isActive()) {
+                    autoTrailYaw = tf.headingYaw();
+                    autoTrailYawSaved = true;
+                }
+                fm.toggle();
+            }
             return;
         }
 
@@ -10779,6 +10805,11 @@ public class SpawnerDetector extends Module {
             if (autoAreaLoaderWasOn) {
                 Module fm = selectedFlightModule();
                 if (fm != null && !fm.isActive()) {
+                    if (autoTrailYawSaved && fm instanceof TrailFollower) {
+                        mc.player.setYaw(autoTrailYaw);
+                        mc.player.setPitch(0.0f);
+                        autoLog("RESUME", autoSite.center, "yaw restored for TrailFollower");
+                    }
                     fm.toggle();
                     autoLog("RESUME", autoSite.center, "re-enabled " + fm.name);
                 }
@@ -10801,6 +10832,11 @@ public class SpawnerDetector extends Module {
                     er.toggle();
                     autoLog("RESUME", autoSite.center, "re-enabled ElytraRecast");
                 }
+            }
+            Module fm = selectedFlightModule();
+            if (autoTrailYawSaved && fm instanceof TrailFollower && fm.isActive()) {
+                mc.player.setYaw(autoTrailYaw);
+                mc.player.setPitch(0.0f);
             }
         }
 
