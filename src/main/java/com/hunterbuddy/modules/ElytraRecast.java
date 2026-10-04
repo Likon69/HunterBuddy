@@ -126,6 +126,8 @@ public class ElytraRecast extends Module {
    private Pitch40 pitch40Util;
    private final ElytraTakeoff takeoff = new ElytraTakeoff();
    private int monitoringRecoveryCooldown = 0;
+   private int lastTickAge = -1;
+   private int lastPostTickAge = -1;
    private static final int MONITORING_RECOVERY_PAUSE = 80;
 
    public ElytraRecast() {
@@ -179,6 +181,8 @@ public class ElytraRecast extends Module {
    @EventHandler
    private void onTick(Pre event) {
       if (this.mc.player != null && this.mc.world != null && this.state != null && this.hasElytraEquipped()) {
+         if (this.lastTickAge == this.mc.player.age) return;
+         this.lastTickAge = this.mc.player.age;
          if (this.takeoff.isActive()) {
             this.takeoff.tickPre();
             return;
@@ -197,6 +201,8 @@ public class ElytraRecast extends Module {
    @EventHandler
    private void onTickPost(Post event) {
       if (this.mc.player != null && this.mc.world != null && this.takeoff.isActive()) {
+         if (this.lastPostTickAge == this.mc.player.age) return;
+         this.lastPostTickAge = this.mc.player.age;
          this.takeoff.tickPost();
       }
    }

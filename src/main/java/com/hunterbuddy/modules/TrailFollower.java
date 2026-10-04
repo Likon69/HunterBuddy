@@ -31,6 +31,7 @@ import xaeroplus.event.ChunkDataEvent;
 import xaeroplus.module.ModuleManager;
 import xaeroplus.module.impl.OldChunks;
 import xaeroplus.module.impl.PaletteNewChunks;
+import xaeroplus.settings.Settings;
 
 public class TrailFollower extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -119,6 +120,14 @@ public class TrailFollower extends Module {
                 .sliderRange(0.0, 1.0)
                 .build()
         );
+    public final Setting<Integer> resumeWindow = this.sgGeneral.add(new Builder()
+        .name("resume-window")
+        .description("Seconds to keep a trail heading for resuming after a pause. Set to 0 to disable.")
+        .defaultValue(3600).min(0).sliderRange(0, 7200).build());
+    public final Setting<Double> resumeMaxDistance = this.sgGeneral.add(new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+        .name("resume-max-distance")
+        .description("Maximum distance in blocks from the saved position to resume a trail heading.")
+        .defaultValue(512.0).min(0.0).sliderMax(2048.0).build());
     public final Setting<Boolean> oppositeDimension = this.sgGeneral
         .add(
             new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -347,6 +356,9 @@ public class TrailFollower extends Module {
         .add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder().name("debug").description("Debug mode.").defaultValue(false).build());
     private boolean oldAutoFireworkValue;
     private boolean oldAutoBoundAdjustValue;
+    private boolean pitch40ToggledByUs;
+    private boolean rocketFlyToggledByUs;
+    private boolean autoFireworkChangedByUs;
     private TrailFollower.FollowMode followMode;
     private boolean followingTrail = false;
     private ArrayDeque<Vec3d> trail = new ArrayDeque<>();
@@ -368,6 +380,15 @@ public class TrailFollower extends Module {
     private double committedYaw;
     private double searchPhase;
     private boolean wasSearching;
+    private double resumeYaw;
+    private double resumeDesiredYaw;
+    private int resumeChunks;
+    private RegistryKey<World> resumeDimension;
+    private Vec3d resumePos;
+    private long resumeAt;
+    private boolean resumeValid;
+    private boolean resumeAwaitingChunk;
+    private RegistryKey<World> activeDimension;
     private int baritoneSetGoalTicks = 0;
     Vec3d posDebug;
 
@@ -378,6 +399,8 @@ public class TrailFollower extends Module {
     public float headingYaw() { return (float) (followingTrail ? committedYaw : targetYaw); }
 
     void resetTrail() {
+        this.posDebug = null;
+        this.resumeAwaitingChunk = false;
         this.baritoneSetGoalTicks = 0;
         this.followingTrail = false;
         this.trail = new ArrayDeque<>();
@@ -391,10 +414,12 @@ public class TrailFollower extends Module {
     @Override
     public void onActivate() {
         this.resetTrail();
+        XaeroPlus.EVENT_BUS.unregister(this);
         XaeroPlus.EVENT_BUS.register(this);
         if (this.started) {
             if (this.mc.player != null && this.mc.world != null) {
                 RegistryKey<World> currentDimension = this.mc.world.getRegistryKey();
+                this.activeDimension = currentDimension;
                 if (this.oppositeDimension.get()) {
                     if (currentDimension.equals(World.END)) {
                         this.info("There is no opposite dimension to the end. Disabling TrailFollower");
@@ -432,6 +457,7 @@ public class TrailFollower extends Module {
                         Module pitch40UtilModule = Modules.get().get(pitch40Util);
                         if (!pitch40UtilModule.isActive()) {
                             pitch40UtilModule.toggle();
+                            this.pitch40ToggledByUs = true;
                             if (this.pitch40Firework.get()) {
                                 Setting<Boolean> setting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-firework");
                                 if (setting != null) {
@@ -440,6 +466,7 @@ public class TrailFollower extends Module {
                                     );
                                     this.oldAutoFireworkValue = setting.get();
                                     setting.set(true);
+                                    this.autoFireworkChangedByUs = true;
                                 }
                             }
 
@@ -453,14 +480,26 @@ public class TrailFollower extends Module {
                         RocketFly rocketFly = Modules.get().get(RocketFly.class);
                         if (!rocketFly.isActive()) {
                             rocketFly.toggle();
+                            this.rocketFlyToggledByUs = true;
                         }
                     }
                 }
 
-                this.initialYaw = this.getActualYaw(this.mc.player.getYaw());
+                long now = System.currentTimeMillis();
+                long resumeWindowMs = this.resumeWindow.get() * 1000L;
+                if (this.resumeValid && resumeWindowMs > 0L && now - this.resumeAt > resumeWindowMs) {
+                    this.resumeValid = false;
+                }
+                boolean resuming = this.resumeValid && resumeWindowMs > 0L
+                    && currentDimension.equals(this.resumeDimension)
+                    && this.mc.player.getEntityPos().distanceTo(this.resumePos) <= this.resumeMaxDistance.get()
+                    && now - this.resumeAt <= resumeWindowMs
+                    && Math.abs(TrailUtils.angleDifference(this.mc.player.getYaw(), this.resumeYaw)) <= 90.0;
+                this.initialYaw = resuming ? this.resumeYaw : this.getActualYaw(this.mc.player.getYaw());
                 this.hasInitialDirection = true;
+                double seedYaw = resuming ? this.resumeYaw : this.mc.player.getYaw();
                 Vec3d offset = new Vec3d(
-                        Math.sin(-this.mc.player.getYaw() * Math.PI / 180.0), 0.0, Math.cos(-this.mc.player.getYaw() * Math.PI / 180.0)
+                        Math.sin(-seedYaw * Math.PI / 180.0), 0.0, Math.cos(-seedYaw * Math.PI / 180.0)
                     )
                     .normalize()
                     .multiply(this.pathDistance.get());
@@ -471,6 +510,30 @@ public class TrailFollower extends Module {
                 }
 
                 this.targetYaw = this.initialYaw;
+                if (resuming) {
+                    this.committedYaw = this.resumeYaw;
+                    this.desiredYaw = this.resumeDesiredYaw;
+                    this.followingTrail = true;
+                    this.chunksFoundSinceStart = this.resumeChunks;
+                    this.lastFoundTrailTime = this.lastSteerChunkTime = now;
+                    this.wasSearching = false;
+                    this.resumeAwaitingChunk = true;
+                    this.log("trail heading resumed " + this.resumeYaw);
+                }
+                try {
+                    boolean changed = false;
+                    if (!Settings.REGISTRY.paletteNewChunksEnabledSetting.get()) {
+                        Settings.REGISTRY.paletteNewChunksEnabledSetting.setValue(true);
+                        changed = true;
+                    }
+                    if (this.only112.get() && !Settings.REGISTRY.oldChunksEnabledSetting.get()) {
+                        Settings.REGISTRY.oldChunksEnabledSetting.setValue(true);
+                        changed = true;
+                    }
+                    if (changed) this.info("Enabled XaeroPlus trail highlights.");
+                } catch (Exception e) {
+                    this.warning("Could not enable XaeroPlus trail highlights.");
+                }
             } else {
                 this.toggle();
             }
@@ -479,49 +542,50 @@ public class TrailFollower extends Module {
 
     @Override
     public void onDeactivate() {
+        if (this.followingTrail && this.mc.player != null && this.mc.world != null) {
+            this.resumeYaw = this.committedYaw;
+            this.resumeDesiredYaw = this.desiredYaw;
+            this.resumeChunks = this.chunksFoundSinceStart;
+            this.resumeDimension = this.mc.world.getRegistryKey();
+            this.resumePos = this.mc.player.getEntityPos();
+            this.resumeAt = System.currentTimeMillis();
+            this.resumeValid = true;
+        }
         this.started = false;
         this.seenChunksCache = Caffeine.newBuilder().maximumSize(this.chunkCacheLength.get().intValue()).expireAfterWrite(Duration.ofMinutes(5L)).build();
         XaeroPlus.EVENT_BUS.unregister(this);
         this.trail.clear();
-        if (this.followMode != null) {
-            switch (this.followMode) {
-                case BARITONE:
-                    BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute("cancel");
-                    break;
-                case YAWLOCK:
-                    if (this.mc.world == null || this.mc.world.getRegistryKey().equals(World.NETHER)) {
-                        return;
-                    }
-
-                    if (this.overworldFlightMode.get() == TrailFollower.OverworldFlightMode.ROCKETS) {
-                        RocketFly rocketFly = Modules.get().get(RocketFly.class);
-                        if (rocketFly != null) {
-                            rocketFly.resetYLock();
-                            if (rocketFly.isActive()) {
-                                rocketFly.toggle();
-                            }
-                        }
-                    } else if (this.overworldFlightMode.get() == TrailFollower.OverworldFlightMode.PITCH40) {
-                        Class<? extends Module> pitch40Util = Pitch40.class;
-                        Module pitch40UtilModule = Modules.get().get(pitch40Util);
-                        if (pitch40UtilModule != null) {
-                            if (pitch40UtilModule.isActive()) {
-                                pitch40UtilModule.toggle();
-                            }
-
-                            Setting<Boolean> autoFireworkSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-firework");
-                            if (autoFireworkSetting != null) {
-                                autoFireworkSetting.set(this.oldAutoFireworkValue);
-                            }
-
-                            Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-bound-adjust");
-                            if (autoBoundAdjustSetting != null) {
-                                autoBoundAdjustSetting.set(this.oldAutoBoundAdjustValue);
-                            }
-                        }
-                    }
+        if (this.rocketFlyToggledByUs) {
+            RocketFly rocketFly = Modules.get().get(RocketFly.class);
+            if (rocketFly != null) {
+                rocketFly.resetYLock();
+                if (rocketFly.isActive()) {
+                    rocketFly.toggle();
+                }
             }
         }
+        if (this.pitch40ToggledByUs) {
+            Module pitch40UtilModule = Modules.get().get(Pitch40.class);
+            if (pitch40UtilModule != null) {
+                if (pitch40UtilModule.isActive()) {
+                    pitch40UtilModule.toggle();
+                }
+                Setting<Boolean> autoFireworkSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-firework");
+                if (this.autoFireworkChangedByUs && autoFireworkSetting != null) {
+                    autoFireworkSetting.set(this.oldAutoFireworkValue);
+                }
+                Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-bound-adjust");
+                if (autoBoundAdjustSetting != null) {
+                    autoBoundAdjustSetting.set(this.oldAutoBoundAdjustValue);
+                }
+            }
+        }
+        if (this.followMode == TrailFollower.FollowMode.BARITONE) {
+            BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute("cancel");
+        }
+        this.pitch40ToggledByUs = false;
+        this.rocketFlyToggledByUs = false;
+        this.autoFireworkChangedByUs = false;
     }
 
     private void searchForTrail() {
@@ -563,7 +627,15 @@ public class TrailFollower extends Module {
     @EventHandler
     private void onTick(Post event) {
         if (this.mc.player != null && this.mc.world != null) {
+            if (this.started && !this.oppositeDimension.get() && !this.mc.world.getRegistryKey().equals(this.activeDimension)) {
+                this.followingTrail = false;
+                this.onDeactivate();
+                this.resumeValid = false;
+                this.resetTrail();
+                return;
+            }
             if (!this.started) {
+                if (this.mc.player.age < 20) return;
                 this.started = true;
                 this.onActivate();
                 if (!this.isActive()) {
@@ -571,8 +643,11 @@ public class TrailFollower extends Module {
                 }
             }
 
-            long sinceLastChunk = System.currentTimeMillis() - this.lastFoundTrailTime;
-            if (this.followingTrail && sinceLastChunk > this.trailTimeout.get()) {
+            long now = System.currentTimeMillis();
+            if (this.resumeAwaitingChunk) this.lastFoundTrailTime = this.lastSteerChunkTime = now;
+            long sinceLastChunk = now - this.lastFoundTrailTime;
+            if (!this.resumeAwaitingChunk && this.followingTrail && sinceLastChunk > this.trailTimeout.get()) {
+                this.resumeValid = false;
                 this.resetTrail();
                 this.log("Trail timed out, stopping.");
                 switch ((TrailFollower.TrailEndBehavior)this.trailEndBehavior.get()) {
@@ -591,7 +666,7 @@ public class TrailFollower extends Module {
                 }
             }
 
-            if (this.followingTrail && System.currentTimeMillis() - this.lastSteerChunkTime > this.chunkFoundTimeout.get()) {
+            if (!this.resumeAwaitingChunk && this.followingTrail && now - this.lastSteerChunkTime > this.chunkFoundTimeout.get()) {
                 this.searchForTrail();
             } else {
                 this.wasSearching = false;
@@ -647,7 +722,7 @@ public class TrailFollower extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (this.debug.get()) {
+        if (this.started && this.debug.get()) {
             Vec3d targetPos = TrailUtils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, 10.0);
             event.renderer
                 .line(
@@ -678,6 +753,7 @@ public class TrailFollower extends Module {
     public void onChunkData(ChunkDataEvent event) {
         if (!event.seenChunk()) {
             if (this.mc.player != null && this.mc.world != null) {
+                if (!this.started) return;
                 RegistryKey<World> currentDimension = this.mc.world.getRegistryKey();
                 WorldChunk chunk = event.chunk();
                 ChunkPos chunkPos = chunk.getPos();
@@ -771,6 +847,7 @@ public class TrailFollower extends Module {
                                     }
 
                                     this.chunksFoundSinceStart++;
+                                    this.resumeAwaitingChunk = false;
                                     if (!this.trail.isEmpty()) {
                                         Vec3d averagePos = this.calculateForwardWeightedAverage(this.trail);
                                         if (averagePos != null) {
