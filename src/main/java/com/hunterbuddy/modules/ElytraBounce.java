@@ -522,7 +522,8 @@ public class ElytraBounce extends Module {
                   "[ElytraBounce speed] peak=%.1f b/s (%.0f km/h) predicted=%.1f b/s headroom=%.2f pitch=%.1f",
                   this.peakSpeed,
                   this.peakSpeed * 3.6,
-                  this.predictedSpeed,
+                  this.autoPitch.get() && this.flyingPlan != null && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2)
+                     ? this.predictedSpeed : 0.0,
                   this.solvedHeadroom,
                   this.effectivePitch()
                )
@@ -902,7 +903,9 @@ public class ElytraBounce extends Module {
       var world = this.mc.world;
       AutoPitchKey key = this.pitchKey;
       this.pitchPlans.update(player, world, key);
-      this.flyingPlan = this.pitchPlans.plan(player, world, key);
+      BounceSolver.Plan cachedPlan = this.pitchPlans.plan(player, world, key);
+      if (cachedPlan != null) this.flyingPlan = cachedPlan;
+      else if (this.flyingPlan != null && !(this.flyingPlan.headroom >= 1.2)) this.flyingPlan = null;
       if (this.flyingPlan != null) this.predictedSpeed = this.flyingPlan.speed;
       BouncePlanCache.Request<AutoPitchKey> request = this.pitchPlans.request();
       if (request == null) return;
@@ -927,14 +930,17 @@ public class ElytraBounce extends Module {
 
    private float effectivePitch() {
       BounceSolver.Plan plan = this.flyingPlan;
-      return this.autoPitch.get() && plan != null ? plan.pitchAt(this.ticksSinceJump) : this.pitch.get().floatValue();
+      return this.autoPitch.get() && plan != null && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2)
+         ? plan.pitchAt(this.ticksSinceJump) : this.pitch.get().floatValue();
    }
 
    @Override
    public String getInfoString() {
+      if (!this.bounce.get() || !this.lockPitch.get()) return null;
       BounceSolver.Plan plan = this.flyingPlan;
-      return this.bounce.get() && this.lockPitch.get() && this.autoPitch.get() && plan != null
-         ? String.format(java.util.Locale.ROOT, "%.0f b/s @ %.0f-%.0f°", plan.speed, plan.minPitch(), plan.maxPitch()) : null;
+      return this.autoPitch.get() && plan != null && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2)
+         ? String.format(java.util.Locale.ROOT, "%.0f b/s @ %.0f-%.0f°", plan.speed, plan.minPitch(), plan.maxPitch())
+         : String.format(java.util.Locale.ROOT, "%.0f° fixed", this.pitch.get());
    }
 
    private boolean isFreeTick() {
@@ -1085,7 +1091,7 @@ public class ElytraBounce extends Module {
             Modules.get().get(ChestSwap.class).swap();
             int slot = this.findHotbarGliderSlot();
             if (slot >= 0) this.mc.player.getInventory().setSelectedSlot(slot);
-            else this.reportChestBlocked("chest piece must be in the hotbar");
+            else this.reportChestBlocked("elytra must be in the hotbar");
          });
          return;
       }

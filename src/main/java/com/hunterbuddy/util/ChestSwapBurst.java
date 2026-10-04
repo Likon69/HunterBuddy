@@ -1,6 +1,7 @@
 package com.hunterbuddy.util;
 
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.mixininterface.IClientPlayerInteractionManager;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.PendingUpdateManager;
@@ -21,11 +22,12 @@ public final class ChestSwapBurst {
 
    public static int useSwap(Hand hand) {
       MinecraftClient mc = MeteorClient.mc;
-      if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null || !canSwap(hand)) return -1;
+      if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.getNetworkHandler() == null || !canSwap(hand)) return -1;
       ItemStack stack = mc.player.getStackInHand(hand);
       int sequence;
       try (PendingUpdateManager prediction = mc.world.getPendingUpdateManager().incrementSequence()) {
          sequence = prediction.getSequence();
+         ((IClientPlayerInteractionManager) mc.interactionManager).meteor$syncSelected();
          mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(hand, sequence, mc.player.getYaw(), mc.player.getPitch()));
       }
       ActionResult result = stack.use(mc.world, mc.player, hand);
