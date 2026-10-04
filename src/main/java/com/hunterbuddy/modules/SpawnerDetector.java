@@ -481,6 +481,8 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> noSafeColumnLogged = new java.util.HashSet<>();
     private final Set<BlockPos> lowGlideLogged = new java.util.HashSet<>();
     private final Set<BlockPos> floatingBlockLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> lidBlockLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> shaftPivotFailureLogged = new java.util.HashSet<>();
     private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
     private final Set<BlockPos> newChunkSkipLogged = new java.util.HashSet<>();
     private final Set<BlockPos> autoAbandonedOnce = new java.util.HashSet<>();
@@ -885,6 +887,8 @@ public class SpawnerDetector extends Module {
         noSafeColumnLogged.clear();
         lowGlideLogged.clear();
         floatingBlockLogged.clear();
+        lidBlockLogged.clear();
+        shaftPivotFailureLogged.clear();
         jungleTempleSkipLogged.clear();
         newChunkSkipLogged.clear();
         autoSoloRejectedThisSession.clear();
@@ -3107,6 +3111,21 @@ public class SpawnerDetector extends Module {
                 continue;
             }
             if (!hasTwentyDryOpenBelow(x, y, z, cursor)) break;
+            boolean supported = false;
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                cursor.set(x + dir.getOffsetX(), y - 1, z + dir.getOffsetZ());
+                BlockState belowNeighbor = mc.world.getBlockState(cursor);
+                if (!isOpenState(belowNeighbor, cursor) || !belowNeighbor.getFluidState().isEmpty()) {
+                    supported = true;
+                    break;
+                }
+            }
+            if (supported) {
+                if (siteCenter != null && lidBlockLogged.add(siteCenter)) {
+                    autoLog("PLAN", siteCenter, String.format("column %d,%d lid at y=%d kept as top", x, z, y));
+                }
+                break;
+            }
             if (siteCenter != null && floatingBlockLogged.add(siteCenter)) {
                 autoLog("PLAN", siteCenter, String.format("column %d,%d floating block at y=%d ignored", x, z, y));
             }
@@ -3117,6 +3136,21 @@ public class SpawnerDetector extends Module {
 
     private int descendPastFloatingBlockTop(BlockPos siteCenter, int x, int z, int y, int minY, BlockPos.Mutable cursor) {
         while (y > minY && hasTwentyDryOpenBelow(x, y, z, cursor)) {
+            boolean supported = false;
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                cursor.set(x + dir.getOffsetX(), y - 1, z + dir.getOffsetZ());
+                BlockState belowNeighbor = mc.world.getBlockState(cursor);
+                if (!isOpenState(belowNeighbor, cursor) || !belowNeighbor.getFluidState().isEmpty()) {
+                    supported = true;
+                    break;
+                }
+            }
+            if (supported) {
+                if (siteCenter != null && lidBlockLogged.add(siteCenter)) {
+                    autoLog("PLAN", siteCenter, String.format("column %d,%d lid at y=%d kept as top", x, z, y));
+                }
+                break;
+            }
             if (siteCenter != null && floatingBlockLogged.add(siteCenter)) {
                 autoLog("PLAN", siteCenter, String.format("column %d,%d floating block at y=%d ignored", x, z, y));
             }
@@ -8805,14 +8839,25 @@ public class SpawnerDetector extends Module {
 
         if (obstacleY == Integer.MIN_VALUE) return true;
 
-        if (obstacleY - 2 < s.exitY()) return false;
+        if (obstacleY - 2 < s.exitY()) {
+            if (autoSite != null && shaftPivotFailureLogged.add(autoSite.center)) {
+                autoLog("SHAFT_FLY", autoSite.center, String.format("no pivot: obstacle y=%d exitY=%d too close", obstacleY, s.exitY()));
+            }
+            return false;
+        }
 
         int minFeetY = Math.max(obstacleY - 4, s.exitY() - 1);
         int maxFeetY = obstacleY - 2;
         BlockPos lowestEscape = null;
         for (int h = minFeetY; h <= maxFeetY; h++) {
             BlockPos escape = findShaftPivotEscape(s.x(), h, s.z());
-            if (escape == null) return false;
+            if (escape == null) {
+                if (autoSite != null && shaftPivotFailureLogged.add(autoSite.center)) {
+                    autoLog("SHAFT_FLY", autoSite.center, String.format("no pivot: obstacle y=%d exitY=%d no escape at feet y=%d (band %d..%d)",
+                        obstacleY, s.exitY(), h, minFeetY, maxFeetY));
+                }
+                return false;
+            }
             if (lowestEscape == null) lowestEscape = escape;
         }
 
