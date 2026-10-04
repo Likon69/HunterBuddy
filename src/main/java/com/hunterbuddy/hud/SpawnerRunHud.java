@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
@@ -43,8 +44,25 @@ public class SpawnerRunHud extends HudElement {
 
     private final Setting<HudStyle> style = sgGeneral.add(new EnumSetting.Builder<HudStyle>()
         .name("style")
-        .description("CONSOLE is a scrolling log with the current step and its last events. CARD is a compact readable status card. LINE is a single minimal line. TIMELINE is the classic time band with phase history.")
+        .description("CONSOLE is a panel with the current step, its last events, the last runs and the session totals. CARD is a compact readable status card. LINE is a single minimal line. TIMELINE is the classic time band with phase history.")
         .defaultValue(HudStyle.CONSOLE).build());
+
+    private final Setting<Integer> logLines = sgGeneral.add(new IntSetting.Builder()
+        .name("log-lines")
+        .description("CONSOLE only: how many recent events the log keeps on screen.")
+        .defaultValue(4).min(1).max(8).sliderRange(1, 8)
+        .visible(() -> style.get() == HudStyle.CONSOLE).build());
+
+    private final Setting<Integer> historyRuns = sgGeneral.add(new IntSetting.Builder()
+        .name("history-runs")
+        .description("CONSOLE only: how many finished runs to list, newest first, with their phases, time, loot and outcome. 0 hides the list.")
+        .defaultValue(5).min(0).max(8).sliderRange(0, 8)
+        .visible(() -> style.get() == HudStyle.CONSOLE).build());
+
+    private final Setting<Boolean> sessionStats = sgGeneral.add(new BoolSetting.Builder()
+        .name("session-stats")
+        .description("CONSOLE only: rooms, spawners, chests and shulkers since the client started, with the average run time and rooms per hour of active time.")
+        .defaultValue(true).visible(() -> style.get() == HudStyle.CONSOLE).build());
 
     private final Setting<Boolean> showHistory = sgGeneral.add(new BoolSetting.Builder()
         .name("show-history")
@@ -226,8 +244,39 @@ public class SpawnerRunHud extends HudElement {
 
     private record DistResult(double fraction, String valueText) {}
 
+    private enum Outcome { DONE, ABANDONED, FAILED, CRUISE }
+
+    private record RunSummary(int number, RunRecord run, int chests, int shulkers, Outcome outcome) {}
+
+    private record ConsoleView(
+        String label, Color titleColor, Tone tone, String detail, String chrono,
+        String runTag, String runTotal,
+        Kind kind, double fraction, int pillsFilled, int pillsTotal, Color barColor, String barKey,
+        List<LogEntry> log, List<RunSummary> runs, double newestReveal,
+        int rooms, int spawners, int chests, int shulkers, String avgRun, String perHour, String activeText
+    ) {}
+
     private final List<Segment> runSegments = new ArrayList<>();
     private final List<RunRecord> history = new ArrayList<>();
+    private final List<RunSummary> runSummaries = new ArrayList<>();
+    private int runStartRooms;
+    private int runStartChests;
+    private int runStartShulkers;
+    private boolean runCruise;
+    private long summaryAddedMs;
+    private String consoleBarKey = "";
+    private double consoleBarShown;
+    private int doneRunCount;
+    private long doneRunSumMs;
+    private long activeMs;
+    private long lastLiveFrameMs;
+    private double frameDt = 0.016;
+
+    private String consoleLabel = "";
+    private Color consoleLabelColor = new Color(255, 255, 255, 255);
+    private String consoleOutLabel = "";
+    private Color consoleOutLabelColor = new Color(255, 255, 255, 255);
+    private long consoleLabelChangeMs;
     private final long[] groupAvgSum = new long[7];
     private final int[] groupAvgCount = new int[7];
 
@@ -249,7 +298,6 @@ public class SpawnerRunHud extends HudElement {
     private final List<LogEntry> consoleLog = new ArrayList<>();
     private long logSeq;
     private int runIndex;
-    private int lastKnownRoomTotal;
     private boolean combatPauseLogged;
     private long lastBottomLogKey;
     private long logSlideStartMs;
@@ -280,6 +328,7 @@ public class SpawnerRunHud extends HudElement {
         double dt = lastFrameNanos == 0L ? 0.016 : Math.min(0.25, (nowNanos - lastFrameNanos) / 1_000_000_000.0);
         lastFrameNanos = nowNanos;
         animTime += dt;
+        frameDt = dt;
 
         SpawnerDetector detector = Modules.get().get(SpawnerDetector.class);
         boolean live = MeteorClient.mc.player != null && MeteorClient.mc.world != null
@@ -287,6 +336,11 @@ public class SpawnerRunHud extends HudElement {
 
         if (!live) {
             wasLive = false;
+            lastLiveFrameMs = 0L;
+            if (detector != null && runStartMs != 0L) {
+                finishRun(detector, System.currentTimeMillis(), false);
+                lastSiteRef = null;
+            }
             if (isInEditor()) {
                 renderEditorDemo(renderer);
                 return;
@@ -300,6 +354,8 @@ public class SpawnerRunHud extends HudElement {
             moduleActivatedMs = now;
             wasLive = true;
         }
+        if (lastLiveFrameMs != 0L) activeMs += Math.min(2_000L, Math.max(0L, now - lastLiveFrameMs));
+        lastLiveFrameMs = now;
 
         Object site = detector.getAutoSite();
         String stateName = detector.getAutoStateName();
@@ -332,7 +388,7 @@ public class SpawnerRunHud extends HudElement {
 
     private void updateRun(SpawnerDetector detector, Object site, String stateName, long now) {
         if (site != lastSiteRef) {
-            if (lastSiteRef != null) finishRun(detector, now);
+            if (lastSiteRef != null) finishRun(detector, now, site != null && !runCruise && !detector.isAutoSoloTransitOnly());
             if (site != null) {
                 runSegments.clear();
                 runStartMs = now;
@@ -340,16 +396,21 @@ public class SpawnerRunHud extends HudElement {
                 runFailedCap = false;
                 lastStateName = "";
                 runIndex++;
-                lastKnownRoomTotal = 0;
                 combatPauseLogged = false;
-                pushLog(now, "RUN " + runIndex, "spawner found", Tone.ACCENT);
+                runStartRooms = detector.getStatRoomsFarmed();
+                runStartChests = detector.getStatChestsBroken();
+                runStartShulkers = detector.getStatShulkersFound();
+                runCruise = detector.isAutoSoloTransitOnly();
+                pushLog(now, "RUN " + runIndex, runCruise ? "cruise leg" : "spawner found", Tone.ACCENT);
             }
             lastSiteRef = site;
         } else if (site == null && (runStartMs != 0L || !runSegments.isEmpty())) {
-            finishRun(detector, now);
+            finishRun(detector, now, false);
         }
 
         if (site == null) return;
+
+        runCruise = runCruise && detector.isAutoSoloTransitOnly();
 
         boolean failedNow = "FAILED".equals(stateName);
         int group = groupOf(stateName);
@@ -377,9 +438,6 @@ public class SpawnerRunHud extends HudElement {
             if ("CLIMB".equals(stateName)) gaugeRefY = MeteorClient.mc.player.getY();
             lastStateName = stateName;
         }
-
-        int roomTotal = detector.getAutoRoomContainerTotal();
-        if (roomTotal > 0) lastKnownRoomTotal = roomTotal;
 
         double px = MeteorClient.mc.player.getX(), py = MeteorClient.mc.player.getY(), pz = MeteorClient.mc.player.getZ();
         if (!havePos) {
@@ -412,21 +470,34 @@ public class SpawnerRunHud extends HudElement {
         }
     }
 
-    private void finishRun(SpawnerDetector detector, long now) {
+    private void finishRun(SpawnerDetector detector, long now, boolean chained) {
         if (currentGroup >= 0 && !runFailedCap && !runSegments.isEmpty()) {
             Segment last = runSegments.get(runSegments.size() - 1);
             if (last.endMs < 0L) pushPhaseEndLog(last.group, last.durationMs(now), detector, now);
         }
         closeCurrentSegment(now);
+        List<Frozen> frozen = new ArrayList<>();
+        for (Segment s : runSegments) frozen.add(new Frozen(s.group, s.durationMs(now)));
+        long total = Math.max(1L, now - runStartMs);
+        RunRecord record = new RunRecord(frozen, total, runFailedCap);
         if (!runSegments.isEmpty()) {
-            List<Frozen> frozen = new ArrayList<>();
-            for (Segment s : runSegments) frozen.add(new Frozen(s.group, s.durationMs(now)));
-            long total = Math.max(1L, now - runStartMs);
-            RunRecord record = new RunRecord(frozen, total, runFailedCap);
             history.add(0, record);
             while (history.size() > 8) history.remove(history.size() - 1);
             insertion = new Insertion(frozen, total, runFailedCap, now);
-            if (!runFailedCap) pushLog(now, "RUN " + runIndex, "done · " + formatSpan(total) + " · " + lastKnownRoomTotal + " chests", Tone.ACCENT);
+        }
+        if (runStartMs != 0L) {
+            int chests = Math.max(0, detector.getStatChestsBroken() - runStartChests);
+            int shulkers = Math.max(0, detector.getStatShulkersFound() - runStartShulkers);
+            boolean farmed = chained || detector.getStatRoomsFarmed() > runStartRooms;
+            Outcome outcome = runFailedCap ? Outcome.FAILED : farmed ? Outcome.DONE : runCruise ? Outcome.CRUISE : Outcome.ABANDONED;
+            runSummaries.add(0, new RunSummary(runIndex, record, chests, shulkers, outcome));
+            while (runSummaries.size() > 8) runSummaries.remove(runSummaries.size() - 1);
+            summaryAddedMs = now;
+            if (outcome == Outcome.DONE) {
+                doneRunCount++;
+                doneRunSumMs += total;
+            }
+            if (outcome != Outcome.FAILED) pushLog(now, "RUN " + runIndex, describeRunEnd(outcome, total, chests, shulkers), runEndTone(outcome));
         }
         runSegments.clear();
         runStartMs = 0L;
@@ -815,6 +886,29 @@ public class SpawnerRunHud extends HudElement {
         pushLog(now, GROUP_WORD[group], describePhaseEnd(group, d) + " · " + formatSpan(durationMs), Tone.DIM);
     }
 
+    private static String describeRunEnd(Outcome outcome, long totalMs, int chests, int shulkers) {
+        return switch (outcome) {
+            case DONE -> "done · " + formatSpan(totalMs) + " · " + plural(chests, "chest")
+                + (shulkers > 0 ? " · " + plural(shulkers, "shulker") : "");
+            case ABANDONED -> "abandoned · " + formatSpan(totalMs);
+            case CRUISE -> "cruise leg over · " + formatSpan(totalMs);
+            default -> "failed · " + formatSpan(totalMs);
+        };
+    }
+
+    private static Tone runEndTone(Outcome outcome) {
+        return switch (outcome) {
+            case DONE -> Tone.ACCENT;
+            case ABANDONED -> Tone.AMBER;
+            case FAILED -> Tone.RED;
+            default -> Tone.DIM;
+        };
+    }
+
+    private static String plural(int n, String word) {
+        return n + " " + word + (n == 1 ? "" : "s");
+    }
+
     private String describePhaseEnd(int group, SpawnerDetector d) {
         return switch (group) {
             case G_VOL -> "landed";
@@ -861,7 +955,7 @@ public class SpawnerRunHud extends HudElement {
 
     private List<LogEntry> buildDisplayLog(StepInfo step, Tone tone, long now) {
         LogEntry live = tone == Tone.AMBER ? new LogEntry(-2L, now, "!", buildStuckLogText(step, now), Tone.AMBER) : null;
-        int show = Math.min(CONSOLE_LOG_ROWS, consoleLog.size() + (live != null ? 1 : 0));
+        int show = Math.min(logLines.get(), consoleLog.size() + (live != null ? 1 : 0));
         List<LogEntry> out = new ArrayList<>(show);
         int fromPersisted = live != null ? show - 1 : show;
         int start = Math.max(0, consoleLog.size() - fromPersisted);
@@ -885,7 +979,7 @@ public class SpawnerRunHud extends HudElement {
         };
     }
 
-    private static Color faded(SettingColor c, float alpha) {
+    private static Color faded(Color c, float alpha) {
         return new Color(c.r, c.g, c.b, (int) (c.a * MathClamp01(alpha)));
     }
 
@@ -909,20 +1003,37 @@ public class SpawnerRunHud extends HudElement {
     private static final double LINE_BAR_H = 3.0;
     private static final double MIN_LINE_W = 160.0;
 
-    private static final double CONSOLE_DOT = 3.0;
-    private static final double CONSOLE_DOT_X = 5.0;
-    private static final double CONSOLE_DOT_Y = 6.0;
-    private static final double CONSOLE_HEADER_H = 15.0;
-    private static final double CONSOLE_SEP_H = 0.8;
-    private static final double CONSOLE_LOG_ROW_H = 9.0;
-    private static final int CONSOLE_LOG_ROWS = 3;
-    private static final double MIN_CONSOLE_W = 240.0;
-    private static final double CONSOLE_DETAIL_MIN_W = 70.0;
+    private static final double CONSOLE_STRIPE_W = 2.0;
+    private static final double CONSOLE_DOT_R = 2.4;
+    private static final double CONSOLE_TITLE_SCALE = 1.15;
+    private static final double CONSOLE_TEXT_SCALE = 0.85;
+    private static final double CONSOLE_CLOCK_SCALE = 0.75;
+    private static final double CONSOLE_MICRO_SCALE = 0.7;
+    private static final double CONSOLE_BAR_H = 2.0;
+    private static final double CONSOLE_ROW_H = 12.0;
+    private static final double CONSOLE_SECTION_GAP = 6.0;
+    private static final double CONSOLE_TRACKING = 0.8;
+    private static final double MIN_CONSOLE_W = 270.0;
+    private static final double CONSOLE_DETAIL_MIN_W = 110.0;
+    private static final double CONSOLE_LOG_TEXT_MIN_W = 130.0;
+    private static final double CONSOLE_HIST_BAND_MIN_W = 48.0;
     private static final double CONSOLE_BLINK_S = 1.6;
+    private static final double CONSOLE_SHIMMER_S = 1.8;
     private static final long CONSOLE_LOG_SLIDE_MS = 350L;
+    private static final long CONSOLE_LOG_FLASH_MS = 1400L;
+    private static final long CONSOLE_LABEL_ANIM_MS = 260L;
+    private static final long CONSOLE_VALUE_FLASH_MS = 1200L;
     private static final String ARROW = "→";
-    private static final String[] CONSOLE_LOG_TAGS = {"FLY", "LAND", "DIG", "ROOM", "EXIT", "CLIMB", "HANDOFF", "PAUSE", "RUN 99", "!", "×"};
+    private static final String[] CONSOLE_LOG_TAGS = {"FLY", "LAND", "DIG", "ROOM", "EXIT", "CLIMB", "HANDOFF", "PAUSE", "RUN 999", "!", "×"};
     private static final String CLOCK_TEMPLATE = "00:00:00";
+    private static final String RUN_INFO_TEMPLATE = "RUN 999 · 00:00";
+    private static final String RUN_NUM_TEMPLATE = "#999";
+    private static final String CHESTS_TEMPLATE = "99 chests";
+    private static final String SHULKERS_TEMPLATE = "99 shulkers";
+    private static final String ACTIVE_TEMPLATE = "99h 59m active";
+    private static final String TILE_VALUE_TEMPLATE = "8888";
+    private static final String[] OUTCOME_WORDS = {"DONE", "ABANDONED", "FAILED", "CRUISE"};
+    private static final String[] TILE_LABELS = {"ROOMS", "SPAWNERS", "CHESTS", "SHULKERS", "AVG RUN", "ROOMS/H"};
 
 
     private double maxTextWidth(HudRenderer renderer, String[] arr, boolean shadow, double s) {
@@ -941,96 +1052,459 @@ public class SpawnerRunHud extends HudElement {
 
 
     private void renderConsole(HudRenderer renderer, SpawnerDetector detector, String stateName, StepInfo step, long elapsed, long now) {
-        boolean shadow = textShadow.get();
-        double s = size.get();
-        boolean anim = animations.get();
-        double pad = padding.get();
         boolean idleNow = "IDLE".equals(stateName) && detector.getAutoSite() == null;
-
         Tone tone = consoleTone(detector, stateName, step, elapsed, now);
-
-        double gap = GAP * s;
-        double dotSize = CONSOLE_DOT * s;
-        double dotX = CONSOLE_DOT_X * s;
-        double dotY = CONSOLE_DOT_Y * s;
-        double titleColX = (CONSOLE_DOT_X + CONSOLE_DOT) * s + gap;
-        double titleW = maxTextWidth(renderer, CARD_LABELS, shadow, s);
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
-        double detailScale = s * 0.8;
-
-        double headerH = CONSOLE_HEADER_H * s;
-        double sepH = Math.max(0.6, CONSOLE_SEP_H * s);
-        double logRowH = CONSOLE_LOG_ROW_H * s;
-
-        double width = Math.max(titleColX + titleW + gap + CONSOLE_DETAIL_MIN_W * s + gap + chronoW, MIN_CONSOLE_W * s);
-        double height = headerH + sepH + CONSOLE_LOG_ROWS * logRowH;
-
-        double x0 = this.x + pad, y0 = this.y + pad;
-        if (background.get()) renderer.quad(this.x, this.y, width + pad * 2.0, height + pad * 2.0, backgroundColor.get());
-
-        boolean blink = anim && dotBlinks(tone);
-        float dotAlpha = blink ? (float) (0.625 + 0.375 * Math.cos(animTime * 2.0 * Math.PI / CONSOLE_BLINK_S)) : 1.0f;
-        renderer.quad(x0 + dotX, y0 + dotY, dotSize, dotSize, faded(dotColor(tone), dotAlpha));
-
-        double titleTextH = renderer.textHeight(shadow, s);
-        double titleTextY = y0 + (headerH - titleTextH) / 2.0;
-        drawClipped(renderer, step.label(), x0 + titleColX, titleTextY, titleW, toneColor(tone), shadow, s);
-
         String detail = composeConsoleDetail(stateName, step, tone, idleNow, elapsed, now);
-        double detailX = x0 + titleColX + titleW + gap;
-        double detailAvailable = Math.max(0.0, width - (titleColX + titleW + gap) - gap - chronoW);
-        double detailTextH = renderer.textHeight(shadow, detailScale);
-        double detailTextY = y0 + (headerH - detailTextH) / 2.0;
-        drawClipped(renderer, detail, detailX, detailTextY, detailAvailable, mutedColor.get(), shadow, detailScale);
+        boolean inRun = runStartMs > 0L;
+        double reveal = animations.get()
+            ? smoothstep((now - summaryAddedMs) / (double) INSERT_ANIM_MS)
+            : 1.0;
+        String avgRun = doneRunCount > 0 ? formatSpan(doneRunSumMs / doneRunCount) : "--";
+        String perHour = doneRunCount > 0 && activeMs >= 60_000L
+            ? String.format(Locale.ROOT, "%.1f", doneRunCount * 3_600_000.0 / activeMs)
+            : "--";
 
-        String chronoText = formatSpan(elapsed);
-        double chronoTextW = renderer.textWidth(chronoText, shadow, s);
-        renderer.text(chronoText, x0 + width - chronoTextW, titleTextY, toneColor(tone), shadow, s);
+        ConsoleView view = new ConsoleView(
+            step.label(), consoleTitleColor(tone, step), tone, detail, formatSpan(elapsed),
+            inRun ? "RUN " + runIndex : "", inRun ? formatSpan(now - runStartMs) : "",
+            step.kind(), step.fraction(), step.pillsFilled(), step.pillsTotal(), step.barColor(),
+            runIndex + ":" + stepSinceMs + ":" + step.label(),
+            buildDisplayLog(step, tone, now), runSummaries, reveal,
+            detector.getStatRoomsFarmed(), detector.getStatSpawnersBroken(), detector.getStatChestsBroken(), detector.getStatShulkersFound(),
+            avgRun, perHour, formatActive(activeMs));
+        drawConsole(renderer, view, now);
+    }
 
-        double sepY = y0 + headerH;
-        renderer.quad(x0, sepY, width, sepH, faded(mutedColor.get(), 0.5f));
+    private Color consoleTitleColor(Tone tone, StepInfo step) {
+        return switch (tone) {
+            case RED -> badColor.get();
+            case FIGHT -> fightColor.get();
+            case DIM -> valueColor.get();
+            default -> step.labelColor();
+        };
+    }
 
-        List<LogEntry> lines = buildDisplayLog(step, tone, now);
+    private void updateConsoleLabel(String label, Color color, long now) {
+        if (!label.equals(consoleLabel)) {
+            consoleOutLabel = consoleLabel;
+            consoleOutLabelColor = consoleLabelColor;
+            consoleLabel = label;
+            consoleLabelChangeMs = now;
+        }
+        consoleLabelColor = color;
+    }
+
+    private void drawConsole(HudRenderer renderer, ConsoleView v, long now) {
+        boolean shadow = textShadow.get();
+        boolean anim = animations.get();
+        double s = size.get();
+        double pad = padding.get();
+        double gap = GAP * s;
+
+        double titleScale = s * CONSOLE_TITLE_SCALE;
+        double textScale = s * CONSOLE_TEXT_SCALE;
+        double clockScale = s * CONSOLE_CLOCK_SCALE;
+        double microScale = s * CONSOLE_MICRO_SCALE;
+        double tracking = CONSOLE_TRACKING * s;
+
+        double stripeW = CONSOLE_STRIPE_W * s;
+        double dotR = CONSOLE_DOT_R * s;
+        double rowH = CONSOLE_ROW_H * s;
+        double barH = Math.max(1.0, CONSOLE_BAR_H * s);
+        double sectionGap = CONSOLE_SECTION_GAP * s;
+        double pillPadX = 3.0 * s;
+
+        double titleH = renderer.textHeight(shadow, titleScale);
+        double textH = renderer.textHeight(shadow, textScale);
+        double microH = renderer.textHeight(shadow, microScale);
+        double valueH = renderer.textHeight(shadow, s);
+        double pillH = microH + 2.0 * s;
+
+        double dotLeft = stripeW + 4.0 * s;
+        double titleX = dotLeft + dotR * 2.0 + 5.0 * s;
+        double titleW = maxTextWidth(renderer, CARD_LABELS, shadow, titleScale);
+        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, titleScale);
+        double runInfoW = renderer.textWidth(RUN_INFO_TEMPLATE, shadow, textScale);
+        double clockW = renderer.textWidth(CLOCK_TEMPLATE, shadow, clockScale);
+        double tagW = maxTextWidth(renderer, CONSOLE_LOG_TAGS, shadow, microScale) + pillPadX * 2.0;
+        double numW = renderer.textWidth(RUN_NUM_TEMPLATE, shadow, textScale);
+        double durW = renderer.textWidth(CHRONO_TEMPLATE, shadow, textScale);
+        double chestsW = renderer.textWidth(CHESTS_TEMPLATE, shadow, textScale);
+        double shulkW = renderer.textWidth(SHULKERS_TEMPLATE, shadow, textScale);
+        double badgeW = maxTextWidth(renderer, OUTCOME_WORDS, shadow, microScale) + pillPadX * 2.0;
+        double activeW = renderer.textWidth(ACTIVE_TEMPLATE, shadow, microScale);
+        double tileContentW = Math.max(
+            Math.max(renderer.textWidth(TILE_VALUE_TEMPLATE, shadow, s), renderer.textWidth(CHRONO_TEMPLATE, shadow, s)),
+            maxTrackedWidth(renderer, TILE_LABELS, shadow, microScale, tracking));
+
+        boolean showHist = historyRuns.get() > 0;
+        boolean showSession = sessionStats.get();
+        int histShown = Math.min(historyRuns.get(), v.runs().size());
+        int logRows = logLines.get();
+
+        double headerNeed = titleX + Math.max(titleW + gap * 2.0 + chronoW, CONSOLE_DETAIL_MIN_W * s + gap * 2.0 + runInfoW);
+        double logNeed = clockW + gap * 2.0 + tagW + gap * 2.0 + CONSOLE_LOG_TEXT_MIN_W * s;
+        double histNeed = showHist ? numW + durW + chestsW + shulkW + badgeW + gap * 10.0 + CONSOLE_HIST_BAND_MIN_W * s : 0.0;
+        double tilesNeed = showSession ? (tileContentW + gap * 2.0) * TILE_LABELS.length : 0.0;
+        double width = Math.max(MIN_CONSOLE_W * s, Math.max(Math.max(headerNeed, logNeed), Math.max(histNeed, tilesNeed)));
+
+        double line1H = Math.max(titleH, dotR * 2.0) + 3.0 * s;
+        double line2H = textH + 2.0 * s;
+        double headerH = 2.0 * s + line1H + line2H + 3.0 * s + barH + 2.0 * s;
+        double captionH = microH + 4.0 * s;
+        double tilesH = valueH + 2.0 * s + microH;
+        double height = headerH
+            + sectionGap + captionH + logRows * rowH
+            + (showHist ? sectionGap + captionH + historyRuns.get() * rowH : 0.0)
+            + (showSession ? sectionGap + captionH + tilesH : 0.0);
+
+        double fullW = width + pad * 2.0;
+        double fullH = height + pad * 2.0;
+        double x0 = this.x + pad, y0 = this.y + pad;
+
+        updateConsoleLabel(v.label(), v.titleColor(), now);
+        boolean labelMoving = anim && !consoleOutLabel.isEmpty();
+        double labelProgress = labelMoving ? smoothstep((now - consoleLabelChangeMs) / (double) CONSOLE_LABEL_ANIM_MS) : 1.0;
+        Color headColor = labelProgress < 1.0 ? mix(consoleOutLabelColor, v.titleColor(), (float) labelProgress) : v.titleColor();
+
+        if (background.get()) {
+            renderer.quad(this.x, this.y, fullW, fullH, backgroundColor.get());
+            Color tintL = faded(headColor, 0.22f);
+            Color tintR = faded(headColor, 0.0f);
+            renderer.quad(this.x, this.y, fullW, pad + headerH, tintL, tintR, tintR, tintL);
+        }
+        renderer.quad(x0, y0, stripeW, headerH - 2.0 * s, headColor);
+
+        double line1Y = y0 + 2.0 * s;
+        drawBeatDot(renderer, x0 + dotLeft + dotR, line1Y + line1H / 2.0, dotR, dotColor(v.tone()), anim && dotBlinks(v.tone()), s);
+
+        double titleY = line1Y + (line1H - titleH) / 2.0;
+        double titleAvail = Math.max(0.0, width - titleX - gap * 2.0 - chronoW);
+        double slide = titleH * 0.6;
+        double outSlide = Math.min(slide, Math.max(0.0, titleY - this.y));
+        if (labelProgress < 1.0) {
+            drawClipped(renderer, consoleOutLabel, x0 + titleX, titleY - labelProgress * outSlide, titleAvail,
+                faded(consoleOutLabelColor, (float) (1.0 - labelProgress)), shadow, titleScale);
+        }
+        drawClipped(renderer, v.label(), x0 + titleX, titleY + (1.0 - labelProgress) * slide, titleAvail,
+            faded(v.titleColor(), (float) labelProgress), shadow, titleScale);
+
+        double chronoTextW = renderer.textWidth(v.chrono(), shadow, titleScale);
+        renderer.text(v.chrono(), x0 + width - chronoTextW, titleY, toneColor(v.tone()), shadow, titleScale);
+
+        double line2Y = line1Y + line1H;
+        double detailY = line2Y + (line2H - textH) / 2.0;
+        boolean hasRun = !v.runTag().isEmpty();
+        double detailAvail = Math.max(0.0, width - titleX - (hasRun ? runInfoW + gap * 2.0 : 0.0));
+        drawClipped(renderer, v.detail(), x0 + titleX, detailY, detailAvail, mutedColor.get(), shadow, textScale);
+        if (hasRun) {
+            String sep = " · ";
+            double totalX = x0 + width - renderer.textWidth(v.runTotal(), shadow, textScale);
+            double sepX = totalX - renderer.textWidth(sep, shadow, textScale);
+            double tagX = sepX - renderer.textWidth(v.runTag(), shadow, textScale);
+            renderer.text(v.runTag(), tagX, detailY, accentColor.get(), shadow, textScale);
+            renderer.text(sep, sepX, detailY, faded(mutedColor.get(), 0.7f), shadow, textScale);
+            renderer.text(v.runTotal(), totalX, detailY, valueColor.get(), shadow, textScale);
+        }
+
+        double barY = line2Y + line2H + 3.0 * s;
+        drawConsoleProgress(renderer, v, x0 + dotLeft, barY, width - dotLeft, barH, s, anim);
+
+        double y = y0 + headerH + sectionGap;
+        drawCaption(renderer, "EVENTS", "", 0.0, x0, y, width, captionH, shadow, microScale, tracking, s);
+        y += captionH;
+        drawConsoleLog(renderer, v.log(), x0, y, width, rowH, clockW, tagW, pillH, this.y + fullH, shadow, textScale, clockScale, microScale, gap, s, anim, now);
+        y += logRows * rowH;
+
+        if (showHist) {
+            y += sectionGap;
+            drawCaption(renderer, "LAST RUNS", "", 0.0, x0, y, width, captionH, shadow, microScale, tracking, s);
+            y += captionH;
+            drawConsoleHistory(renderer, v.runs(), histShown, v.newestReveal(), x0, y, width, rowH,
+                numW, durW, chestsW, shulkW, badgeW, pillH, this.y + fullH, shadow, textScale, microScale, gap, s);
+            y += historyRuns.get() * rowH;
+        }
+
+        if (showSession) {
+            y += sectionGap;
+            drawCaption(renderer, "SESSION", v.activeText(), activeW, x0, y, width, captionH, shadow, microScale, tracking, s);
+            y += captionH;
+            drawConsoleTiles(renderer, v, x0, y, width, tilesH, shadow, s, microScale, tracking, gap, anim);
+        }
+
+        setSize(fullW, fullH);
+    }
+
+    private void drawBeatDot(HudRenderer renderer, double cx, double cy, double r, Color color, boolean beat, double s) {
+        if (!beat) {
+            disc(renderer, cx, cy, r, color);
+            return;
+        }
+        double phase = (animTime / CONSOLE_BLINK_S) % 1.0;
+        double second = phase - 0.22;
+        double env = Math.max(0.0, 1.0 - phase * 5.0) + (second > 0.0 ? 0.6 * Math.max(0.0, 1.0 - second * 5.0) : 0.0);
+        ring(renderer, cx, cy, r * (1.2 + 1.2 * phase), Math.max(0.8, 0.8 * s), faded(color, (float) (0.5 * (1.0 - phase))));
+        disc(renderer, cx, cy, r * (1.0 + 0.22 * env), faded(color, (float) (0.8 + 0.2 * Math.min(1.0, env))));
+    }
+
+    private void drawConsoleProgress(HudRenderer renderer, ConsoleView v, double x, double y, double w, double h, double s, boolean anim) {
+        Color track = faded(mutedColor.get(), 0.22f);
+        Color fill = v.tone() == Tone.RED ? badColor.get() : v.barColor();
+        int total = v.pillsTotal();
+        boolean segmented = (v.kind() == Kind.PIPS || v.kind() == Kind.DOTS) && total > 0 && total <= 24;
+        double segGap = Math.max(1.0, 1.5 * s);
+        double segW = segmented ? (w - segGap * (total - 1)) / total : 0.0;
+        if (segmented && segW >= 2.0) {
+            int filled = MathHelperClamp(v.pillsFilled(), 0, total);
+            float current = anim ? (float) (0.3 + 0.35 * (0.5 + 0.5 * Math.sin(animTime * 2.0 * Math.PI / 1.1))) : 0.45f;
+            for (int i = 0; i < total; i++) {
+                Color c = i < filled ? fill : i == filled && v.kind() == Kind.PIPS ? faded(fill, current) : track;
+                renderer.quad(x + i * (segW + segGap), y, segW, h, c);
+            }
+            return;
+        }
+        renderer.quad(x, y, w, h, track);
+        if (v.kind() == Kind.BAR || v.kind() == Kind.PIPS) {
+            double f = MathClampD(v.fraction(), 0.0, 1.0);
+            if (!anim || !v.barKey().equals(consoleBarKey)) {
+                consoleBarKey = v.barKey();
+                consoleBarShown = f;
+            } else {
+                consoleBarShown += (1.0 - Math.exp(-frameDt / 0.25)) * (f - consoleBarShown);
+            }
+            f = MathClampD(consoleBarShown, 0.0, 1.0);
+            double fw = w * f;
+            if (fw > 0.3) {
+                renderer.quad(x, y, fw, h, fill);
+                double headW = Math.min(fw, Math.max(1.0, s));
+                renderer.quad(x + fw - headW, y, headW, h, faded(valueColor.get(), 0.85f));
+            }
+        } else if (anim) {
+            double cometW = w * 0.22;
+            double head = x - cometW + (w + cometW) * smoothstep((animTime / CONSOLE_SHIMMER_S) % 1.0);
+            double a = Math.max(x, head), b = Math.min(x + w, head + cometW);
+            if (b > a) {
+                Color tail = faded(fill, 0.0f);
+                Color tip = faded(fill, 0.9f);
+                renderer.quad(a, y, b - a, h, tail, tip, tip, tail);
+            }
+        }
+    }
+
+    private void drawCaption(HudRenderer renderer, String caption, String right, double rightW, double x, double y, double w, double h,
+                             boolean shadow, double scale, double tracking, double s) {
+        double ty = y + (h - renderer.textHeight(shadow, scale)) / 2.0;
+        double end = drawTracked(renderer, caption, x, ty, faded(mutedColor.get(), 0.9f), shadow, scale, tracking);
+        double ruleEnd = x + w;
+        if (!right.isEmpty()) {
+            renderer.text(right, x + w - renderer.textWidth(right, shadow, scale), ty, faded(mutedColor.get(), 0.75f), shadow, scale);
+            ruleEnd = x + w - rightW - 4.0 * s;
+        }
+        double ruleX = end + 4.0 * s;
+        if (ruleEnd - ruleX > 1.0) {
+            double ruleH = Math.max(0.6, 0.8 * s);
+            Color a = faded(mutedColor.get(), 0.4f);
+            Color b = faded(mutedColor.get(), 0.05f);
+            renderer.quad(ruleX, y + (h - ruleH) / 2.0, ruleEnd - ruleX, ruleH, a, b, b, a);
+        }
+    }
+
+    private void drawConsoleLog(HudRenderer renderer, List<LogEntry> lines, double x, double y, double w, double rowH,
+                                double clockW, double tagW, double pillH, double limitY, boolean shadow,
+                                double textScale, double clockScale, double microScale, double gap, double s, boolean anim, long now) {
         long bottomKey = lines.isEmpty() ? 0L : lines.get(lines.size() - 1).seq();
         if (bottomKey != lastBottomLogKey) {
             logSlideStartMs = now;
             lastBottomLogKey = bottomKey;
         }
-
-        double clockW = renderer.textWidth(CLOCK_TEMPLATE, shadow, detailScale);
-        double tagW = maxTextWidth(renderer, CONSOLE_LOG_TAGS, shadow, detailScale);
-        double logClockX = x0 + 6.0 * s;
-        double logTagX = logClockX + clockW + gap;
-        double logTextX = logTagX + tagW + gap;
-        double logTextAvail = Math.max(0.0, width - (logTextX - x0) - 4.0 * s);
-
-        int total = lines.size();
-        double[] baseAlphas = {0.45, 0.7, 1.0};
-        for (int i = 0; i < total; i++) {
-            LogEntry entry = lines.get(i);
-            double rowAlpha = baseAlphas[baseAlphas.length - total + i];
-            double rowY = sepY + sepH + i * logRowH;
-            boolean isBottom = i == total - 1;
-            double dyOffset = 0.0;
-            double extraAlpha = 1.0;
-            if (isBottom && anim) {
-                double progress = MathClampD((now - logSlideStartMs) / (double) CONSOLE_LOG_SLIDE_MS, 0.0, 1.0);
-                double eased = smoothstep(progress);
-                dyOffset = (1.0 - eased) * 5.0 * s;
-                extraAlpha = eased;
-            }
-            double lineTextH = renderer.textHeight(shadow, detailScale);
-            double lineTextY = rowY + (logRowH - lineTextH) / 2.0 + dyOffset;
-            float lineAlpha = (float) (rowAlpha * extraAlpha);
-            if (entry.tone() == Tone.AMBER && anim) lineAlpha *= (float) (0.6 + 0.4 * Math.cos(animTime * 2.0 * Math.PI / 1.1));
-            Color clockColor = faded(mutedColor.get(), (float) (rowAlpha * extraAlpha));
-            Color lineColor = faded(toneColor(entry.tone()), lineAlpha);
-            renderer.text(formatClock(entry.whenMs()), logClockX, lineTextY, clockColor, shadow, detailScale);
-            drawClipped(renderer, entry.tag(), logTagX, lineTextY, tagW, lineColor, shadow, detailScale);
-            drawClipped(renderer, entry.text(), logTextX, lineTextY, logTextAvail, lineColor, shadow, detailScale);
+        double textH = renderer.textHeight(shadow, textScale);
+        double clockH = renderer.textHeight(shadow, clockScale);
+        double tagX = x + clockW + gap * 2.0;
+        double textX = tagX + tagW + gap * 2.0;
+        double textAvail = Math.max(0.0, x + w - textX);
+        double drawnH = Math.max(pillH, Math.max(textH, clockH));
+        if (lines.isEmpty()) {
+            renderer.text("waiting for the first event", textX, y + (rowH - textH) / 2.0, faded(mutedColor.get(), 0.6f), shadow, textScale);
+            return;
         }
+        int total = lines.size();
+        for (int i = 0; i < total; i++) {
+            LogEntry e = lines.get(i);
+            double rowAlpha = total <= 1 ? 1.0 : 0.4 + 0.6 * i / (double) (total - 1);
+            double dy = 0.0;
+            double enter = 1.0;
+            double flash = 0.0;
+            if (i == total - 1 && anim) {
+                double p = smoothstep((now - logSlideStartMs) / (double) CONSOLE_LOG_SLIDE_MS);
+                dy = Math.min((1.0 - p) * 4.0 * s, Math.max(0.0, limitY - (y + i * rowH) - (rowH + drawnH) / 2.0));
+                enter = p;
+                flash = 1.0 - MathClampD((now - logSlideStartMs) / (double) CONSOLE_LOG_FLASH_MS, 0.0, 1.0);
+            }
+            float a = (float) (rowAlpha * enter);
+            if (e.seq() == -2L && anim) a *= (float) (0.6 + 0.4 * Math.cos(animTime * 2.0 * Math.PI / 1.1));
+            double rowY = y + i * rowH + dy;
+            renderer.text(formatClock(e.whenMs()), x, rowY + (rowH - clockH) / 2.0, faded(mutedColor.get(), a * 0.85f), shadow, clockScale);
+            drawPill(renderer, e.tag(), tagX, rowY + (rowH - pillH) / 2.0, tagW, pillH, logTagColor(e), a, (float) (0.18 + 0.32 * flash), shadow, microScale);
+            drawClipped(renderer, e.text(), textX, rowY + (rowH - textH) / 2.0, textAvail, faded(toneColor(e.tone()), a), shadow, textScale);
+        }
+    }
 
-        setSize(width + pad * 2.0, height + pad * 2.0);
+    private Color logTagColor(LogEntry e) {
+        for (int g = 0; g < GROUP_WORD.length; g++) {
+            if (GROUP_WORD[g].equals(e.tag())) return phaseColor(g);
+        }
+        return toneColor(e.tone());
+    }
+
+    private void drawConsoleHistory(HudRenderer renderer, List<RunSummary> runs, int shown, double reveal, double x, double y, double w, double rowH,
+                                    double numW, double durW, double chestsW, double shulkW, double badgeW, double pillH, double limitY,
+                                    boolean shadow, double textScale, double microScale, double gap, double s) {
+        double textH = renderer.textHeight(shadow, textScale);
+        if (shown == 0) {
+            renderer.text("no finished run yet", x, y + (rowH - textH) / 2.0, faded(mutedColor.get(), 0.6f), shadow, textScale);
+            return;
+        }
+        double badgeX = x + w - badgeW;
+        double shulkX = badgeX - gap * 2.0 - shulkW;
+        double chestsX = shulkX - gap * 2.0 - chestsW;
+        double durX = chestsX - gap * 2.0 - durW;
+        double bandX = x + numW + gap * 2.0;
+        double bandW = Math.max(4.0 * s, durX - gap * 2.0 - bandX);
+        double bandH = Math.max(2.0, 3.0 * s);
+        long maxTotal = 1L;
+        for (int i = 0; i < shown; i++) maxTotal = Math.max(maxTotal, runs.get(i).run().totalMs());
+        double scale = bandW / maxTotal;
+
+        for (int i = 0; i < shown; i++) {
+            RunSummary r = runs.get(i);
+            float a = (float) (i == 0 ? reveal : Math.max(0.55, 1.0 - 0.1 * i));
+            double drop = i == 0 ? Math.min((1.0 - reveal) * 4.0 * s, Math.max(0.0, limitY - y - (rowH + Math.max(textH, pillH)) / 2.0)) : 0.0;
+            double rowY = y + i * rowH + drop;
+            double ty = rowY + (rowH - textH) / 2.0;
+
+            renderer.text("#" + r.number(), x, ty, faded(mutedColor.get(), a), shadow, textScale);
+
+            double by = rowY + (rowH - bandH) / 2.0;
+            renderer.quad(bandX, by, bandW, bandH, faded(mutedColor.get(), 0.14f * a));
+            double cx = bandX;
+            for (Frozen f : r.run().segments()) {
+                double segW = f.durationMs() * scale;
+                if (segW > 0.0) renderer.quad(cx, by, segW, bandH, faded(phaseColor(f.group()), a));
+                cx += segW;
+            }
+            if (r.outcome() == Outcome.FAILED && cx > bandX) {
+                double capW = Math.min(bandH, cx - bandX);
+                renderer.quad(cx - capW, by, capW, bandH, faded(badColor.get(), a));
+            }
+
+            String dur = formatSpan(r.run().totalMs());
+            renderer.text(dur, durX + durW - renderer.textWidth(dur, shadow, textScale), ty, faded(valueColor.get(), a), shadow, textScale);
+            if (r.outcome() != Outcome.CRUISE) {
+                Color chestColor = r.chests() > 0 ? faded(valueColor.get(), a) : faded(mutedColor.get(), a * 0.7f);
+                drawClipped(renderer, plural(r.chests(), "chest"), chestsX, ty, chestsW, chestColor, shadow, textScale);
+            }
+            if (r.shulkers() > 0) {
+                drawClipped(renderer, plural(r.shulkers(), "shulker"), shulkX, ty, shulkW, faded(accentColor.get(), a), shadow, textScale);
+            }
+            drawPill(renderer, OUTCOME_WORDS[r.outcome().ordinal()], badgeX, rowY + (rowH - pillH) / 2.0, badgeW, pillH,
+                outcomeColor(r.outcome()), a, 0.22f, shadow, microScale);
+        }
+    }
+
+    private Color outcomeColor(Outcome outcome) {
+        return switch (outcome) {
+            case DONE -> accentColor.get();
+            case ABANDONED -> amberColor.get();
+            case FAILED -> badColor.get();
+            default -> mutedColor.get();
+        };
+    }
+
+    private void drawConsoleTiles(HudRenderer renderer, ConsoleView v, double x, double y, double w, double h,
+                                  boolean shadow, double s, double microScale, double tracking, double gap, boolean anim) {
+        String[] values = {
+            Integer.toString(v.rooms()), Integer.toString(v.spawners()), Integer.toString(v.chests()),
+            Integer.toString(v.shulkers()), v.avgRun(), v.perHour()
+        };
+        double valueH = renderer.textHeight(shadow, s);
+        double tileW = w / values.length;
+        for (int i = 0; i < values.length; i++) {
+            double tx = x + i * tileW;
+            if (i > 0) renderer.quad(tx, y + s, Math.max(0.6, 0.8 * s), h - 2.0 * s, faded(mutedColor.get(), 0.2f));
+            float fresh = pulse.freshness("consoleTile" + i, values[i], CONSOLE_VALUE_FLASH_MS);
+            boolean empty = "--".equals(values[i]) || "0".equals(values[i]);
+            Color base = empty ? faded(mutedColor.get(), 0.7f) : i == 3 ? accentColor.get() : valueColor.get();
+            Color c = anim && fresh > 0.0f ? mix(base, accentColor.get(), fresh) : base;
+            double inner = i == 0 ? 0.0 : gap;
+            renderer.text(values[i], tx + inner, y, c, shadow, s);
+            drawTracked(renderer, TILE_LABELS[i], tx + inner, y + valueH + 2.0 * s, faded(mutedColor.get(), 0.85f), shadow, microScale, tracking);
+        }
+    }
+
+    private void drawPill(HudRenderer renderer, String text, double x, double y, double w, double h, Color color,
+                          float alpha, float fillAlpha, boolean shadow, double scale) {
+        pill(renderer, x, y, w, h, faded(color, fillAlpha * alpha));
+        double tw = renderer.textWidth(text, shadow, scale);
+        double ty = y + (h - renderer.textHeight(shadow, scale)) / 2.0;
+        if (tw > w) drawClipped(renderer, text, x, ty, w, faded(color, alpha), shadow, scale);
+        else renderer.text(text, x + (w - tw) / 2.0, ty, faded(color, alpha), shadow, scale);
+    }
+
+    private void pill(HudRenderer renderer, double x, double y, double w, double h, Color colour) {
+        double r = Math.min(h, w) / 2.0;
+        double cy = y + h / 2.0;
+        if (w - 2.0 * r > 0.0) renderer.quad(x + r, y, w - 2.0 * r, h, colour);
+        halfDisc(renderer, x + r, cy, r, Math.PI * 0.5, colour);
+        halfDisc(renderer, x + w - r, cy, r, -Math.PI * 0.5, colour);
+    }
+
+    private void halfDisc(HudRenderer renderer, double cx, double cy, double r, double from, Color colour) {
+        int segments = 8;
+        double previousX = cx + Math.cos(from) * r;
+        double previousY = cy + Math.sin(from) * r;
+        for (int i = 1; i <= segments; i++) {
+            double angle = from + Math.PI * i / segments;
+            double px = cx + Math.cos(angle) * r;
+            double py = cy + Math.sin(angle) * r;
+            tri(renderer, cx, cy, previousX, previousY, px, py, colour);
+            previousX = px;
+            previousY = py;
+        }
+    }
+
+    private double drawTracked(HudRenderer renderer, String text, double x, double y, Color color, boolean shadow, double scale, double tracking) {
+        double cx = x;
+        for (int i = 0; i < text.length(); i++) {
+            String ch = String.valueOf(text.charAt(i));
+            renderer.text(ch, cx, y, color, shadow, scale);
+            cx += renderer.textWidth(ch, shadow, scale) + tracking;
+        }
+        return text.isEmpty() ? x : cx - tracking;
+    }
+
+    private double trackedWidth(HudRenderer renderer, String text, boolean shadow, double scale, double tracking) {
+        double w = 0.0;
+        for (int i = 0; i < text.length(); i++) w += renderer.textWidth(String.valueOf(text.charAt(i)), shadow, scale);
+        return w + tracking * Math.max(0, text.length() - 1);
+    }
+
+    private double maxTrackedWidth(HudRenderer renderer, String[] arr, boolean shadow, double scale, double tracking) {
+        double m = 0.0;
+        for (String t : arr) m = Math.max(m, trackedWidth(renderer, t, shadow, scale, tracking));
+        return m;
+    }
+
+    private static Color mix(Color a, Color b, float t) {
+        float k = MathClamp01(t);
+        return new Color(
+            (int) (a.r + (b.r - a.r) * k), (int) (a.g + (b.g - a.g) * k),
+            (int) (a.b + (b.b - a.b) * k), (int) (a.a + (b.a - a.a) * k));
+    }
+
+    private static String formatActive(long ms) {
+        long minutes = Math.max(0L, ms) / 60_000L;
+        String span = minutes >= 60L ? String.format(Locale.ROOT, "%dh %02dm", minutes / 60L, minutes % 60L) : minutes + " min";
+        return span + " active";
     }
 
 
@@ -1483,74 +1957,46 @@ public class SpawnerRunHud extends HudElement {
     }
 
     private void demoConsole(HudRenderer renderer) {
-        boolean shadow = textShadow.get();
-        double s = size.get();
-        double pad = padding.get();
-        double gap = GAP * s;
-        double dotSize = CONSOLE_DOT * s;
-        double dotX = CONSOLE_DOT_X * s;
-        double dotY = CONSOLE_DOT_Y * s;
-        double titleColX = (CONSOLE_DOT_X + CONSOLE_DOT) * s + gap;
-        double titleW = maxTextWidth(renderer, CARD_LABELS, shadow, s);
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
-        double detailScale = s * 0.8;
+        long now = System.currentTimeMillis();
+        List<LogEntry> all = List.of(
+            new LogEntry(-109L, now - 277_000L, "DIG", "y 45 " + ARROW + " 17 · 0:31", Tone.DIM),
+            new LogEntry(-108L, now - 236_000L, "ROOM", "chest 3/3 · 0:41", Tone.DIM),
+            new LogEntry(-107L, now - 214_000L, "EXIT", "shaft fly · 0:22", Tone.DIM),
+            new LogEntry(-106L, now - 205_000L, "CLIMB", "climb done · 0:09", Tone.DIM),
+            new LogEntry(-105L, now - 204_000L, "HANDOFF", "handed off · 0:01", Tone.DIM),
+            new LogEntry(-104L, now - 204_000L, "RUN 26", "done · 2:08 · 3 chests · 1 shulker", Tone.ACCENT),
+            new LogEntry(-103L, now - 62_000L, "RUN 27", "spawner found", Tone.ACCENT),
+            new LogEntry(-102L, now - 44_000L, "FLY", "landed · 0:18", Tone.DIM),
+            new LogEntry(-101L, now - 37_000L, "LAND", "walked to hole · 0:07", Tone.DIM)
+        );
+        List<LogEntry> log = all.subList(Math.max(0, all.size() - logLines.get()), all.size());
+        List<RunSummary> runs = List.of(
+            demoRun(26, 3, 1, Outcome.DONE, 18, 6, 31, 41, 22, 9, 1),
+            demoRun(25, 0, 0, Outcome.ABANDONED, 22, 9, 47),
+            demoRun(24, 2, 0, Outcome.DONE, 16, 5, 28, 33, 19, 8, 1),
+            demoRun(23, 0, 0, Outcome.FAILED, 20, 7, 38),
+            demoRun(22, 0, 0, Outcome.CRUISE, 54),
+            demoRun(21, 4, 2, Outcome.DONE, 19, 6, 35, 52, 24, 10, 1),
+            demoRun(20, 1, 0, Outcome.DONE, 17, 5, 26, 22, 18, 8, 1),
+            demoRun(19, 2, 1, Outcome.DONE, 21, 7, 30, 37, 20, 9, 1)
+        );
+        ConsoleView view = new ConsoleView(
+            "DIGGING", creuseColor.get(), Tone.OK, "y 45 " + ARROW + " 17 · 23/57 blocks", "0:37",
+            "RUN 27", "1:02",
+            Kind.BAR, 23.0 / 57.0, 0, 0, creuseColor.get(), "demo",
+            log, runs, 1.0,
+            12, 11, 27, 4, "1:52", "6.4", formatActive(112L * 60_000L));
+        drawConsole(renderer, view, now);
+    }
 
-        double headerH = CONSOLE_HEADER_H * s;
-        double sepH = Math.max(0.6, CONSOLE_SEP_H * s);
-        double logRowH = CONSOLE_LOG_ROW_H * s;
-
-        double width = Math.max(titleColX + titleW + gap + CONSOLE_DETAIL_MIN_W * s + gap + chronoW, MIN_CONSOLE_W * s);
-        double height = headerH + sepH + CONSOLE_LOG_ROWS * logRowH;
-
-        double x0 = this.x + pad, y0 = this.y + pad;
-        if (background.get()) renderer.quad(this.x, this.y, width + pad * 2.0, height + pad * 2.0, backgroundColor.get());
-
-        renderer.quad(x0 + dotX, y0 + dotY, dotSize, dotSize, accentColor.get());
-
-        double titleTextH = renderer.textHeight(shadow, s);
-        double titleTextY = y0 + (headerH - titleTextH) / 2.0;
-        drawClipped(renderer, "DIGGING", x0 + titleColX, titleTextY, titleW, valueColor.get(), shadow, s);
-
-        String detail = "y 45 " + ARROW + " 17 · 23/57 blocks";
-        double detailX = x0 + titleColX + titleW + gap;
-        double detailAvailable = Math.max(0.0, width - (titleColX + titleW + gap) - gap - chronoW);
-        double detailTextH = renderer.textHeight(shadow, detailScale);
-        double detailTextY = y0 + (headerH - detailTextH) / 2.0;
-        drawClipped(renderer, detail, detailX, detailTextY, detailAvailable, mutedColor.get(), shadow, detailScale);
-
-        String chronoText = "0:37";
-        double chronoTextW = renderer.textWidth(chronoText, shadow, s);
-        renderer.text(chronoText, x0 + width - chronoTextW, titleTextY, valueColor.get(), shadow, s);
-
-        double sepY = y0 + headerH;
-        renderer.quad(x0, sepY, width, sepH, faded(mutedColor.get(), 0.5f));
-
-        double clockW = renderer.textWidth(CLOCK_TEMPLATE, shadow, detailScale);
-        double tagW = maxTextWidth(renderer, CONSOLE_LOG_TAGS, shadow, detailScale);
-        double logClockX = x0 + 6.0 * s;
-        double logTagX = logClockX + clockW + gap;
-        double logTextX = logTagX + tagW + gap;
-        double logTextAvail = Math.max(0.0, width - (logTextX - x0) - 4.0 * s);
-
-        String[][] demoLines = {
-            {"08:14:41", "RUN 4  ", "spawner found", "accent", "0.45"},
-            {"08:14:59", "FLY    ", "landed · 0:18", "muted", "0.7"},
-            {"08:15:04", "LAND   ", "walked to hole · 0:05", "muted", "1.0"}
-        };
-        double lineTextH = renderer.textHeight(shadow, detailScale);
-        for (int i = 0; i < demoLines.length; i++) {
-            double rowY = sepY + sepH + i * logRowH;
-            double lineTextY = rowY + (logRowH - lineTextH) / 2.0;
-            float alpha = Float.parseFloat(demoLines[i][4]);
-            SettingColor base = "accent".equals(demoLines[i][3]) ? accentColor.get() : mutedColor.get();
-            Color clockColor = faded(mutedColor.get(), alpha);
-            Color lineColor = faded(base, alpha);
-            renderer.text(demoLines[i][0], logClockX, lineTextY, clockColor, shadow, detailScale);
-            drawClipped(renderer, demoLines[i][1], logTagX, lineTextY, tagW, lineColor, shadow, detailScale);
-            drawClipped(renderer, demoLines[i][2], logTextX, lineTextY, logTextAvail, lineColor, shadow, detailScale);
+    private static RunSummary demoRun(int number, int chests, int shulkers, Outcome outcome, int... seconds) {
+        List<Frozen> segments = new ArrayList<>();
+        long total = 0L;
+        for (int g = 0; g < seconds.length; g++) {
+            segments.add(new Frozen(g, seconds[g] * 1000L));
+            total += seconds[g] * 1000L;
         }
-
-        setSize(width + pad * 2.0, height + pad * 2.0);
+        return new RunSummary(number, new RunRecord(segments, total, outcome == Outcome.FAILED), chests, shulkers, outcome);
     }
 
     private void demoCard(HudRenderer renderer) {

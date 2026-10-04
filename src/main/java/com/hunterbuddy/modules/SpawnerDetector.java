@@ -1068,6 +1068,7 @@ public class SpawnerDetector extends Module {
 
     public boolean isAutoAreaLoaderHandoff() { return autoAreaLoaderWasOn && flightModule.get() == FlightModule.AreaLoader; }
     public boolean isAutoPaused() { return autoPaused; }
+    public boolean isAutoSoloTransitOnly() { return autoSoloTransitOnly; }
     public String getAutoPauseReason() { return autoPauseReason; }
     public Entity getAutoShaftChaseTarget() { return autoShaftChaseTarget; }
 
