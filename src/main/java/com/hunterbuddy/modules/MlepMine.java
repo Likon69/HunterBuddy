@@ -815,7 +815,8 @@ public class MlepMine extends Module {
                         this.miningQueue.remove(miningData2);
                      }
 
-                     if (miningData2.getBlockDamage() >= (Double)this.speedConfig.get()) {
+                     if (miningData2.getBlockDamage() >= (Double)this.speedConfig.get()
+                        && (!(Boolean)this.grimConfig.get() || this.grimBalance.canFinish(miningData2.getPos(), now))) {
                         if (this.mc.player.isUsingItem() && !(Boolean)this.multitaskConfig.get()) {
                            return;
                         }

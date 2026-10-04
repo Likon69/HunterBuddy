@@ -71,6 +71,7 @@ public final class GrimBreakBalance {
 
     private double maximumBlockDamage;
     private long startBreak;
+    private long finishStart;
     private long lastFinishBreak;
     private double breakBalance;
     private double delayBalance;
@@ -91,6 +92,7 @@ public final class GrimBreakBalance {
         targetBroken = false;
         maximumBlockDamage = 0.0;
         startBreak = 0L;
+        finishStart = 0L;
         lastFinishBreak = 0L;
         breakBalance = 0.0;
         delayBalance = 0.0;
@@ -135,6 +137,7 @@ public final class GrimBreakBalance {
         // Grim credits fifty milliseconds to the very first start of a session and nothing after
         // that, so this only ever fires once.
         startBreak = now - (target == null ? 50L : 0L);
+        finishStart = now;
 
         double breakDelay = now - lastFinishBreak;
 
@@ -159,10 +162,11 @@ public final class GrimBreakBalance {
 
     /** STOP_DESTROY_BLOCK left the client: a finish, whatever this client calls it. */
     public void onFinish(BlockPos pos, long now) {
-        lastFinished = pos.toImmutable();
-
         // A finish with nothing started before it is not measured at all.
-        if (target == null) return;
+        if (target == null) {
+            lastFinished = pos.toImmutable();
+            return;
+        }
 
         double predicted = maximumBlockDamage <= 0.0
             ? Double.POSITIVE_INFINITY
@@ -182,13 +186,21 @@ public final class GrimBreakBalance {
             breakBalance += diff;
         }
 
-        if (pos.equals(target)) targetBroken = true;
-
         // Grim sets both, and the start time matters as much as the other: the next finish on
         // this same position is measured from here, not from the start that opened the block.
         lastFinishBreak = startBreak = now;
+        finishStart = now;
 
         clamp();
+        if (breakBalance <= 900.0) {
+            lastFinished = pos.toImmutable();
+            if (pos.equals(target)) targetBroken = true;
+        }
+    }
+
+    public boolean canFinish(BlockPos pos, long now) {
+        if (!pos.equals(target) || targetBroken) return true;
+        return now - finishStart >= burstCost(maximumBlockDamage) + 50.0;
     }
 
     /**

@@ -712,6 +712,7 @@ public class SpawnerDetector extends Module {
     private boolean autoShaftReturning;
 
     private BlockPos autoDigQueuedPos;
+    private final Map<BlockPos, Integer> autoDigBlockRetries = new HashMap<>();
     private String autoDigQueuedBlockLabel;
     private long autoDigBlockStartMs;
     private long autoDigTotalStartMs;
@@ -3315,7 +3316,7 @@ public class SpawnerDetector extends Module {
     }
 
     private BlockPos chooseLandSpot(ColumnPlan plan, int ringRadius) {
-        int holeTopY = plan.startY();
+        int holeTopY = plan.water() ? plan.startY() : (plan.rim() != null ? plan.rim().getY() : plan.holeTopY());
         BlockPos best = probeLandingSpot(plan.x(), plan.z(), holeTopY);
         double bestDistSq = best != null ? 0.0 : Double.MAX_VALUE;
 
@@ -4534,7 +4535,7 @@ public class SpawnerDetector extends Module {
         double px = mc.player.getX(), py = mc.player.getY(), pz = mc.player.getZ();
         double dx = (plan.x() + 0.5) - px, dz = (plan.z() + 0.5) - pz;
         double D = Math.hypot(dx, dz);
-        double H = py - plan.exitY();
+        double H = py - (plan.water() ? plan.exitY() : (plan.rim() != null ? plan.rim().getY() : plan.holeTopY()));
         Vec3d vel = mc.player.getVelocity();
         double speed = vel.length();
         double speedH = Math.hypot(vel.x, vel.z);
@@ -5630,6 +5631,7 @@ public class SpawnerDetector extends Module {
             autoDigBlockStartMs = autoDigTotalStartMs;
             autoDigBlocksPlanned = Math.max(1, autoColumn.blocksToBreak());
             autoDigQueuedPos = null;
+            autoDigBlockRetries.clear();
             autoDigQueuedBlockLabel = null;
             autoDigBlockTicks = 0;
             autoDigDisplacedSinceMs = 0;
@@ -5647,6 +5649,7 @@ public class SpawnerDetector extends Module {
         boolean slowInWater = underwater && mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED) < 0.99;
         int mult = slowInWater ? 5 : 1;
         long perBlockTimeout = 15_000L * mult;
+        long now = System.currentTimeMillis();
         long totalTimeout = Math.max(120_000L, 4_000L * autoDigBlocksPlanned) * mult;
         if (System.currentTimeMillis() - autoDigTotalStartMs > totalTimeout) { abort("dig timeout"); return; }
 
@@ -5681,8 +5684,15 @@ public class SpawnerDetector extends Module {
             }
             autoDigBlockTicks++;
             if (autoMineTick("DIG", below, true)) handleDigBlockCleared(below, gap);
-            if (System.currentTimeMillis() - autoDigBlockStartMs > perBlockTimeout) {
-                abort("dig block timeout");
+            if (autoDigQueuedPos != null && now - autoDigBlockStartMs > perBlockTimeout) {
+                if (autoDigBlockRetries.merge(autoDigQueuedPos.toImmutable(), 1, Integer::sum) >= 2) {
+                    abort("dig block timeout");
+                } else {
+                    Utils.setPressed(mc.options.attackKey, false);
+                    autoDigQueuedPos = null;
+                    autoDigBlockStartMs = now;
+                    autoLog("DIG", autoSite.center, "dig block retry");
+                }
             }
             return;
         }
@@ -5749,8 +5759,15 @@ public class SpawnerDetector extends Module {
         autoDigBlockTicks++;
         autoMineTick("DIG", below, true);
 
-        if (System.currentTimeMillis() - autoDigBlockStartMs > perBlockTimeout) {
-            abort("dig block timeout");
+        if (autoDigQueuedPos != null && now - autoDigBlockStartMs > perBlockTimeout) {
+            if (autoDigBlockRetries.merge(autoDigQueuedPos.toImmutable(), 1, Integer::sum) >= 2) {
+                abort("dig block timeout");
+            } else {
+                Utils.setPressed(mc.options.attackKey, false);
+                autoDigQueuedPos = null;
+                autoDigBlockStartMs = now;
+                autoLog("DIG", autoSite.center, "dig block retry");
+            }
         }
     }
 
@@ -10793,7 +10810,7 @@ public class SpawnerDetector extends Module {
 
         BaritoneHelper.stopAllPathing();
         releaseAllAutoKeys();
-        markVisited(autoSite.center, "aborted:" + reason);
+        if (!"dig block timeout".equals(reason)) markVisited(autoSite.center, "aborted:" + reason);
         autoRunAbandoned = true;
 
         boolean gliding = mc.player.isGliding();
