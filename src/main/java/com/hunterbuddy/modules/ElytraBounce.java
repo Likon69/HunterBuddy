@@ -4,50 +4,50 @@ import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
+import com.hunterbuddy.modules.regear.util.Utils;
+import com.hunterbuddy.util.BouncePlanCache;
 import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.util.BounceSolver;
+import com.hunterbuddy.util.ChestSwapBurst;
+import java.util.ArrayDeque;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
+import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
+import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
+import meteordevelopment.meteorclient.events.world.PlaySoundEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
-import com.hunterbuddy.modules.regear.util.Utils;
-import java.util.List;
-import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
-import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
-import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
-import meteordevelopment.meteorclient.events.packets.PacketEvent.Send;
-import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
-import meteordevelopment.meteorclient.events.world.PlaySoundEvent;
-import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
+import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.player.ChestSwap;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
+import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.EnchantmentEffectComponentTypes;
-import net.minecraft.component.type.EquippableComponent;
-import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.block.Blocks;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.MovementType;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 import net.minecraft.network.packet.s2c.play.CloseScreenS2CPacket;
-import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 
 public class ElytraBounce extends Module {
    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
@@ -160,6 +160,12 @@ public class ElytraBounce extends Module {
                .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && !(Boolean)this.autoPitch.get())
                .build()
       );
+   private final Setting<Boolean> pitchSchedule = this.sgGeneral
+      .add(new Builder().name("pitch-schedule")
+         .description("Let auto-pitch vary the pitch within each hop instead of holding one angle.")
+         .defaultValue(true)
+         .visible(() -> this.autoPitch.get() && this.lockPitch.get())
+         .build());
    private final Setting<Integer> setbackPause = this.sgGeneral
       .add(
          new meteordevelopment.meteorclient.settings.IntSetting.Builder()
@@ -310,61 +316,58 @@ public class ElytraBounce extends Module {
    private boolean startSprinting;
    private BlockPos portalTrap = null;
    private boolean paused = false;
-   private int rubberBandCooldown = 0;
-   /** Best pitch {@link BounceSolver} has found for the headroom last measured. */
-   private float solvedPitch = 90.0F;
-   /** Headroom the current {@link #solvedPitch} was solved for; -1 = not measured yet. */
+   private volatile int rubberBandCooldown = 0;
+
+   private int ticksSinceJump;
+   private volatile BounceSolver.Plan flyingPlan;
+   private final BouncePlanCache<AutoPitchKey, BounceSolver.Plan> pitchPlans = new BouncePlanCache<>();
+   private volatile AutoPitchKey pitchKey;
+
    private double solvedHeadroom = -1.0;
-   /** What {@link BounceSolver} predicts for {@link #solvedPitch}, shown in {@link #getInfoString}. */
+
    private double predictedSpeed = 0.0;
-   /** Ticks left before {@link #updateAutoPitch} will re-measure headroom on the ground. */
+
    private int solveCooldown = 0;
-   // hold-glide-clear: pings answered on our own schedule instead of vanilla's,
-   // separate from pingQueue below (which belongs to the tunnel-bounce fake-lag
-   // illusion and answers on its own timer, not this one).
+
    private final java.util.Queue<net.minecraft.network.packet.s2c.common.CommonPingS2CPacket> glideClearPingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
-   /** Glide-clear metadata packets held until the tick the re-deploy is free. */
+
    private final java.util.Queue<net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket> heldClears = new java.util.concurrent.ConcurrentLinkedQueue<>();
-   /** player.age the current batch of held clears started at. Netty thread writes it, the main thread reads it. */
+
    private volatile long heldSince = 0L;
-   /** G: the tick the player last actually left the ground under its own physics. */
+
    private int jumpTick = 0;
    private boolean wasOnGroundLastTick = true;
-   /** Whether the jump key was down as of the end of the previous tick. */
-   private boolean jumpKeyDownLastTick = false;
-   /** Set by serviceGlideClear on the tick a hold releases, so updateJumpKey presses that same tick. */
-   private boolean forcePressThisTick = false;
-   // chestplate-fakefly (v0.5.3 rewrite): which hand a burst just swapped the
-   // glider into, waiting for the return swap on SendMovementPacketsEvent —
-   // non-null only within the one tick between the two swaps.
-   private Hand fakeFlyBurstHand = null;
-   /** Sequence of a fakefly swap awaiting the server's own answer; -1 = none pending. */
-   private int fakeFlyPendingSequence = -1;
-   /** Age the pending sequence's ack (PlayerActionResponseS2CPacket) landed at; -1 = not yet. */
-   private long fakeFlyAckedAt = -1L;
-   /** Set once an acked swap goes a full tick with no inventory echo — a confirmed refusal, not a guess. */
-   private boolean fakeFlyDesynced = false;
-   /** Set for the one send that follows a fakefly swap call, so onSendPacket knows which PlayerInteractItemC2SPacket is ours. */
-   private boolean fakeFlyArmedForSend = false;
-   /** Last refusal cause reported, so the message prints once rather than every tick it holds. */
-   private String fakeFlyBlockedReason = null;
-   /** Whether fakefly's pair was present as of the last check — what {@link #shouldAutoJump} gates the ground jump on. */
-   private boolean fakeFlyPairReady = true;
-   // Lambda-style smart gliding: only force isGliding() once the real gliding flag
-   // has actually been set (server accepted the glide), then latch it through ground
-   // touches so gliding physics (low friction) is kept between bounces.
-   private boolean prevGliding = false;
 
-   /** True while the module is holding the jump key down for the player. */
+   private boolean jumpKeyDownLastTick = false;
+
+   private boolean forcePressThisTick = false;
+
+   private boolean chestMode;
+   private volatile boolean deployEdge;
+   private volatile boolean atomicOutPending;
+   private volatile int preTick;
+   private volatile int glideStartTick = -2;
+   private int lastOutTick = -2;
+   private String chestBlockedReason;
+   private boolean chestPairReady = true;
+   private volatile int groundClearTicks;
+   private volatile boolean clearanceEngaged;
+   private final ArrayDeque<Integer> heldPongs = new ArrayDeque<>();
+   private Deferred deferred;
+   private final AtomicInteger deploys = new AtomicInteger();
+   private final AtomicInteger swapsRefused = new AtomicInteger();
+   private final AtomicInteger teleports = new AtomicInteger();
+   private final AtomicInteger grimSetbacks = new AtomicInteger();
+   private final AtomicInteger clearsPlaced = new AtomicInteger();
+   private final AtomicInteger clearsLetGo = new AtomicInteger();
+
    private boolean jumpKeyDown = false;
-   // Mirror of the real (unforced) gliding flag, updated by modifyIsGliding().
-   private boolean realGliding = false;
-   // Lambda-style fake lag for 1x2 tunnel bounce: outgoing packets and incoming pings
-   // are held while skimming the tunnel floor, then released in bursts so the server
-   // treats the movement like a lag spike instead of flagging it.
+
+   private volatile boolean realGliding = false;
+
    private final java.util.Queue<net.minecraft.network.packet.Packet<?>> sendQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
    private final java.util.Queue<net.minecraft.network.packet.s2c.common.CommonPingS2CPacket> pingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
-   // Read/written from both the client and netty threads.
+
    private volatile boolean flushingPackets = false;
    private int fakeLagTicks = 0;
    private double lastGroundY;
@@ -386,79 +389,39 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onReceivePacket(Receive event) {
       this.probeReceive(event.packet);
-
-      // The server's own answer to a fakefly swap: a full inventory echo
-      // (F9) is only ever sent for one that actually applied. Not cancelled
-      // — it confirms the state the client already predicted, same as it
-      // would for a swap this module never touched. Any sync-0 echo counts,
-      // not just one traceable to a specific pending sequence: it's also
-      // what resumes the module on its own after a confirmed refusal,
-      // exactly the "reprise sans réactivation" a fresh inventory view gives
-      // by hand.
-      if (event.packet instanceof InventoryS2CPacket inventory && inventory.syncId() == 0) {
-         this.fakeFlyPendingSequence = -1;
-         this.fakeFlyAckedAt = -1L;
-         this.fakeFlyDesynced = false;
-      }
-
-      // The ack for a fakefly swap (F9 — sent before the swap itself is even
-      // attempted server-side, so it always arrives before the inventory
-      // echo a successful one gets). Recorded, not judged here: judged in
-      // serviceFakeFlyBurst, one full tick later with still no echo.
-      if (this.fakeFlyPendingSequence >= 0
-         && this.mc.player != null
-         && event.packet instanceof net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket ack
-         && ack.sequence() >= this.fakeFlyPendingSequence) {
-         this.fakeFlyAckedAt = this.mc.player.age;
-      }
-
-      // hold-glide-clear's own intake takes every ping and every glide clear
-      // before anything else gets a look — including the tunnel-bounce
-      // fake-lag ping queue below, which loses its own hold on a ping to
-      // this one if both happen to be active at once. Rare in practice
-      // (tunnel bounce is off by default, this is on), and correctness here
-      // matters more than the illusion there.
-      if (this.handleGlideClearPacket(event)) {
-         return;
-      }
-
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
-         // A setback makes Grim's own knockback "possible" on the pong of its
-         // transaction (the same mechanism a held clear rides); a held clear
-         // still sitting there when the client applies a teleport it hasn't
-         // pinged for yet is exactly the kind of offset this exists to avoid.
+         this.teleports.incrementAndGet();
+         if (this.enabled() && this.bounce.get() && (this.realGliding || this.preTick - this.glideStartTick <= 2)) {
+            this.grimSetbacks.incrementAndGet();
+         }
          this.releaseHeldGlideState();
-
-         // Rubberband (Meteor-style): stop gliding client side, release the latch and
-         // pause for a few ticks before restarting the takeoff cycle cleanly. The
-         // gliding reset happens either way; only the pause length is the setting,
-         // and 0 skips it — the loop most people would want off is the pause, not
-         // the reset that keeps the client and server flags from fighting.
-         if ((Integer)this.setbackPause.get() > 0) {
-            this.rubberBandCooldown = (Integer)this.setbackPause.get();
-         }
-
-         this.prevGliding = false;
+         this.atomicOutPending = false;
+         this.deployEdge = false;
+         this.clearanceEngaged = false;
+         this.groundClearTicks = 0;
+         this.rubberBandCooldown = this.setbackPause.get();
          this.realGliding = false;
-         if (this.mc.player != null) {
-            this.mc.player.stopGliding();
-         }
+         if (this.mc.player != null) this.mc.player.stopGliding();
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.play.PlayerRespawnS2CPacket
          || event.packet instanceof net.minecraft.network.packet.s2c.common.DisconnectS2CPacket) {
-         // Respawn also covers a dimension change in modern Minecraft — there
-         // is no separate packet for it any more — and either way, whatever
-         // was held belonged to a world that is no longer this one.
          this.releaseHeldGlideState();
+         this.pitchPlans.invalidate();
+         this.flyingPlan = null;
+         this.pitchKey = null;
+         this.atomicOutPending = false;
+         this.deployEdge = false;
+         this.clearanceEngaged = false;
+         this.groundClearTicks = 0;
+         this.realGliding = false;
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket velocity
-         && this.mc.player != null
-         && velocity.getEntityId() == this.mc.player.getId()) {
+         && this.mc.player != null && velocity.getEntityId() == this.mc.player.getId()) {
          this.releaseHeldGlideState();
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.play.ExplosionS2CPacket explosion
          && explosion.playerKnockback().isPresent()) {
          this.releaseHeldGlideState();
+      } else if (this.handleGlideClearPacket(event)) {
+         return;
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping && this.shouldQueuePackets()) {
-         // Grim brackets movement with transaction pings; holding them (and answering
-         // in the flush burst) is what makes the "lag" believable.
          this.pingQueue.add(ping);
          event.cancel();
       } else if (event.packet instanceof CloseScreenS2CPacket) {
@@ -469,26 +432,11 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onSendPacket(meteordevelopment.meteorclient.events.packets.PacketEvent.Send event) {
       this.probeSend(event.packet);
-
-      // The one PlayerInteractItemC2SPacket a fakefly swap just sent,
-      // captured here rather than returned from interactItem (which hands
-      // back an ActionResult, not the sequence) — judged by the server's own
-      // answer to it in onReceivePacket, not by a timer alone.
-      if (this.fakeFlyArmedForSend && event.packet instanceof PlayerInteractItemC2SPacket interact) {
-         this.fakeFlyPendingSequence = interact.getSequence();
-         this.fakeFlyAckedAt = -1L;
-      }
-
-      if (this.flushingPackets) {
-         return;
-      }
-
+      if (this.flushingPackets) return;
       if (this.shouldQueuePackets()) {
          this.sendQueue.add(event.packet);
          event.cancel();
       } else {
-         // Flushing here (before this packet goes out) keeps the packet order intact
-         // when the queue condition just turned false mid-tick.
          this.flushPackets();
       }
    }
@@ -551,18 +499,6 @@ public class ElytraBounce extends Module {
       }
    }
 
-   /**
-    * One line whenever the glider's durability actually moves, wherever it is
-    * - worn or in a hand - plus a line on the first tick of a run so a flight
-    * has a starting value to be read against. Reads only; nothing here can
-    * change what the module does.
-    */
-   /**
-    * The speed actually reached, against what the solver promised. The model
-    * is a faithful port of vanilla's gliding maths, so a flight that comes in
-    * well under its own prediction is being held back by something outside
-    * the physics, and one that beats it means the model is what is wrong.
-    */
    private void watchSpeed() {
       if (!(Boolean)this.logDurability.get() || this.mc.player == null) {
          return;
@@ -638,13 +574,39 @@ public class ElytraBounce extends Module {
 
    public void onActivate() {
       this.lastDurability = -1;
-      if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
+      this.peakSpeed = 0.0;
+      this.speedWindowTicks = 0;
+      if (this.deferred != null) this.deferred.finish();
+      this.deferred = null;
+      this.pitchPlans.invalidate();
+      this.flyingPlan = null;
+      this.pitchKey = null;
+      this.ticksSinceJump = 0;
+      this.preTick = 0;
+      this.chestMode = this.fakeFly.get();
+      this.deployEdge = false;
+      this.atomicOutPending = false;
+      this.glideStartTick = -2;
+      this.lastOutTick = -2;
+      this.chestBlockedReason = null;
+      this.chestPairReady = true;
+      this.groundClearTicks = 0;
+      this.clearanceEngaged = false;
+      synchronized (this.heldPongs) {
+         this.heldPongs.clear();
+      }
+      this.deploys.set(0);
+      this.swapsRefused.set(0);
+      this.teleports.set(0);
+      this.grimSetbacks.set(0);
+      this.clearsPlaced.set(0);
+      this.clearsLetGo.set(0);
+      if (this.mc.player != null && this.mc.world != null && !this.mc.player.getAbilities().allowFlying) {
          this.startSprinting = this.mc.player.isSprinting();
          this.tempPath = null;
          this.portalTrap = null;
          this.paused = false;
          this.rubberBandCooldown = 0;
-         this.solvedPitch = ((Double)this.pitch.get()).floatValue();
          this.solvedHeadroom = -1.0;
          this.predictedSpeed = 0.0;
          this.solveCooldown = 0;
@@ -655,10 +617,6 @@ public class ElytraBounce extends Module {
          this.wasOnGroundLastTick = this.mc.player.isOnGround();
          this.jumpKeyDownLastTick = false;
          this.forcePressThisTick = false;
-         this.fakeFlyBurstHand = null;
-         this.fakeFlyPendingSequence = -1;
-         this.fakeFlyBlockedReason = null;
-         this.prevGliding = false;
          this.realGliding = false;
          this.sendQueue.clear();
          this.pingQueue.clear();
@@ -732,46 +690,76 @@ public class ElytraBounce extends Module {
 
    public void onDeactivate() {
       BounceProbe.get().stop();
-      this.prevGliding = false;
+      if (this.deferred != null) this.deferred.finish();
+      this.deferred = null;
+      this.pitchPlans.invalidate();
+      this.flyingPlan = null;
+      this.pitchKey = null;
       this.realGliding = false;
+      this.jumpKeyDown = false;
+      this.jumpKeyDownLastTick = false;
+      this.deployEdge = false;
+      this.atomicOutPending = false;
+      this.clearanceEngaged = false;
+      this.groundClearTicks = 0;
       this.fakeLagTicks = 0;
-      // Applied, not dropped: a held clear the module never gets to release
-      // would leave the client believing it's still gliding after the server
-      // already cleared it, worse than any tick the clear might have cost.
       this.releaseHeldGlideState();
       this.flushPackets();
       if (this.mc.player != null) {
-         if ((Boolean)this.freePitch.get() && (Boolean)this.lockPitch.get() && (Boolean)this.bounce.get()) {
-            this.mc.player.setPitch(this.cameraPitch);
-         }
-
-         if ((Boolean)this.bounce.get()
+         if (this.freePitch.get() && this.lockPitch.get() && this.bounce.get()) this.mc.player.setPitch(this.cameraPitch);
+         if (this.bounce.get()
             && (!BaritoneHelper.hasElytraProcess() || BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().currentDestination() == null)) {
             BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoal(null);
          }
-
          this.mc.player.setSprinting(this.startSprinting);
-         if ((Boolean)this.toggleElytra.get()
-            && !(Boolean)this.fakeFly.get()
+         if (this.chestMode) {
+            this.restoreGlider();
+         } else if (this.toggleElytra.get()
             && !this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().toString().contains("chestplate")) {
-            ((ChestSwap)Modules.get().get(ChestSwap.class)).swap();
+            this.deferSwap(() -> Modules.get().get(ChestSwap.class).swap());
          }
       }
    }
 
    @EventHandler
    private void onTick(Pre event) {
+      this.preTick++;
+      if (this.mc.player == null || this.mc.world == null) {
+         this.jumpKeyDown = false;
+         this.deployEdge = false;
+         this.atomicOutPending = false;
+         this.pitchPlans.invalidate();
+         this.flyingPlan = null;
+         this.pitchKey = null;
+         this.releaseHeldGlideState();
+         this.flushPackets();
+         return;
+      }
+      this.ticksSinceJump = this.mc.player.isOnGround() ? 0 : this.ticksSinceJump + 1;
+      boolean previousChestMode = this.chestMode;
+      this.chestMode = this.fakeFly.get();
+      if (previousChestMode != this.chestMode) {
+         this.deployEdge = false;
+         this.atomicOutPending = false;
+         this.clearanceEngaged = false;
+         this.groundClearTicks = 0;
+         this.chestPairReady = true;
+         this.chestBlockedReason = null;
+         if (previousChestMode) this.restoreGlider();
+      }
       this.watchDurability();
       this.watchSpeed();
-      this.updateAutoPitch();
+      this.watchStats();
       this.tickFakeLag();
-      // Before updateJumpKey: a release here can flip realGliding false this
-      // same tick (the isGliding hook runs well before this point in a tick),
-      // and updateJumpKey's own stale-flag branch is what presses off that.
-      // serviceFakeFlyBurst follows the same rule for the same reason: its
-      // swap-in has to have already happened for the key to press into it.
+      if (Deferred.quiet) {
+         this.mc.player.setSprinting(false);
+         this.releaseHeldGlideState();
+         return;
+      }
+      this.prepareChestMode();
+      if (Deferred.quiet) return;
+      this.updateAutoPitch();
       this.serviceGlideClear();
-      this.serviceFakeFlyBurst();
       this.updateJumpKey();
       this.probeTick();
       if (this.rubberBandCooldown > 0) {
@@ -781,20 +769,15 @@ public class ElytraBounce extends Module {
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
          if ((Boolean)this.toggleElytra.get() && !(Boolean)this.fakeFly.get() && !this.elytraToggled) {
             if (!this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA)) {
-               ((ChestSwap)Modules.get().get(ChestSwap.class)).swap();
+               this.deferSwap(() -> Modules.get().get(ChestSwap.class).swap());
+               return;
             } else {
                this.elytraToggled = true;
             }
          }
 
          if (this.enabled()) {
-            // Held on, gliding or not, which is what the reference does. Dropping it
-            // the instant the glide started -- Meteor's pattern, kept until now --
-            // put a STOP_SPRINTING inside every one of the two-tick windows the
-            // server granted, and the grant died at the end of all of them. That is
-            // not proof, because the module cut the sprint on the grant itself and
-            // the two cannot be told apart from the outside; it is the only thing
-            // this client said in that window, and the reference never says it.
+
             this.mc.player.setSprinting(true);
          }
 
@@ -832,7 +815,6 @@ public class ElytraBounce extends Module {
                )) {
                this.waitingForChunksToLoad = false;
                this.paused = true;
-               this.prevGliding = false;
                BlockPos goal = this.mc.player.getBlockPos();
                double currDistance = (Double)this.distance.get();
                if (this.portalTrap != null) {
@@ -885,27 +867,10 @@ public class ElytraBounce extends Module {
 
          if (this.enabled()) {
             if (this.mc.player.isOnGround()) {
-               // The server force-stops gliding on ground contact (canGlide() returns
-               // false on ground), so mark the real flag off to re-deploy right after
-               // the next jump instead of relying on the flag sync through ViaVersion.
+
                this.realGliding = false;
             }
 
-            // Fakefly's own burst (swap in, press, swap out) runs earlier in
-            // this tick, from serviceFakeFlyBurst — before updateJumpKey, same
-            // as serviceGlideClear, and for the same reason: it has to have
-            // happened before the key decides whether to press.
-
-            // Nothing else here on purpose. Sending the takeoff from this tick used
-            // to be the whole point, and it is exactly what kept it from working:
-            // the packet went out one tick after leaving the ground, and the check
-            // that guards this cancels any takeoff that arrives while the last two
-            // ground flags are still set -- outright, before the server ever sees
-            // it. It also arrived before the input packet that releases the jump,
-            // which reads as a takeoff with the key already held. The forced key
-            // does it instead: held on the ground, tapped in the air, and vanilla
-            // sends the same packet on the rising edge, two ticks up, in the one
-            // shape those checks accept.
          }
       }
    }
@@ -916,63 +881,62 @@ public class ElytraBounce extends Module {
       return distToAxis > (Double)this.minDiagonalAngle.get();
    }
 
-   /**
-    * Re-measures headroom on the ground, at most every 10 ticks, and only
-    * re-solves the pitch when it actually changed — a ceiling doesn't move
-    * mid-hop, so there is nothing to gain re-solving in the air, only cycles
-    * to spend.
-    */
    private void updateAutoPitch() {
-      if ((Boolean)this.autoPitch.get() && (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && this.mc.world != null && this.mc.player != null) {
-         if (this.solveCooldown > 0) {
-            this.solveCooldown--;
-         } else if (this.mc.player.isOnGround()) {
-            this.solveCooldown = 10;
-            double headroom = BounceSolver.measureHeadroom(this.mc.player, this.mc.world);
-            if (!(this.solvedHeadroom >= 0.0) || !(Math.abs(headroom - this.solvedHeadroom) < 0.05)) {
-               boolean clearHeld = (Boolean)this.holdGlideClear.get();
-               this.solvedHeadroom = headroom;
-               this.solvedPitch = BounceSolver.solvePitch(headroom, clearHeld);
-               this.predictedSpeed = BounceSolver.simulateSpeed(this.solvedPitch, headroom, clearHeld);
-            }
-         }
+      if (Deferred.quiet) return;
+      if (!this.autoPitch.get() || !this.bounce.get() || !this.lockPitch.get() || this.mc.player == null || this.mc.world == null) {
+         this.pitchPlans.invalidate();
+         this.flyingPlan = null;
+         this.pitchKey = null;
+         return;
       }
+      if (this.solveCooldown > 0) {
+         this.solveCooldown--;
+      } else if (this.mc.player.isOnGround()) {
+         this.solveCooldown = 10;
+         this.solvedHeadroom = BounceSolver.measureHeadroom(this.mc.player, this.mc.world);
+         this.pitchKey = new AutoPitchKey(BounceSolver.Physics.DEFAULT, this.solvedHeadroom, this.pitchSchedule.get());
+      }
+      if (this.pitchKey == null) return;
+      this.pitchKey = new AutoPitchKey(BounceSolver.Physics.DEFAULT, this.pitchKey.headroom(), this.pitchSchedule.get());
+      var player = this.mc.player;
+      var world = this.mc.world;
+      AutoPitchKey key = this.pitchKey;
+      this.pitchPlans.update(player, world, key);
+      this.flyingPlan = this.pitchPlans.plan(player, world, key);
+      if (this.flyingPlan != null) this.predictedSpeed = this.flyingPlan.speed;
+      BouncePlanCache.Request<AutoPitchKey> request = this.pitchPlans.request();
+      if (request == null) return;
+      MeteorExecutor.execute(() -> {
+         try {
+            AutoPitchKey requested = request.key();
+            BounceSolver.Plan plan = BounceSolver.solve(requested.headroom(), requested.schedule(), requested.physics());
+            this.mc.execute(() -> {
+               if (this.pitchPlans.complete(request, plan) && this.isActive()
+                  && this.mc.player == player && this.mc.world == world && key.equals(this.pitchKey) && !Deferred.quiet) {
+                  this.flyingPlan = plan;
+                  this.predictedSpeed = plan.speed;
+               }
+            });
+         } catch (RuntimeException e) {
+            this.mc.execute(() -> {
+               if (this.pitchPlans.fail(request) && this.isActive()) this.warning("Could not solve bounce pitch: %s", e.getMessage());
+            });
+         }
+      });
    }
 
-   /** The pitch actually applied: the solver's answer, or the fixed setting when auto-pitch is off. */
    private float effectivePitch() {
-      // Under 1.2 blocks of headroom the solver's model has nothing to say:
-      // the ceiling stop kills the vertical speed without touching the
-      // horizontal, so it predicts 80 to 135 b/s in a crawling tunnel and its
-      // answer swings thirty degrees for five centimetres of measurement. The
-      // fixed angle is what flew those tunnels before auto-pitch existed.
-      boolean solverUsable = (Boolean)this.autoPitch.get() && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2);
-      return solverUsable ? this.solvedPitch : ((Double)this.pitch.get()).floatValue();
+      BounceSolver.Plan plan = this.flyingPlan;
+      return this.autoPitch.get() && plan != null ? plan.pitchAt(this.ticksSinceJump) : this.pitch.get().floatValue();
    }
 
    @Override
    public String getInfoString() {
-      return (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && (Boolean)this.autoPitch.get() && !(this.predictedSpeed <= 0.0)
-         ? String.format("%.0f b/s @ %.0f°", this.predictedSpeed, this.solvedPitch)
-         : null;
+      BounceSolver.Plan plan = this.flyingPlan;
+      return this.bounce.get() && this.lockPitch.get() && this.autoPitch.get() && plan != null
+         ? String.format(java.util.Locale.ROOT, "%.0f b/s @ %.0f-%.0f°", plan.speed, plan.minPitch(), plan.maxPitch()) : null;
    }
 
-   /**
-    * Whether this tick is a legal moment for a re-deploy to depart: airborne,
-    * at least two ticks clear of the ground (F4 — Grim refuses a START while
-    * onGround or lastOnGround), and the jump key was released the tick
-    * before — the shape of a fresh press, not one still following the last
-    * one. Shared between {@link #serviceGlideClear} (whether to release a
-    * held clear) and {@link #serviceFakeFlyBurst} (whether to swap the
-    * glider in) — the same tick means the same thing to both.
-    *
-    * <p>{@link #jumpTick} is recorded the first {@code Pre} that already
-    * reads airborne — one tick after the ground impulse itself, in the
-    * spec's own G notation. Two full ticks past *that* is G+3, one more than
-    * Grim actually requires (G+2: positions G and G+1 already airborne); the
-    * "+1" below, not "+2", is what keeps this at G+2 given where jumpTick
-    * actually lands.
-    */
    private boolean isFreeTick() {
       if (this.mc.player == null) return false;
       return !this.mc.player.isOnGround()
@@ -980,23 +944,6 @@ public class ElytraBounce extends Module {
          && !this.jumpKeyDownLastTick;
    }
 
-   /**
-    * v0.5.3's core mechanism, reconstructed from Grim rather than ported —
-    * the original is closed-source and no code for this rebuild exists anywhere we
-    * have it; this is a clean-room reading of the changelog against Grim's
-    * own behaviour, not a copy of anything (see project memory for the
-    * packet-level facts this is built on).
-    *
-    * <p>A glide clear is only ever applied, together with the pong of the
-    * transaction that brackets it (Grim only flips its own copy of the flag
-    * on that pong), on a tick where the re-deploy departs in that same tick
-    * — never earlier. Landing anywhere else costs a tick of speed one way or
-    * another: full ground friction if it lands on the jump tick, air
-    * friction if it lands mid-hop. Held until the free tick it costs
-    * nothing, because both sides are still agreeing on stale elytra physics
-    * in the meantime — the real START only ever renews a server-side flag
-    * that was never actually wrong yet.
-    */
    private void serviceGlideClear() {
       if (this.mc.player == null || !(Boolean)this.bounce.get() || !(Boolean)this.holdGlideClear.get() || !this.enabled()) {
          this.releaseHeldGlideState();
@@ -1010,25 +957,14 @@ public class ElytraBounce extends Module {
          if (free || age - this.heldSince >= (Integer)this.clearHoldCap.get()) {
             BounceProbe.get().line("RELEASE-CLEAR", "held=" + (age - this.heldSince) + " free=" + free);
             this.releaseHeldGlideState();
-            // The mixin hook is what actually keeps realGliding current, and
-            // nothing between the release above and updateJumpKey calls
-            // isGliding() to run it — without this line realGliding still
-            // reads last tick's "true" here, one tick stale by definition of
-            // what a release is. forcePressThisTick covers updateJumpKey's
-            // own tap; this is what serviceFakeFlyBurst reads to know a
-            // START can actually depart this tick.
+
             this.realGliding = this.mc.player.isGliding();
             this.forcePressThisTick = true;
          } else {
             BounceProbe.get().line("HOLD-CLEAR", "since=" + (age - this.heldSince));
          }
       } else {
-         // Nothing held: still answer whatever pings are waiting, from the
-         // head of the tick, the way vanilla would have — a clear's own
-         // transaction always lands on the wire before the clear itself
-         // (Grim pings ahead of the metadata it brackets), so by the time a
-         // clear shows up here as held, its ping may already have arrived
-         // and been queued below with nothing (yet) to hold it for.
+
          net.minecraft.client.network.ClientPlayNetworkHandler handler = this.mc.getNetworkHandler();
          if (handler != null) {
             net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping;
@@ -1039,92 +975,68 @@ public class ElytraBounce extends Module {
       }
    }
 
-   /**
-    * hold-glide-clear's packet intake. Claims every ping outright — not just
-    * ones that follow a clear, since a clear's own transaction ping can
-    * arrive before we've seen the clear it belongs to — and holds a glide
-    * clear until {@link #serviceGlideClear} finds a free tick to release it
-    * on. Returns true if it consumed the packet.
-    */
    private boolean handleGlideClearPacket(Receive event) {
-      if (this.mc.player == null || !(Boolean)this.bounce.get() || !(Boolean)this.holdGlideClear.get()) {
-         return false;
-      }
-
+      if (this.mc.player == null || !this.bounce.get() || !this.holdGlideClear.get()) return false;
       if (event.packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping) {
-         this.glideClearPingQueue.add(ping);
+         synchronized (this.heldPongs) {
+            if (!this.heldClears.isEmpty()) {
+               this.heldPongs.addLast(ping.getParameter());
+            } else {
+               this.glideClearPingQueue.add(ping);
+            }
+         }
          event.cancel();
          return true;
       }
-
       if (event.packet instanceof net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket tracker
-         && tracker.id() == this.mc.player.getId()
-         && this.mc.player.isGliding()) {
-         // Index zero is the shared flag byte; 0x80 clear in it, while we're
-         // still gliding, is the server turning the flag back off — the only
-         // update from this packet worth holding. A glide-start confirmation
-         // (0x80 set) or an unrelated flag change passes through untouched.
+         && tracker.id() == this.mc.player.getId() && this.mc.player.isGliding()) {
          for (net.minecraft.entity.data.DataTracker.SerializedEntry<?> entry : tracker.trackedValues()) {
             if (entry.id() == 0 && entry.value() instanceof Byte flags && (flags & 0x80) == 0) {
-               if (this.heldClears.isEmpty()) {
-                  this.heldSince = this.mc.player.age;
+               synchronized (this.heldPongs) {
+                  if (this.heldClears.isEmpty()) this.heldSince = this.mc.player.age;
+                  this.heldClears.add(tracker);
+                  net.minecraft.network.packet.s2c.common.CommonPingS2CPacket queued;
+                  while ((queued = this.glideClearPingQueue.poll()) != null) this.heldPongs.addLast(queued.getParameter());
                }
-
-               this.heldClears.add(tracker);
+               this.clearsPlaced.incrementAndGet();
                event.cancel();
                return true;
             }
          }
       }
-
       return false;
    }
 
-   /**
-    * Applies every held clear, in order, then every held ping's pong.
-    * Clears first: Grim's transaction task only flips its copy of the flag
-    * on the pong, so by the time our pong is on the wire our own client-side
-    * flag has already been cleared to match what that pong is about to
-    * confirm.
-    */
    private void releaseHeldGlideState() {
       net.minecraft.client.network.ClientPlayNetworkHandler handler = this.mc.getNetworkHandler();
-      if (handler == null) {
-         this.heldClears.clear();
-         this.glideClearPingQueue.clear();
-         return;
-      }
-
-      net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket clear;
-      while ((clear = this.heldClears.poll()) != null) {
-         this.applyPacket(handler, clear);
-      }
-
-      net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping;
-      while ((ping = this.glideClearPingQueue.poll()) != null) {
-         this.applyPacket(handler, ping);
+      synchronized (this.heldPongs) {
+         if (handler == null) {
+            this.heldPongs.clear();
+            this.heldClears.clear();
+            this.glideClearPingQueue.clear();
+            this.heldSince = 0L;
+            return;
+         }
+         boolean wasFlushing = this.flushingPackets;
+         this.flushingPackets = true;
+         try {
+            while (!this.heldPongs.isEmpty()) {
+               handler.sendPacket(new net.minecraft.network.packet.c2s.common.CommonPongC2SPacket(this.heldPongs.removeFirst()));
+            }
+         } finally {
+            this.flushingPackets = wasFlushing;
+         }
+         net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping;
+         while ((ping = this.glideClearPingQueue.poll()) != null) this.applyPacket(handler, ping);
+         net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket clear;
+         while ((clear = this.heldClears.poll()) != null) {
+            this.applyPacket(handler, clear);
+            this.clearsLetGo.incrementAndGet();
+         }
+         this.heldSince = 0L;
       }
    }
 
-   /**
-    * Applies a held packet as if it had just arrived. On the main thread
-    * that's a direct {@code apply} — same as {@link #flushPackets}'s pings.
-    * Off it (this class also releases from {@code onReceivePacket}'s netty
-    * thread, for the setback/knockback/respawn/disconnect exceptions in
-    * §6.3), a direct {@code apply} would run headfirst into
-    * {@code NetworkThreadUtils.forceMainThread}: off the main thread it
-    * queues the call in {@code PacketApplyBatcher} and throws
-    * {@code OffThreadException} to unwind back out — which our own trigger
-    * packet's handler is still on the stack above, so that exception would
-    * have silently swallowed it, and the teleport, knockback or respawn that
-    * triggered this release would never have run at all. Queuing onto the
-    * same batcher instead is exactly what the packet that triggered us is
-    * about to do anyway (`ClientConnection.channelRead0` batches every
-    * packet that isn't already on the render thread) — ours simply join the
-    * queue first, so ordering (clears and pongs before the trigger packet)
-    * still holds once the batcher drains in {@code MinecraftClient.render()},
-    * ahead of both {@code runTasks} and the next {@code tick()}.
-    */
    private <T extends net.minecraft.network.listener.PacketListener> void applyPacket(T listener, net.minecraft.network.packet.Packet<T> packet) {
       if (this.mc.isOnThread()) {
          packet.apply(listener);
@@ -1133,19 +1045,16 @@ public class ElytraBounce extends Module {
       }
    }
 
-   /** A glider: the item this chest-slot equip actually flies with. */
    private static boolean isGlider(ItemStack stack) {
       return !stack.isEmpty() && LivingEntity.canGlideWith(stack, EquipmentSlot.CHEST);
    }
 
-   /** A chest piece that isn't itself a glider — the other half of fakefly's pair. */
    private static boolean isChestPiece(ItemStack stack) {
       if (stack.isEmpty()) return false;
       EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
       return equippable != null && equippable.slot() == EquipmentSlot.CHEST && !isGlider(stack);
    }
 
-   /** First hotbar slot holding a glider, or -1. Used only right after ChestSwap moves one there. */
    private int findHotbarGliderSlot() {
       for (int i = 0; i < 9; i++) {
          if (isGlider(this.mc.player.getInventory().getStack(i))) return i;
@@ -1154,211 +1063,168 @@ public class ElytraBounce extends Module {
       return -1;
    }
 
-   /**
-    * The hand holding the glider, when the resting pair fakefly needs is
-    * actually there: a chest piece worn and a glider in a hand (the transient
-    * mid-burst state — glider briefly worn, chest piece briefly in hand — is
-    * handled separately, by {@link #serviceFakeFlyBurst} itself). Never falls
-    * back to bouncing the glider alone when the pair isn't there: the
-    * changelog is explicit that a missing pair stops the module rather than
-    * degrading it.
-    */
-   private Hand fakeFlyReadyHand() {
-      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-      ItemStack main = this.mc.player.getStackInHand(Hand.MAIN_HAND);
-      ItemStack off = this.mc.player.getStackInHand(Hand.OFF_HAND);
-      Hand handGlider = isGlider(main) ? Hand.MAIN_HAND : (isGlider(off) ? Hand.OFF_HAND : null);
-
-      if (!isChestPiece(worn) || handGlider == null) {
-         this.reportFakeFlyBlocked("chestplate-fakefly needs a glider and a chest piece, one worn and the other in a hand");
-         return null;
-      }
-
-      if (EnchantmentHelper.hasAnyEnchantmentsWith(worn, EnchantmentEffectComponentTypes.PREVENT_ARMOR_CHANGE) && !this.mc.player.isCreative()) {
-         this.reportFakeFlyBlocked("chest piece has Curse of Binding");
-         return null;
-      }
-
-      ItemStack glider = handGlider == Hand.MAIN_HAND ? main : off;
-      if (glider.willBreakNextUse()) {
-         this.reportFakeFlyBlocked("elytra is spent");
-         return null;
-      }
-
-      this.fakeFlyBlockedReason = null;
-      return handGlider;
+   private Hand pairHand(ItemStack worn) {
+      return isGlider(worn) ? ChestSwapBurst.chestPieceHand(this.mc.player) : ChestSwapBurst.gliderHand(this.mc.player);
    }
 
-   /** Prints a refusal once per distinct cause rather than every tick it holds. */
-   private void reportFakeFlyBlocked(String reason) {
-      if (reason.equals(this.fakeFlyBlockedReason)) return;
-      this.fakeFlyBlockedReason = reason;
+   private void reportChestBlocked(String reason) {
+      if (reason.equals(this.chestBlockedReason)) return;
+      this.chestBlockedReason = reason;
       this.info(reason, new Object[0]);
    }
 
-   /**
-    * v0.5.3's fakefly rewrite: one right-click burst per re-deploy instead of
-    * the mlep-era ground jump this file used to send here (see the class
-    * doc for why that path was dead code). Swaps the glider in at the head
-    * of a free tick, so {@code updateJumpKey}'s own tap presses into a
-    * takeoff the server sees a glider actually worn for, then swaps it back
-    * out for the chest piece on {@link #onSendMovementPackets} — before
-    * that tick's own position packet — so the server is never on the far
-    * side of a tick with the glide flag set and no glider on the torso to
-    * justify it, nor on the near side with a glider still worn once the
-    * chest piece was due back.
-    */
-   private void serviceFakeFlyBurst() {
-      if (this.mc.player == null || !(Boolean)this.bounce.get() || !(Boolean)this.fakeFly.get() || !this.enabled()) {
-         this.fakeFlyPendingSequence = -1;
-         this.fakeFlyAckedAt = -1L;
-         this.fakeFlyDesynced = false;
-         this.fakeFlyBurstHand = null;
-         this.fakeFlyPairReady = true;
-         return;
-      }
-
-      long age = this.mc.player.age;
-
-      // Judged without blocking the next swap on it: the client's own
-      // prediction (F8) is deterministic, so a swap still awaiting its echo
-      // doesn't hold anything up. Only a confirmed refusal does — the ack
-      // for our sequence landing, then a full tick with still no echo. Not
-      // a timer from the send: on 2b2t's own lag a fixed delay would call a
-      // perfectly applied swap "refused" for no reason.
-      if (this.fakeFlyPendingSequence >= 0 && this.fakeFlyAckedAt >= 0 && age > this.fakeFlyAckedAt) {
-         this.fakeFlyPendingSequence = -1;
-         this.fakeFlyAckedAt = -1L;
-         this.fakeFlyDesynced = true;
-      }
-
-      if (this.fakeFlyDesynced) {
-         this.fakeFlyPairReady = false;
-         this.reportFakeFlyBlocked("the server refused the chest swap, open your inventory to resync");
-         return;
-      }
-
+   private void prepareChestMode() {
+      this.chestPairReady = true;
+      if (!this.chestMode) return;
       ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-
-      // Recovery: a glider found worn on any tick that isn't this burst's
-      // own doing (a swap-out the server refused, a pause caught with it
-      // still on) gets the chest piece back at once — retried every other
-      // tick rather than every tick, since a swap just refused a moment ago
-      // isn't going to succeed the very next one either. Normal operation,
-      // not a failure: the pair is still there, just the other way around.
-      if (isGlider(worn)) {
-         this.fakeFlyPairReady = true;
-         this.fakeFlyBlockedReason = null;
-
-         if (age % 2L != 0L) return;
-
-         ItemStack main = this.mc.player.getStackInHand(Hand.MAIN_HAND);
-         ItemStack off = this.mc.player.getStackInHand(Hand.OFF_HAND);
-         Hand chestHand = isChestPiece(main) ? Hand.MAIN_HAND : (isChestPiece(off) ? Hand.OFF_HAND : null);
-
-         if (chestHand != null) {
-            this.swapFakeFlyHand(chestHand);
-         } else if (this.mc.player.isOnGround()) {
-            // Glider worn, no chest piece in either hand: Meteor's ChestSwap,
-            // "from a quiet tick" — on the ground, nothing else pending. It
-            // puts a chest piece from the hotbar onto the torso and the
-            // glider wherever that chest piece came from; selecting the slot
-            // it lands in is what gets it into a hand, ready for the next
-            // free tick's burst. [hypothesis, per the spec: ChestSwap goes
-            // through inventory clicks, which Grim compensates outside the
-            // movement window — watch the probe's IN-TP lines around this if
-            // setbacks show up here specifically.]
+      Hand hand = this.pairHand(worn);
+      if (isGlider(worn) && hand == null && this.mc.player.isOnGround()) {
+         this.chestPairReady = false;
+         this.deferSwap(() -> {
+            if (!isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) return;
             Modules.get().get(ChestSwap.class).swap();
             int slot = this.findHotbarGliderSlot();
-            if (slot >= 0) {
-               this.mc.player.getInventory().setSelectedSlot(slot);
-            } else {
-               this.reportFakeFlyBlocked("chest piece must be in the hotbar");
-            }
-         }
-
+            if (slot >= 0) this.mc.player.getInventory().setSelectedSlot(slot);
+            else this.reportChestBlocked("chest piece must be in the hotbar");
+         });
          return;
       }
-
-      // Checked every tick, not just a free one: waiting for a free tick to
-      // notice a missing pair would mean never noticing it at all while
-      // still on the ground, which is exactly where the pair usually goes
-      // missing (shouldAutoJump reads fakeFlyPairReady to stop the ground
-      // jump entirely once it's false).
-      Hand gliderHand = this.fakeFlyReadyHand();
-      this.fakeFlyPairReady = gliderHand != null;
-      if (gliderHand == null) return;
-
-      // Free isn't enough on its own: it's true through most of an ordinary
-      // hop too, glide flag and all, where checkGliding() would refuse a
-      // START outright (F7) and this would just churn the swap for nothing
-      // every few ticks whenever fakeFlyPendingSequence happens to be idle.
-      // Only a tick where the client's own glide flag just went (or already
-      // was) false is one where a re-deploy can actually depart.
-      if (!this.isFreeTick() || this.mc.player.isGliding()) return;
-
-      this.swapFakeFlyHand(gliderHand);
-      this.fakeFlyBurstHand = gliderHand;
-      this.forcePressThisTick = true;
-      BounceProbe.get().line("FAKEFLY-SWAP-IN", "hand=" + gliderHand);
-   }
-
-   /** One right-click equip swap, its sequence armed for capture in onSendPacket. */
-   private void swapFakeFlyHand(Hand hand) {
-      this.fakeFlyArmedForSend = true;
-
-      try {
-         this.mc.interactionManager.interactItem(this.mc.player, hand);
-      } finally {
-         this.fakeFlyArmedForSend = false;
+      if (hand == null || !(isGlider(worn) || isChestPiece(worn))) {
+         this.chestPairReady = false;
+         this.reportChestBlocked("chestplate-fakefly needs a glider and a chest piece, one worn and the other in a hand");
+      } else if (!ChestSwapBurst.canSwap(hand)) {
+         this.chestPairReady = false;
+         this.reportChestBlocked("chest equipment cannot be swapped: binding, stack size or identical items");
+      } else if ((isGlider(worn) ? worn : this.mc.player.getStackInHand(hand)).willBreakNextUse()) {
+         this.chestPairReady = false;
+         this.reportChestBlocked("elytra is spent");
+      } else {
+         this.chestBlockedReason = null;
       }
    }
 
-   /**
-    * The second half of a burst: the chest piece back on before this tick's
-    * own movement packet (F12 — this event fires at the head of
-    * sendMovementPackets, after tickMovement already sent the START).
-    *
-    * <p>{@code SendMovementPacketsEvent} is only ever a namespace for its two
-    * nested marker classes ({@code Pre}/{@code Post}, each a reused
-    * singleton) — Meteor never posts the bare outer class, and Orbit
-    * dispatches on the exact runtime class, so a handler typed for it would
-    * simply never fire. {@code Pre} is what {@code AntiHunger} and
-    * {@code Rotations} both listen for at this same point.
-    */
-   @EventHandler
-   private void onSendMovementPackets(SendMovementPacketsEvent.Pre event) {
-      if (this.fakeFlyBurstHand == null) return;
+   @EventHandler(priority = -100)
+   private void onTickEnd(Pre event) {
+      this.updateChestMode();
+   }
 
-      Hand hand = this.fakeFlyBurstHand;
-      this.fakeFlyBurstHand = null;
-      this.swapFakeFlyHand(hand);
-      BounceProbe.get().line("FAKEFLY-SWAP-OUT", "hand=" + hand);
+   private void updateChestMode() {
+      if (!this.chestMode || !this.bounce.get() || !this.enabled() || !this.chestPairReady
+         || this.mc.world == null || this.mc.getNetworkHandler() == null) return;
+      boolean wasEngaged = this.clearanceEngaged;
+      if (!this.groundClear()) {
+         if (wasEngaged) {
+            this.clearanceEngaged = false;
+            this.groundClearTicks = 0;
+            this.restoreGlider();
+         }
+         this.deployEdge = false;
+         return;
+      }
+      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+      Hand hand = this.pairHand(worn);
+      if (hand == null) return;
+      if (this.deployEdge && !this.mc.player.isOnGround() && this.preTick - this.glideStartTick >= 2) {
+         if (!isGlider(worn) && !this.sendSwap(hand, false)) return;
+         this.releaseHeldGlideState();
+         this.mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(this.mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
+         this.mc.player.startGliding();
+         this.jumpKeyDown = true;
+         this.jumpKeyDownLastTick = true;
+         this.atomicOutPending = true;
+         this.glideStartTick = this.preTick;
+         this.clearanceEngaged = this.airBelow(2.0);
+         this.deploys.incrementAndGet();
+         this.deployEdge = false;
+      } else if (isGlider(worn) && this.preTick - this.lastOutTick >= 2) {
+         this.sendSwap(hand, true);
+      }
+   }
+
+   private boolean sendSwap(Hand hand, boolean out) {
+      if (ChestSwapBurst.useSwap(hand) < 0) {
+         this.swapsRefused.incrementAndGet();
+         return false;
+      }
+      if (out) this.lastOutTick = this.preTick;
+      BounceProbe.get().line(out ? "FAKEFLY-SWAP-OUT" : "FAKEFLY-SWAP-IN", "hand=" + hand);
+      return true;
+   }
+
+   private boolean groundClear() {
+      if (this.mc.player.isOnGround() || !this.clearanceEngaged && !this.airBelow(2.0)) {
+         this.clearanceEngaged = false;
+         this.groundClearTicks = 0;
+         return true;
+      }
+      var handler = this.mc.getNetworkHandler();
+      var entry = handler == null ? null : handler.getPlayerListEntry(this.mc.player.getUuid());
+      int rttTicks = entry == null ? 0 : Math.max(0, (int) Math.ceil(entry.getLatency() / 50.0));
+      double vertical = this.mc.player.getVelocity().y;
+      double travel = vertical < 0.0 ? -vertical * (rttTicks + 4) : vertical * (rttTicks / 2 + 2);
+      double need = 6.0 + travel + (this.clearanceEngaged ? 0.0 : 2.0);
+      boolean clear = this.airBelow(need);
+      if (this.clearanceEngaged) return clear;
+      this.groundClearTicks = clear ? this.groundClearTicks + 1 : 0;
+      return this.groundClearTicks >= 10;
+   }
+
+   private boolean airBelow(double depth) {
+      return this.mc.player != null && this.mc.world != null
+         && this.mc.world.isBlockSpaceEmpty(this.mc.player, this.mc.player.getBoundingBox().stretch(0.0, -depth, 0.0));
+   }
+
+   private void restoreGlider() {
+      if (this.mc.player == null || isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) return;
+      Hand hand = ChestSwapBurst.gliderHand(this.mc.player);
+      if (hand != null) this.deferSwap(() -> {
+         if (isGlider(this.mc.player.getStackInHand(hand))
+            && !isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) this.sendSwap(hand, false);
+      });
+   }
+
+   private void deferSwap(Runnable action) {
+      if (this.mc.player == null || this.mc.world == null || this.deferred != null && !this.deferred.finished) return;
+      var player = this.mc.player;
+      var world = this.mc.world;
+      this.jumpKeyDown = false;
+      this.jumpKeyDownLastTick = false;
+      this.deployEdge = false;
+      this.forcePressThisTick = false;
+      this.deferred = new Deferred(2, true, () -> {
+         if (this.mc.player == player && this.mc.world == world) action.run();
+      });
+   }
+
+   private void watchStats() {
+      if (!this.logDurability.get() || this.preTick % 400 != 0) return;
+      HunterBuddyAddon.LOG.info(String.format(java.util.Locale.ROOT,
+         "[ElytraBounce stats] deploys=%d swapsRefused=%d teleports=%d grimSetbacks=%d clearsPlaced=%d clearsLetGo=%d",
+         this.deploys.get(), this.swapsRefused.get(), this.teleports.get(), this.grimSetbacks.get(),
+         this.clearsPlaced.get(), this.clearsLetGo.get()));
+   }
+
+   @EventHandler
+   private void onBeforeSendPosition(SendMovementPacketsEvent.Pre event) {
+      if (this.mc.player == null) return;
+      if (Deferred.quiet) this.mc.player.setSprinting(false);
+      if (!this.atomicOutPending) return;
+      this.atomicOutPending = false;
+      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+      if (isGlider(worn)) {
+         Hand hand = this.pairHand(worn);
+         if (hand != null) this.sendSwap(hand, true);
+      }
    }
 
    public boolean enabled() {
-      return this.isActive()
-         && !this.paused
-         && this.rubberBandCooldown <= 0
-         && this.mc.player != null
-         && ((Boolean)this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
+      return this.isActive() && !this.paused && !Deferred.quiet && this.rubberBandCooldown <= 0
+         && this.mc.player != null && this.mc.world != null
+         && (this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
    }
 
-   /**
-    * Called by LivingEntityMixin#isGliding at RETURN with the real (unforced) flag.
-    * Lambda-style latch: once the gliding flag has genuinely been set, keep returning
-    * true through ground touches so gliding physics carry the momentum between
-    * bounces. Never forces gliding before an actual takeoff, which would desync the
-    * client from the server and get flagged by Grim.
-    */
    public boolean modifyIsGliding(boolean original) {
-      this.realGliding = this.prevGliding = original;
-
-      // Passed through as it comes. Holding it true across ground contact kept the
-      // glide physics running between bounces on the client, but the server drops
-      // the flag the instant you touch anything, so the two were flying different
-      // players -- and the one the server flies is the one that gets stood back up.
-      // The reference does not latch it either; it jumps instead.
+      this.realGliding = original;
       return original;
    }
 
@@ -1366,65 +1232,30 @@ public class ElytraBounce extends Module {
       return this.enabled() && (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && (Boolean)this.freePitch.get();
    }
 
-   /**
-    * Holds the jump key for the player, which is how the bounce is actually flown.
-    *
-    * <p>On the ground the key is held, so the player jumps. In the air, before the
-    * elytra is out, it is tapped -- held one tick, released the next -- because it
-    * is the press that deploys, and a key left down is not a press. Once gliding it
-    * is let go. The takeoff that follows is vanilla's own, sent by the client as any
-    * jump would be, which is the difference between a bounce the server agrees with
-    * and one it answers by standing you back up.
-    */
    private void updateJumpKey() {
+      if (Deferred.quiet) return;
       boolean previous = this.jumpKeyDown;
-
-      if (this.mc.player != null) {
-         boolean onGround = this.mc.player.isOnGround();
-         // G: the tick physics actually leaves the ground, whatever sent it
-         // there — not necessarily our own jump, and that's the point: Grim's
-         // onGround||lastOnGround check (F4) doesn't care why either.
-         if (!onGround && this.wasOnGroundLastTick) {
-            this.jumpTick = this.mc.player.age;
-         }
-
-         this.wasOnGroundLastTick = onGround;
-      }
-
-      if (this.mc.player == null || !this.enabled() || !this.shouldAutoJump()) {
+      boolean ground = this.mc.player != null && this.mc.player.isOnGround();
+      boolean flying = this.mc.player != null && this.mc.player.isGliding();
+      if (this.mc.player != null && !ground && this.wasOnGroundLastTick) this.jumpTick = this.mc.player.age;
+      this.wasOnGroundLastTick = ground;
+      if (!this.enabled() || !this.shouldAutoJump()) {
          this.jumpKeyDown = false;
-      } else if (this.mc.player.isOnGround()) {
-         // The speed gate motion-y-boost used to carry on the module's own jump,
-         // moved to where the jump is decided now: stop taking off once the run is
-         // already fast enough, and let the speed carry.
-         this.jumpKeyDown = !(Boolean)this.motionYBoost.get()
-            || meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() < (Double)this.speed.get();
+      } else if (ground) {
+         this.jumpKeyDown = !this.motionYBoost.get()
+            || meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() < this.speed.get();
       } else if (this.forcePressThisTick) {
-         // Ahead of realGliding on purpose: this is the tick a release just
-         // ran, and nothing between that release and here calls isGliding()
-         // to refresh the mirror through its own hook — serviceGlideClear
-         // does that explicitly right after releasing, but relying on
-         // realGliding here regardless would still read this same tick's
-         // release as the *previous* tick's stale "still gliding", pressing
-         // one tick late and losing exactly the tick hold-glide-clear exists
-         // to save.
-         this.jumpKeyDown = true;
-      } else if (this.realGliding) {
+         this.jumpKeyDown = !previous;
+      } else if (flying) {
          this.jumpKeyDown = false;
       } else {
          this.jumpKeyDown = !previous;
       }
-
+      this.deployEdge = this.jumpKeyDown && !previous && !ground && !flying;
       this.forcePressThisTick = false;
       this.jumpKeyDownLastTick = this.jumpKeyDown;
    }
 
-   /**
-    * The state of the player at the top of a tick, before anything acts on it.
-    *
-    * <p>Written after the jump key has been decided and before the game moves, so a line and
-    * the packets stamped with the same tick read in the order they happened.
-    */
    private void probeTick() {
       BounceProbe probe = BounceProbe.get();
       if (!probe.isRecording() || this.mc.player == null) return;
@@ -1481,9 +1312,6 @@ public class ElytraBounce extends Module {
       if (packet instanceof net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket tracker) {
          if (this.mc.player == null || tracker.id() != this.mc.player.getId()) return;
 
-         // Index zero on Entity is the shared flag byte, and 0x80 in it is the gliding bit:
-         // this is the server answering a takeoff, and the only thing that ever turns the
-         // client's own flag back off.
          for (net.minecraft.entity.data.DataTracker.SerializedEntry<?> entry : tracker.trackedValues()) {
             if (entry.id() == 0 && entry.value() instanceof Byte flags) {
                probe.line("IN-META", "glide=" + ((flags & 0x80) != 0));
@@ -1505,20 +1333,12 @@ public class ElytraBounce extends Module {
       }
    }
 
-   /** Read by KeyBindingMixin: whether jump is down as far as the game is concerned. */
    public boolean isJumpKeyForcedDown() {
       return this.jumpKeyDown;
    }
 
-   /** Fake fly does its own jumping, so the key is left alone there. */
    public boolean shouldAutoJump() {
-      // Fakefly uses the same tapped key as a plain bounce now — the burst
-      // that swaps the glider in rides the same press, it doesn't jump on
-      // its own any more. But it stops jumping outright, same as the
-      // changelog says, once serviceFakeFlyBurst finds the pair actually
-      // missing — jumping toward a takeoff fakefly can't complete is worse
-      // than standing still and saying why.
-      return (Boolean)this.bounce.get() && (!(Boolean)this.fakeFly.get() || this.fakeFlyPairReady);
+      return this.bounce.get() && (!this.chestMode || this.chestPairReady);
    }
 
    public boolean isFakeFlyEnabled() {
@@ -1589,20 +1409,6 @@ public class ElytraBounce extends Module {
       }
    }
 
-   /**
-    * The button that starts and stops the probe.
-    *
-    * <p>Off unless asked for, and it used to start itself every time the module came
-    * on, which wrote a file nobody had asked for on every flight. What it records is
-    * only worth having when something is being chased: a line per tick and one per
-    * digging, movement, input, metadata and teleport packet, in the order they
-    * crossed the wire, which is the only way a two-tick disagreement with the server
-    * can be read at all.
-    *
-    * <p>The file is bounce-probe.log in the game folder, emptied at every start so a
-    * run stands on its own, and it keeps recording until it is stopped here or the
-    * module is switched off.
-    */
    public WWidget getWidget(GuiTheme theme) {
       WVerticalList list = theme.verticalList();
 
@@ -1621,5 +1427,49 @@ public class ElytraBounce extends Module {
       };
 
       return list;
+   }
+   private record AutoPitchKey(BounceSolver.Physics physics, double headroom, boolean schedule) {
+   }
+
+   private static final class Deferred {
+      static volatile boolean quiet;
+      private int ticks;
+      private final boolean quietWindow;
+      private final Runnable action;
+      private boolean finished;
+
+      Deferred(int ticks, boolean quietWindow, Runnable action) {
+         this.ticks = ticks;
+         this.quietWindow = quietWindow;
+         this.action = action;
+         if (quietWindow) {
+            quiet = true;
+            if (MeteorClient.mc.player != null) MeteorClient.mc.player.setSprinting(false);
+         }
+         MeteorClient.EVENT_BUS.subscribe(this);
+      }
+
+      @EventHandler
+      private void onTick(Pre event) {
+         if (MeteorClient.mc.player == null) {
+            this.finish();
+         } else {
+            if (this.quietWindow) MeteorClient.mc.player.setSprinting(false);
+            if (--this.ticks <= 0) {
+               try {
+                  this.action.run();
+               } finally {
+                  this.finish();
+               }
+            }
+         }
+      }
+
+      private void finish() {
+         if (this.finished) return;
+         this.finished = true;
+         MeteorClient.EVENT_BUS.unsubscribe(this);
+         if (this.quietWindow) quiet = false;
+      }
    }
 }

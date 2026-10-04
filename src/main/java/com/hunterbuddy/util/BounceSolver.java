@@ -1,220 +1,393 @@
 package com.hunterbuddy.util;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.function.ToDoubleFunction;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.World;
 
-/**
- * Ported from a source drop, mechanically — package, Yarn
- * mappings ({@code Mth} to {@code MathHelper}, {@code AABB} to {@code Box},
- * {@code Level.noCollision} to {@code World.isSpaceEmpty}, {@code Player} to
- * {@code PlayerEntity}, {@code box.move} to {@code box.offset}) — with the
- * logic and every constant left exactly as written there: a vanilla elytra
- * bounce, simulated tick by tick, glide clearing three ticks after the last
- * ground contact, to find whichever pitch keeps it in the air longest under
- * a given ceiling. That three-tick clear is the pre-v0.5.2 model, from
- * before their glide-clear-timing rebuild; see {@code ElytraBounce}'s own
- * doc for where our copy of this solver diverges from it once that rebuild
- * lands here too.
- */
 public final class BounceSolver {
-    private static final double GRAVITY = 0.08;
-    private static final float JUMP_POWER = 0.42F;
     public static final double GLIDE_HEIGHT = 0.6;
+    public static final double MAX_USEFUL_HEADROOM = 2.0;
+    public static final int SCHEDULE_TICKS = 16;
+    public static final int MAX_PERSIST = 40;
     private static final int GLIDE_PERSIST_TICKS = 3;
-    private static final int SIM_TICKS = 600;
-    private static final float MIN_PITCH = 25.0F;
-    private static final float MAX_PITCH = 89.0F;
-    private static final double MAX_USEFUL_HEADROOM = 2.0;
+    private static final int SIM_TICKS = 1000;
+    private static final int AVG_TICKS = 400;
+    private static final int MIN_PITCH = 0;
+    private static final int MAX_PITCH = 90;
+    private static final int THOROUGH_SEEDS = 6;
 
     private BounceSolver() {
     }
 
     public static double measureHeadroom(PlayerEntity player, World world) {
+        double halfWidth = Physics.DEFAULT.width / 2.0;
         Box box = new Box(
-            player.getX() - 0.3,
+            player.getX() - halfWidth,
             player.getY(),
-            player.getZ() - 0.3,
-            player.getX() + 0.3,
-            player.getY() + 0.6,
-            player.getZ() + 0.3
+            player.getZ() - halfWidth,
+            player.getX() + halfWidth,
+            player.getY() + Physics.DEFAULT.glideHeight,
+            player.getZ() + halfWidth
         );
         double free = 0.0;
-
-        for (double rise = 0.05; rise <= 2.0 && world.isSpaceEmpty(box.offset(0.0, rise, 0.0)); rise += 0.05) {
+        for (int step = 1; step <= 40; step++) {
+            double rise = step * 0.05;
+            if (rise > MAX_USEFUL_HEADROOM || !world.isSpaceEmpty(box.offset(0.0, rise, 0.0))) break;
             free = rise;
         }
-
         return free;
     }
 
-    /**
-     * {@code clearHeld} models ElytraBounce's {@code hold-glide-clear}: with
-     * it, the server's glide clear never actually reaches the client mid-hop
-     * any more — it's held until the tick the next takeoff departs anyway,
-     * so the client's own glide flag never toggles off in between. Without
-     * it (the pre-rebuild regime this solver was written for), the flag
-     * clears itself here 3 ticks after the last ground contact, same as the
-     * reference always modelled. Added rather than assumed true, since
-     * {@code hold-glide-clear} is itself a setting a bounce can disable.
-     */
     public static double simulateSpeed(float pitch, double headroom, boolean clearHeld) {
         return simulateSpeed(pitch, pitch, headroom, clearHeld);
     }
 
-    /**
-     * Two angles instead of one: the climb and the descent of a hop want
-     * opposite things, and a single constant pitch has to compromise between
-     * them. Simulated the same way, only the angle in force each tick changes
-     * with the sign of the vertical speed.
-     */
     public static double simulateSpeed(float pitchUp, float pitchDown, double headroom, boolean clearHeld) {
-        double vx = 0.0;
-        double vy = 0.0;
-        double vz = 0.0;
-        double y = 0.0;
-        boolean onGround = true;
-        boolean gliding = false;
-        boolean prevJump = false;
-        int noJumpDelay = 0;
-        int sinceGround = Integer.MAX_VALUE;
-
-        for (int t = 0; t < 600; t++) {
-            if (noJumpDelay > 0) {
-                noJumpDelay--;
-            }
-
-            boolean jump = onGround || !gliding && !prevJump;
-            if (jump && !prevJump && !onGround && !gliding) {
-                gliding = true;
-            }
-
-            prevJump = jump;
-            if (jump) {
-                if (onGround && noJumpDelay == 0) {
-                    vy = Math.max(0.42F, vy);
-                    vz += 0.2;
-                    noJumpDelay = 10;
-                }
-            } else {
-                noJumpDelay = 0;
-            }
-
-            if (gliding) {
-                float pitch = vy > 0.0 ? pitchUp : pitchDown;
-                double f = pitch * (float) (Math.PI / 180.0);
-                double lookZ = MathHelper.cos(f);
-                double d = Math.abs(lookZ);
-                double e = Math.sqrt(vx * vx + vz * vz);
-                double h = MathHelper.square(Math.cos(f));
-                vy += 0.08 * (-1.0 + h * 0.75);
-                if (vy < 0.0 && d > 0.0) {
-                    double i = vy * -0.1 * h;
-                    vz += lookZ * i / d;
-                    vy += i;
-                }
-
-                if (d > 0.0) {
-                    vz += (lookZ / d * e - vz) * 0.1;
-                }
-
-                vx *= 0.99F;
-                vy *= 0.98F;
-                vz *= 0.99F;
-            } else {
-                double fric = onGround ? 0.546 : 0.91;
-                vx *= fric;
-                vz *= fric;
-                vy = (vy - 0.08) * 0.98;
-            }
-
-            double ceilingH = headroom + 0.6;
-            double hitbox = !gliding && !(ceilingH < 1.8) ? 1.8 : 0.6;
-            double free = headroom >= 2.0 ? Double.MAX_VALUE : ceilingH - hitbox;
-            double ny = y + vy;
-            onGround = false;
-            if (ny <= 0.0) {
-                ny = 0.0;
-                vy = 0.0;
-                onGround = true;
-            } else if (ny >= free) {
-                ny = free;
-                vy = 0.0;
-            }
-
-            y = ny;
-            if (onGround) {
-                sinceGround = 0;
-            } else if (sinceGround != Integer.MAX_VALUE) {
-                sinceGround++;
-            }
-
-            if (!clearHeld && gliding && sinceGround >= 3 && sinceGround != Integer.MAX_VALUE) {
-                gliding = false;
-                sinceGround = Integer.MAX_VALUE;
-            }
-        }
-
-        return Math.sqrt(vx * vx + vz * vz) * 20.0;
+        return simulate((ticks, vertical) -> vertical >= 0.0 ? pitchUp : pitchDown, headroom,
+            clearHeld ? 0 : GLIDE_PERSIST_TICKS, null, null, Physics.DEFAULT);
     }
 
     public static float solvePitch(double headroom, boolean clearHeld) {
-        float best = MAX_PITCH;
-        double bestSpeed = -1.0;
-
-        for (float p = MIN_PITCH; p <= MAX_PITCH; p++) {
-            double s = simulateSpeed(p, headroom, clearHeld);
-            if (s > bestSpeed) {
-                bestSpeed = s;
-                best = p;
-            }
-        }
-
-        return best;
+        int persist = clearHeld ? 0 : GLIDE_PERSIST_TICKS;
+        Plan plan = search(headroom, table -> simulateTable(table, headroom, persist, Physics.DEFAULT),
+            persist, false, Physics.DEFAULT);
+        return plan.pitchByTick[plan.pitchByTick.length - 1];
     }
 
-    /**
-     * The fastest pair of angles for a given ceiling: index 0 is the climb,
-     * index 1 the descent. Swept coarsely over the whole range first, then
-     * refined a degree at a time around the best pair, so the cost stays a
-     * few hundred simulations rather than the four thousand a full pass over
-     * both axes would take.
-     */
     public static float[] solvePlan(double headroom, boolean clearHeld) {
-        float bestUp = 89.0F;
-        float bestDown = 89.0F;
-        double bestSpeed = -1.0;
-
-        for (float up = MIN_PITCH; up <= MAX_PITCH; up += 4.0F) {
-            for (float down = MIN_PITCH; down <= MAX_PITCH; down += 4.0F) {
-                double s = simulateSpeed(up, down, headroom, clearHeld);
-                if (s > bestSpeed) {
-                    bestSpeed = s;
+        float bestUp = MAX_PITCH;
+        float bestDown = MAX_PITCH;
+        double bestSpeed = Double.NEGATIVE_INFINITY;
+        for (float up = MIN_PITCH; up <= MAX_PITCH; up += 5.0F) {
+            for (float down = MIN_PITCH; down <= MAX_PITCH; down += 5.0F) {
+                double speed = simulateSpeed(up, down, headroom, clearHeld);
+                if (speed > bestSpeed) {
+                    bestSpeed = speed;
                     bestUp = up;
                     bestDown = down;
                 }
             }
         }
-
         float coarseUp = bestUp;
         float coarseDown = bestDown;
-
-        for (float up = coarseUp - 3.0F; up <= coarseUp + 3.0F; up++) {
-            if (up < MIN_PITCH || up > MAX_PITCH) continue;
-
-            for (float down = coarseDown - 3.0F; down <= coarseDown + 3.0F; down++) {
-                if (down < MIN_PITCH || down > MAX_PITCH) continue;
-
-                double s = simulateSpeed(up, down, headroom, clearHeld);
-                if (s > bestSpeed) {
-                    bestSpeed = s;
+        for (float up = Math.max(MIN_PITCH, coarseUp - 4.0F); up <= Math.min(MAX_PITCH, coarseUp + 4.0F); up++) {
+            for (float down = Math.max(MIN_PITCH, coarseDown - 4.0F); down <= Math.min(MAX_PITCH, coarseDown + 4.0F); down++) {
+                double speed = simulateSpeed(up, down, headroom, clearHeld);
+                if (speed > bestSpeed) {
+                    bestSpeed = speed;
                     bestUp = up;
                     bestDown = down;
                 }
             }
         }
-
         return new float[]{bestUp, bestDown};
+    }
+
+    public static Plan solve(double headroom, boolean schedule) {
+        return solve(headroom, schedule, Physics.DEFAULT);
+    }
+
+    public static Plan solve(double headroom, boolean schedule, Physics physics) {
+        return search(headroom, table -> expectedSpeed(table, headroom, physics), 0, schedule, physics);
+    }
+
+    public static double expectedSpeed(float[] table, double headroom, Physics physics) {
+        return simulateTable(table, headroom, 0, physics);
+    }
+
+    private static double simulateTable(float[] table, double headroom, int persist, Physics physics) {
+        return simulate((ticks, vertical) -> table[Math.min(ticks, table.length - 1)],
+            headroom, persist, null, null, physics);
+    }
+
+    public static double simulate(PitchFn fn, double headroom, int persist, float[] recordTable,
+                                  int[] cycleOut, Physics physics) {
+        MotionState motion = new MotionState();
+        double y = Math.min(0.3, headroom);
+        double z = 0.0;
+        double zMark = 0.0;
+        boolean onGround = false;
+        boolean gliding = true;
+        boolean prevKey = false;
+        int queueSize = Integer.highestOneBit(MAX_PERSIST) << 1;
+        int[] clears = new int[queueSize];
+        int clearHead = 0;
+        int clearTail = 0;
+        int ticksSinceJump = 0;
+        int lastLanding = -1;
+        int cycleSum = 0;
+        int cycleCount = 0;
+        double ceilingHeight = headroom + physics.glideHeight;
+        for (int tick = 0; tick < SIM_TICKS; tick++) {
+            if (tick == SIM_TICKS - AVG_TICKS) zMark = z;
+            while (clearHead != clearTail && clears[clearHead & (queueSize - 1)] <= tick) {
+                clearHead++;
+                gliding = false;
+            }
+            applyMovementThreshold(motion);
+            boolean key = onGround || !gliding && !prevKey;
+            if (key && !prevKey && !onGround && !gliding) gliding = true;
+            prevKey = key;
+            if (key && onGround) {
+                applyJump(motion, physics);
+                ticksSinceJump = 0;
+            }
+            float pitch = fn.pitch(ticksSinceJump, motion.vertical);
+            if (recordTable != null) recordTable[Math.min(ticksSinceJump, recordTable.length - 1)] = pitch;
+            double availableHeight = ceilingHeight - y;
+            double hitbox = gliding ? physics.glideHeight
+                : availableHeight >= physics.standingHeight ? physics.standingHeight
+                : availableHeight >= physics.crouchingHeight ? physics.crouchingHeight : physics.glideHeight;
+            double free = ceilingHeight - hitbox;
+            boolean wasGround = onGround;
+            if (gliding) {
+                applyGlideMovement(motion, pitch, physics);
+            } else {
+                motion.forward += forwardInputAcceleration(physics, onGround);
+            }
+            double nextY = y + motion.vertical;
+            onGround = false;
+            if (nextY < 0.0) {
+                nextY = 0.0;
+                motion.vertical = 0.0;
+                onGround = true;
+            } else if (nextY > free) {
+                nextY = free;
+                motion.vertical = 0.0;
+            }
+            y = nextY;
+            z += motion.forward;
+            if (!gliding) applyAirFriction(motion, wasGround, physics);
+            ticksSinceJump++;
+            if (onGround) {
+                if (persist > 0 && clearTail - clearHead < queueSize) {
+                    clears[clearTail++ & (queueSize - 1)] = tick + persist;
+                }
+                if (!wasGround) {
+                    if (lastLanding >= 0 && tick >= SIM_TICKS - AVG_TICKS) {
+                        cycleSum += tick - lastLanding;
+                        cycleCount++;
+                    }
+                    lastLanding = tick;
+                }
+            }
+        }
+        if (cycleOut != null) cycleOut[0] = cycleCount > 0 ? (int) Math.round((double) cycleSum / cycleCount) : 0;
+        return (z - zMark) / AVG_TICKS * 20.0;
+    }
+
+    private static void applyMovementThreshold(MotionState motion) {
+        if (motion.forward * motion.forward < 9.0E-6) motion.forward = 0.0;
+        if (Math.abs(motion.vertical) < 0.003) motion.vertical = 0.0;
+    }
+
+    private static void applyJump(MotionState motion, Physics physics) {
+        if (physics.jumpPower <= 1.0E-5F) return;
+        if (physics.sprinting) motion.forward += 0.2;
+        motion.vertical = Math.max(physics.jumpPower, motion.vertical);
+    }
+
+    private static double forwardInputAcceleration(Physics physics, boolean onGround) {
+        float acceleration = onGround
+            ? physics.movementSpeed * (0.21600002F / (physics.groundFriction * physics.groundFriction * physics.groundFriction))
+            : physics.sprinting ? 0.025999999F : 0.02F;
+        return 0.98F * acceleration;
+    }
+
+    private static double effectiveGravity(Physics physics, double vertical) {
+        return vertical <= 0.0 && physics.slowFalling ? Math.min(physics.gravity, 0.01) : physics.gravity;
+    }
+
+    private static void applyAirFriction(MotionState motion, boolean startedOnGround, Physics physics) {
+        float blockFriction = startedOnGround ? physics.groundFriction : 1.0F;
+        motion.forward *= blockFriction * 0.91F;
+        motion.vertical = (motion.vertical - effectiveGravity(physics, motion.vertical)) * 0.98F;
+    }
+
+    private static void applyGlideMovement(MotionState motion, float pitch, Physics physics) {
+        float leanAngle = pitch * (float) (Math.PI / 180.0);
+        double lookZ = MathHelper.cos(leanAngle);
+        double lookHorizontal = Math.abs(lookZ);
+        double horizontalSpeed = Math.abs(motion.forward);
+        double lift = MathHelper.square(Math.cos(leanAngle));
+        double vertical = motion.vertical + effectiveGravity(physics, motion.vertical) * (-1.0 + lift * 0.75);
+        double forward = motion.forward;
+        if (vertical < 0.0 && lookHorizontal > 0.0) {
+            double convert = vertical * -0.1 * lift;
+            forward += lookZ * convert / lookHorizontal;
+            vertical += convert;
+        }
+        if (leanAngle < 0.0F && lookHorizontal > 0.0) {
+            double convert = horizontalSpeed * -MathHelper.sin(leanAngle) * 0.04;
+            forward -= lookZ * convert / lookHorizontal;
+            vertical += convert * 3.2;
+        }
+        if (lookHorizontal > 0.0) forward += (lookZ / lookHorizontal * horizontalSpeed - forward) * 0.1;
+        motion.forward = forward * 0.99F;
+        motion.vertical = vertical * 0.98F;
+    }
+
+    private static Plan search(double headroom, ToDoubleFunction<float[]> scorer, int seedPersist,
+                               boolean schedule, Physics physics) {
+        float[] best = new float[SCHEDULE_TICKS];
+        double bestScore = Double.NEGATIVE_INFINITY;
+        List<float[]> seeds = new ArrayList<>();
+        List<Double> seedScores = new ArrayList<>();
+        for (int pitch = MIN_PITCH; pitch <= MAX_PITCH; pitch++) {
+            float[] table = new float[SCHEDULE_TICKS];
+            Arrays.fill(table, pitch);
+            double score = scorer.applyAsDouble(table);
+            if (score > bestScore) {
+                bestScore = score;
+                best = table;
+            }
+            if (schedule) {
+                seeds.add(table);
+                seedScores.add(score);
+            }
+        }
+        if (schedule) {
+            for (int up = 30; up <= MAX_PITCH; up += 5) {
+                for (int down = MIN_PITCH; down <= MAX_PITCH; down += 5) {
+                    float pitchUp = up;
+                    float pitchDown = down;
+                    float[] table = new float[SCHEDULE_TICKS];
+                    Arrays.fill(table, pitchUp);
+                    simulate((ticks, vertical) -> vertical >= 0.0 ? pitchUp : pitchDown,
+                        headroom, seedPersist, table, null, physics);
+                    double score = scorer.applyAsDouble(table);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = table;
+                    }
+                    seeds.add(table);
+                    seedScores.add(score);
+                }
+            }
+            for (int first = 3; first <= 8; first++) {
+                for (int second = first + 1; second <= 13; second++) {
+                    for (int up = 60; up <= MAX_PITCH; up += 10) {
+                        for (int downFirst = MIN_PITCH; downFirst <= MAX_PITCH; downFirst += 15) {
+                            for (int downSecond = MIN_PITCH; downSecond <= MAX_PITCH; downSecond += 15) {
+                                float[] table = new float[SCHEDULE_TICKS];
+                                for (int tick = 0; tick < table.length; tick++) {
+                                    table[tick] = tick < first ? up : tick < second ? downFirst : downSecond;
+                                }
+                                double score = scorer.applyAsDouble(table);
+                                if (score > bestScore) {
+                                    bestScore = score;
+                                    best = table;
+                                }
+                                seeds.add(table);
+                                seedScores.add(score);
+                            }
+                        }
+                    }
+                }
+            }
+            Integer[] order = new Integer[seeds.size()];
+            for (int index = 0; index < order.length; index++) order[index] = index;
+            Arrays.sort(order, Comparator.comparingDouble(index -> -seedScores.get(index)));
+            for (int index = 0; index < Math.min(THOROUGH_SEEDS, order.length); index++) {
+                float[] table = seeds.get(order[index]).clone();
+                double score = descend(table, seedScores.get(order[index]), scorer, 6, 3);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = table;
+                }
+            }
+            bestScore = descend(best, bestScore, scorer, 2, 2);
+            bestScore = descend(best, bestScore, scorer, 1, 1);
+        }
+        float[] table = best;
+        int[] cycle = new int[1];
+        simulate((ticks, vertical) -> table[Math.min(ticks, table.length - 1)],
+            headroom, seedPersist, null, cycle, physics);
+        return new Plan(table, bestScore, cycle[0], headroom, physics);
+    }
+
+    private static double descend(float[] table, double score, ToDoubleFunction<float[]> scorer, int step, int passes) {
+        for (int pass = 0; pass < passes; pass++) {
+            boolean improved = false;
+            for (int index = 0; index < table.length; index++) {
+                float keep = table[index];
+                for (int pitch = MIN_PITCH; pitch <= MAX_PITCH; pitch += step) {
+                    if (pitch == keep) continue;
+                    table[index] = pitch;
+                    double candidate = scorer.applyAsDouble(table);
+                    if (candidate > score + 1.0E-6) {
+                        score = candidate;
+                        keep = pitch;
+                        improved = true;
+                    }
+                }
+                table[index] = keep;
+            }
+            if (!improved) break;
+        }
+        return score;
+    }
+
+    public record Physics(
+        double gravity, float jumpPower, float movementSpeed,
+        float groundFriction, float airDragModifier, float frictionModifier,
+        boolean slowFalling, boolean sprinting,
+        float width, float standingHeight, float crouchingHeight, float glideHeight
+    ) {
+        public static final Physics DEFAULT = new Physics(
+            0.08, 0.42F, 0.13F, 0.6F, 1.0F, 1.0F, false, true, 0.6F, 1.8F, 1.5F, 0.6F
+        );
+    }
+
+    @FunctionalInterface
+    public interface PitchFn {
+        float pitch(int ticksSinceJump, double verticalVelocity);
+    }
+
+    public static final class Plan {
+        public final float[] pitchByTick;
+        public final double speed;
+        public final int cycle;
+        public final double headroom;
+        public final Physics physics;
+
+        Plan(float[] pitchByTick, double speed, int cycle, double headroom, Physics physics) {
+            this.pitchByTick = pitchByTick;
+            this.speed = speed;
+            this.cycle = cycle;
+            this.headroom = headroom;
+            this.physics = physics;
+        }
+
+        public float pitchAt(int ticksSinceJump) {
+            return pitchByTick[Math.min(Math.max(ticksSinceJump, 0), pitchByTick.length - 1)];
+        }
+
+        public float minPitch() {
+            float min = Float.MAX_VALUE;
+            for (int index = 0; index < Math.max(1, Math.min(cycle, pitchByTick.length)); index++) {
+                min = Math.min(min, pitchByTick[index]);
+            }
+            return min;
+        }
+
+        public float maxPitch() {
+            float max = -Float.MAX_VALUE;
+            for (int index = 0; index < Math.max(1, Math.min(cycle, pitchByTick.length)); index++) {
+                max = Math.max(max, pitchByTick[index]);
+            }
+            return max;
+        }
+    }
+
+    private static final class MotionState {
+        double forward;
+        double vertical;
     }
 }

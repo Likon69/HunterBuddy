@@ -1,26 +1,52 @@
 package com.hunterbuddy.util;
 
+import meteordevelopment.meteorclient.MeteorClient;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.client.network.PendingUpdateManager;
 import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.component.EnchantmentEffectComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 
 public final class ChestSwapBurst {
    private ChestSwapBurst() {
    }
 
-   /**
-    * The swap itself, with the arm kept still. Equipping from the hand comes
-    * back as a success the client answers by swinging, and at one burst every
-    * few ticks that is an arm waving several times a second for an exchange
-    * that is over inside the same tick. The packet the server reads is
-    * untouched; only the animation is dropped.
-    */
+   public static int useSwap(Hand hand) {
+      MinecraftClient mc = MeteorClient.mc;
+      if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null || !canSwap(hand)) return -1;
+      ItemStack stack = mc.player.getStackInHand(hand);
+      int sequence;
+      try (PendingUpdateManager prediction = mc.world.getPendingUpdateManager().incrementSequence()) {
+         sequence = prediction.getSequence();
+         mc.getNetworkHandler().sendPacket(new PlayerInteractItemC2SPacket(hand, sequence, mc.player.getYaw(), mc.player.getPitch()));
+      }
+      ActionResult result = stack.use(mc.world, mc.player, hand);
+      ItemStack held = result instanceof ActionResult.Success success && success.getNewHandStack() != null
+         ? success.getNewHandStack() : mc.player.getStackInHand(hand);
+      if (held != stack) mc.player.setStackInHand(hand, held);
+      return result.isAccepted() ? sequence : -1;
+   }
+
+   public static boolean canSwap(Hand hand) {
+      MinecraftClient mc = MeteorClient.mc;
+      if (mc.player == null || hand == null) return false;
+      ItemStack held = mc.player.getStackInHand(hand);
+      ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
+      EquippableComponent equippable = held.get(DataComponentTypes.EQUIPPABLE);
+      return !held.isEmpty() && equippable != null && equippable.slot() == EquipmentSlot.CHEST
+         && held.getCount() <= 1
+         && !EnchantmentHelper.hasAnyEnchantmentsWith(chest, EnchantmentEffectComponentTypes.PREVENT_ARMOR_CHANGE)
+         && !ItemStack.areItemsAndComponentsEqual(held, chest);
+   }
+
    public static void swapSilently(Hand hand) {
       net.minecraft.client.MinecraftClient mc = meteordevelopment.meteorclient.MeteorClient.mc;
       if (mc.player == null || mc.interactionManager == null) {
