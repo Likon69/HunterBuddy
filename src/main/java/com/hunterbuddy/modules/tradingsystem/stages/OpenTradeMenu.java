@@ -1,21 +1,12 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.stages;
 
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.MerchantScreen;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.PlayerInput;
+import net.minecraft.util.hit.EntityHitResult;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
-import java.util.Objects;
 
 public class OpenTradeMenu extends Stage {
     private int waitTicks = 0;
@@ -28,36 +19,28 @@ public class OpenTradeMenu extends Stage {
     @Override
     public boolean work() {
         if (!this.isPacketSent) {
-            ClientPlayNetworkHandler connection = MinecraftClient.getInstance().getNetworkHandler();
-
-            BlockPos lookAtOffset = super.mainModule.lookAtOffset.get();
-
-            PlayerInteractEntityC2SPacket interactAtPacket = PlayerInteractEntityC2SPacket.interactAt(
-                Objects.requireNonNull(super.mainModule.getTarget()),
-                false,
-                Hand.MAIN_HAND,
-                super.mainModule.getTarget().getBlockPos().toCenterPos().add(new Vec3d(lookAtOffset.getX(), lookAtOffset.getY(), lookAtOffset.getZ()))
-            );
-
-            PlayerInteractEntityC2SPacket interactPacket = PlayerInteractEntityC2SPacket.interact(
-                Objects.requireNonNull(super.mainModule.getTarget()),
-                false,
-                Hand.MAIN_HAND
-            );
-
-            Objects.requireNonNull(connection).sendPacket(interactAtPacket);
-            Objects.requireNonNull(connection).sendPacket(interactPacket);
+            var player = getPlayer();
+            var target = requireNonNull(super.mainModule.getTarget());
+            var interactionManager = requireNonNull(client.interactionManager);
+            PlayerInput input = player.input.playerInput;
+            player.input.playerInput = new PlayerInput(input.forward(), input.backward(), input.left(), input.right(), input.jump(), false, input.sprint());
+            try {
+                interactionManager.interactEntityAtLocation(player, target, new EntityHitResult(target, target.getBoundingBox().getCenter()), Hand.MAIN_HAND);
+                interactionManager.interactEntity(player, target, Hand.MAIN_HAND);
+            } finally {
+                player.input.playerInput = input;
+            }
 
             this.isPacketSent = true;
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Пакет интеракта отправлен.");
+                super.mainModule.info("Trade interaction sent.");
             }
         } else {
             this.waitTicks += 1;
 
             if (super.mainModule.maxServerTimeout.get() * 20 <= this.waitTicks) {
-                super.mainModule.nextRound("Меню торговли слишком долго открывалось.");
+                super.mainModule.nextRound("Trade screen timed out.");
                 reset();
                 return false;
             }
@@ -69,7 +52,7 @@ public class OpenTradeMenu extends Stage {
             reset();
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Пакет интеракта успешно обработан.");
+                super.mainModule.info("Trade screen opened.");
             }
         }
 

@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -25,7 +20,7 @@ public class RenderUtils {
         for (Entity entity : world.getEntities()) {
             if (blocked.contains(entity.getId())) continue;
             if (!(entity instanceof VillagerEntity villager)) continue;
-            if (!villager.getVillagerData().profession().equals(VillagerProfession.CLERIC)) continue;
+            if (!villager.getVillagerData().profession().matchesKey(VillagerProfession.CLERIC)) continue;
 
             drawBoundingBox(event, entity);
         }

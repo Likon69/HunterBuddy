@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import net.minecraft.entity.passive.VillagerEntity;
@@ -23,7 +18,7 @@ public class TraderUtils {
                         return false;
                     }
 
-                    return villager.getVillagerData().profession().equals(VillagerProfession.CLERIC);
+                    return villager.getVillagerData().profession().matchesKey(VillagerProfession.CLERIC);
                 }
             )
             .parallelStream()

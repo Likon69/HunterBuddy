@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.stages;
 
 import baritone.api.pathing.goals.GoalBlock;
@@ -27,14 +22,14 @@ public class SprintStage extends Stage {
             super.mainModule.setTarget(TraderUtils.getNearestCleric(getPlayer(), super.mainModule.blocked, super.mainModule.searchingRadius.get()));
 
             if (super.mainModule.getTarget() == null) {
-                super.mainModule.info("Торговля закончилась!");
+                super.mainModule.info("Trading finished.");
                 super.mainModule.toggle();
                 reset();
                 return false;
             }
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Найден житель на координатах: " + super.mainModule.getTarget().getBlockPos().toShortString());
+                super.mainModule.info("Villager found at: " + super.mainModule.getTarget().getBlockPos().toShortString());
             }
         }
 
@@ -42,7 +37,7 @@ public class SprintStage extends Stage {
             this.targetPosition = super.mainModule.getTarget().getBlockPos().add(1, 2, 1);
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Установлена таргет позиция на: " + this.targetPosition.toShortString());
+                super.mainModule.info("Target set to: " + this.targetPosition.toShortString());
             }
         }
 
@@ -65,7 +60,7 @@ public class SprintStage extends Stage {
                 reset();
 
                 if (super.mainModule.doOutput()) {
-                    super.mainModule.info("Игрок на нужных координатах.");
+                    super.mainModule.info("Reached target.");
                 }
 
                 return true;
@@ -78,7 +73,7 @@ public class SprintStage extends Stage {
             getGoalProcess().setGoalAndPath(new GoalBlock(this.targetPosition));
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Установлена цель для баритона.");
+                super.mainModule.info("Baritone goal set.");
             }
         }
 

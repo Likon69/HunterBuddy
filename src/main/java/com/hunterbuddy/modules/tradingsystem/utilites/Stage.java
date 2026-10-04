@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.utilites;
 
 import baritone.api.BaritoneAPI;
@@ -16,24 +11,15 @@ import java.util.Objects;
 
 public abstract class Stage {
     protected ExperienceTraderModule mainModule;
-    private static ClientPlayerEntity player;
-    protected static ICustomGoalProcess goalProcess;
 
     protected static MinecraftClient client = MinecraftClient.getInstance();
 
-    protected static @NotNull ClientPlayerEntity getPlayer() {
-        if (player == null)
-            player = Objects.requireNonNull(client.player);
-
-        return player;
+    protected static ClientPlayerEntity getPlayer() {
+        return client.player;
     }
 
     public static ICustomGoalProcess getGoalProcess() {
-        if (goalProcess == null) {
-            goalProcess = BaritoneAPI.getProvider().getBaritoneForPlayer(getPlayer()).getCustomGoalProcess();
-        }
-
-        return goalProcess;
+        return BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess();
     }
 
     @NotNull

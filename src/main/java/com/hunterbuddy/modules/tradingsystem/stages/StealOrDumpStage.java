@@ -1,102 +1,66 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.stages;
 
-import meteordevelopment.meteorclient.utils.Utils;
-import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.SlotUtils;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.Slot;
 import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class StealOrDumpStage extends Stage {
     private final Type type;
-    private final AtomicBoolean isComplete = new AtomicBoolean(false);
     private boolean isFirstTick = true;
+    private int nextSlot = 0;
+    private int stoleCount = 0;
+    private long lastMovingTime = 0;
 
     public StealOrDumpStage(ExperienceTraderModule main, Type type) {
         super(main);
         this.type = type;
     }
 
-    private void moveSlots(ScreenHandler handler, int start, int end, Type type) {
-        long lastMovingTime = 0;
-        int stoleCount = 0;
-        for (int i = start; i < end; i++) {
-            if (!handler.getSlot(i).hasStack()) continue;
-
-            if (!(System.currentTimeMillis() - lastMovingTime > super.mainModule.stealAndDumpDelay.get())) {
-                try {
-                    Thread.sleep(super.mainModule.stealAndDumpDelay.get() / 2);
-                } catch (InterruptedException ignored) { }
-            }
-
-            if (client.currentScreen == null || !Utils.canUpdate()) break;
-
-            Item item = handler.getSlot(i).getStack().getItem();
-            if (!item.equals(type.getItem())) continue;
-
-            InvUtils.shiftClick().slotId(i);
-
-            if (type.equals(Type.STEAL)) {
-                stoleCount++;
-                if (stoleCount >= type.stacksCount())
-                    break;
-            }
-
-            lastMovingTime = System.currentTimeMillis();
-        }
-        this.isComplete.set(true);
-    }
-
-    private void steal(ScreenHandler handler) {
-        MeteorExecutor.execute(() -> moveSlots(handler, 0, SlotUtils.indexToId(SlotUtils.MAIN_START), type));
-    }
-
-    private void dump(ScreenHandler handler) {
-        int playerInvOffset = SlotUtils.indexToId(SlotUtils.MAIN_START);
-        MeteorExecutor.execute(() -> moveSlots(handler, playerInvOffset, playerInvOffset + 4 * 9, type));
-    }
-
     @Override
     public boolean work() {
         if (!super.mainModule.isTimeToClear()) return true;
-
+        if (!(client.currentScreen instanceof GenericContainerScreen chestScreen)) return finish();
+        if (type == Type.STEAL && this.stoleCount >= type.stacksCount()) return finish();
+        ScreenHandler handler = chestScreen.getScreenHandler();
+        int playerInvOffset = SlotUtils.indexToId(SlotUtils.MAIN_START);
+        int end = type == Type.STEAL ? playerInvOffset : playerInvOffset + 4 * 9;
         if (this.isFirstTick) {
-            if (requireNonNull(client.currentScreen) instanceof GenericContainerScreen chestScreen) {
-                switch (type) {
-                    case DUMP -> dump(chestScreen.getScreenHandler());
-                    case STEAL -> steal(chestScreen.getScreenHandler());
-                }
-            } else {
-                throw new RuntimeException("Invalid screen");
-            }
-
+            this.nextSlot = type == Type.STEAL ? 0 : playerInvOffset;
             this.isFirstTick = false;
         }
-
-        if (this.isComplete.get()) {
-            if (client.currentScreen != null) {
-                client.currentScreen.close();
+        while (this.nextSlot < end) {
+            Slot slot = handler.getSlot(this.nextSlot);
+            if (!slot.hasStack() || !slot.getStack().getItem().equals(type.getItem())) {
+                this.nextSlot++;
+                continue;
             }
+            if (System.currentTimeMillis() - this.lastMovingTime < super.mainModule.stealAndDumpDelay.get()) return false;
+            InvUtils.shiftClick().slotId(this.nextSlot++);
+            this.lastMovingTime = System.currentTimeMillis();
+            if (type == Type.STEAL && ++this.stoleCount >= type.stacksCount()) return finish();
+            return this.nextSlot >= end ? finish() : false;
         }
+        return finish();
+    }
 
-        return this.isComplete.get();
+    private boolean finish() {
+        if (client.currentScreen != null) client.currentScreen.close();
+        return true;
     }
 
     @Override
     public void reset() {
-        this.isComplete.set(false);
         this.isFirstTick = true;
+        this.nextSlot = 0;
+        this.stoleCount = 0;
+        this.lastMovingTime = 0;
     }
 
     @Override

@@ -176,9 +176,9 @@ public class ExperienceTraderModule extends Module {
             .onChanged(val -> {
                 try {
                     blocked.clear();
-                    info("Данные о пройденных жителях очищена!");
+                    info("Visited villagers cleared.");
                 } catch (Throwable ignored) {
-                    error("Ошибка при сбрасывании данных о жителях!");
+                    error("Could not clear visited villagers.");
                 }
             })
             .build()
@@ -192,9 +192,9 @@ public class ExperienceTraderModule extends Module {
             .onChanged(val -> {
                 try {
                     resetData();
-                    info("Все данные очищены!");
+                    info("Trader data cleared.");
                 } catch (Throwable ignored) {
-                    error("Ошибка при сбрасывании кеша!");
+                    error("Could not clear trader cache.");
                 }
             })
             .build()
@@ -212,16 +212,16 @@ public class ExperienceTraderModule extends Module {
         stages.add(new EmptyStage(this));
         stages.add(new ValidateStage(this));
         stages.add(new EmeraldCheckStage(this));
-        stages.add(new SprintToChest(this, SprintToChest.NeededChest.EXPERIENCE)); //a pass if you don't need it
-        stages.add(new StealOrDumpStage(this, StealOrDumpStage.Type.DUMP)); //a pass if you don't need it
-        stages.add(new SprintToChest(this, SprintToChest.NeededChest.EMERALDS)); //a pass if you don't need it
-        stages.add(new StealOrDumpStage(this, StealOrDumpStage.Type.STEAL)); //a pass if you don't need it
-        stages.add(new CraftStage(this)); //a pass if you don't need it
+        stages.add(new SprintToChest(this, SprintToChest.NeededChest.EXPERIENCE));
+        stages.add(new StealOrDumpStage(this, StealOrDumpStage.Type.DUMP));
+        stages.add(new SprintToChest(this, SprintToChest.NeededChest.EMERALDS));
+        stages.add(new StealOrDumpStage(this, StealOrDumpStage.Type.STEAL));
+        stages.add(new CraftStage(this));
         stages.add(new SprintStage(this));
         stages.add(new OpenTradeMenu(this));
         stages.add(new BuyingStage(this));
 
-        //perform current data
+
         resetData();
     }
 
@@ -259,6 +259,7 @@ public class ExperienceTraderModule extends Module {
     private int current_index = 0;
     @EventHandler
     public void onTick(TickEvent.Pre event) {
+        if (mc.player == null || mc.world == null) return;
         if (this.autoEat != null) {
             if (this.autoEat.eating) return;
         }
@@ -277,7 +278,7 @@ public class ExperienceTraderModule extends Module {
             if (this.stages.size() <= current_index)
                 resetData();
         } catch (Throwable err) {
-            error("Ошибка при выполнении одной из стадий: " + err.getMessage());
+            error("Stage failed: " + err.getMessage());
             err.printStackTrace(System.err);
             super.toggle();
         }
@@ -296,7 +297,7 @@ public class ExperienceTraderModule extends Module {
 
     public void nextRound(String reason) {
         if (doOutput()) {
-            warning("Житель пропущен по причине: " + reason);
+            warning("Villager skipped: " + reason);
         }
 
         resetData();

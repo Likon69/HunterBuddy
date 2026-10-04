@@ -41,7 +41,7 @@ public class WorldUtils {
     public static boolean interact(BlockPos pos, FindItemResult findItemResult, boolean rotate) {
         if (!findItemResult.found()) return false;
         Runnable action = () -> {
-            // 1.20 -> 1.21 migration: input.sneaking field removed. Use the high-level setter.
+
             boolean wasSneaking = mc.player.isSneaking();
             mc.player.setSneaking(false);
             InvUtils.swap(findItemResult.slot(), true);

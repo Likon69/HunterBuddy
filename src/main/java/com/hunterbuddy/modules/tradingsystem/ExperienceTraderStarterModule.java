@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem;
 
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -43,6 +38,7 @@ public class ExperienceTraderStarterModule extends Module {
     );
 
     private String parsedTime;
+    private long lastTriggeredDay = Long.MIN_VALUE;
 
     public ExperienceTraderStarterModule(Category category, ExperienceTraderModule module) {
         super(category, "Experience Trader Starter", "AI is going to take over the world");
@@ -51,10 +47,13 @@ public class ExperienceTraderStarterModule extends Module {
 
     @EventHandler
     public void onTickPost(TickEvent.Post event) {
+        if (mc.world == null) return;
         if (parsedTime == null) updateParsedTime();
 
-        if (this.parsedTime.equals(Utils.getWorldTime())) {
+        long day = mc.world.getTimeOfDay() / 24000;
+        if (this.parsedTime.equals(Utils.getWorldTime()) && day != this.lastTriggeredDay) {
             if (!this.module.isActive()) {
+                this.lastTriggeredDay = day;
                 this.module.blocked.clear();
                 this.module.toggle();
             }

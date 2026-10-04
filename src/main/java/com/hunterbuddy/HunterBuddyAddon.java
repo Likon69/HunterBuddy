@@ -108,11 +108,11 @@ public class HunterBuddyAddon extends MeteorAddon {
         com.hunterbuddy.util.PingSampler.init();
         com.hunterbuddy.util.LifetimeStats.init();
         MeteorClient.EVENT_BUS.subscribe(new com.hunterbuddy.modules.VisualRangeNotifier.Hooks());
-        // Clears RocketBoost's Baritone settings on join when the module is off, so a value left
-        // behind by a crash mid-flight cannot make Baritone plan for a boost nothing is applying.
+
+
         MeteorClient.EVENT_BUS.subscribe(new com.hunterbuddy.modules.RocketBoost.Hooks());
 
-        // HUDs
+
         Hud.get().register(ElytraHelperHud.INFO);
         Hud.get().register(SpeedKMH.INFO);
         Hud.get().register(MovementStatusHud.INFO);
@@ -145,8 +145,8 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(com.hunterbuddy.hud.SpawnerFarmHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.SpawnerRunHud.INFO);
 
-        // HunterBuddy modules
-        // Modules.get().add(new AFKVanillaFly());
+
+
         Modules.get().add(new AutoLogPlus());
         Modules.get().add(new AutoEXPPlus());
         Modules.get().add(new ClientSideTime());
@@ -191,7 +191,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new EntityView());
         Modules.get().add(new FlightTrail());
 
-        // HunterBuddy-original modules
+
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new com.hunterbuddy.modules.Shader());
         Modules.get().add(new RocketBoost());
@@ -208,11 +208,9 @@ public class HunterBuddyAddon extends MeteorAddon {
         Commands.add(new SetClear());
         Commands.add(new com.hunterbuddy.commands.AreaLoaderReset());
         Commands.add(new com.hunterbuddy.commands.Trails());
-        // ExperienceTraderModule and ExperienceTraderStarterModule are hidden for now
-        // (files kept, but not registered in module list).
-        // ExperienceTraderModule module = new ExperienceTraderModule(HUNTER_BUDDY_CATEGORY);
-        // Modules.get().add(module);
-        // Modules.get().add(new ExperienceTraderStarterModule(HUNTER_BUDDY_CATEGORY, module));
+        ExperienceTraderModule module = new ExperienceTraderModule(UTILITY_CATEGORY);
+        Modules.get().add(module);
+        Modules.get().add(new ExperienceTraderStarterModule(UTILITY_CATEGORY, module));
     }
 
     @Override

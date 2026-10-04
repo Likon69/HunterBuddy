@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.stages;
 
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
@@ -59,7 +54,7 @@ public class CraftStage extends Stage {
                 } else {
                     if (this.waitTime >= super.mainModule.maxServerTimeout.get() * 1000) {
                         super.mainModule.toggle();
-                        super.mainModule.error("Сервер не ответил результатом крафта.");
+                        super.mainModule.error("Craft output timed out.");
                     }
 
                     this.waitTime += super.mainModule.stealAndDumpDelay.get();
@@ -110,12 +105,6 @@ public class CraftStage extends Stage {
             getPlayer()
         );
 
-        screen.getScreenHandler().onSlotClick(
-            0,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT,
-            SlotActionType.QUICK_MOVE,
-            getPlayer()
-        );
     }
 
     @Override

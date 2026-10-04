@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.stages;
 
 import net.minecraft.client.gui.screen.ingame.MerchantScreen;
@@ -15,7 +10,6 @@ import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
 import com.hunterbuddy.modules.tradingsystem.utilites.Stage;
 
 import java.util.ArrayList;
-import java.util.Objects;
 import java.util.Optional;
 
 public class BuyingStage extends Stage {
@@ -30,13 +24,16 @@ public class BuyingStage extends Stage {
     private int ignoredTicks = 0;
     @Override
     public boolean work() {
-        MerchantScreen tradeScreen = Objects.requireNonNull((MerchantScreen) client.currentScreen);
+        if (!(client.currentScreen instanceof MerchantScreen tradeScreen)) {
+            super.mainModule.nextRound("trade screen closed");
+            return false;
+        }
 
         if (this.targetOffer == null) {
             this.targetOffer = findTradeOffer(tradeScreen);
 
             if (this.targetOffer == null) {
-                super.mainModule.nextRound("У жителя отсутствуют нужные торги.");
+                super.mainModule.nextRound("No matching trades.");
                 return false;
             }
 
@@ -45,7 +42,7 @@ public class BuyingStage extends Stage {
             setSelectedIndex(tradeScreen, this.targetIndex);
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Нужный трейд установлен.");
+                super.mainModule.info("Trade selected.");
             }
         }
 
@@ -62,12 +59,13 @@ public class BuyingStage extends Stage {
                     buyProcess(tradeScreen);
                     resetPhase();
                 } else if (!sellItemType.equals(Items.AIR)) {
-                    throw new RuntimeException("Invalid target trade offer");
+                    super.mainModule.nextRound("unexpected item in the trade output");
+                    return false;
                 } else {
                     this.ignoredTicks++;
 
                     if (this.ignoredTicks >= super.mainModule.maxServerTimeout.get() * 20) {
-                        super.mainModule.nextRound("Время ожидания товара в слоте покупки вышло.");
+                        super.mainModule.nextRound("Trade output timed out.");
                         return false;
                     }
                 }
@@ -86,7 +84,7 @@ public class BuyingStage extends Stage {
     private TradeOffer findTradeOffer(MerchantScreen tradeScreen) {
         ArrayList<TradeOffer> offers = tradeScreen.getScreenHandler().getRecipes();
 
-        // Log all available offers for debugging
+
         System.out.println("Available trade offers:");
         offers.forEach(offer -> {
             System.out.println("Sell: " + offer.copySellItem().getItem() +

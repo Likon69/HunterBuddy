@@ -1,8 +1,3 @@
-/*
- * This file is part of the Meteor Client distribution (https://github.com/MeteorDevelopment/meteor-client).
- * Copyright (c) Meteor Development.
- */
-
 package com.hunterbuddy.modules.tradingsystem.stages;
 
 import baritone.api.pathing.goals.GoalBlock;
@@ -31,7 +26,7 @@ public class SprintToChest extends Stage {
     public boolean work() {
         if (!super.mainModule.isTimeToClear()) return true;
 
-        //NOTE: "+ 1" because block not fluid, can't go to "< 1" distance
+
         boolean isAlreadyWithin = this.chest.getChestPosition(super.mainModule).isWithinDistance(
             getPlayer().getEntityPos(),
             super.mainModule.baritoneStopDistance.get() + 1
@@ -40,15 +35,15 @@ public class SprintToChest extends Stage {
         if (isAlreadyWithin) {
             if (this.isFirstTick) {
                 if (super.mainModule.doOutput()) {
-                    super.mainModule.info("Игрок на нужных координатах.");
+                    super.mainModule.info("Reached target.");
                 }
 
-                //baritone can jump on block and lookAt can be uncorrected
+
                 super.mainModule.addWaitTicks(20);
 
                 return this.isFirstTick = false;
             } else if (!this.isPacketSent) {
-                reset(); //JOKE: method resetting this.isPacketSent
+                reset();
 
                 getPlayer().lookAt(
                     EntityAnchorArgumentType.EntityAnchor.EYES,
@@ -58,8 +53,9 @@ public class SprintToChest extends Stage {
                 HitResult hitResult = getPlayer().raycast(5, 0, false);
 
                 if (!hitResult.getType().equals(HitResult.Type.BLOCK)) {
+                    super.mainModule.error("Could not target the chest.");
                     super.mainModule.toggle();
-                    super.mainModule.error("Ошибка при рейкастинге на сундук!");
+                    return false;
                 }
 
                 BlockHitResult blockHitResult = (BlockHitResult) hitResult;
@@ -70,11 +66,11 @@ public class SprintToChest extends Stage {
                     blockHitResult
                 );
 
-                this.isPacketSent = true; //JOKE continue: setting this.isPacketSent
+                this.isPacketSent = true;
                 this.isFirstTick = false;
 
                 if (super.mainModule.doOutput()) {
-                    super.mainModule.info("Пакет интеракта отправлен!");
+                    super.mainModule.info("Chest interaction sent.");
                 }
 
                 return false;
@@ -82,8 +78,9 @@ public class SprintToChest extends Stage {
                 this.waitTicks++;
 
                 if (waitTicks > super.mainModule.maxServerTimeout.get() * 20) {
-                    super.mainModule.error("Слишком долго открывается сундук.");
+                    super.mainModule.error("Chest screen timed out.");
                     super.mainModule.toggle();
+                    return false;
                 }
             } else {
                 return true;
@@ -94,15 +91,16 @@ public class SprintToChest extends Stage {
 
         if (!getGoalProcess().isActive() || getGoalProcess().getGoal() == null) {
             if (this.attempts > 10) {
-                super.mainModule.toggle();
-                super.mainModule.error("Баритон не может дойти до цели. Убедитесь в правильности и чистоте координат: "
+                super.mainModule.error("Could not reach chest; check coordinates: "
                     + this.chest.getChestPosition(super.mainModule).toShortString());
+                super.mainModule.toggle();
+                return false;
             }
 
             getGoalProcess().setGoalAndPath(new GoalBlock(this.chest.getChestPosition(super.mainModule).add(0, 1, 0)));
 
             if (super.mainModule.doOutput()) {
-                super.mainModule.info("Установлена цель на сундук " + this.chest + ".");
+                super.mainModule.info("Chest goal set: " + this.chest + ".");
             }
 
             this.attempts++;
