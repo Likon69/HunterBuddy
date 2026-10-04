@@ -482,6 +482,7 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> lowGlideLogged = new java.util.HashSet<>();
     private final Set<BlockPos> floatingBlockLogged = new java.util.HashSet<>();
     private final Set<BlockPos> jungleTempleSkipLogged = new java.util.HashSet<>();
+    private final Set<BlockPos> newChunkSkipLogged = new java.util.HashSet<>();
     private final Set<BlockPos> autoAbandonedOnce = new java.util.HashSet<>();
     private final Set<BlockPos> autoSoloRejectedThisSession = new java.util.HashSet<>();
     private final Set<BlockPos> autoSoundedSites = new java.util.HashSet<>();
@@ -885,6 +886,7 @@ public class SpawnerDetector extends Module {
         lowGlideLogged.clear();
         floatingBlockLogged.clear();
         jungleTempleSkipLogged.clear();
+        newChunkSkipLogged.clear();
         autoSoloRejectedThisSession.clear();
         autoSoundedSites.clear();
         jungleTempleLowestYCache.clear();
@@ -1457,6 +1459,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        if (newChunkSkipLogged.contains(center)) return;
         if (sites.containsKey(center)) {
             logSkipOnce(center, String.format("spawnerless center already site %d,%d,%d", center.getX(), center.getY(), center.getZ()));
             return;
@@ -1801,6 +1804,43 @@ public class SpawnerDetector extends Module {
                 autoLog("SITE", center, "skipped: jungle temple");
             }
             return false;
+        }
+
+        if (!ps.hasSpawner()) {
+            if (newChunkSkipLogged.contains(center)) {
+                rejected.add(center);
+                return false;
+            }
+            int deepslateY = -1;
+            WorldChunk chunk = mc.world.getChunkManager().getWorldChunk(center.getX() >> 4, center.getZ() >> 4);
+            if (chunk.getBottomY() <= 0) {
+                int sectionIndex = chunk.getSectionIndex(0);
+                ChunkSection[] sections = chunk.getSectionArray();
+                if (sectionIndex >= 0 && sectionIndex < sections.length) {
+                    ChunkSection section = sections[sectionIndex];
+                    if (section != null && !section.isEmpty()
+                        && section.hasAny(st -> st.isOf(Blocks.DEEPSLATE) || st.isOf(Blocks.COBBLED_DEEPSLATE))) {
+                        for (int y = 5; y < 16 && deepslateY < 0; y++) {
+                            for (int x = 0; x < 16 && deepslateY < 0; x++) {
+                                for (int z = 0; z < 16; z++) {
+                                    BlockState state = section.getBlockState(x, y, z);
+                                    if (state.isOf(Blocks.DEEPSLATE) || state.isOf(Blocks.COBBLED_DEEPSLATE)) {
+                                        deepslateY = y;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (deepslateY >= 0) {
+                rejected.add(center);
+                if (newChunkSkipLogged.add(center)) {
+                    autoLog("SITE", center, String.format("skipped: spawnerless room in a new chunk (deepslate at y=%d)", deepslateY));
+                }
+                return false;
+            }
         }
 
         long t0 = System.nanoTime();
