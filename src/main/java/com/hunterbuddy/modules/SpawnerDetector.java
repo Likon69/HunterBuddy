@@ -587,6 +587,7 @@ public class SpawnerDetector extends Module {
     private int autoRoomSubState;
     private long autoRoomSubStateStartMs;
     private int autoRoomOpenAttempts;
+    private int autoRoomContainerFails;
     private int autoRoomWaitTicks;
     private long autoRoomBreakStartMs;
     private boolean autoRoomSpawnerHandled;
@@ -6420,6 +6421,7 @@ public class SpawnerDetector extends Module {
 
         if (!isContainerPresent(target)) {
             autoRoomIndex++;
+            autoRoomContainerFails = 0;
             autoRoomSubState = 0;
             autoRoomPillarTarget = null;
             autoRoomPillarPhase = 0;
@@ -6466,9 +6468,13 @@ public class SpawnerDetector extends Module {
                     if (autoRoomOpenAttempts < 2) {
                         autoRoomSubState = 2;
                     } else {
-                        autoLog("ROOM", target, "container did not open, retry");
-                        autoRoomOpenAttempts = 0;
-                        autoRoomSubState = 0;
+                        autoLog("ROOM", target, "container did not open, breaking it unread");
+                        autoRoomBreakStartMs = System.currentTimeMillis();
+                        autoRoomBreakTicks = 0;
+                        autoRoomContainerGoneTicks = 0;
+                        autoRoomBreakAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+                        autoRoomBreakRepositioning = false;
+                        autoRoomSubState = 5;
                     }
                 }
             }
@@ -6477,6 +6483,7 @@ public class SpawnerDetector extends Module {
                 boolean kept = readContainer(target);
                 if (kept) {
                     autoRoomIndex++;
+                    autoRoomContainerFails = 0;
                     autoRoomSubState = 0;
                     autoRoomPillarTarget = null;
                     autoRoomPillarPhase = 0;
@@ -6505,6 +6512,7 @@ public class SpawnerDetector extends Module {
                 statChestsBroken++;
                 autoLog("ROOM", target, "broken in " + autoRoomBreakTicks + " ticks");
                 autoRoomIndex++;
+                autoRoomContainerFails = 0;
                 autoRoomSubState = 0;
                 autoRoomPillarTarget = null;
                 autoRoomPillarPhase = 0;
@@ -6544,7 +6552,16 @@ public class SpawnerDetector extends Module {
         if (System.currentTimeMillis() - autoRoomBreakStartMs > 20_000L) {
             Utils.setPressed(mc.options.attackKey, false);
             autoRoomBreakRepositioning = false;
-            autoLog("ROOM", target, "break failed, retry");
+            autoRoomContainerFails++;
+            if (autoRoomContainerFails >= 2) {
+                autoRoomIndex++;
+                autoRoomContainerFails = 0;
+                autoRoomPillarTarget = null;
+                autoRoomPillarPhase = 0;
+                autoLog("ROOM", target, "container skipped after 2 failed breaks");
+            } else {
+                autoLog("ROOM", target, "break failed, retry");
+            }
             autoRoomSubState = 0;
             return;
         }
@@ -6618,6 +6635,7 @@ public class SpawnerDetector extends Module {
                 autoRoomPillarTarget = null;
                 autoRoomPillarPhase = 0;
                 autoRoomIndex++;
+                autoRoomContainerFails = 0;
                 autoRoomSubState = 0;
                 return true;
             }
@@ -7185,6 +7203,7 @@ public class SpawnerDetector extends Module {
             autoRoomSpawnerAnchor = null;
             autoRoomSpawnerRepositioning = false;
             autoRoomIndex = 0;
+            autoRoomContainerFails = 0;
             autoRoomSubState = 0;
             autoRoomPillarTarget = null;
             autoRoomPillarPhase = 0;
@@ -7200,6 +7219,13 @@ public class SpawnerDetector extends Module {
             autoPauseReason = null;
             autoPauseStartMs = 0;
             autoPausedTicks = 0;
+        }
+
+        if ((stateTicks - autoPausedTicks) > 180 * 20) {
+            autoLog("ROOM", autoSite.center, "room timeout 180s, leaving");
+            releaseAllAutoKeys();
+            finishRoomAndAscend();
+            return;
         }
 
         if ((mc.player.isOnGround() || mc.player.isSubmergedInWater()) && mc.player.getBlockPos().getY() < autoSite.room.cy() - 2) {
