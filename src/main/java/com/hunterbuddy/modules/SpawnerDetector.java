@@ -6995,6 +6995,36 @@ public class SpawnerDetector extends Module {
 
         BlockPos from = finishedSite.center;
         double chainDist = Math.sqrt(bestDistSq);
+        if (finishedFlooded && mc.player.isTouchingWater()) {
+            QualResult wq = evaluateQualification(chainSite, true);
+            if (wq.reject() == null && wq.plan() != null && wq.plan().water()) {
+                markVisited(from, autoRunOutcome());
+                if (!autoRunAbandoned) statRoomsFarmed++;
+                autoLog("CHAIN", from, String.format("underground by water next=%d,%d,%d dist=%.1f",
+                    chainSite.center.getX(), chainSite.center.getY(), chainSite.center.getZ(), chainDist));
+
+                autoSite = chainSite;
+                autoColumn = wq.plan();
+                autoChestplateAllowed = false;
+                autoRunAbandoned = false;
+                autoRoomFoundShulkers = 0;
+                autoRoomFoundItems = 0;
+                autoClimbLostGlideRetries = 0;
+                autoTakeoffRetries = 0;
+                autoAscendFailedPoints.clear();
+                autoAscendRadius = 0;
+                autoAscendSurfacedCount = 0;
+                autoWalkReapproach = false;
+                autoWalkReapproachCount = 0;
+                autoExitShaftForeign = false;
+                autoTunnelTrail.clear();
+
+                enterState(AutoState.WALK, String.format("chained by water from %d,%d,%d dist=%.1f",
+                    from.getX(), from.getY(), from.getZ(), chainDist));
+                return true;
+            }
+        }
+
         markVisited(from, autoRunOutcome());
         if (!autoRunAbandoned) statRoomsFarmed++;
         autoLog("CHAIN", from, String.format("underground next=%d,%d,%d dist=%.1f",
