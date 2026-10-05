@@ -9592,7 +9592,7 @@ public class SpawnerDetector extends Module {
                 }
                 return;
             }
-            if (autoAreaLoaderWasOn && !isClearSkyHere()) {
+            if (autoAreaLoaderWasOn && (!isClearSkyHere() || (autoExitShaft != null && !autoExitShaft.water() && autoClimbLostGlideRetries < 4 && Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ()) <= 4.0 && mc.player.getY() < autoExitShaft.exitY() + 20))) {
                 if (!(mc.player.isOnGround() || mc.player.isTouchingWater())) return;
                 autoClimbLostGlideRetries++;
                 boolean dryShaftFly = autoClimbLostGlideRetries < 2 && autoExitShaft != null && !autoExitShaft.skyBlocked()
