@@ -677,6 +677,8 @@ public class SpawnerDetector extends Module {
     private boolean autoWalkKeyLogged;
     private int autoWalkStuckTicks;
     private int autoWalkIdleTicks;
+    private BlockPos autoWalkBoxPos;
+    private int autoWalkBoxTicks;
     private double autoWalkStuckLastDist;
     private boolean autoWalkStuckUseBreak;
     private boolean autoWalkStuckBreaking;
@@ -4840,6 +4842,8 @@ public class SpawnerDetector extends Module {
     }
 
     private void startWalkBaritoneGoal() {
+        autoWalkBoxPos = null;
+        autoWalkBoxTicks = 0;
         autoBaritoneRetries = 0;
         IBaritone bt = primaryBaritone();
         if (bt != null) {
@@ -4873,6 +4877,8 @@ public class SpawnerDetector extends Module {
             autoWalkKeyLogged = false;
             autoWalkStuckTicks = 0;
             autoWalkIdleTicks = 0;
+            autoWalkBoxPos = null;
+            autoWalkBoxTicks = 0;
             autoWalkStuckLastDist = -1;
             autoWalkStuckUseBreak = false;
             autoWalkStuckBreaking = false;
@@ -5230,6 +5236,29 @@ public class SpawnerDetector extends Module {
             bt.getPathingBehavior().cancelEverything();
             releaseAllAutoKeys();
             autoLog("WALK", autoSite.center, "near hole, baritone no progress 5s");
+            return;
+        }
+        if (pathing) {
+            BlockPos stuckFeet = mc.player.getBlockPos();
+            if (autoWalkBoxPos != null
+                && Math.abs(stuckFeet.getX() - autoWalkBoxPos.getX()) <= 2
+                && Math.abs(stuckFeet.getY() - autoWalkBoxPos.getY()) <= 2
+                && Math.abs(stuckFeet.getZ() - autoWalkBoxPos.getZ()) <= 2) {
+                autoWalkBoxTicks++;
+            } else {
+                autoWalkBoxPos = stuckFeet;
+                autoWalkBoxTicks = 0;
+            }
+        } else if (baritoneGaveUp) {
+            autoWalkBoxPos = null;
+            autoWalkBoxTicks = 0;
+        }
+        if (autoWalkBoxTicks >= 240) {
+            bt.getPathingBehavior().cancelEverything();
+            releaseAllAutoKeys();
+            autoWalkBoxPos = null;
+            autoWalkBoxTicks = 0;
+            autoLog("WALK", autoSite.center, "baritone no progress 12s");
             return;
         }
         if (!pathing && !baritoneGaveUp) {
@@ -10006,25 +10035,41 @@ public class SpawnerDetector extends Module {
         if (!pathing && grounded && baritoneGaveUp && stateTicks > 20 && autoBaritoneRetries < 3) {
             autoBaritoneRetries++;
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
-        } else if (!pathing && grounded && baritoneGaveUp && autoBaritoneRetries >= 3) {
-            BlockPos stuckFeet = mc.player.getBlockPos();
-            if (autoAscendStuckPos != null && autoAscendStuckPos.equals(stuckFeet)) {
-                autoAscendStuckTicks++;
-            } else {
-                autoAscendStuckPos = stuckFeet;
-                autoAscendStuckTicks = 0;
-            }
-
-            if (autoAscendStuckTicks >= 60) {
-                if (bt != null) bt.getPathingBehavior().cancelEverything();
-                releaseAllAutoKeys();
-                autoLog("ASCEND", autoSite.center, "baritone stuck, self ascend");
-                enterState(AutoState.SELF_ASCEND, "baritone stuck");
-                return;
-            }
+        }
+        BlockPos stuckFeet = mc.player.getBlockPos();
+        if (autoAscendStuckPos != null
+            && Math.abs(stuckFeet.getX() - autoAscendStuckPos.getX()) <= 2
+            && Math.abs(stuckFeet.getY() - autoAscendStuckPos.getY()) <= 2
+            && Math.abs(stuckFeet.getZ() - autoAscendStuckPos.getZ()) <= 2) {
+            autoAscendStuckTicks++;
         } else {
+            autoAscendStuckPos = stuckFeet;
+            autoAscendStuckTicks = 0;
+        }
+
+        if (autoAscendStuckTicks >= 240) {
             autoAscendStuckPos = null;
             autoAscendStuckTicks = 0;
+            if (autoBaritoneRetries < 3) {
+                autoBaritoneRetries++;
+                if (bt != null) {
+                    bt.getPathingBehavior().cancelEverything();
+                    bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+                }
+                releaseAllAutoKeys();
+                autoLog("ASCEND", autoSite.center, "baritone no progress 12s, retry " + autoBaritoneRetries);
+                return;
+            }
+            if (mc.player.getBlockPos().getY() <= autoSite.room.cy() + 4 && autoAscendRadius < 96) {
+                ascendRetryBiggerRadius();
+                autoLog("ASCEND", autoSite.center, "baritone no progress at room level, wider takeoff search");
+                return;
+            }
+            if (bt != null) bt.getPathingBehavior().cancelEverything();
+            releaseAllAutoKeys();
+            autoLog("ASCEND", autoSite.center, "baritone stuck, self ascend");
+            enterState(AutoState.SELF_ASCEND, "baritone stuck");
+            return;
         }
 
         logNavTelemetry("ASCEND", autoAscendTargets.isEmpty()
