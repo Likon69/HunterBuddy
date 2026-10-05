@@ -6462,7 +6462,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
+        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && !isOpenState(mc.world.getBlockState(mc.player.getBlockPos().down()), mc.player.getBlockPos().down()));
         if (autoMineTick("ROOM", autoRoomSpawnerPos, false)) {
             autoRoomSpawnerHandled = true;
         }
@@ -6621,7 +6621,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickRoomContainerBreak(BlockPos target) {
-        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
+        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && !isOpenState(mc.world.getBlockState(mc.player.getBlockPos().down()), mc.player.getBlockPos().down()));
         autoRoomBreakTicks++;
 
         boolean present = isContainerPresent(target);
@@ -7281,7 +7281,7 @@ public class SpawnerDetector extends Module {
         }
 
         releaseAllAutoKeys();
-        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
+        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && !isOpenState(mc.world.getBlockState(mc.player.getBlockPos().down()), mc.player.getBlockPos().down()));
 
         if (autoMineTick("ROOM", pos, false)) {
             autoRoomDebrisBroken++;
