@@ -9218,6 +9218,30 @@ public class SpawnerDetector extends Module {
         boolean onSwimUpColumn = swimUpColumnDist <= 0.7;
 
         navigateExitColumn(swimUpX, swimUpZ, 0.2, swimUpEntry, true);
+        boolean fastSwimUp = onSwimUpColumn && mc.player.isSubmergedInWater()
+            && autoSwimUpBreakPos == null && autoExitBreakPos == null
+            && autoExitTrailBreakPos == null && !autoExitStuckBreaking
+            && mc.player.getHungerManager().getFoodLevel() > 6;
+        if (fastSwimUp) {
+            BlockPos feet = mc.player.getBlockPos();
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos neighbor = feet.offset(dir);
+                BlockState neighborState = mc.world.getBlockState(neighbor);
+                if (isOpenState(neighborState, neighbor) || neighborState.getFluidState().isIn(FluidTags.WATER)) {
+                    fastSwimUp = false;
+                    break;
+                }
+            }
+        }
+        if (fastSwimUp) {
+            mc.player.setPitch(-90.0f);
+            Utils.setPressed(mc.options.forwardKey, true);
+            Utils.setPressed(mc.options.sprintKey, true);
+            Utils.setPressed(mc.options.sneakKey, false);
+            Utils.setPressed(mc.options.jumpKey, true);
+        } else {
+            Utils.setPressed(mc.options.sprintKey, false);
+        }
 
         double swimUpY = mc.player.getY();
         if (swimUpY >= autoSwimUpLastY + 0.5) {
@@ -9283,9 +9307,10 @@ public class SpawnerDetector extends Module {
         }
 
         if (stateTicks % 20 == 0) {
-            autoLog("SWIM_UP", autoSite.center, String.format("x=%.1f y=%.1f z=%.1f submerged=%b touchingWater=%b",
+            autoLog("SWIM_UP", autoSite.center, String.format("x=%.1f y=%.1f z=%.1f submerged=%b touchingWater=%b sprint=%b swimming=%b fast=%b pitch=%.0f vy=%.3f",
                 mc.player.getX(), mc.player.getY(), mc.player.getZ(),
-                mc.player.isSubmergedInWater(), mc.player.isTouchingWater()));
+                mc.player.isSubmergedInWater(), mc.player.isTouchingWater(),
+                mc.player.isSprinting(), mc.player.isSwimming(), fastSwimUp, mc.player.getPitch(), mc.player.getVelocity().y));
         }
 
         boolean surfaced = !mc.player.isSubmergedInWater() && mc.player.getY() >= swimUpExitY - 1;
