@@ -3111,13 +3111,15 @@ public class SpawnerDetector extends Module {
                 continue;
             }
             if (!hasTwentyDryOpenBelow(x, y, z, cursor)) break;
-            boolean supported = false;
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                cursor.set(x + dir.getOffsetX(), y - 1, z + dir.getOffsetZ());
-                BlockState belowNeighbor = mc.world.getBlockState(cursor);
-                if (!isOpenState(belowNeighbor, cursor) || !belowNeighbor.getFluidState().isEmpty()) {
-                    supported = true;
-                    break;
+            boolean supported = true;
+            for (int dy = 1; dy <= 2 && supported; dy++) {
+                for (Direction dir : Direction.Type.HORIZONTAL) {
+                    cursor.set(x + dir.getOffsetX(), y - dy, z + dir.getOffsetZ());
+                    BlockState belowNeighbor = mc.world.getBlockState(cursor);
+                    if (isOpenState(belowNeighbor, cursor) && belowNeighbor.getFluidState().isEmpty()) {
+                        supported = false;
+                        break;
+                    }
                 }
             }
             if (supported) {
@@ -3136,13 +3138,15 @@ public class SpawnerDetector extends Module {
 
     private int descendPastFloatingBlockTop(BlockPos siteCenter, int x, int z, int y, int minY, BlockPos.Mutable cursor) {
         while (y > minY && hasTwentyDryOpenBelow(x, y, z, cursor)) {
-            boolean supported = false;
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                cursor.set(x + dir.getOffsetX(), y - 1, z + dir.getOffsetZ());
-                BlockState belowNeighbor = mc.world.getBlockState(cursor);
-                if (!isOpenState(belowNeighbor, cursor) || !belowNeighbor.getFluidState().isEmpty()) {
-                    supported = true;
-                    break;
+            boolean supported = true;
+            for (int dy = 1; dy <= 2 && supported; dy++) {
+                for (Direction dir : Direction.Type.HORIZONTAL) {
+                    cursor.set(x + dir.getOffsetX(), y - dy, z + dir.getOffsetZ());
+                    BlockState belowNeighbor = mc.world.getBlockState(cursor);
+                    if (isOpenState(belowNeighbor, cursor) && belowNeighbor.getFluidState().isEmpty()) {
+                        supported = false;
+                        break;
+                    }
                 }
             }
             if (supported) {
