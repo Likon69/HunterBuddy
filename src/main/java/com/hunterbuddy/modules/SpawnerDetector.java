@@ -8039,9 +8039,11 @@ public class SpawnerDetector extends Module {
                 if (foreign) {
                     ColumnPlan own = planColumn(autoSite);
                     int ownCy = autoSite.room.cy();
-                    if (own != null && !own.side() && !own.water() && own.waterCells() == 0 && !own.skyBlocked()
-                        && own.blocksToBreak() <= 2 && own.startY() <= ownCy + 6 && own.holeTopY() > own.startY()) {
-                        autoExitShaft = new ExitShaft(own.x(), own.z(), ownCy, own.holeTopY(), false, false, null);
+                    if (own != null && !own.side() && !own.skyBlocked()
+                        && own.startY() <= ownCy + 6 && own.holeTopY() > own.startY()
+                        && (own.water() ? own.blocksToBreak() == 0 && !autoRunAbandoned
+                                        : own.waterCells() == 0 && own.blocksToBreak() <= 2)) {
+                        autoExitShaft = new ExitShaft(own.x(), own.z(), ownCy, own.holeTopY(), own.water(), false, null);
                         autoExitShaftForeign = false;
                         autoTunnelTrail.clear();
                         releaseAllAutoKeys();
