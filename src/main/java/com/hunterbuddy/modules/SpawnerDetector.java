@@ -9595,7 +9595,7 @@ public class SpawnerDetector extends Module {
             if (autoAreaLoaderWasOn && !isClearSkyHere()) {
                 if (!(mc.player.isOnGround() || mc.player.isTouchingWater())) return;
                 autoClimbLostGlideRetries++;
-                boolean dryShaftFly = autoClimbLostGlideRetries < 4 && autoExitShaft != null
+                boolean dryShaftFly = autoClimbLostGlideRetries < 2 && autoExitShaft != null && !autoExitShaft.skyBlocked()
                     && !mc.player.isTouchingWater()
                     && mc.player.getBlockX() == autoExitShaft.x() && mc.player.getBlockZ() == autoExitShaft.z()
                     && (!autoExitShaft.skyBlocked() || shaftExitHasPivotEscape(autoExitShaft)) && autoShaftFly.get() && countRockets() >= 4;
