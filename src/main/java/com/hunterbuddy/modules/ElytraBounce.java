@@ -1027,7 +1027,12 @@ public class ElytraBounce extends Module {
          this.flushingPackets = true;
          try {
             while (!this.heldPongs.isEmpty()) {
-               handler.sendPacket(new net.minecraft.network.packet.c2s.common.CommonPongC2SPacket(this.heldPongs.removeFirst()));
+               int id = this.heldPongs.removeFirst();
+               if (this.mc.isOnThread()) {
+                  handler.sendPacket(new net.minecraft.network.packet.c2s.common.CommonPongC2SPacket(id));
+               } else {
+                  this.applyPacket(handler, new net.minecraft.network.packet.s2c.common.CommonPingS2CPacket(id));
+               }
             }
          } finally {
             this.flushingPackets = wasFlushing;
@@ -1133,10 +1138,6 @@ public class ElytraBounce extends Module {
       if (this.deployEdge && !this.mc.player.isOnGround() && this.preTick - this.glideStartTick >= 2) {
          if (!isGlider(worn) && !this.sendSwap(hand, false)) return;
          this.releaseHeldGlideState();
-         this.mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(this.mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING));
-         this.mc.player.startGliding();
-         this.jumpKeyDown = true;
-         this.jumpKeyDownLastTick = true;
          this.atomicOutPending = true;
          this.glideStartTick = this.preTick;
          this.clearanceEngaged = this.airBelow(2.0);
@@ -1216,6 +1217,7 @@ public class ElytraBounce extends Module {
       if (Deferred.quiet) this.mc.player.setSprinting(false);
       if (!this.atomicOutPending) return;
       this.atomicOutPending = false;
+      if (!this.mc.player.isGliding()) return;
       ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
       if (isGlider(worn)) {
          Hand hand = this.pairHand(worn);
