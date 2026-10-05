@@ -15,17 +15,40 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Heightmap;
 
 public class RocketFly extends Module {
    private long lastRocketUse = 0L;
    private boolean launched = false;
    private double yTarget = -1.0;
+   private double obstacleTargetY = -1.0;
+   private int obstacleHoldTicks;
+   private boolean obstacleReturning;
    private float targetPitch = 0.0F;
    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
    private final Setting<Integer> fireworkDelay = this.sgGeneral
       .add(
          new Builder().name("timed-delay").description("The delay between firework usages in milliseconds.").defaultValue(4000)
             .sliderRange(0, 10000)
+            .build()
+      );
+   private final Setting<Boolean> obstacleLookahead = this.sgGeneral
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+            .name("obstacle-lookahead")
+            .description("Climb above terrain ahead while gliding.")
+            .defaultValue(true)
+            .build()
+      );
+   private final Setting<Integer> obstacleMargin = this.sgGeneral
+      .add(
+         new Builder().name("obstacle-margin")
+            .description("Height to keep above terrain ahead.")
+            .defaultValue(8)
+            .range(2, 24)
+            .sliderRange(2, 24)
+            .visible(this.obstacleLookahead::get)
             .build()
       );
    private final Setting<Boolean> useManualY = this.sgGeneral
@@ -103,6 +126,9 @@ public class RocketFly extends Module {
       HunterBuddyAddon.LOG.info("[RocketFly] activated", new Throwable("RocketFly activation stack"));
       this.launched = false;
       this.yTarget = -1.0;
+      this.obstacleTargetY = -1.0;
+      this.obstacleHoldTicks = 0;
+      this.obstacleReturning = false;
       this.takeoffGaveUp = false;
       this.takeoff.cancel();
       if (this.mc.player == null) {
@@ -178,7 +204,16 @@ public class RocketFly extends Module {
                this.launched = true;
             }
 
-            if (!(Boolean)this.useManualY.get()) {
+            if ((Boolean)this.obstacleLookahead.get() && this.mc.world != null && !this.mc.world.getDimension().hasCeiling()) {
+               if (this.mc.player.age % 5 == 0) this.scanAhead();
+            } else {
+               this.obstacleTargetY = -1.0;
+               this.obstacleHoldTicks = 0;
+               this.obstacleReturning = false;
+            }
+            if (Math.abs(currentY - this.yTarget) <= 10.0) this.obstacleReturning = false;
+
+            if (!(Boolean)this.useManualY.get() && this.obstacleTargetY <= 0.0 && !this.obstacleReturning) {
                double yDiffFromLock = currentY - this.yTarget;
                if (Math.abs(yDiffFromLock) > 10.0) {
                   this.yTarget = currentY;
@@ -186,7 +221,8 @@ public class RocketFly extends Module {
                }
             }
 
-            double yDiff = currentY - this.yTarget;
+            double effTarget = this.obstacleTargetY > 0.0 && this.obstacleTargetY > this.yTarget ? this.obstacleTargetY : this.yTarget;
+            double yDiff = currentY - effTarget;
             if (Math.abs(yDiff) > 10.0) {
                this.targetPitch = (float)(Math.atan2(yDiff, 100.0) * (180.0 / Math.PI));
             } else if (yDiff > 2.0) {
@@ -220,6 +256,63 @@ public class RocketFly extends Module {
             }
 
             this.yTarget = -1.0;
+            this.obstacleTargetY = -1.0;
+            this.obstacleHoldTicks = 0;
+            this.obstacleReturning = false;
+         }
+      }
+   }
+
+   private void scanAhead() {
+      Vec3d velocity = this.mc.player.getVelocity();
+      double dirX = velocity.x;
+      double dirZ = velocity.z;
+      double speed = Math.hypot(dirX, dirZ);
+      if (speed >= 0.3) {
+         dirX /= speed;
+         dirZ /= speed;
+      } else {
+         double yaw = Math.toRadians(this.mc.player.getYaw());
+         dirX = -Math.sin(yaw);
+         dirZ = Math.cos(yaw);
+      }
+
+      double required = this.yTarget;
+      int requiredTop = 0;
+      int requiredDistance = 0;
+      for (int distance = 16; distance <= 192; distance += 16) {
+         double px = this.mc.player.getX() + dirX * distance;
+         double pz = this.mc.player.getZ() + dirZ * distance;
+         int x = (int)Math.floor(px);
+         int z = (int)Math.floor(pz);
+         if (!this.mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) break;
+         int top = this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+         top = Math.max(top, this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, (int)Math.floor(px + dirZ * 3.0), (int)Math.floor(pz - dirX * 3.0)));
+         top = Math.max(top, this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, (int)Math.floor(px - dirZ * 3.0), (int)Math.floor(pz + dirX * 3.0)));
+         double need = top + this.obstacleMargin.get();
+         if (need > required) {
+            required = need;
+            requiredTop = top;
+            requiredDistance = distance;
+         }
+      }
+
+      if (required > this.yTarget) {
+         boolean starting = this.obstacleTargetY == -1.0;
+         this.obstacleTargetY = Math.min(Math.max(this.obstacleTargetY, required), this.mc.world.getTopYInclusive() - 10);
+         this.obstacleHoldTicks = 60;
+         if (starting && this.obstacleTargetY > 0.0) {
+            this.info("Obstacle ahead: top=" + requiredTop + " at " + requiredDistance + "m, climbing to " + this.obstacleTargetY, new Object[0]);
+            if (this.obstacleTargetY - this.mc.player.getY() > 10.0 && System.currentTimeMillis() - this.lastRocketUse > 1000L) {
+               this.tryUseFirework();
+            }
+         }
+      } else if (this.obstacleHoldTicks > 0) {
+         this.obstacleHoldTicks -= 5;
+         if (this.obstacleHoldTicks <= 0 && this.obstacleTargetY > 0.0) {
+            if (this.mc.player.getY() > this.yTarget + 10.0) this.obstacleReturning = true;
+            this.obstacleTargetY = -1.0;
+            this.info("Obstacle cleared, back to " + this.yTarget, new Object[0]);
          }
       }
    }
@@ -227,6 +320,9 @@ public class RocketFly extends Module {
    public void resetYLock() {
       this.yTarget = -1.0;
       this.launched = false;
+      this.obstacleTargetY = -1.0;
+      this.obstacleHoldTicks = 0;
+      this.obstacleReturning = false;
    }
 
    @EventHandler
