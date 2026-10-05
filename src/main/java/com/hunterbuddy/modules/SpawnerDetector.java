@@ -1274,6 +1274,9 @@ public class SpawnerDetector extends Module {
             BlockPos pos = it.next();
             if (!mc.world.isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4)) {
                 logSkipOnce(pos, "spawnerless waiting chunk unloaded");
+                long key = net.minecraft.util.math.ChunkPos.toLong(pos.getX() >> 4, pos.getZ() >> 4);
+                mossyScanned.remove(key);
+                mossyByChunk.remove(key);
                 it.remove();
             } else if (spawnerlessChunksLoaded(pos.getX(), pos.getZ())) {
                 it.remove();
@@ -1788,7 +1791,17 @@ public class SpawnerDetector extends Module {
         }
 
         if (!allLoaded) {
-            if (!mc.world.getChunkManager().isChunkLoaded(center.getX() >> 4, center.getZ() >> 4)) return false;
+            if (!mc.world.getChunkManager().isChunkLoaded(center.getX() >> 4, center.getZ() >> 4)) {
+                for (int cx = room.minX() >> 4; cx <= (room.maxX() >> 4); cx++) {
+                    for (int cz = room.minZ() >> 4; cz <= (room.maxZ() >> 4); cz++) {
+                        long key = net.minecraft.util.math.ChunkPos.toLong(cx, cz);
+                        mossyScanned.remove(key);
+                        mossyByChunk.remove(key);
+                    }
+                }
+                logSkipOnce(center, "spawnerless pending dropped: center chunk unloaded, rescan on reload");
+                return false;
+            }
             return true;
         }
 
@@ -1796,6 +1809,7 @@ public class SpawnerDetector extends Module {
 
         if (requireChests.get() && chests == 0) {
             if (ps.hasSpawner()) rejected.add(center);
+            else logSkipOnce(center, String.format("spawnerless pending dropped: no container counted within %d", chestRange.get()));
             return false;
         }
 
