@@ -664,6 +664,12 @@ public class SpawnerDetector extends Module {
     private int autoExitTrailBudgetTicks;
     private BlockPos autoExitTrailBreakPos;
     private String autoExitTrailBreakLabel;
+    private boolean autoExitReturnSettingsSaved;
+    private boolean autoExitReturnSavedAllowBreak;
+    private List<Block> autoExitReturnSavedAllowBreakAnyway;
+    private int autoExitReturnTicks;
+    private boolean autoExitTrailDirectTried;
+    private BlockPos autoExitTrailGoal;
     private boolean autoWaterJumpVertical;
     private int autoWalkDirectDryTicks;
     private int autoWalkDirectStuckTicks;
@@ -939,6 +945,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void resetAutoState() {
+        restoreExitReturnSettings();
         state = AutoState.IDLE;
         setChestplateHold(false);
         stateTicks = 0;
@@ -3034,6 +3041,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void enterState(AutoState next, String details) {
+        if (state == AutoState.EXIT && next != AutoState.EXIT) restoreExitReturnSettings();
         state = next;
         stateTicks = 0;
         setChestplateHold(autoChestplateAllowed && (next == AutoState.DIG || next == AutoState.SIDE_DIG
@@ -4435,6 +4443,7 @@ public class SpawnerDetector extends Module {
             }
         } catch (Exception e) {
             if (log.get()) HunterBuddyAddon.LOG.info("[SpawnerDetector/auto] exception state={} error={}", state, e.toString());
+            try { restoreExitReturnSettings(); } catch (Exception ignored) {}
             try { releaseAllAutoKeys(); } catch (Exception ignored) {}
             try { BaritoneHelper.stopAllPathing(); } catch (Exception ignored) {}
             try { BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace; } catch (Exception ignored) {}
@@ -7863,6 +7872,9 @@ public class SpawnerDetector extends Module {
             BlockPos p = autoTunnelTrail.get(i);
             int d = Math.max(Math.abs(p.getX() - feet.getX()), Math.max(Math.abs(p.getY() - feet.getY()), Math.abs(p.getZ() - feet.getZ())));
             if (d <= 1) {
+                if (autoExitReturnSettingsSaved && i == 0
+                    && (Math.hypot(p.getX() + 0.5 - mc.player.getX(), p.getZ() + 0.5 - mc.player.getZ()) > 1.5
+                        || Math.abs(p.getY() - mc.player.getY()) > 1.5)) continue;
                 removeTunnelTrailFrom(i);
                 autoExitTrailTicks = 0;
                 autoExitTrailSkipped = 0;
@@ -7888,15 +7900,33 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (!mc.player.isTouchingWater() && dy >= 2 && mc.world.getFluidState(target).isEmpty()) {
+        if (!autoExitTrailDirectTried && !mc.player.isTouchingWater() && dy >= 2 && mc.world.getFluidState(target).isEmpty()) {
             autoLog("EXIT", autoSite.center, String.format("trail climbs dy=%d to %d,%d,%d, back with baritone",
                 dy, target.getX(), target.getY(), target.getZ()));
-            finishExitTunnelTrail(true, "trail climb, baritone");
+            if (autoExitReturnSettingsSaved) {
+                autoExitTrailDirectTried = true;
+                autoExitRetracingTrail = false;
+                autoExitReturning = true;
+                autoExitNoPathChecks = 0;
+                autoExitSelfWalk = false;
+                autoExitSelfBestDist = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).distanceTo(Vec3d.ofBottomCenter(
+                    new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z())));
+                autoExitSelfStuckTicks = 0;
+                IBaritone bt = primaryBaritone();
+                if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(
+                    new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z())));
+            } else {
+                finishExitTunnelTrail(true, "trail climb, baritone");
+            }
             return;
         }
 
         autoExitTrailTicks++;
         if (autoExitTrailTicks >= 200) {
+            if (autoExitReturnSettingsSaved) {
+                finishExitTunnelTrail(true, "trail blocked, ascend");
+                return;
+            }
             autoLog("EXIT", autoSite.center, String.format("trail skip %d,%d,%d",
                 target.getX(), target.getY(), target.getZ()));
             autoTunnelTrail.remove(autoTunnelTrail.size() - 1);
@@ -7913,6 +7943,45 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        if (autoExitReturnSettingsSaved && autoExitTrailDirectTried) {
+            if (autoExitTrailGoal == null || !autoTunnelTrail.contains(autoExitTrailGoal)) {
+                autoExitTrailGoal = findExitTrailGoal();
+                autoExitNoPathChecks = 0;
+                autoExitSelfWalk = false;
+                autoExitSelfBestDist = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).distanceTo(Vec3d.ofBottomCenter(autoExitTrailGoal));
+                autoExitSelfStuckTicks = 0;
+                releaseAllAutoKeys();
+                IBaritone bt = primaryBaritone();
+                if (bt != null) {
+                    bt.getPathingBehavior().cancelEverything();
+                    bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoExitTrailGoal));
+                }
+                autoLog("EXIT", autoSite.center, String.format("trail goal %d,%d,%d",
+                    autoExitTrailGoal.getX(), autoExitTrailGoal.getY(), autoExitTrailGoal.getZ()));
+                return;
+            }
+            if (!autoExitSelfWalk) {
+                IBaritone bt = primaryBaritone();
+                boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
+                autoExitNoPathChecks = pathing ? 0 : autoExitNoPathChecks + 1;
+                double dist = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).distanceTo(Vec3d.ofBottomCenter(autoExitTrailGoal));
+                if (dist < autoExitSelfBestDist - 0.3) {
+                    autoExitSelfBestDist = dist;
+                    autoExitSelfStuckTicks = 0;
+                } else {
+                    autoExitSelfStuckTicks++;
+                }
+                if (autoExitNoPathChecks < 40 && autoExitSelfStuckTicks < 80) {
+                    logNavTelemetry("EXIT trail", autoExitTrailGoal, 0);
+                    return;
+                }
+                if (bt != null) bt.getPathingBehavior().cancelEverything();
+                releaseAllAutoKeys();
+                autoExitSelfWalk = true;
+                autoLog("EXIT", autoSite.center, "trail baritone stalled, retracing with keys");
+            }
+        }
+
         if (autoExitTrailBreakPos != null) {
             BlockState breakState = mc.world.getBlockState(autoExitTrailBreakPos);
             if (isOpenState(breakState, autoExitTrailBreakPos)) {
@@ -7920,7 +7989,7 @@ public class SpawnerDetector extends Module {
                     autoExitTrailBreakPos.getX(), autoExitTrailBreakPos.getY(), autoExitTrailBreakPos.getZ(), autoExitTrailBreakLabel));
                 autoExitTrailBreakPos = null;
                 autoExitTrailBreakLabel = null;
-                autoExitTrailTicks = 0;
+                if (!autoExitReturnSettingsSaved) autoExitTrailTicks = 0;
                 autoExitTrailSkipped = 0;
             } else {
                 releaseAllAutoKeys();
@@ -7974,6 +8043,8 @@ public class SpawnerDetector extends Module {
     }
 
     private void finishExitTunnelTrail(boolean selfAscend, String details) {
+        boolean chainReturn = autoExitReturnSettingsSaved;
+        restoreExitReturnSettings();
         autoExitRetracingTrail = false;
         autoTunnelTrail.clear();
         autoExitShaftForeign = selfAscend;
@@ -7984,7 +8055,59 @@ public class SpawnerDetector extends Module {
         autoExitTrailBreakPos = null;
         autoExitTrailBreakLabel = null;
         releaseAllAutoKeys();
-        enterState(AutoState.EXIT, details);
+        enterState(chainReturn && selfAscend ? AutoState.ASCEND : AutoState.EXIT, details);
+    }
+
+    private BlockPos findExitTrailGoal() {
+        BlockPos target = autoTunnelTrail.get(autoTunnelTrail.size() - 1);
+        BlockPos previous = target;
+        int dx = 0;
+        int dy = 0;
+        int dz = 0;
+        for (int i = autoTunnelTrail.size() - 2; i >= 0; i--) {
+            BlockPos p = autoTunnelTrail.get(i);
+            int sx = Integer.signum(p.getX() - previous.getX());
+            int sy = Integer.signum(p.getY() - previous.getY());
+            int sz = Integer.signum(p.getZ() - previous.getZ());
+            if (p.getSquaredDistance(target) > 64 || Math.abs(p.getX() - previous.getX()) > 1
+                || Math.abs(p.getZ() - previous.getZ()) > 1
+                || ((sx != 0 || sz != 0) && Math.abs(p.getY() - previous.getY()) > 1)) break;
+            if (i != autoTunnelTrail.size() - 2 && (sx != dx || sy != dy || sz != dz)) break;
+            dx = sx;
+            dy = sy;
+            dz = sz;
+            previous = p;
+        }
+        return previous;
+    }
+
+    private void restoreExitReturnSettings() {
+        if (!autoExitReturnSettingsSaved) return;
+        IBaritone bt = primaryBaritone();
+        if (bt != null) bt.getPathingBehavior().cancelEverything();
+        if (autoPaused && state == AutoState.EXIT) endAutoPause();
+        BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
+        BaritoneAPI.getSettings().allowBreak.value = autoExitReturnSavedAllowBreak;
+        BaritoneAPI.getSettings().allowBreakAnyway.value = autoExitReturnSavedAllowBreakAnyway;
+        autoExitReturnSettingsSaved = false;
+        autoExitReturnSavedAllowBreakAnyway = null;
+        autoExitReturnTicks = 0;
+        autoExitTrailDirectTried = false;
+        autoExitTrailGoal = null;
+    }
+
+    private void retryExitTunnelTrail() {
+        IBaritone bt = primaryBaritone();
+        if (bt != null) bt.getPathingBehavior().cancelEverything();
+        releaseAllAutoKeys();
+        autoExitReturning = false;
+        autoExitRetracingTrail = true;
+        autoExitTrailGoal = null;
+        autoExitTrailTicks = 0;
+        autoExitTrailBreakPos = null;
+        autoExitTrailBreakLabel = null;
+        BaritoneAPI.getSettings().allowPlace.value = true;
+        autoLog("EXIT", autoSite.center, "shaft baritone failed, returning along tunnel trail");
     }
 
     private BlockPos findTrailRetraceObstacle(BlockPos target) {
@@ -7997,12 +8120,17 @@ public class SpawnerDetector extends Module {
         }
         if (dx == 0 && dz == 0) {
             if (target.getY() >= feet.getY() + 2) return trailRetraceCandidate(feet.up(2));
-            if (target.getY() > feet.getY()) return trailRetraceCandidate(feet.up());
+            if (target.getY() > feet.getY()) {
+                BlockPos candidate = trailRetraceCandidate(feet.up());
+                return candidate != null || !autoExitReturnSettingsSaved ? candidate : trailRetraceCandidate(feet.up(2));
+            }
             if (target.getY() < feet.getY()) return trailRetraceCandidate(feet.down());
             return null;
         }
         if (target.getY() >= feet.getY() + 2) return null;
+        if (autoExitReturnSettingsSaved && Math.abs(target.getY() - feet.getY()) > 1) return null;
         BlockPos side = new BlockPos(feet.getX() + dx, feet.getY(), feet.getZ() + dz);
+        if (autoExitReturnSettingsSaved && !autoTunnelTrail.contains(side)) return null;
         BlockPos candidate = trailRetraceCandidate(side);
         if (candidate != null) return candidate;
         return trailRetraceCandidate(side.up());
@@ -8018,12 +8146,16 @@ public class SpawnerDetector extends Module {
 
     private void tickExit() {
         stateTicks++;
+        if (autoExitReturnSettingsSaved && ++autoExitReturnTicks > 60 * 20) {
+            finishExitTunnelTrail(true, "return to shaft timeout");
+            return;
+        }
 
         if (autoExitShaft != null) {
             BlockPos shaftBottom = new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z());
             double farDxz = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
 
-            if (stateTicks == 1) {
+            if (stateTicks == 1 && !autoExitReturnSettingsSaved) {
                 autoExitRetracingTrail = false;
                 autoExitTrailTicks = 0;
                 autoExitTrailSkipped = 0;
@@ -8031,11 +8163,12 @@ public class SpawnerDetector extends Module {
                 autoExitTrailBudgetTicks = 0;
                 autoExitTrailBreakPos = null;
                 autoExitTrailBreakLabel = null;
-                if (autoExitShaftForeign && farDxz <= 4.0) {
+                if (autoExitShaftForeign && farDxz <= 4.0
+                    && (autoTunnelTrail.isEmpty() || Math.abs(mc.player.getY() - autoExitShaft.bottomY()) <= 1.5)) {
                     autoExitShaftForeign = false;
                     autoTunnelTrail.clear();
                 }
-                boolean foreign = autoExitShaftForeign && farDxz > 4.0;
+                boolean foreign = autoExitShaftForeign && (farDxz > 4.0 || !autoTunnelTrail.isEmpty());
                 if (foreign) {
                     ColumnPlan own = planColumn(autoSite);
                     int ownCy = autoSite.room.cy();
@@ -8058,18 +8191,25 @@ public class SpawnerDetector extends Module {
                         releaseAllAutoKeys();
                         IBaritone bt = primaryBaritone();
                         if (bt != null) bt.getPathingBehavior().cancelEverything();
+                        autoExitReturnSavedAllowBreak = BaritoneAPI.getSettings().allowBreak.value;
+                        autoExitReturnSavedAllowBreakAnyway = BaritoneAPI.getSettings().allowBreakAnyway.value;
+                        autoExitReturnSettingsSaved = true;
+                        BaritoneAPI.getSettings().allowBreak.value = false;
+                        BaritoneAPI.getSettings().allowBreakAnyway.value = new ArrayList<>();
+                        autoExitReturnTicks = 1;
+                        autoExitTrailDirectTried = false;
+                        autoExitTrailGoal = null;
+                        if (!autoTunnelTrail.get(0).equals(shaftBottom)) autoTunnelTrail.add(0, shaftBottom);
                         autoExitRetracingTrail = true;
                         autoExitReturning = false;
-                        autoExitTrailBudgetTicks = autoTunnelTrail.size() * 20 + 600;
+                        autoExitTrailBudgetTicks = 60 * 20;
                         autoLog("EXIT", autoSite.center, "retracing tunnel trail n=" + autoTunnelTrail.size());
                     } else {
-                        autoExitReturning = autoExitShaft.entry() == null;
-                        if (!autoExitReturning) {
-                            releaseAllAutoKeys();
-                            autoLog("EXIT", autoSite.center, "exit shaft belongs to the previous room, ascend");
-                            enterState(AutoState.ASCEND, "exit shaft belongs to the previous room");
-                            return;
-                        }
+                        autoExitReturning = false;
+                        releaseAllAutoKeys();
+                        autoLog("EXIT", autoSite.center, "exit shaft belongs to the previous room, no tunnel trail, ascend");
+                        enterState(AutoState.ASCEND, "exit shaft belongs to the previous room");
+                        return;
                     }
                 } else {
                     boolean roomWater = mc.player.isTouchingWater()
@@ -8092,6 +8232,22 @@ public class SpawnerDetector extends Module {
                 }
             }
 
+            if (autoExitReturnSettingsSaved) {
+                boolean wasPaused = autoPaused;
+                if (handleAutoPause(true)) {
+                    IBaritone bt = primaryBaritone();
+                    if (bt != null) bt.getPathingBehavior().cancelEverything();
+                    return;
+                }
+                if (wasPaused) {
+                    IBaritone bt = primaryBaritone();
+                    BlockPos goal = autoExitReturning ? shaftBottom : autoExitTrailGoal;
+                    if (bt != null && goal != null && !autoExitSelfWalk) {
+                        bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
+                    }
+                }
+            }
+
             if (autoExitRetracingTrail) {
                 tickExitTunnelTrail();
                 return;
@@ -8104,6 +8260,11 @@ public class SpawnerDetector extends Module {
                     if (bt != null) bt.getPathingBehavior().cancelEverything();
                     releaseAllAutoKeys();
                     autoExitReturning = false;
+                    if (autoExitReturnSettingsSaved) {
+                        autoTunnelTrail.clear();
+                        autoExitShaftForeign = false;
+                        restoreExitReturnSettings();
+                    }
                     enterState(AutoState.EXIT, "back at shaft");
                     return;
                 }
@@ -8197,12 +8358,29 @@ public class SpawnerDetector extends Module {
                 }
 
                 boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
+                if (autoExitReturnSettingsSaved) {
+                    double dist = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).distanceTo(Vec3d.ofBottomCenter(shaftBottom));
+                    if (dist < autoExitSelfBestDist - 0.3) {
+                        autoExitSelfBestDist = dist;
+                        autoExitSelfStuckTicks = 0;
+                    } else {
+                        autoExitSelfStuckTicks++;
+                    }
+                    if (autoExitSelfStuckTicks >= 200) {
+                        retryExitTunnelTrail();
+                        return;
+                    }
+                }
                 if (!pathing && autoBreachPos == null && stateTicks > 20 && stateTicks % 40 == 0) {
                     autoExitNoPathChecks++;
                     if (autoExitNoPathChecks >= 2 && !autoExitSelfWalk
                         && (farDxz > 1.5 || mc.player.getY() >= autoExitShaft.bottomY())) {
                         if (bt != null) bt.getPathingBehavior().cancelEverything();
                         releaseAllAutoKeys();
+                        if (autoExitReturnSettingsSaved) {
+                            retryExitTunnelTrail();
+                            return;
+                        }
                         autoExitSelfWalk = true;
                         autoApproachBreakCount = 0;
                         autoExitSelfBestDist = farDxz;
@@ -8214,7 +8392,7 @@ public class SpawnerDetector extends Module {
                 } else if (pathing && stateTicks % 40 == 0) {
                     autoExitNoPathChecks = 0;
                 }
-                tickBreach("EXIT", shaftBottom);
+                if (!autoExitReturnSettingsSaved) tickBreach("EXIT", shaftBottom);
                 logNavTelemetry("EXIT return", shaftBottom, autoBaritoneRetries);
                 return;
             }
@@ -11106,6 +11284,7 @@ public class SpawnerDetector extends Module {
 
     private void fail(String reason) {
         if (state == AutoState.FAILED) return;
+        restoreExitReturnSettings();
 
         if (autoSite != null) {
             autoLog("FAILED", autoSite.center, "reason=" + reason + " player=" + playerPosLabel());
