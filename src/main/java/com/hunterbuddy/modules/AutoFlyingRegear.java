@@ -645,6 +645,10 @@ public class AutoFlyingRegear extends Module {
       this.releaseBaritonePlacement();
       this.endRun("aborted");
       this.reEnableFlightModules();
+      if (this.reEnableStage < 2) {
+         this.reEnableFlightModules();
+      }
+
       if (!this.savedChestplate.isEmpty() && (Boolean)this.swapToChestplate.get()) {
         this.restoreChestplate();
       }
@@ -2471,7 +2475,7 @@ public class AutoFlyingRegear extends Module {
             this.error("Failed to place ender chest after 15 attempts", new Object[0]);
          }
 
-         this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+         this.abortRunBecause("ender chest could not be placed after 15 attempts");
          this.placementAttempts = 0;
       } else {
          this.mc.options.sneakKey.setPressed(false);
@@ -2484,7 +2488,7 @@ public class AutoFlyingRegear extends Module {
                   this.error("No ender chest found in inventory!", new Object[0]);
                }
 
-               this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+               this.stopOutOfSupplies();
             } else {
                this.moveStack(eChestSlot, targetHotbarSlot);
                if ((Boolean)this.debugMessages.get()) {
@@ -2509,7 +2513,7 @@ public class AutoFlyingRegear extends Module {
                   this.error("No solid ground for ender chest at " + this.echestPos, new Object[0]);
                }
 
-               this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+               this.abortRunBecause("no solid ground for the ender chest at " + this.echestPos);
             } else if (this.placeBlockAtHotbar(this.echestPos, (Integer)this.eChestHotbarSlot.get())) {
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Placing ender chest", new Object[0]);
@@ -2540,7 +2544,7 @@ public class AutoFlyingRegear extends Module {
             this.error("Ender chest failed to place after 15 attempts", new Object[0]);
          }
 
-         this.state = AutoFlyingRegear.FlyingRegearState.IDLE;
+         this.abortRunBecause("ender chest failed to place after 15 attempts");
          this.placementAttempts = 0;
       } else {
          if ((Boolean)this.debugMessages.get()) {

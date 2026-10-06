@@ -4195,6 +4195,7 @@ public class SpawnerDetector extends Module {
         if (!qualifiesForAuto(site)) return false;
         if (isVisited(site.center)) return false;
         if (autoSoloRejectedThisSession.contains(site.center)) return false;
+        if (countRockets() <= autoMinRockets.get()) return false;
         if (site.room.cy() < 0) return false;
         double dx = site.center.getX() + 0.5 - mc.player.getX();
         double dz = site.center.getZ() + 0.5 - mc.player.getZ();
@@ -4262,6 +4263,8 @@ public class SpawnerDetector extends Module {
     private void tryStartAutoFarm() {
         if (state != AutoState.IDLE) return;
         if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
+        AutoFlyingRegear regear = autoFlyingRegearModule();
+        if (regear != null && regear.isRunning()) return;
 
         Site best = null;
         ColumnPlan bestPlan = null;
@@ -10069,8 +10072,9 @@ public class SpawnerDetector extends Module {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radiusSq) continue;
                 int x = cx + dx, z = cz + dz;
-                int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
-                groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, groundY, mc.world.getBottomY(), false, cursor) + 1;
+                int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                int groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, topY - 1, mc.world.getBottomY(), false, cursor) + 1;
+                if (groundY != topY) continue;
 
                 cursor.set(x, groundY - 1, z);
                 BlockState belowState = mc.world.getBlockState(cursor);
@@ -10095,7 +10099,12 @@ public class SpawnerDetector extends Module {
         }
 
         candidates.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(mc.player.getBlockPos())));
-        return new ArrayList<>(candidates.subList(0, Math.min(12, candidates.size())));
+        List<BlockPos> points = new ArrayList<>();
+        for (BlockPos p : candidates) {
+            if (points.size() >= 12) break;
+            if (!hasBlockAbove(p.getX(), p.getY(), p.getZ(), SKY_CHECK_HEIGHT)) points.add(p);
+        }
+        return points;
     }
 
     private Goal buildAscendGoal() {
@@ -10752,8 +10761,9 @@ public class SpawnerDetector extends Module {
                 double distSq = dx * dx + dz * dz;
                 if (distSq > 256 || distSq >= bestDistSq) continue;
                 int x = cx + dx, z = cz + dz;
-                int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1;
-                groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, groundY, mc.world.getBottomY(), false, cursor) + 1;
+                int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                int groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, topY - 1, mc.world.getBottomY(), false, cursor) + 1;
+                if (groundY != topY) continue;
                 BlockPos candidate = new BlockPos(x, groundY, z);
                 if (autoAscendFailedPoints.contains(candidate)) continue;
                 boolean open = true;
@@ -10764,6 +10774,7 @@ public class SpawnerDetector extends Module {
                 }
                 if (!open) continue;
                 if (!isClearTakeoffGround(x, z, groundY)) continue;
+                if (hasBlockAbove(x, groundY, z, SKY_CHECK_HEIGHT)) continue;
                 best = candidate;
                 bestDistSq = distSq;
             }
