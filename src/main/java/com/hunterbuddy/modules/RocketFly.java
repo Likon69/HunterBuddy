@@ -12,9 +12,11 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.BlockState;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
 
@@ -277,6 +279,13 @@ public class RocketFly extends Module {
          dirZ = Math.cos(yaw);
       }
 
+      int margin = this.obstacleMargin.get();
+      double currentY = this.mc.player.getY();
+      double effTarget = this.obstacleTargetY > 0.0 ? Math.max(this.yTarget, this.obstacleTargetY) : this.yTarget;
+      int bottomY = this.mc.world.getBottomY();
+      int topY = this.mc.world.getTopYInclusive();
+      int low = Math.max(bottomY, Math.min(topY, (int)Math.floor(Math.min(currentY, this.yTarget)) - margin));
+      int high = Math.max(bottomY, Math.min(topY, (int)Math.ceil(Math.max(currentY, effTarget)) + margin));
       double required = this.yTarget;
       int requiredTop = 0;
       int requiredDistance = 0;
@@ -286,10 +295,10 @@ public class RocketFly extends Module {
          int x = (int)Math.floor(px);
          int z = (int)Math.floor(pz);
          if (!this.mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) break;
-         int top = this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
-         top = Math.max(top, this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, (int)Math.floor(px + dirZ * 3.0), (int)Math.floor(pz - dirX * 3.0)));
-         top = Math.max(top, this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, (int)Math.floor(px - dirZ * 3.0), (int)Math.floor(pz + dirX * 3.0)));
-         double need = top + this.obstacleMargin.get();
+         int top = this.findObstacleTop(x, z, low, high, margin);
+         top = Math.max(top, this.findObstacleTop((int)Math.floor(px + dirZ * 3.0), (int)Math.floor(pz - dirX * 3.0), low, high, margin));
+         top = Math.max(top, this.findObstacleTop((int)Math.floor(px - dirZ * 3.0), (int)Math.floor(pz + dirX * 3.0), low, high, margin));
+         double need = top + margin;
          if (need > required) {
             required = need;
             requiredTop = top;
@@ -315,6 +324,68 @@ public class RocketFly extends Module {
             this.info("Obstacle cleared, back to " + this.yTarget, new Object[0]);
          }
       }
+   }
+
+   private int findObstacleTop(int x, int z, int low, int high, int margin) {
+      int top = this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+      int bottomY = this.mc.world.getBottomY();
+      if (top <= bottomY) return Integer.MIN_VALUE;
+      if (top + margin <= this.yTarget) return top;
+
+      final int skyGap = 32;
+      int end = Math.min(high, top - 1);
+      int firstBlocking = top;
+      int air = 0;
+      int lowerAir = 0;
+      int maxAir = 0;
+      boolean lowerRun = true;
+      BlockPos.Mutable pos = new BlockPos.Mutable();
+      for (int y = low; y <= end; y++) {
+         BlockState state = this.mc.world.getBlockState(pos.set(x, y, z));
+         if (state.blocksMovement() || !state.getFluidState().isEmpty()) {
+            firstBlocking = y;
+            break;
+         }
+         if (state.isAir()) {
+            air++;
+            if (lowerRun) lowerAir++;
+         } else {
+            air = 0;
+            lowerRun = false;
+         }
+         maxAir = Math.max(maxAir, air);
+      }
+
+      if (firstBlocking == top) {
+         if (maxAir >= skyGap) return Integer.MIN_VALUE;
+         int downAir = lowerAir;
+         for (int y = low - 1; y >= bottomY && downAir < skyGap; y--) {
+            if (!this.mc.world.getBlockState(pos.set(x, y, z)).isAir()) break;
+            downAir++;
+         }
+         if (downAir >= skyGap) return Integer.MIN_VALUE;
+         if (lowerAir == end - low + 1) air += downAir - lowerAir;
+         for (int y = end + 1; y < top && air < skyGap; y++) {
+            if (!this.mc.world.getBlockState(pos.set(x, y, z)).isAir()) break;
+            air++;
+         }
+         return air >= skyGap ? Integer.MIN_VALUE : top;
+      }
+
+      int lastBlocking = firstBlocking;
+      air = 0;
+      for (int y = firstBlocking + 1; y < top; y++) {
+         BlockState state = this.mc.world.getBlockState(pos.set(x, y, z));
+         if (state.blocksMovement() || !state.getFluidState().isEmpty()) {
+            lastBlocking = y;
+            air = 0;
+         } else if (state.isAir()) {
+            if (++air >= skyGap) break;
+         } else {
+            air = 0;
+         }
+      }
+      return lastBlocking + 1;
    }
 
    public void resetYLock() {
