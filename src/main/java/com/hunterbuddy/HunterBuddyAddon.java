@@ -166,6 +166,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new AutoFlyingRegear());
         Modules.get().add(new PearlLoader());
         Modules.get().add(new StashMover());
+        Modules.get().add(new com.hunterbuddy.modules.sorter.ShulkerSorter());
         Modules.get().add(new WaypointFollower());
         Modules.get().add(new TrailFollower());
         Modules.get().add(new MlepMine());
@@ -206,6 +207,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Commands.add(new SetOutput());
         Commands.add(new StashStatus());
         Commands.add(new SetClear());
+        Commands.add(new com.hunterbuddy.commands.logistics.SorterCommand());
         Commands.add(new com.hunterbuddy.commands.AreaLoaderReset());
         Commands.add(new com.hunterbuddy.commands.Trails());
         ExperienceTraderModule module = new ExperienceTraderModule(UTILITY_CATEGORY);
