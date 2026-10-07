@@ -725,6 +725,8 @@ public class SpawnerDetector extends Module {
     private boolean autoShaftChaseBaritoneActive;
     private BlockPos autoShaftChaseBaritoneGoalPos;
     private boolean autoShaftReturning;
+    private int autoShaftReturnStartTick;
+    private int autoShaftReturnRelaunches;
 
     private BlockPos autoDigQueuedPos;
     private final Map<BlockPos, Integer> autoDigBlockRetries = new HashMap<>();
@@ -6874,6 +6876,13 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean tickStepOffContainer(BlockPos target) {
+        if (mc.player.isTouchingWater()) {
+            if (autoRoomStepOffTarget != null || autoRoomStepOffCell != null) releaseAllAutoKeys();
+            autoRoomStepOffTarget = null;
+            autoRoomStepOffCell = null;
+            return false;
+        }
+
         boolean walking = target.equals(autoRoomStepOffTarget);
         if (!walking && !standingOnContainer(target)) return false;
 
@@ -8860,6 +8869,18 @@ public class SpawnerDetector extends Module {
             autoShaftAlignRoomBlockTick = 0;
             autoPausedTicks = 0;
             autoShaftReturning = false;
+            autoShaftReturnStartTick = 0;
+            autoShaftReturnRelaunches = 0;
+        }
+
+        if (autoShaftReturning && stateTicks - autoShaftReturnStartTick >= 600) {
+            IBaritone bt = primaryBaritone();
+            if (bt != null) bt.getPathingBehavior().cancelEverything();
+            releaseAllAutoKeys();
+            autoShaftReturning = false;
+            autoLog("SHAFT_ALIGN", autoSite.center, String.format("back to shaft gave up after %.1fs, relaunches=%d",
+                (stateTicks - autoShaftReturnStartTick) / 20.0, autoShaftReturnRelaunches));
+            autoShaftReturnRelaunches = 3;
         }
 
         if (handleShaftCombat()) {
@@ -8871,26 +8892,39 @@ public class SpawnerDetector extends Module {
         BlockPos shaftBottom = new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z());
         IBaritone alignBt = primaryBaritone();
 
-        if (!autoShaftReturning && alignDist > 3.0 && alignBt != null) {
+        if (!autoShaftReturning && autoShaftReturnRelaunches < 3 && alignDist > 3.0 && alignBt != null) {
             autoShaftReturning = true;
+            autoShaftReturnStartTick = stateTicks;
+            releaseAllAutoKeys();
             alignBt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(shaftBottom));
             autoLog("SHAFT_ALIGN", autoSite.center, String.format("back to shaft with baritone dist=%.1f", alignDist));
         }
 
         if (autoShaftReturning) {
-            if (alignBt == null) {
-                autoShaftReturning = false;
-            } else if (alignDist <= 1.5) {
+            if (alignBt != null && alignDist <= 1.5) {
                 alignBt.getPathingBehavior().cancelEverything();
                 releaseAllAutoKeys();
                 autoShaftReturning = false;
                 autoShaftAlignCenteredTicks = 0;
             } else {
-                if (!alignBt.getPathingBehavior().isPathing()) {
-                    alignBt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(shaftBottom));
+                boolean gaveUp = alignBt == null || (!alignBt.getPathingBehavior().isPathing() && !alignBt.getCustomGoalProcess().isActive());
+                if (gaveUp && (alignBt == null || autoShaftReturnRelaunches >= 3)) {
+                    if (alignBt != null) alignBt.getPathingBehavior().cancelEverything();
+                    releaseAllAutoKeys();
+                    autoShaftReturning = false;
+                    autoLog("SHAFT_ALIGN", autoSite.center, String.format("back to shaft gave up after %.1fs, relaunches=%d",
+                        (stateTicks - autoShaftReturnStartTick) / 20.0, autoShaftReturnRelaunches));
+                    autoShaftReturnRelaunches = 3;
+                } else {
+                    if (gaveUp) {
+                        autoShaftReturnRelaunches++;
+                        releaseAllAutoKeys();
+                        alignBt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(shaftBottom));
+                        autoLog("SHAFT_ALIGN", autoSite.center, "back to shaft relaunch " + autoShaftReturnRelaunches);
+                    }
+                    autoPausedTicks++;
+                    return;
                 }
-                autoPausedTicks++;
-                return;
             }
         }
 
