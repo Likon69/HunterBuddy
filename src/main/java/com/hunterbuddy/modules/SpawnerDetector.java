@@ -575,6 +575,7 @@ public class SpawnerDetector extends Module {
     private boolean autoTrailYawSaved;
     private boolean autoMemoryChaseFromFlightModule;
     private boolean autoSavedAllowPlace;
+    private List<Item> autoSavedThrowawayItems;
     private int autoBaritoneRetries;
     private int autoFailRecoveries;
     private boolean autoAscendFromAbort;
@@ -812,6 +813,7 @@ public class SpawnerDetector extends Module {
     private int autoAscendTimeoutBaseTick;
     private int autoAscendSurfacedCount;
     private BlockPos autoAscendArrivedAt;
+    private int autoSelfAscendReturns;
 
     private int autoSelfAscendDirIndex;
     private final boolean[] autoSelfAscendTried = new boolean[4];
@@ -948,6 +950,7 @@ public class SpawnerDetector extends Module {
 
     private void resetAutoState() {
         restoreExitReturnSettings();
+        restoreAutoThrowawayItems();
         state = AutoState.IDLE;
         setChestplateHold(false);
         stateTicks = 0;
@@ -1014,6 +1017,7 @@ public class SpawnerDetector extends Module {
         autoAscendTimeoutBaseTick = 0;
         autoAscendSurfacedCount = 0;
         autoAscendArrivedAt = null;
+        autoSelfAscendReturns = 0;
         resetSelfAscendState(true);
         autoWalkBestDist = -1;
         autoWalkBestDistTick = 0;
@@ -3044,11 +3048,43 @@ public class SpawnerDetector extends Module {
 
     private void enterState(AutoState next, String details) {
         if (state == AutoState.EXIT && next != AutoState.EXIT) restoreExitReturnSettings();
+        boolean widenAscend = false;
+        if (state == AutoState.SELF_ASCEND && next == AutoState.ASCEND) {
+            autoSelfAscendReturns++;
+            if (autoSelfAscendReturns >= 2) {
+                widenAscend = autoAscendRadius < 96;
+                if (!widenAscend) next = AutoState.TAKEOFF_SPOT;
+            }
+        }
+        if (next == AutoState.SELF_ASCEND && state != AutoState.SWIM_UP
+            && (autoSelfAscendReturns >= 2 || mc.player.getBlockPos().getY() <= autoSite.room.cy() + 4)) {
+            widenAscend = autoAscendRadius < 96;
+            next = widenAscend ? AutoState.ASCEND : AutoState.TAKEOFF_SPOT;
+            details = "self ascend unavailable, " + (widenAscend ? "wider takeoff search" : "takeoff spot");
+            BaritoneHelper.stopAllPathing();
+            releaseAllAutoKeys();
+        }
+        if (autoSite != null && next != AutoState.RESUME && next != AutoState.FAILED) protectAutoThrowawayItems();
         state = next;
         stateTicks = 0;
         setChestplateHold(autoChestplateAllowed && (next == AutoState.DIG || next == AutoState.SIDE_DIG
             || next == AutoState.ROOM || next == AutoState.ROOM_CLIMB || next == AutoState.TUNNEL));
         autoLog(next.name(), autoSite.center, details);
+        if (widenAscend) ascendRetryBiggerRadius();
+    }
+
+    private void protectAutoThrowawayItems() {
+        if (autoSavedThrowawayItems != null) return;
+        autoSavedThrowawayItems = BaritoneAPI.getSettings().acceptableThrowawayItems.value;
+        List<Item> allowed = new ArrayList<>(autoSavedThrowawayItems);
+        allowed.removeIf(item -> item == Items.OBSIDIAN);
+        BaritoneAPI.getSettings().acceptableThrowawayItems.value = allowed;
+    }
+
+    private void restoreAutoThrowawayItems() {
+        if (autoSavedThrowawayItems == null) return;
+        BaritoneAPI.getSettings().acceptableThrowawayItems.value = autoSavedThrowawayItems;
+        autoSavedThrowawayItems = null;
     }
 
     private void enterDigState(String details) {
@@ -4240,6 +4276,7 @@ public class SpawnerDetector extends Module {
         autoSoloTarget = target;
         autoSite = target;
         autoColumn = soloTravelColumn();
+        autoSelfAscendReturns = 0;
         autoChestplateAllowed = false;
         autoSoloBestDistSq = Double.MAX_VALUE;
         autoSoloBestDistTick = 0;
@@ -4338,6 +4375,7 @@ public class SpawnerDetector extends Module {
 
     private void startAutoRun(Site site, ColumnPlan plan) {
         autoSite = site;
+        autoSelfAscendReturns = 0;
         autoColumn = plan;
         autoSoloMode = configuredSoloMode();
         autoSoloTransitOnly = false;
@@ -4452,6 +4490,7 @@ public class SpawnerDetector extends Module {
             try { releaseAllAutoKeys(); } catch (Exception ignored) {}
             try { BaritoneHelper.stopAllPathing(); } catch (Exception ignored) {}
             try { BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace; } catch (Exception ignored) {}
+            try { restoreAutoThrowawayItems(); } catch (Exception ignored) {}
             try { if (takeoff.isActive()) takeoff.cancel(); } catch (Exception ignored) {}
             playAutoSound("spawner_failed", soundFailed);
             state = AutoState.FAILED;
@@ -6986,6 +7025,7 @@ public class SpawnerDetector extends Module {
             lower.center.getX(), lower.center.getY(), lower.center.getZ()));
 
         autoSite = lower;
+        autoSelfAscendReturns = 0;
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
         autoRoomFoundItems = 0;
@@ -7071,6 +7111,7 @@ public class SpawnerDetector extends Module {
 
         autoSite = chainSite;
         autoRunAbandoned = false;
+        autoSelfAscendReturns = 0;
         autoRoomFoundShulkers = 0;
         autoRoomFoundItems = 0;
 
@@ -7834,6 +7875,7 @@ public class SpawnerDetector extends Module {
 
         autoSite = chainSite;
         autoColumn = chainPlan;
+        autoSelfAscendReturns = 0;
         autoChestplateAllowed = !chainPlan.water();
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
@@ -10106,12 +10148,14 @@ public class SpawnerDetector extends Module {
         List<BlockPos> candidates = new ArrayList<>();
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         int radiusSq = radius * radius;
+        int maxTakeoffY = Math.min(mc.player.getBlockPos().getY() + 80, mc.world.getTopYInclusive() - 32);
 
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radiusSq) continue;
                 int x = cx + dx, z = cz + dz;
                 int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                if (topY > maxTakeoffY) continue;
                 int groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, topY - 1, mc.world.getBottomY(), false, cursor) + 1;
                 if (groundY != topY) continue;
 
@@ -10163,6 +10207,9 @@ public class SpawnerDetector extends Module {
 
     private void tickAscend() {
         stateTicks++;
+
+        protectAutoThrowawayItems();
+        if (takeoffIfSkyClear()) return;
 
         if (stateTicks == 1) {
             BaritoneAPI.getSettings().allowPlace.value = true;
@@ -10221,7 +10268,12 @@ public class SpawnerDetector extends Module {
             arrivedAt = new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z());
         }
 
-        if (arrived) {
+        if (arrived && autoAscendFailedPoints.contains(arrivedAt)) {
+            ascendRetryBiggerRadius();
+            return;
+        }
+
+        if (arrived && !autoAscendFailedPoints.contains(mc.player.getBlockPos())) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
             autoLog("ASCEND", autoSite.center, "reached " + arrivedAt.getX() + "," + arrivedAt.getY() + "," + arrivedAt.getZ());
 
@@ -10309,6 +10361,10 @@ public class SpawnerDetector extends Module {
         IBaritone bt = primaryBaritone();
         if (bt != null) bt.getPathingBehavior().cancelEverything();
         releaseAllAutoKeys();
+        if (autoAscendRadius >= 96) {
+            enterState(AutoState.TAKEOFF_SPOT, "ascend search exhausted");
+            return;
+        }
         autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
         autoAscendTargets = findAscendTakeoffPoints(mc.player.getBlockX(), mc.player.getBlockZ(), autoAscendRadius);
         autoBaritoneRetries = 0;
@@ -10320,6 +10376,8 @@ public class SpawnerDetector extends Module {
 
     private void tickSelfAscend() {
         stateTicks++;
+
+        if (takeoffIfSkyClear()) return;
 
         if (stateTicks == 1) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
@@ -10347,13 +10405,8 @@ public class SpawnerDetector extends Module {
                 autoWaterJumpAttempts = 0;
                 autoWaterJumpVertical = false;
                 enterState(AutoState.WATER_JUMP, "self ascend sky");
-            } else if (mc.player.isOnGround()) {
-                releaseAllAutoKeys();
-                autoLog("SELF_ASCEND", autoSite.center, "self ascend sky");
-                autoAscendArrivedAt = null;
-                enterState(AutoState.TAKEOFF, "self ascend sky");
             }
-            if (mc.player.isTouchingWater() || mc.world.getFluidState(mc.player.getBlockPos()).isIn(FluidTags.WATER) || mc.player.isOnGround()) return;
+            if (mc.player.isTouchingWater() || mc.world.getFluidState(mc.player.getBlockPos()).isIn(FluidTags.WATER)) return;
         }
 
         if (stateTicks > 180 * 20) {
@@ -10789,11 +10842,31 @@ public class SpawnerDetector extends Module {
         };
     }
 
+    private boolean takeoffIfSkyClear() {
+        BlockPos feet = mc.player.getBlockPos();
+        if (autoAscendFailedPoints.contains(feet) || !mc.player.isOnGround() || mc.player.isTouchingWater() || mc.player.isClimbing()
+            || !isTrueSkyHere() || !isClearTakeoffGround(feet.getX(), feet.getZ(), feet.getY())) return false;
+        IBaritone bt = primaryBaritone();
+        if (bt != null) bt.getPathingBehavior().cancelEverything();
+        releaseAllAutoKeys();
+        BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
+        autoLog(state.name(), autoSite.center, "sky clear here, take off");
+        if (!autoAscendFromAbort && !autoWalkReapproach && tryChainWalk(autoSite)) return true;
+        if (!autoSoloMode && !autoAreaLoaderWasOn) {
+            enterState(AutoState.RESUME, "staying on foot");
+        } else {
+            autoAscendArrivedAt = feet;
+            enterState(AutoState.TAKEOFF, "");
+        }
+        return true;
+    }
+
     private BlockPos findTakeoffSpot() {
         int cx = mc.player.getBlockX(), cz = mc.player.getBlockZ();
         BlockPos best = null;
         double bestDistSq = Double.MAX_VALUE;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int maxTakeoffY = Math.min(mc.player.getBlockPos().getY() + 80, mc.world.getTopYInclusive() - 32);
 
         for (int dx = -16; dx <= 16; dx++) {
             for (int dz = -16; dz <= 16; dz++) {
@@ -10801,6 +10874,7 @@ public class SpawnerDetector extends Module {
                 if (distSq > 256 || distSq >= bestDistSq) continue;
                 int x = cx + dx, z = cz + dz;
                 int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                if (topY > maxTakeoffY) continue;
                 int groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, topY - 1, mc.world.getBottomY(), false, cursor) + 1;
                 if (groundY != topY) continue;
                 BlockPos candidate = new BlockPos(x, groundY, z);
@@ -10825,14 +10899,23 @@ public class SpawnerDetector extends Module {
     private void tickTakeoffSpot() {
         stateTicks++;
 
+        if (takeoffIfSkyClear()) return;
+
         if (stateTicks == 1) {
             BlockPos spot = findTakeoffSpot();
+            autoTakeoffSpot = spot;
             if (spot == null) {
+                if (autoAscendRadius >= 96) {
+                    IBaritone bt = primaryBaritone();
+                    if (bt != null) bt.getPathingBehavior().cancelEverything();
+                    releaseAllAutoKeys();
+                    autoLog("TAKEOFF_SPOT", autoSite.center, "no takeoff spot at maximum radius, new search cycle in 30s");
+                    return;
+                }
                 autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
                 enterState(AutoState.ASCEND, "no takeoff spot");
                 return;
             }
-            autoTakeoffSpot = spot;
             autoLog("TAKEOFF_SPOT", autoSite.center, String.format("spot=%d,%d,%d dist=%.1f",
                 spot.getX(), spot.getY(), spot.getZ(),
                 Math.hypot((spot.getX() + 0.5) - mc.player.getX(), (spot.getZ() + 0.5) - mc.player.getZ())));
@@ -10843,13 +10926,28 @@ public class SpawnerDetector extends Module {
         }
 
         if (stateTicks > 30 * 20) {
+            if (autoTakeoffSpot != null) autoAscendFailedPoints.add(autoTakeoffSpot);
+            IBaritone bt = primaryBaritone();
+            if (bt != null) bt.getPathingBehavior().cancelEverything();
+            releaseAllAutoKeys();
+            if (autoAscendRadius >= 96) {
+                autoAscendFailedPoints.retainAll(Set.of(mc.player.getBlockPos()));
+                autoAscendRadius = 16;
+                autoAscendTargets = List.of();
+                autoTakeoffSpot = null;
+                enterState(AutoState.ASCEND, "new takeoff search cycle, radius=16");
+                return;
+            }
             autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
             enterState(AutoState.ASCEND, "takeoff spot timeout");
             return;
         }
 
+        if (autoTakeoffSpot == null) return;
+
         double dist = Math.hypot((autoTakeoffSpot.getX() + 0.5) - mc.player.getX(), (autoTakeoffSpot.getZ() + 0.5) - mc.player.getZ());
-        if (dist <= 1.0 && Math.abs(mc.player.getY() - autoTakeoffSpot.getY()) <= 1.5 && mc.player.isOnGround()) {
+        if (dist <= 1.0 && Math.abs(mc.player.getY() - autoTakeoffSpot.getY()) <= 1.5 && mc.player.isOnGround()
+            && !autoAscendFailedPoints.contains(autoTakeoffSpot) && !autoAscendFailedPoints.contains(mc.player.getBlockPos())) {
             IBaritone bt = primaryBaritone();
             if (bt != null) bt.getPathingBehavior().cancelEverything();
             autoAscendArrivedAt = autoTakeoffSpot;
@@ -11001,6 +11099,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void takeoffFailedRetryOrAscend(String reason) {
+        autoAscendFailedPoints.add(mc.player.getBlockPos());
         if (mc.player.isClimbing()) autoTakeoffRetries = 3;
         autoTakeoffRetries++;
         if (autoTakeoffRetries <= 1) {
@@ -11034,6 +11133,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void completeRunBeforeSoloCruise() {
+        restoreAutoThrowawayItems();
         if (autoSoloTransitOnly || autoSite == null) return;
         BlockPos finished = autoSite.center;
         if (!autoRunAbandoned) {
@@ -11076,6 +11176,7 @@ public class SpawnerDetector extends Module {
             }
             autoSoloTarget = target;
             autoSite = target;
+            autoSelfAscendReturns = 0;
             autoSoloBestDistSq = Double.MAX_VALUE;
             autoSoloBestDistTick = stateTicks;
             autoSoloNearUnloadedTicks = 0;
@@ -11351,6 +11452,7 @@ public class SpawnerDetector extends Module {
         BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
 
         state = AutoState.FAILED;
+        restoreAutoThrowawayItems();
         playAutoSound("spawner_failed", soundFailed);
         setChestplateHold(false);
         stateTicks = 0;
