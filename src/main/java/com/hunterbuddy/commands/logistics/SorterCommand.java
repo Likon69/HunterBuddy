@@ -2,6 +2,7 @@ package com.hunterbuddy.commands.logistics;
 
 import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
 import com.hunterbuddy.modules.sorter.ShulkerSorter;
+import com.hunterbuddy.modules.sorter.Purifier;
 import com.hunterbuddy.modules.sorter.SorterStore;
 import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
@@ -37,6 +38,29 @@ public class SorterCommand extends Command {
     @Override
     public void build(LiteralArgumentBuilder<CommandSource> builder) {
         builder.executes(c -> status());
+
+        builder.then(literal("station").executes(c -> {
+            if (mc.world == null || !(mc.crosshairTarget instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) {
+                error("Look at a support block first.");
+                return 1;
+            }
+            BlockPos support = hit.getBlockPos();
+            if (!Purifier.validStation(support)) {
+                error("Station needs a solid support, a free replaceable block above it, room for the lid and an accessible side.");
+                return 1;
+            }
+            SorterProfile profile = SorterStore.get();
+            Pos at = SorterStore.pos(support);
+            String used = profile.whatIs(at);
+            if (used != null && !at.equals(profile.unpackStation)) {
+                error("That block is already the %s.", used);
+                return 1;
+            }
+            profile.unpackStation = at;
+            SorterStore.save();
+            info("Purification station set at %s.", at);
+            return 1;
+        }));
 
         builder.then(literal("input").executes(c -> {
             BlockPos pos = lookedAtContainer(true);
@@ -79,7 +103,9 @@ public class SorterCommand extends Command {
             })));
 
         builder.then(literal("remove").executes(c -> {
-            BlockPos pos = lookedAtContainer();
+            BlockPos pos = mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+                && SorterStore.pos(hit.getBlockPos()).equals(SorterStore.get().unpackStation)
+                ? hit.getBlockPos() : lookedAtContainer();
             if (pos == null) return 1;
             SorterProfile p = SorterStore.get();
             Pos at = SorterStore.pos(pos);
@@ -101,6 +127,7 @@ public class SorterCommand extends Command {
         builder.then(literal("list").executes(c -> {
             SorterProfile p = SorterStore.get();
             info("Inputs (%d): %s", p.inputs.size(), p.inputs);
+            info("Station: %s", p.unpackStation == null ? "none" : p.unpackStation);
             for (Destination d : p.destinations) {
                 info("  %s: %d chest(s), %d full", d.category, d.chests.size(), d.full.size());
             }
@@ -156,7 +183,7 @@ public class SorterCommand extends Command {
         ShulkerSorter module = Modules.get().get(ShulkerSorter.class);
         info("%d input(s), %d destination(s). Module: %s", p.inputs.size(), p.destinations.size(),
             module != null && module.isActive() ? module.statusLine() : "off");
-        info("Subcommands: input, dest <category>, remove, list, categories, check, resetfull, reload");
+        info("Subcommands: input, dest <category>, station, remove, list, categories, check, resetfull, reload");
         return 1;
     }
 

@@ -8,6 +8,7 @@ import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
+import com.hunterbuddy.modules.sorter.logic.PurificationPlan;
 import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Destination;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -36,6 +38,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket.LookAndOnGround;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.GenericContainerScreenHandler;
+import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -72,37 +75,43 @@ public class ShulkerSorter extends Module {
         .defaultValue(false)
         .build());
 
+    private final Setting<Boolean> purifyMixed = sgSort.add(new BoolSetting.Builder()
+        .name("purify-mixed")
+        .description("Keep the dominant category in mixed shulkers at the configured station.")
+        .defaultValue(true)
+        .build());
+
     private final Setting<Boolean> dryRun = sgSort.add(new BoolSetting.Builder()
         .name("dry-run")
         .description("Open the input chests and report what would go where, without moving anything.")
         .defaultValue(true)
         .build());
 
-    private final Setting<Integer> clicksPerTick = sgSpeed.add(new IntSetting.Builder()
+    final Setting<Integer> clicksPerTick = sgSpeed.add(new IntSetting.Builder()
         .name("clicks-per-tick")
         .description("Inventory clicks per tick. Keep it low on 2b2t.")
         .defaultValue(1).min(1).sliderMax(6)
         .build());
 
-    private final Setting<Integer> clickDelay = sgSpeed.add(new IntSetting.Builder()
+    final Setting<Integer> clickDelay = sgSpeed.add(new IntSetting.Builder()
         .name("click-delay")
         .description("Ticks to wait after a tick with inventory clicks.")
         .defaultValue(3).min(0).sliderMax(10)
         .build());
 
-    private final Setting<Integer> actionDelay = sgSpeed.add(new IntSetting.Builder()
+    final Setting<Integer> actionDelay = sgSpeed.add(new IntSetting.Builder()
         .name("action-delay")
         .description("Ticks to wait between steps (after opening, before closing...).")
         .defaultValue(4).min(0).sliderMax(20)
         .build());
 
-    private final Setting<Integer> openTimeout = sgSpeed.add(new IntSetting.Builder()
+    final Setting<Integer> openTimeout = sgSpeed.add(new IntSetting.Builder()
         .name("open-timeout")
         .description("Ticks to wait for a container to open before retrying.")
         .defaultValue(40).min(10).sliderMax(100)
         .build());
 
-    private final Setting<Integer> pathTimeout = sgSpeed.add(new IntSetting.Builder()
+    final Setting<Integer> pathTimeout = sgSpeed.add(new IntSetting.Builder()
         .name("path-timeout")
         .description("Seconds to reach a chest before giving up on it.")
         .defaultValue(60).min(5).sliderMax(300)
@@ -115,7 +124,7 @@ public class ShulkerSorter extends Module {
         .build());
 
     private enum State {
-        IDLE, PICK_INPUT, GOTO, OPEN, TAKE, PICK_DEST, DEPOSIT, CLOSE, DONE
+        IDLE, PICK_INPUT, GOTO, OPEN, TAKE, PICK_DEST, DEPOSIT, CLOSE, PURIFY, DONE
 
     }
 
@@ -132,10 +141,10 @@ public class ShulkerSorter extends Module {
     private int retries;
     private int pathRelaunches;
     private int openings;
-    private int openingClicks;
+    int openingClicks;
     private int recoveryClicks;
     private int cursorReappearances;
-    private int cursorSourceSlot = -1;
+    int cursorSourceSlot = -1;
     private boolean openingChecked;
     private boolean closingRequested;
 
@@ -144,6 +153,13 @@ public class ShulkerSorter extends Module {
     private final Map<Pos, Integer> occupiedOnClose = new LinkedHashMap<>();
 
     private final Set<Integer> protectedSlots = new HashSet<>();
+    private final Set<Integer> recoveredSlots = new HashSet<>();
+    private final Map<Pos, Set<Integer>> attemptedSources = new LinkedHashMap<>();
+    private final Purifier purifier = new Purifier(this);
+    private int reservedSlot = -1;
+    private PurificationPlan candidate;
+    private boolean deliverBeforePurifying;
+    private boolean purificationDisabled;
     private final Map<String, Integer> report = new LinkedHashMap<>();
 
     public ShulkerSorter() {
@@ -158,12 +174,13 @@ public class ShulkerSorter extends Module {
             return;
         }
         SorterProfile profile = SorterStore.get();
-        if (profile.inputs.isEmpty()) {
+        boolean recovery = !dryRun.get() && purifier.needsRecovery();
+        if (!recovery && profile.inputs.isEmpty()) {
             error("No input chest. Look at one and run .sorter input");
             toggle();
             return;
         }
-        if (!dryRun.get() && profile.destinations.isEmpty()) {
+        if (!recovery && !dryRun.get() && profile.destinations.isEmpty()) {
             error("No destination. Look at a chest and run .sorter dest <category>");
             toggle();
             return;
@@ -180,6 +197,12 @@ public class ShulkerSorter extends Module {
         }
 
         protectedSlots.clear();
+        recoveredSlots.clear();
+        attemptedSources.clear();
+        candidate = null;
+        deliverBeforePurifying = false;
+        purificationDisabled = false;
+        reservedSlot = -1;
         for (int i = 0; i < 36; i++) {
             if (!mc.player.getInventory().getStack(i).isEmpty()) {
                 protectedSlots.add(i);
@@ -194,6 +217,19 @@ public class ShulkerSorter extends Module {
         targetPos = null;
         cursorSourceSlot = -1;
         setState(State.PICK_INPUT);
+        if (!dryRun.get() && purifyMixed.get() && profile.unpackStation != null) {
+            for (int i = 0; i < 9; i++) {
+                if (mc.player.getInventory().getStack(i).isEmpty()) {
+                    reservedSlot = i;
+                    break;
+                }
+            }
+            if (reservedSlot == -1) warning("No empty hotbar slot; purification disabled for this run.");
+        }
+        if (recovery) {
+            purifier.start(null, -1, 0);
+            setState(State.PURIFY);
+        }
         info("Started%s. %d input chest(s), %d destination(s).",
             dryRun.get() ? " (dry run)" : "", profile.inputs.size(), profile.destinations.size());
     }
@@ -215,6 +251,14 @@ public class ShulkerSorter extends Module {
             return;
         }
         stateTicks++;
+        if (state == State.PURIFY) {
+            switch (purifier.tick()) {
+                case DONE, FAILURE -> setState(cargoCategories().isEmpty() ? State.PICK_INPUT : State.PICK_DEST);
+                case STOP -> { if (isActive()) toggle(); }
+                default -> { }
+            }
+            return;
+        }
         if (timer > 0) {
             timer--;
             return;
@@ -232,6 +276,11 @@ public class ShulkerSorter extends Module {
             default -> {
             }
         }
+    }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        if (isActive()) toggle();
     }
 
     private void pickInput() {
@@ -351,7 +400,7 @@ public class ShulkerSorter extends Module {
         }
     }
 
-    private void interact(BlockPos pos) {
+    void interact(BlockPos pos) {
         Vec3d eye = mc.player.getEyePos();
         Vec3d center = Vec3d.ofCenter(pos);
         Vec3d toEye = eye.subtract(center);
@@ -428,6 +477,21 @@ public class ShulkerSorter extends Module {
                     }
                     continue;
                 }
+                if (candidate != null) {
+                    int slot = handlerSlotOf(containerSlots, reservedSlot);
+                    if (!handler.getCursorStack().isEmpty() && handler.getSlot(slot).getStack().isEmpty()) {
+                        mc.interactionManager.clickSlot(handler.syncId, slot, 0, SlotActionType.PICKUP, mc.player);
+                        openingClicks++;
+                    } else if (handler.getCursorStack().isEmpty()) {
+                        if (!isShulker(handler.getSlot(slot).getStack())) candidate = null;
+                        closeThen();
+                        return;
+                    } else {
+                        candidate = null;
+                        abandonOpening("Reserved slot changed");
+                    }
+                    continue;
+                }
                 if (!handler.getCursorStack().isEmpty()) {
                     if (!emptyCursor(handler)) {
                         return;
@@ -438,6 +502,34 @@ public class ShulkerSorter extends Module {
                 int source = -1;
                 for (int i = 0; i < containerSlots; i++) {
                     ItemStack stack = handler.getSlot(i).getStack();
+                    if (!purificationDisabled && reservedSlot >= 0 && purifyMixed.get()
+                        && SorterStore.get().unpackStation != null
+                        && mc.player.getInventory().getStack(reservedSlot).isEmpty()
+                        && isShulker(stack) && classifyShulker(stack, SorterStore.get().rules).isMixed()
+                        && !attemptedSources.getOrDefault(SorterStore.pos(targetPos), Set.of()).contains(i)) {
+                        PurificationPlan plan = Purifier.plan(stack);
+                        int capacity = 0;
+                        for (int inv = 0; inv < 36; inv++) if (inv != reservedSlot && isCargoSlot(inv)) capacity++;
+                        if (resolveDestination(SorterStore.get(), plan.retainedCategory()) != null
+                            && plan.requiredCargoSlots() <= capacity) {
+                            if (freeCargoSlots() < plan.requiredCargoSlots()) {
+                                if (!cargoCategories().isEmpty()) {
+                                    deliverBeforePurifying = true;
+                                    closeThen();
+                                    return;
+                                }
+                            } else if (openingClicks > 0) {
+                                deliverBeforePurifying = true;
+                                closeThen();
+                                return;
+                            } else {
+                                candidate = plan;
+                                attemptedSources.computeIfAbsent(SorterStore.pos(targetPos), key -> new HashSet<>()).add(i);
+                                source = i;
+                                break;
+                            }
+                        }
+                    }
                     if (!stack.isEmpty() && routedCategory(stack) != null) {
                         source = i;
                         break;
@@ -521,7 +613,7 @@ public class ShulkerSorter extends Module {
         }
     }
 
-    private static int handlerSlotOf(int containerSlots, int inv) {
+    static int handlerSlotOf(int containerSlots, int inv) {
         return inv < 9 ? containerSlots + 27 + inv : containerSlots + (inv - 9);
     }
 
@@ -567,8 +659,15 @@ public class ShulkerSorter extends Module {
         return true;
     }
 
-    private static int clickLimit(GenericContainerScreenHandler handler) {
-        return 2 * (handler.getRows() * 9 + 36);
+    static int clickLimit(ScreenHandler handler) {
+        return 2 * handler.slots.size();
+    }
+
+    void resetClicks() {
+        openingClicks = 0;
+        recoveryClicks = 0;
+        cursorSourceSlot = -1;
+        closingRequested = false;
     }
 
     private void abandonOpening(String reason) {
@@ -577,26 +676,24 @@ public class ShulkerSorter extends Module {
         closingRequested = true;
     }
 
-    private int firstEmptyCargoSlot(GenericContainerScreenHandler handler) {
-        int containerSlots = handler.getRows() * 9;
+    int firstEmptyCargoSlot(ScreenHandler handler) {
+        int containerSlots = handler.slots.size() - 36;
         for (int inv = 9; inv < 36; inv++) {
             int slot = handlerSlotOf(containerSlots, inv);
-            if (isCargoSlot(inv) && handler.getSlot(slot).getStack().isEmpty()) {
+            if (inv != reservedSlot && isCargoSlot(inv) && handler.getSlot(slot).getStack().isEmpty()) {
                 return slot;
             }
         }
-        if (useHotbar.get()) {
-            for (int inv = 0; inv < 9; inv++) {
-                int slot = handlerSlotOf(containerSlots, inv);
-                if (isCargoSlot(inv) && handler.getSlot(slot).getStack().isEmpty()) {
-                    return slot;
-                }
+        for (int inv = 0; inv < 9; inv++) {
+            int slot = handlerSlotOf(containerSlots, inv);
+            if (inv != reservedSlot && isCargoSlot(inv) && handler.getSlot(slot).getStack().isEmpty()) {
+                return slot;
             }
         }
         return -1;
     }
 
-    private boolean emptyCursor(GenericContainerScreenHandler handler) {
+    boolean emptyCursor(ScreenHandler handler) {
         if (recoveryClicks >= clickLimit(handler)) {
             stopWithCursor();
             return false;
@@ -615,7 +712,7 @@ public class ShulkerSorter extends Module {
         if (closingRequested) {
             recoveryClicks++;
             if (handler.getCursorStack().isEmpty()) {
-                closeThen();
+                if (state != State.PURIFY) closeThen();
                 return false;
             }
         }
@@ -652,11 +749,25 @@ public class ShulkerSorter extends Module {
         }
         mc.player.closeHandledScreen();
         timer = actionDelay.get();
+        if (candidate != null) {
+            boolean ready = SorterStore.get().unpackStation != null
+                && isShulker(mc.player.getInventory().getStack(reservedSlot));
+            if (ready) {
+                purifier.start(candidate, reservedSlot, timer);
+                timer = 0;
+            }
+            candidate = null;
+            if (ready) {
+                setState(State.PURIFY);
+                return;
+            }
+        }
         if (target == Target.INPUT) {
             boolean deliverNow = !dryRun.get() && !cargoCategories().isEmpty()
-                && (freeCargoSlots() == 0 || exhaustedInputs.contains(SorterStore.pos(targetPos))
+                && (deliverBeforePurifying || freeCargoSlots() == 0 || exhaustedInputs.contains(SorterStore.pos(targetPos))
                     || excludedChests.contains(SorterStore.pos(targetPos)));
             setState(deliverNow ? State.PICK_DEST : State.PICK_INPUT);
+            deliverBeforePurifying = false;
         } else {
             setState(State.PICK_DEST);
         }
@@ -712,7 +823,7 @@ public class ShulkerSorter extends Module {
         return null;
     }
 
-    private ShulkerClassifier.Result classifyShulker(ItemStack stack, CategoryRules rules) {
+    ShulkerClassifier.Result classifyShulker(ItemStack stack, CategoryRules rules) {
         List<ShulkerClassifier.Slot> slots = new ArrayList<>();
         for (ItemStack inner : ShulkerDataParser.parseShulkerContentsAsList(stack)) {
             slots.add(new ShulkerClassifier.Slot(Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount()));
@@ -727,18 +838,35 @@ public class ShulkerSorter extends Module {
         return Registries.ITEM.getId(stack.getItem()).getPath() + " -> " + SorterStore.get().rules.categoryOf(Registries.ITEM.getId(stack.getItem()).toString());
     }
 
-    private static boolean isShulker(ItemStack stack) {
+    static boolean isShulker(ItemStack stack) {
         return stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock;
     }
 
     private boolean isCargoSlot(int inv) {
-        return !protectedSlots.contains(inv) && (inv >= 9 || useHotbar.get());
+        if (recoveredSlots.contains(inv)) {
+            if (isShulker(mc.player.getInventory().getStack(inv))) {
+                return true;
+            }
+            recoveredSlots.remove(inv);
+        }
+        return !protectedSlots.contains(inv) && (inv >= 9 || useHotbar.get() || inv == reservedSlot);
+    }
+
+    void acceptRecovered(int slot) {
+        recoveredSlots.add(slot);
+    }
+
+    void disablePurification(String reason) {
+        if (!purificationDisabled) {
+            purificationDisabled = true;
+            warning("Purification disabled for this run: %s.", reason);
+        }
     }
 
     private int freeCargoSlots() {
         int free = 0;
         for (int i = 0; i < 36; i++) {
-            if (isCargoSlot(i) && mc.player.getInventory().getStack(i).isEmpty()) {
+            if (i != reservedSlot && isCargoSlot(i) && mc.player.getInventory().getStack(i).isEmpty()) {
                 free++;
             }
         }
@@ -762,11 +890,11 @@ public class ShulkerSorter extends Module {
         return out;
     }
 
-    private boolean inReach(BlockPos pos) {
+    boolean inReach(BlockPos pos) {
         return mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(pos)) <= REACH * REACH;
     }
 
-    private void stopPathing() {
+    void stopPathing() {
         if (BaritoneHelper.isAvailable()) {
             BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().cancelEverything();
         }
@@ -778,6 +906,7 @@ public class ShulkerSorter extends Module {
     }
 
     public String statusLine() {
+        if (state == State.PURIFY) return purifier.statusLine();
         return state + (targetPos == null ? "" : " @ " + targetPos.toShortString())
             + (currentDest == null ? "" : " [" + currentDest.category + "]");
     }
