@@ -6011,6 +6011,7 @@ public class SpawnerDetector extends Module {
             BlockState belowState = mc.world.getBlockState(below);
             if (!isOpenState(belowState, below) && mc.player.isOnGround()) {
                 trackSideDigBlock(below);
+                if (state != AutoState.SIDE_DIG) return;
                 autoMineTick("SIDE_DIG", below, true);
             }
         } else if (deepSide) {
@@ -6040,11 +6041,13 @@ public class SpawnerDetector extends Module {
             }
             if (!isOpenState(headState, nHead)) {
                 trackSideDigBlock(nHead);
+                if (state != AutoState.SIDE_DIG) return;
                 autoMineTick("SIDE_DIG", nHead, false);
             } else {
                 BlockState floorState = mc.world.getBlockState(nFloor);
                 if (!isOpenState(floorState, nFloor)) {
                     trackSideDigBlock(nFloor);
+                    if (state != AutoState.SIDE_DIG) return;
                     autoMineTick("SIDE_DIG", nFloor, false);
                 } else {
                     recenterDig(nx, nz, 0.2);
@@ -6104,7 +6107,9 @@ public class SpawnerDetector extends Module {
         }
         if (now - autoSideDigLastSlowLogMs >= 15_000L) {
             autoSideDigLastSlowLogMs = now;
-            autoLog("SIDE_DIG", autoSite.center, String.format("side dig slow %d,%d,%d", target.getX(), target.getY(), target.getZ()));
+            autoLog("SIDE_DIG", autoSite.center, String.format("side dig slow %d,%d,%d block=%s",
+                target.getX(), target.getY(), target.getZ(), Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock())));
+            abort("dig block timeout");
         }
     }
 
