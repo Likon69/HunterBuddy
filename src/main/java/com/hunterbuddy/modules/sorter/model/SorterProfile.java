@@ -17,6 +17,7 @@ public class SorterProfile {
     public List<Destination> destinations = new ArrayList<>();
 
     public Pos unpackStation;
+    public Pos enderChest;
     public CategoryRules rules = CategoryRules.defaults();
 
     public List<Destination> destinationsFor(String category) {
@@ -55,6 +56,9 @@ public class SorterProfile {
         }
         if (pos.equals(unpackStation)) {
             return "unpack station";
+        }
+        if (pos.equals(enderChest)) {
+            return "ender chest";
         }
         return null;
     }

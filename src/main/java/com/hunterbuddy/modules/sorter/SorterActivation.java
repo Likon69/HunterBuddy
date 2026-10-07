@@ -132,7 +132,7 @@ final class SorterActivation {
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
         if (owner.isActive()) {
-            pendingResume = owner.resumeAfterReconnect();
+            pendingResume = owner.resumeAfterReconnect() && !owner.isWithdrawing();
             internalToggle = true;
             try {
                 owner.stopForDisconnect();

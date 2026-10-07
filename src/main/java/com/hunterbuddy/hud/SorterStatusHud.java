@@ -163,6 +163,15 @@ public final class SorterStatusHud extends HudElement {
         if (snapshot.pauseReason() != null && !snapshot.pauseReason().isEmpty()) {
             lines.add(new Line("Waiting", snapshot.pauseReason(), AMBER, null));
         }
+        if (snapshot.withdrawal() != null) {
+            SorterRunSnapshot.Withdrawal withdrawal = snapshot.withdrawal();
+            lines.add(new Line(withdrawal.category(), withdrawal.withdrawn() + "/" + withdrawal.requested()
+                + " → " + withdrawal.destination(), WHITE, "withdrawal"));
+            if (snapshot.mode() == SorterRunSnapshot.Mode.DONE) {
+                lines.add(new Line("Inventory", withdrawal.leftInInventory() + " shulkers left", WHITE, null));
+            }
+            return lines;
+        }
         SorterRunSnapshot.Storage storage = snapshot.storage();
         boolean off = snapshot.mode() == SorterRunSnapshot.Mode.OFF;
         if (off || snapshot.mode() == SorterRunSnapshot.Mode.DONE) {
@@ -217,7 +226,7 @@ public final class SorterStatusHud extends HudElement {
         return switch (snapshot.mode()) {
             case STATION -> VIOLET;
             case DONE -> GREEN;
-            case SORTING -> CYAN;
+            case SORTING, WITHDRAW -> CYAN;
             default -> MUTED;
         };
     }
@@ -266,6 +275,6 @@ public final class SorterStatusHud extends HudElement {
             new SorterRunSnapshot.Results(12, 3, 4, 7, 2, 1, Map.of("pvp", 9, "flight", 6, "building", 4)),
             new SorterRunSnapshot.Capacity(1, 2, List.of()),
             new SorterRunSnapshot.Alert("Reserve at 124, 64, -318 was not empty; marked full.", 2300, false),
-            new SorterRunSnapshot.Storage(8, 6, 2, "130 64 -322"), 137_000);
+            new SorterRunSnapshot.Storage(8, 6, 2, "130 64 -322"), 137_000, null);
     }
 }

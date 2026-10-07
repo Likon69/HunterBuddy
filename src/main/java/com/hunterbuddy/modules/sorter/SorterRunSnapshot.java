@@ -8,11 +8,12 @@ import java.util.Map;
 public record SorterRunSnapshot(
     Mode mode, Stage stage, String state, String pauseReason, Target target,
     Progress progress, Results results, Capacity capacity, Alert alert,
-    Storage storage, long durationMillis
+    Storage storage, long durationMillis, Withdrawal withdrawal
 ) {
-    public enum Mode { OFF, SORTING, STATION, PAUSED, DONE }
+    public enum Mode { OFF, SORTING, WITHDRAW, STATION, PAUSED, DONE }
     public enum Stage { INPUTS, SORT, STATION, PACK, STORE }
 
+    public record Withdrawal(String category, int requested, int withdrawn, String destination, int leftInInventory) { }
     public record Target(String role, String category, String position, double distance) { }
     public record Progress(int registered, int remaining, int emptied, int excluded) { }
     public record Results(int shulkers, int purifiedDelivered, int purified, int looseStacks, int packed, int packedFull,
@@ -32,6 +33,6 @@ public record SorterRunSnapshot(
     public static SorterRunSnapshot empty() {
         return new SorterRunSnapshot(Mode.OFF, null, "Off", "", null,
             new Progress(0, 0, 0, 0), new Results(0, 0, 0, 0, 0, 0, Map.of()),
-            new Capacity(0, 0, List.of()), null, new Storage(0, 0, 0, ""), 0);
+            new Capacity(0, 0, List.of()), null, new Storage(0, 0, 0, ""), 0, null);
     }
 }

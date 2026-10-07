@@ -28,23 +28,6 @@ final class SorterPacking {
         }
     }
 
-    private static final class Transfer {
-        final GenericContainerScreenHandler handler;
-        final int source;
-        final int destination;
-        final ItemStack stack;
-        final int amount;
-        int placed;
-
-        Transfer(GenericContainerScreenHandler handler, int source, int destination, ItemStack stack, int amount) {
-            this.handler = handler;
-            this.source = source;
-            this.destination = destination;
-            this.stack = stack.copy();
-            this.amount = amount;
-        }
-    }
-
     private final ShulkerSorter owner;
     private final SorterInventory inventory;
     private final Map<Pos, List<ItemStack>> observations = new LinkedHashMap<>();
@@ -58,7 +41,7 @@ final class SorterPacking {
     private boolean noProgress;
     private PackingPlan plan;
     private List<ItemStack> space;
-    private Transfer transfer;
+    private boolean takingShulker;
 
     SorterPacking(ShulkerSorter owner, SorterInventory inventory) {
         this.owner = owner;
@@ -77,7 +60,7 @@ final class SorterPacking {
         noProgress = false;
         plan = null;
         space = null;
-        transfer = null;
+        takingShulker = false;
     }
 
     void begin(SorterProfile profile) {
@@ -187,11 +170,20 @@ final class SorterPacking {
         if (!collecting || noProgress) {
             return false;
         }
-        if (transfer != null) {
-            return transfer(handler);
-        }
         if (!handler.getCursorStack().isEmpty()) {
-            return abort("Cursor changed while packing");
+            if (takingShulker) {
+                int slot = SorterInventory.handlerSlotOf(handler.getRows() * 9, inventory.reservedSlot);
+                if (!plan.matches(handler.getCursorStack()) || !handler.getSlot(slot).getStack().isEmpty()) {
+                    return abort("Packing shulker or reserved slot changed");
+                }
+                click(handler, slot);
+                takingShulker = false;
+                return true;
+            }
+            return inventory.emptyCursor(handler);
+        }
+        if (takingShulker) {
+            return abort("Packing shulker pickup changed");
         }
         if (plan == null) {
             int source = bestPartial(pos, category());
@@ -214,15 +206,15 @@ final class SorterPacking {
                     PackingPlan.insert(space, cargo);
                 }
             }
-            transfer = new Transfer(handler, source, reserved, shulker, shulker.getCount());
-            click(handler, source, 0);
+            takingShulker = true;
+            click(handler, source);
             return true;
         }
         if (!plan.matches(mc.player.getInventory().getStack(inventory.reservedSlot))) {
             return abort("Packing shulker changed");
         }
         int destination = inventory.firstEmptyCargoSlot(handler);
-        if (destination == -1) {
+        if (destination == -1 || PackingPlan.full(space)) {
             return false;
         }
         for (int source = 0; source < handler.getRows() * 9; source++) {
@@ -234,59 +226,26 @@ final class SorterPacking {
             if (amount == 0) {
                 continue;
             }
-            int clicks = amount == stack.getCount() ? 2 : amount + 2;
-            if (inventory.openingClicks + clicks > SorterInventory.clickLimit(handler)) {
+            if (inventory.openingClicks + 2 > SorterInventory.clickLimit(handler)) {
                 return false;
             }
-            ItemStack admitted = stack.copy();
-            admitted.setCount(amount);
-            PackingPlan.insert(space, admitted);
-            transfer = new Transfer(handler, source, destination, stack, amount);
-            click(handler, source, 0);
+            PackingPlan.insert(space, stack);
+            click(handler, source);
             return true;
         }
         return false;
     }
 
-    private boolean transfer(GenericContainerScreenHandler handler) {
-        if (transfer.handler != handler) {
-            return abort("Packing screen changed");
-        }
-        ItemStack cursor = handler.getCursorStack();
-        ItemStack destination = handler.getSlot(transfer.destination).getStack();
-        if (cursor.isEmpty() || !ItemStack.areItemsAndComponentsEqual(cursor, transfer.stack)
-            || cursor.getCount() != transfer.stack.getCount() - transfer.placed
-            || (transfer.placed == 0 ? !destination.isEmpty()
-                : !ItemStack.areItemsAndComponentsEqual(destination, transfer.stack) || destination.getCount() != transfer.placed)) {
-            return abort("Server changed packing transfer");
-        }
-        if (transfer.placed == transfer.amount) {
-            ItemStack source = handler.getSlot(transfer.source).getStack();
-            if (!source.isEmpty()) {
-                return abort("Packing source slot changed");
-            }
-            click(handler, transfer.source, 0);
-            transfer = null;
-        } else if (transfer.amount == transfer.stack.getCount()) {
-            click(handler, transfer.destination, 0);
-            transfer = null;
-        } else {
-            click(handler, transfer.destination, 1);
-            transfer.placed++;
-        }
-        return true;
-    }
-
-    private void click(GenericContainerScreenHandler handler, int slot, int button) {
-        inventory.cursorSourceSlot = transfer == null ? slot : transfer.source;
-        mc.interactionManager.clickSlot(handler.syncId, slot, button, SlotActionType.PICKUP, mc.player);
+    private void click(GenericContainerScreenHandler handler, int slot) {
+        if (handler.getCursorStack().isEmpty()) inventory.cursorSourceSlot = slot;
+        mc.interactionManager.clickSlot(handler.syncId, slot, 0, SlotActionType.PICKUP, mc.player);
         inventory.openingClicks++;
     }
 
     private boolean abort(String reason) {
         owner.warning("%s; returning packing cargo through normal routing.", reason);
         noProgress = true;
-        transfer = null;
+        takingShulker = false;
         return false;
     }
 
@@ -308,7 +267,7 @@ final class SorterPacking {
         boolean progressed = success && plan != null && plan.progressed(stack);
         noProgress = !progressed;
         returning = true;
-        transfer = null;
+        takingShulker = false;
         return progressed;
     }
 
@@ -316,7 +275,7 @@ final class SorterPacking {
         returning = false;
         plan = null;
         space = null;
-        transfer = null;
+        takingShulker = false;
         collecting = false;
     }
 

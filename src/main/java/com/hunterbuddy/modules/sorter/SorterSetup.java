@@ -22,6 +22,8 @@ import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.input.WDropdown;
+import meteordevelopment.meteorclient.gui.widgets.input.WIntEdit;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WCheckbox;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
 import meteordevelopment.orbit.EventHandler;
@@ -44,7 +46,7 @@ import net.minecraft.util.math.BlockPos;
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 public final class SorterSetup {
-    public enum Role { INPUT, RESERVE, STATION, DESTINATION }
+    public enum Role { INPUT, RESERVE, STATION, ENDER, DESTINATION }
 
     public record RoleChoice(Role role, String category) {
         @Override
@@ -53,6 +55,7 @@ public final class SorterSetup {
                 case INPUT -> "Input";
                 case RESERVE -> "Reserve";
                 case STATION -> "Station";
+                case ENDER -> "Ender chest";
                 case DESTINATION -> category;
             };
         }
@@ -116,6 +119,13 @@ public final class SorterSetup {
     }
 
     private boolean valid(BlockPos pos, RoleChoice choice) {
+        if (choice.role() == Role.ENDER) {
+            if (!(mc.world.getBlockState(pos).getBlock() instanceof EnderChestBlock)) {
+                owner.error("That is not an ender chest at %s.", pos.toShortString());
+                return false;
+            }
+            return true;
+        }
         if (choice.role() == Role.STATION) {
             if (!Purifier.validStation(pos)) {
                 owner.error("Station needs a solid support, free space above, room for the lid and an accessible side at %s.", pos.toShortString());
@@ -165,6 +175,7 @@ public final class SorterSetup {
             case INPUT -> profile.inputs.add(at);
             case RESERVE -> profile.reserves.add(at);
             case STATION -> profile.unpackStation = at;
+            case ENDER -> profile.enderChest = at;
             case DESTINATION -> profile.getOrCreate(choice.category()).chests.add(at);
         }
         SorterStore.save();
@@ -181,6 +192,10 @@ public final class SorterSetup {
         profile.destinations.removeIf(destination -> destination.chests.isEmpty());
         if (at.equals(profile.unpackStation)) {
             profile.unpackStation = null;
+            removed = true;
+        }
+        if (at.equals(profile.enderChest)) {
+            profile.enderChest = null;
             removed = true;
         }
         return removed;
@@ -251,6 +266,10 @@ public final class SorterSetup {
         String used = profile.whatIs(at);
         if (used != null) {
             owner.info("Already %s; category: %s; position: %s.", used, categoryAt(profile, at), at);
+            return;
+        }
+        if (mc.world.getBlockState(pos).getBlock() instanceof EnderChestBlock) {
+            assign(pos, new RoleChoice(Role.ENDER, null), false);
             return;
         }
         BlockEntity block = mc.world.getBlockEntity(pos);
@@ -457,10 +476,14 @@ public final class SorterSetup {
         if (profile.unpackStation != null) {
             roles.put(profile.unpackStation, new RoleChoice(Role.STATION, null));
         }
+        if (profile.enderChest != null) {
+            roles.put(profile.enderChest, new RoleChoice(Role.ENDER, null));
+        }
         List<RoleChoice> options = new ArrayList<>();
         options.add(new RoleChoice(Role.INPUT, null));
         options.add(new RoleChoice(Role.RESERVE, null));
         options.add(new RoleChoice(Role.STATION, null));
+        options.add(new RoleChoice(Role.ENDER, null));
         for (String category : profile.rules.names()) {
             options.add(new RoleChoice(Role.DESTINATION, category));
         }
@@ -486,6 +509,26 @@ public final class SorterSetup {
         reset.action = () -> widgetAction(theme, table, profile, this::resetFull);
         WButton reload = table.add(theme.button("Reload profile")).widget();
         reload.action = () -> widgetAction(theme, table, profile, this::reload);
+        table.row();
+        table.add(theme.horizontalSeparator("Withdraw")).expandX();
+        table.row();
+        String[] categories = profile.rules.names().stream().filter(name -> !CategoryRules.MIXED.equals(name)).toArray(String[]::new);
+        WDropdown<String> category = table.add(theme.dropdown(categories, categories[0])).widget();
+        WIntEdit quantity = table.add(theme.intEdit(1, 1, 27, 1, 27)).widget();
+        String[] destinations = profile.enderChest == null ? new String[] { "Inventory" } : new String[] { "Inventory", "Ender chest" };
+        WDropdown<String> destination = table.add(theme.dropdown(destinations, destinations[0])).widget();
+        table.row();
+        table.add(theme.label("Full shulkers only"));
+        WCheckbox fullOnly = table.add(theme.checkbox(true)).widget();
+        WButton withdraw = table.add(theme.button("Withdraw")).widget();
+        withdraw.action = () -> {
+            if (mc.world == null || SorterStore.get() != profile) {
+                owner.warning("Profile changed; reopen the withdrawal controls.");
+                fillTable(theme, table);
+                return;
+            }
+            owner.withdraw(category.get(), quantity.get(), destination.get().equals("Ender chest"), fullOnly.checked);
+        };
     }
 
     private void widgetAction(GuiTheme theme, WTable table, SorterProfile displayed, Runnable action) {
