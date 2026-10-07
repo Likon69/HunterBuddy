@@ -59,6 +59,7 @@ public final class Purifier {
     private boolean contentsChecked;
     private String pauseReason;
     private long pauseStarted;
+    private ItemStack completedShulker = ItemStack.EMPTY;
 
     Purifier(ShulkerSorter owner, SorterInventory inventory, SorterSafety safety) {
         this.owner = owner;
@@ -121,6 +122,7 @@ public final class Purifier {
     }
 
     void start(PurificationPlan plan, int slot, int delay) {
+        completedShulker = ItemStack.EMPTY;
         this.plan = plan;
         this.slot = slot;
         timer = delay;
@@ -323,6 +325,9 @@ public final class Purifier {
                     if (owner.classifyShulker(stack, SorterStore.get().rules).isMixed()) {
                         owner.warning("Recovered shulker is still mixed; using normal routing.");
                     }
+                    if (!failed) {
+                        completedShulker = stack.copy();
+                    }
                     return failed ? Result.FAILURE : Result.DONE;
                 }
                 if (ticks >= 10 && ticks % 20 == 10) {
@@ -477,9 +482,33 @@ public final class Purifier {
     }
 
     private Result stop(String reason) {
-        owner.warning("%s; sorter stopped. Recover the shulker at %s.", reason, pos.toShortString());
+        owner.blockingWarning("%s; sorter stopped. Recover the shulker at %s.", reason, pos.toShortString());
         owner.stopPathing();
         return Result.STOP;
+    }
+
+    ItemStack completedShulker() {
+        return completedShulker;
+    }
+
+    BlockPos position() {
+        return pos;
+    }
+
+    String pauseReason() {
+        return pauseReason;
+    }
+
+    String hudState() {
+        return switch (state) {
+            case GOTO -> "Station: walking";
+            case PLACE -> "Station: placing";
+            case OPEN -> "Station: opening";
+            case EXTRACT -> "Station: extracting";
+            case CLOSE -> "Station: closing";
+            case BREAK -> "Station: breaking";
+            case PICKUP -> "Station: collecting";
+        };
     }
 
     String statusLine() {

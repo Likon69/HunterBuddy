@@ -19,10 +19,10 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
-import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.InventoryEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
@@ -100,6 +100,18 @@ public class ShulkerSorter extends Module {
         .defaultValue(true)
         .build());
 
+    private final Setting<Boolean> autoStart = sgSort.add(new BoolSetting.Builder()
+        .name("auto-start")
+        .description("Start after you close a registered input containing items, with dry-run off.")
+        .defaultValue(false)
+        .build());
+
+    private final Setting<Boolean> resumeAfterReconnect = sgSort.add(new BoolSetting.Builder()
+        .name("resume-after-reconnect")
+        .description("Resume an interrupted run near an input after five seconds clear of safety pauses.")
+        .defaultValue(false)
+        .build());
+
     private final Setting<Boolean> ignoreFriends = sgSort.add(new BoolSetting.Builder()
         .name("ignore-friends")
         .description("Do not pause when a visible player is a friend.")
@@ -170,6 +182,7 @@ public class ShulkerSorter extends Module {
     private boolean pathingStarted;
     private boolean assignedReserve;
     private int contentsSyncId = -1;
+    private GenericContainerScreenHandler visitHandler;
 
     private final Set<Pos> exhaustedInputs = new HashSet<>();
     private final Set<Pos> excludedChests = new HashSet<>();
@@ -178,6 +191,18 @@ public class ShulkerSorter extends Module {
     private final Map<Pos, Set<Integer>> attemptedSources = new LinkedHashMap<>();
     private final SorterInventory inventory = new SorterInventory(this, useHotbar::get);
     private final SorterSafety safety = new SorterSafety();
+    private final SorterActivation activation = new SorterActivation(this, safety);
+    private final SorterDeliveryTracker deliveries = new SorterDeliveryTracker(inventory);
+    private SorterRunSnapshot snapshot = SorterRunSnapshot.empty();
+    private final Set<Pos> emptiedInputs = new HashSet<>();
+    private long runStarted;
+    private long runEnded;
+    private boolean runCompleted;
+    private String lastWarning;
+    private long warningAt;
+    private boolean warningBlocking;
+    private SorterProfile warningProfile;
+    private SorterProfile snapshotProfile;
     private final Purifier purifier = new Purifier(this, inventory, safety);
     private PurificationPlan candidate;
     private boolean deliverBeforePurifying;
@@ -187,6 +212,21 @@ public class ShulkerSorter extends Module {
     public ShulkerSorter() {
         super(HunterBuddyAddon.LOGISTICS_CATEGORY, "shulker-sorter",
             "Sorts storage by category. Register blocks with tag-key and edit their roles below.");
+    }
+
+    @Override
+    public void toggle() {
+        if (activation != null) {
+            activation.onToggle();
+        }
+        super.toggle();
+        refreshSnapshot();
+    }
+
+    void stopForDisconnect() {
+        deliveries.resetVisit();
+        visitHandler = null;
+        toggle();
     }
 
     @Override
@@ -223,6 +263,13 @@ public class ShulkerSorter extends Module {
             return;
         }
 
+        deliveries.reset();
+        emptiedInputs.clear();
+        runStarted = System.nanoTime();
+        runEnded = 0;
+        runCompleted = false;
+        lastWarning = null;
+        snapshotProfile = profile;
         inventory.reset();
         attemptedSources.clear();
         candidate = null;
@@ -265,17 +312,36 @@ public class ShulkerSorter extends Module {
             state = State.IDLE;
             return;
         }
+        if (runStarted != 0 && runEnded == 0) {
+            runEnded = System.nanoTime();
+        }
+        if (state == State.PURIFY && mc.world != null && purifier.needsRecovery() && !warningBlocking) {
+            blockingWarning("Recovery required at %s.", purifier.position().toShortString());
+        }
         stopPathing();
+        if (mc.player != null && mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler
+            && handler.getCursorStack().isEmpty()) {
+            recordVisitClose(handler);
+        }
         if (mc.player != null && mc.player.currentScreenHandler != mc.player.playerScreenHandler
             && mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
             mc.player.closeHandledScreen();
         }
         SorterStore.save();
         state = State.IDLE;
+        refreshSnapshot();
     }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
+        try {
+            tickRun();
+        } finally {
+            refreshSnapshot();
+        }
+    }
+
+    private void tickRun() {
         if (mc.player == null || mc.world == null) {
             return;
         }
@@ -299,7 +365,15 @@ public class ShulkerSorter extends Module {
         stateTicks++;
         if (state == State.PURIFY) {
             switch (purifier.tick()) {
-                case DONE, FAILURE -> setState(cargoCategories().isEmpty() ? State.PICK_INPUT : State.PICK_DEST);
+                case DONE -> {
+                    ItemStack completed = purifier.completedShulker();
+                    ShulkerClassifier.Result result = classifyShulker(completed, SorterStore.get().rules);
+                    if (isShulker(completed) && !result.empty() && result.purity() == 1.0) {
+                        deliveries.purified(completed);
+                    }
+                    setState(cargoCategories().isEmpty() ? State.PICK_INPUT : State.PICK_DEST);
+                }
+                case FAILURE -> setState(cargoCategories().isEmpty() ? State.PICK_INPUT : State.PICK_DEST);
                 case STOP -> { if (isActive()) toggle(); }
                 default -> { }
             }
@@ -325,11 +399,6 @@ public class ShulkerSorter extends Module {
     }
 
     @EventHandler
-    private void onGameLeft(GameLeftEvent event) {
-        if (isActive()) toggle();
-    }
-
-    @EventHandler
     private void onInventory(InventoryEvent event) {
         if (mc.player != null && mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler
             && event.packet.syncId() == handler.syncId) {
@@ -350,7 +419,7 @@ public class ShulkerSorter extends Module {
             if (!cargoCategories().isEmpty()) {
                 setState(State.PICK_DEST);
             } else {
-                warning("Inventory full of cargo that has no free destination. Add chests or empty them.");
+                blockingWarning("Inventory full of cargo that has no free destination. Add chests or empty them.");
                 setState(State.DONE);
             }
             return;
@@ -402,6 +471,8 @@ public class ShulkerSorter extends Module {
         target = t;
         targetPos = pos;
         contentsSyncId = -1;
+        visitHandler = null;
+        deliveries.resetVisit();
         retries = 0;
         pathRelaunches = 0;
         openings = 0;
@@ -437,7 +508,8 @@ public class ShulkerSorter extends Module {
     }
 
     private void tickOpen() {
-        if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler) {
+        if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler) {
+            visitHandler = handler;
             if (++openings > 3) {
                 warning("Container at %s keeps closing, skipping it.", targetPos.toShortString());
                 skipTarget();
@@ -616,6 +688,7 @@ public class ShulkerSorter extends Module {
         int clicksBefore = inventory.openingClicks;
         try {
             if (!(mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler)) {
+                deliveries.resetVisit();
                 setState(State.OPEN);
                 return;
             }
@@ -623,6 +696,7 @@ public class ShulkerSorter extends Module {
             if (!checkOpening(handler)) {
                 return;
             }
+            deliveries.begin(handler, currentDest.category, stack -> currentDest.category.equals(routedCategory(stack)));
             int clicks = 0;
             boolean leftover = false;
 
@@ -696,15 +770,15 @@ public class ShulkerSorter extends Module {
     }
 
     private boolean checkOpening(GenericContainerScreenHandler handler) {
-        if (target == Target.DEST && assignedReserve) {
-            if (contentsSyncId != handler.syncId) {
-                if (stateTicks > openTimeout.get() + actionDelay.get()) {
-                    assignedReserve = false;
-                    abandonOpening("Reserve contents did not arrive");
-                    closeThen();
-                }
-                return false;
+        if (contentsSyncId != handler.syncId) {
+            if (stateTicks > openTimeout.get() + actionDelay.get()) {
+                assignedReserve = false;
+                abandonOpening("Container contents did not arrive");
+                closeThen();
             }
+            return false;
+        }
+        if (target == Target.DEST && assignedReserve) {
             assignedReserve = false;
             if (occupiedSlots(handler) != 0) {
                 currentDest.full.add(SorterStore.pos(targetPos));
@@ -740,7 +814,7 @@ public class ShulkerSorter extends Module {
     }
 
     void stopWithCursor() {
-        warning("Could not safely empty the cursor. Sorter stopped; empty it manually before closing the screen.");
+        blockingWarning("Could not safely empty the cursor. Sorter stopped; empty it manually before closing the screen.");
         toggle();
     }
 
@@ -766,6 +840,9 @@ public class ShulkerSorter extends Module {
                 setState(target == Target.INPUT ? State.TAKE : State.DEPOSIT);
             }
             return;
+        }
+        if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler) {
+            recordVisitClose(handler);
         }
         mc.player.closeHandledScreen();
         timer = actionDelay.get();
@@ -794,6 +871,7 @@ public class ShulkerSorter extends Module {
     }
 
     private void finish() {
+        runCompleted = true;
         if (dryRun.get()) {
             info("Dry run report (%d kinds):", report.size());
             report.forEach((k, v) -> info("  %dx %s", v, k));
@@ -803,6 +881,18 @@ public class ShulkerSorter extends Module {
         }
         SorterStore.save();
         toggle();
+    }
+
+    private void recordVisitClose(GenericContainerScreenHandler handler) {
+        if (handler != visitHandler) {
+            deliveries.resetVisit();
+            return;
+        }
+        if (target == Target.DEST && !dryRun.get()) {
+            deliveries.finish(handler);
+        } else if (target == Target.INPUT && targetPos != null && contentsSyncId == handler.syncId && occupiedSlots(handler) == 0) {
+            emptiedInputs.add(SorterStore.pos(targetPos));
+        }
     }
 
     private String categoryOf(ItemStack stack) {
@@ -945,7 +1035,7 @@ public class ShulkerSorter extends Module {
     private void tickPaused() {
         long now = System.nanoTime();
         if (now - pauseStarted >= SorterSafety.PAUSE_LIMIT_NANOS) {
-            warning("Pause exceeded two minutes (%s); sorter stopped.", pauseReason);
+            blockingWarning("Pause exceeded two minutes (%s); sorter stopped.", pauseReason);
             toggle();
             return;
         }
@@ -965,6 +1055,18 @@ public class ShulkerSorter extends Module {
 
     boolean isPurifying() {
         return state == State.PURIFY;
+    }
+
+    boolean autoStart() {
+        return autoStart.get();
+    }
+
+    boolean resumeAfterReconnect() {
+        return resumeAfterReconnect.get();
+    }
+
+    boolean dryRun() {
+        return dryRun.get();
     }
 
     boolean ignoreFriends() {
@@ -1003,6 +1105,155 @@ public class ShulkerSorter extends Module {
         if (state == State.PURIFY) return purifier.statusLine();
         return state + (targetPos == null ? "" : " @ " + targetPos.toShortString())
             + (currentDest == null ? "" : " [" + currentDest.category + "]");
+    }
+
+    @Override
+    public void warning(String message, Object... args) {
+        recordWarning(message, false, args);
+        super.warning(message, args);
+    }
+
+    @Override
+    public void error(String message, Object... args) {
+        recordWarning(message, isActive(), args);
+        super.error(message, args);
+    }
+
+    void blockingWarning(String message, Object... args) {
+        recordWarning(message, true, args);
+        super.warning(message, args);
+    }
+
+    private void recordWarning(String message, boolean blocking, Object... args) {
+        lastWarning = args.length == 0 ? message : String.format(Locale.ROOT, message, args);
+        warningAt = System.nanoTime();
+        warningBlocking = blocking;
+        warningProfile = mc.world == null ? snapshotProfile : SorterStore.get();
+    }
+
+    public SorterRunSnapshot snapshot() {
+        return snapshot;
+    }
+
+    void refreshSnapshot() {
+        long now = System.nanoTime();
+        long age = lastWarning == null ? 0 : Math.max(0, (now - warningAt) / 1_000_000);
+        SorterRunSnapshot.Alert alert = lastWarning != null && (warningBlocking || age < 10_000)
+            ? new SorterRunSnapshot.Alert(lastWarning, age, warningBlocking) : null;
+        if (mc.world == null || mc.player == null) {
+            SorterRunSnapshot empty = SorterRunSnapshot.empty();
+            snapshot = new SorterRunSnapshot(empty.mode(), null, autoStart.get() ? "Auto-start armed" : "Off", "", null,
+                empty.progress(), empty.results(), empty.capacity(), alert, empty.storage(), 0);
+            return;
+        }
+        SorterProfile profile = SorterStore.get();
+        if (snapshotProfile != null && snapshotProfile != profile) {
+            runCompleted = false;
+            runStarted = 0;
+            runEnded = 0;
+            deliveries.reset();
+            emptiedInputs.clear();
+            if (warningProfile != profile) {
+                lastWarning = null;
+                alert = null;
+            }
+        }
+        snapshotProfile = profile;
+        boolean active = isActive();
+        boolean done = !active && runCompleted && runEnded != 0 && now - runEnded < 10_000_000_000L;
+        String stationPause = active && state == State.PURIFY ? purifier.pauseReason() : null;
+        SorterRunSnapshot.Mode mode = !active ? (done ? SorterRunSnapshot.Mode.DONE : SorterRunSnapshot.Mode.OFF)
+            : state == State.PAUSED || stationPause != null ? SorterRunSnapshot.Mode.PAUSED
+            : state == State.PURIFY ? SorterRunSnapshot.Mode.STATION
+            : state == State.DONE ? SorterRunSnapshot.Mode.DONE : SorterRunSnapshot.Mode.SORTING;
+        State effective = state == State.PAUSED ? resumeState : state;
+        SorterRunSnapshot.Stage stage = switch (effective) {
+            case PURIFY -> SorterRunSnapshot.Stage.STATION;
+            case PICK_INPUT -> SorterRunSnapshot.Stage.INPUTS;
+            case PICK_DEST, DEPOSIT, DONE -> SorterRunSnapshot.Stage.STORE;
+            case GOTO, OPEN -> target == Target.INPUT ? SorterRunSnapshot.Stage.INPUTS : SorterRunSnapshot.Stage.STORE;
+            default -> SorterRunSnapshot.Stage.SORT;
+        };
+        if (!active) {
+            stage = done ? SorterRunSnapshot.Stage.STORE : null;
+        }
+        SorterRunSnapshot.Target hudTarget = null;
+        if (active && effective == State.PURIFY && purifier.position() != null) {
+            BlockPos pos = purifier.position();
+            hudTarget = new SorterRunSnapshot.Target("Station", "", pos.toShortString(),
+                Math.sqrt(mc.player.squaredDistanceTo(Vec3d.ofCenter(pos))));
+        } else if (active && targetPos != null && effective != State.PICK_INPUT && effective != State.PICK_DEST) {
+            hudTarget = new SorterRunSnapshot.Target(target == Target.INPUT ? "Input" : "Destination",
+                target == Target.DEST && currentDest != null ? currentDest.category : "", targetPos.toShortString(),
+                Math.sqrt(mc.player.squaredDistanceTo(Vec3d.ofCenter(targetPos))));
+        }
+        int excluded = 0;
+        int remaining = 0;
+        int empty = 0;
+        for (Pos input : profile.inputs) {
+            if (active || done) {
+                if (excludedChests.contains(input)) {
+                    excluded++;
+                } else if (!exhaustedInputs.contains(input)) {
+                    remaining++;
+                }
+                if (emptiedInputs.contains(input)) {
+                    empty++;
+                }
+            } else {
+                remaining++;
+            }
+        }
+        Set<Pos> full = new HashSet<>();
+        int destinations = 0;
+        for (Destination destination : profile.destinations) {
+            destinations += destination.chests.size();
+            for (Pos pos : destination.chests) {
+                if (destination.full.contains(pos)) {
+                    full.add(pos);
+                }
+            }
+        }
+        Set<String> missing = new LinkedHashSet<>();
+        if (active || done) {
+            for (int inv = 0; inv < 36; inv++) {
+                ItemStack stack = mc.player.getInventory().getStack(inv);
+                if (inventory.isCargoSlot(inv) && !stack.isEmpty()) {
+                    String category = categoryOf(stack);
+                    if (category != null && resolveDestination(profile, category) == null) {
+                        missing.add(category);
+                    }
+                }
+            }
+        }
+        String stateText = !active ? (autoStart.get() ? "Auto-start armed" : done ? "Done" : "Off") : switch (state) {
+            case IDLE -> "Off";
+            case PICK_INPUT -> "Choosing input";
+            case GOTO -> target == Target.INPUT ? "Walking to input" : "Walking to chest";
+            case OPEN -> target == Target.INPUT ? "Opening input" : "Opening chest";
+            case TAKE -> "Taking items";
+            case PICK_DEST -> "Choosing destination";
+            case DEPOSIT -> "Depositing";
+            case CLOSE -> "Closing chest";
+            case PURIFY -> purifier.hudState();
+            case PAUSED -> "Paused";
+            case DONE -> "Done";
+        };
+        if (mode == SorterRunSnapshot.Mode.PAUSED) {
+            stateText = "Paused";
+        }
+        if (active && dryRun.get()) {
+            stateText = "Dry run · " + stateText;
+        }
+        long duration = (active || done) && runStarted != 0
+            ? Math.max(0, ((runEnded == 0 ? now : runEnded) - runStarted) / 1_000_000) : 0;
+        snapshot = new SorterRunSnapshot(mode, stage, stateText,
+            mode == SorterRunSnapshot.Mode.PAUSED ? (stationPause != null ? stationPause : pauseReason) : "",
+            hudTarget, new SorterRunSnapshot.Progress(profile.inputs.size(), remaining, empty, excluded),
+            active || done ? deliveries.results() : new SorterRunSnapshot.Results(0, 0, 0, 0, Map.of()),
+            new SorterRunSnapshot.Capacity(full.size(), profile.reserves.size(), new ArrayList<>(missing)), alert,
+            new SorterRunSnapshot.Storage(profile.inputs.size(), destinations, profile.reserves.size(),
+                profile.unpackStation == null ? "" : profile.unpackStation.toString()), duration);
     }
 
     @EventHandler

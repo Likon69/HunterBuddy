@@ -50,8 +50,8 @@ public final class SorterSetup {
         @Override
         public String toString() {
             return switch (role) {
-                case INPUT -> "Entrée";
-                case RESERVE -> "Réserve";
+                case INPUT -> "Input";
+                case RESERVE -> "Reserve";
                 case STATION -> "Station";
                 case DESTINATION -> category;
             };
@@ -89,7 +89,7 @@ public final class SorterSetup {
         return hit.getBlockPos();
     }
 
-    private BlockPos registeredPosition(SorterProfile profile, BlockPos pos) {
+    BlockPos registeredPosition(SorterProfile profile, BlockPos pos) {
         if (profile.whatIs(SorterStore.pos(pos)) != null) {
             return pos;
         }
@@ -168,6 +168,7 @@ public final class SorterSetup {
             case DESTINATION -> profile.getOrCreate(choice.category()).chests.add(at);
         }
         SorterStore.save();
+        owner.refreshSnapshot();
     }
 
     private boolean removeRole(SorterProfile profile, Pos at) {
@@ -311,6 +312,9 @@ public final class SorterSetup {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
+        if (!owner.isActive()) {
+            owner.refreshSnapshot();
+        }
         if (!isInspecting()) {
             return;
         }
@@ -465,12 +469,12 @@ public final class SorterSetup {
             RoleChoice role = entry.getValue();
             boolean full = profile.destinations.stream().anyMatch(destination -> destination.full.contains(pos));
             String label = role.role() == Role.DESTINATION ? "Destination " + role.category() : role.toString();
-            String capacity = role.role() == Role.DESTINATION ? (full ? "plein" : "non marqué plein") : "—";
+            String capacity = role.role() == Role.DESTINATION ? (full ? "full" : "not marked full") : "—";
             table.add(theme.label(label + " | " + pos + " | " + capacity)).expandX();
             WDropdown<RoleChoice> dropdown = table.add(theme.dropdown(options.toArray(RoleChoice[]::new), role)).widget();
             dropdown.action = () -> widgetAction(theme, table, profile,
                 () -> assign(SorterStore.blockPos(pos), dropdown.get(), true));
-            WButton remove = table.add(theme.button("Retirer")).widget();
+            WButton remove = table.add(theme.button("Remove")).widget();
             remove.action = () -> widgetAction(theme, table, profile, () -> remove(SorterStore.blockPos(pos)));
             table.row();
         }
@@ -478,9 +482,9 @@ public final class SorterSetup {
             table.add(theme.label("No registered blocks. Use tag-key while looking at a block."));
             table.row();
         }
-        WButton reset = table.add(theme.button("Réinitialiser les pleins")).widget();
+        WButton reset = table.add(theme.button("Reset full")).widget();
         reset.action = () -> widgetAction(theme, table, profile, this::resetFull);
-        WButton reload = table.add(theme.button("Recharger le profil")).widget();
+        WButton reload = table.add(theme.button("Reload profile")).widget();
         reload.action = () -> widgetAction(theme, table, profile, this::reload);
     }
 

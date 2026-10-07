@@ -125,6 +125,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(SystemStatsHud.INFO);
         Hud.get().register(ElytraStatusHud.INFO);
         Hud.get().register(RegearStatusHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.SorterStatusHud.INFO);
         Hud.get().register(TravelHud.INFO);
         Hud.get().register(HuntTallyHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.Pitch40CycleHud.INFO);
