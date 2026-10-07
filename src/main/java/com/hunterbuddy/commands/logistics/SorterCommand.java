@@ -4,14 +4,16 @@ import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
 import com.hunterbuddy.modules.sorter.ShulkerSorter;
 import com.hunterbuddy.modules.sorter.SorterSetup;
 import com.hunterbuddy.modules.sorter.SorterStore;
+import com.hunterbuddy.modules.sorter.logic.CategoryRules;
 import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Destination;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.block.ShulkerBoxBlock;
@@ -32,7 +34,7 @@ public class SorterCommand extends Command {
 
         builder.then(literal("get").then(argument("category", StringArgumentType.word())
             .suggests((ctx, sb) -> CommandSource.suggestMatching(SorterStore.get().rules.names().stream()
-                .filter(name -> !com.hunterbuddy.modules.sorter.logic.CategoryRules.MIXED.equals(name)), sb))
+                .filter(name -> !CategoryRules.MIXED.equals(name)), sb))
             .then(argument("count", IntegerArgumentType.integer(1, 27))
                 .executes(c -> withdraw(StringArgumentType.getString(c, "category"), IntegerArgumentType.getInteger(c, "count"), "inventory"))
                 .then(argument("destination", StringArgumentType.word())
@@ -46,7 +48,7 @@ public class SorterCommand extends Command {
         builder.then(literal("dest").then(argument("category", StringArgumentType.word())
             .suggests((ctx, sb) -> CommandSource.suggestMatching(SorterStore.get().rules.names(), sb))
             .executes(c -> assign(SorterSetup.Role.DESTINATION,
-                StringArgumentType.getString(c, "category").toLowerCase(java.util.Locale.ROOT)))));
+                StringArgumentType.getString(c, "category").toLowerCase(Locale.ROOT)))));
         builder.then(literal("remove").executes(c -> {
             SorterSetup setup = setup();
             if (setup != null) {
@@ -66,9 +68,13 @@ public class SorterCommand extends Command {
             }
             List<String> missing = new ArrayList<>();
             for (String name : p.rules.names()) {
-                if (p.destinationsFor(name).isEmpty()) missing.add(name);
+                if (p.destinationsFor(name).isEmpty()) {
+                    missing.add(name);
+                }
             }
-            if (!missing.isEmpty()) info("No destination yet for: %s", String.join(", ", missing));
+            if (!missing.isEmpty()) {
+                info("No destination yet for: %s", String.join(", ", missing));
+            }
             return 1;
         }));
 
@@ -124,7 +130,7 @@ public class SorterCommand extends Command {
             error("Shulker sorter is unavailable.");
             return 0;
         }
-        return module.withdraw(category.toLowerCase(java.util.Locale.ROOT), count, destination.equalsIgnoreCase("ender"), true) ? 1 : 0;
+        return module.withdraw(category.toLowerCase(Locale.ROOT), count, destination.equalsIgnoreCase("ender"), true) ? 1 : 0;
     }
 
     private SorterSetup setup() {

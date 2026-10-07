@@ -54,7 +54,9 @@ final class SorterWithdrawal {
 
     Pos nextSource(Set<Pos> excluded) {
         for (Pos pos : sources) {
-            if (!exhausted.contains(pos) && !excluded.contains(pos) && visit(pos)) return pos;
+            if (!exhausted.contains(pos) && !excluded.contains(pos) && visit(pos)) {
+                return pos;
+            }
         }
         return null;
     }
@@ -65,13 +67,17 @@ final class SorterWithdrawal {
 
     boolean visit(Pos pos) {
         int count = visits.getOrDefault(pos, 0);
-        if (count >= visitLimit) return false;
+        if (count >= visitLimit) {
+            return false;
+        }
         visits.put(pos, count + 1);
         return true;
     }
 
     private boolean eligible(ItemStack stack) {
-        if (!ShulkerSorter.isShulker(stack) || stack.getCount() != 1) return false;
+        if (!ShulkerSorter.isShulker(stack) || stack.getCount() != 1) {
+            return false;
+        }
         List<ItemStack> contents = PackingPlan.contents(stack);
         return PackingPlan.pure(contents, request.category()) && (!request.fullOnly() || PackingPlan.full(contents));
     }
@@ -81,17 +87,25 @@ final class SorterWithdrawal {
         if (!pending.isEmpty()) {
             if (handler != pendingHandler || !ItemStack.areEqual(handler.getCursorStack(), pending)
                 || !handler.getSlot(pendingSlot).getStack().isEmpty()
-                || inventory.firstEmptyCargoSlot(handler) != pendingSlot) return false;
+                || inventory.firstEmptyCargoSlot(handler) != pendingSlot) {
+                return false;
+            }
             inventory.emptyCursor(handler);
             settle(handler);
             return true;
         }
-        if (!handler.getCursorStack().isEmpty() || withdrawn() >= request.count()) return false;
+        if (!handler.getCursorStack().isEmpty() || withdrawn() >= request.count()) {
+            return false;
+        }
         int destination = inventory.firstEmptyCargoSlot(handler);
-        if (destination < 0 || inventory.openingClicks + 2 > SorterInventory.clickLimit(handler)) return false;
+        if (destination < 0 || inventory.openingClicks + 2 > SorterInventory.clickLimit(handler)) {
+            return false;
+        }
         for (int source = 0; source < handler.getRows() * 9; source++) {
             ItemStack stack = handler.getSlot(source).getStack();
-            if (!eligible(stack)) continue;
+            if (!eligible(stack)) {
+                continue;
+            }
             pending = stack.copy();
             pendingSlot = destination;
             pendingSource = source;
@@ -106,7 +120,9 @@ final class SorterWithdrawal {
     }
 
     void settle(GenericContainerScreenHandler handler) {
-        if (pending.isEmpty() || handler != pendingHandler || !handler.getCursorStack().isEmpty()) return;
+        if (pending.isEmpty() || handler != pendingHandler || !handler.getCursorStack().isEmpty()) {
+            return;
+        }
         if (handler.getSlot(pendingSource).getStack().isEmpty()
             && ItemStack.areEqual(handler.getSlot(pendingSlot).getStack(), pending)) {
             int containerSlots = handler.getRows() * 9;
@@ -124,19 +140,25 @@ final class SorterWithdrawal {
 
     boolean cargoChanged() {
         for (Map.Entry<Integer, ItemStack> entry : taken.entrySet()) {
-            if (!ItemStack.areEqual(entry.getValue(), mc.player.getInventory().getStack(entry.getKey()))) return true;
+            if (!ItemStack.areEqual(entry.getValue(), mc.player.getInventory().getStack(entry.getKey()))) {
+                return true;
+            }
         }
         return false;
     }
 
     void deposited(int inv) {
-        if (mc.player.getInventory().getStack(inv).isEmpty() && taken.remove(inv) != null) deposited++;
+        if (mc.player.getInventory().getStack(inv).isEmpty() && taken.remove(inv) != null) {
+            deposited++;
+        }
     }
 
     int held() {
         int count = 0;
         for (Map.Entry<Integer, ItemStack> entry : taken.entrySet()) {
-            if (owns(entry.getKey(), mc.player.getInventory().getStack(entry.getKey()))) count++;
+            if (owns(entry.getKey(), mc.player.getInventory().getStack(entry.getKey()))) {
+                count++;
+            }
         }
         return count;
     }

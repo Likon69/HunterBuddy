@@ -118,6 +118,26 @@ public final class SorterSetup {
         return true;
     }
 
+    static String blockedChestReason(BlockPos pos) {
+        if (mc.world == null) {
+            return null;
+        }
+        BlockState state = mc.world.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock)) {
+            return null;
+        }
+        BlockPos blocked = null;
+        if (ChestBlock.isChestBlocked(mc.world, pos)) {
+            blocked = pos;
+        } else if (state.get(ChestBlock.CHEST_TYPE) != ChestType.SINGLE) {
+            BlockPos other = pos.offset(ChestBlock.getFacing(state));
+            if (mc.world.getBlockState(other).isOf(state.getBlock()) && ChestBlock.isChestBlocked(mc.world, other)) {
+                blocked = other;
+            }
+        }
+        return blocked == null ? null : "Chest at " + SorterStore.pos(blocked) + " cannot open: clear the block above it.";
+    }
+
     private boolean valid(BlockPos pos, RoleChoice choice) {
         if (choice.role() == Role.ENDER) {
             if (!(mc.world.getBlockState(pos).getBlock() instanceof EnderChestBlock)) {
@@ -138,6 +158,11 @@ public final class SorterSetup {
             owner.error("That is not a chest or barrel at %s.", pos.toShortString());
             return false;
         }
+        String blocked = blockedChestReason(pos);
+        if (blocked != null) {
+            owner.error("%s", blocked);
+            return false;
+        }
         if (choice.role() == Role.INPUT && block instanceof TrappedChestBlockEntity) {
             owner.error("Trapped chests cannot be inputs at %s.", pos.toShortString());
             return false;
@@ -155,13 +180,13 @@ public final class SorterSetup {
         }
         SorterProfile profile = SorterStore.get();
         pos = registeredPosition(profile, pos);
+        if (!valid(pos, choice)) {
+            return false;
+        }
         Pos at = SorterStore.pos(pos);
         String used = profile.whatIs(at);
         if (used != null && !replace && !(choice.role() == Role.STATION && at.equals(profile.unpackStation))) {
             owner.warning("Already %s at %s; category: %s.", used, at, categoryAt(profile, at));
-            return false;
-        }
-        if (!valid(pos, choice)) {
             return false;
         }
         apply(profile, at, choice);
@@ -262,6 +287,11 @@ public final class SorterSetup {
         }
         SorterProfile profile = SorterStore.get();
         pos = registeredPosition(profile, pos);
+        String blocked = blockedChestReason(pos);
+        if (blocked != null) {
+            owner.error("%s", blocked);
+            return;
+        }
         Pos at = SorterStore.pos(pos);
         String used = profile.whatIs(at);
         if (used != null) {
@@ -355,7 +385,8 @@ public final class SorterSetup {
                     abort("Another screen opened during inspection");
                 } else if (ticks == 1 || (ticks - 1) % owner.openTimeout() == 0) {
                     if (attempts == 3) {
-                        abort("Container did not open after three attempts");
+                        String blocked = blockedChestReason(tagPos);
+                        abort(blocked == null ? "Container did not open after three attempts" : blocked);
                     } else if (mc.player.isSneaking() || !owner.inReach(tagPos)) {
                         abort("Release sneak and stay within reach while tagging");
                     } else if (!(mc.world.getBlockEntity(tagPos) instanceof ChestBlockEntity)

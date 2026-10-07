@@ -60,7 +60,7 @@ ESP, overlays, and render helpers.
 | `SpawnerDetector` | Finds spawners a player has already visited, and whether the loot is still there. |
 | `VanityESP` | Unified ESP for decorative items and selected special blocks. |
 
-### Logistics (6)
+### Logistics (7)
 
 Restocking, inventory handling, and stash transfer tools.
 
@@ -71,6 +71,7 @@ Restocking, inventory handling, and stash transfer tools.
 | `PearlLoader` | Anti-AFK loop with pearl-loading support. |
 | `replenish` | Replenishes hotbar items using shift-click packets. |
 | `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
+| `shulker-sorter` | Sorts shulkers and items from input chests into category chests, purifies mixed shulkers and fills partial ones at a station, and withdraws shulkers on request. Set it up with `tag-key` and the buttons in its settings. |
 | `stash-mover` | Moves items between selected input and output stash areas using pearl loading. |
 
 ### Utility (15)
@@ -93,20 +94,21 @@ Restocking, inventory handling, and stash transfer tools.
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatically computed speed multiplier; can trace every boosted tick to a CSV for tuning. |
 | `unfocused-fps` | Limits FPS while the game window is unfocused. |
 
-## Commands (6)
+## Commands (7)
 
 Commands use the configured Meteor command prefix.
 
 | Command | Description |
 |---|---|
+| `arealoaderreset` | Delete every AreaLoader saved profile, not just the selected one. |
+| `setclear` | Clear both StashMover selections. |
 | `setinput` | Select the StashMover input area with two left-clicked corners. |
 | `setoutput` | Select the StashMover output area with two left-clicked corners. |
+| `sorter` | Fallback setup and withdrawal for the shulker sorter (`input`, `dest`, `reserve`, `station`, `remove`, `list`, `get`…). |
 | `stashstatus` | Show the selected areas and current StashMover status. |
-| `setclear` | Clear both StashMover selections. |
-| `arealoaderreset` | Delete every AreaLoader saved profile, not just the selected one. |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-## HUD elements (29)
+## HUD elements (30)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
@@ -133,6 +135,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
 | `RegearStatus` | The regear's identity badge, its station on its line, stocks and gains, counters, next-regear estimate and last event. |
 | `SessionTimeline` | The session as coloured activity segments with find markers. |
+| `SorterStatus` | Shulker sorter state, target, input progress, confirmed deliveries, purified and packed shulkers, capacity and alerts. |
 | `SpeedKMH` | Movement speed in km/h. |
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
 | `SpiralCoverage` | AreaLoader coverage for any mode: flown legs, current leg, planned turns. |

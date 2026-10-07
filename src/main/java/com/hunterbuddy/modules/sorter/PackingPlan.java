@@ -3,6 +3,7 @@ package com.hunterbuddy.modules.sorter;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.ItemStack;
@@ -13,10 +14,12 @@ import net.minecraft.util.collection.DefaultedList;
 final class PackingPlan {
     private final String category;
     private final List<ItemStack> source;
+    private final boolean emptySource;
 
     PackingPlan(String category, ItemStack shulker) {
         this.category = category;
         source = contents(shulker);
+        emptySource = source.stream().allMatch(ItemStack::isEmpty);
     }
 
     String category() {
@@ -32,7 +35,11 @@ final class PackingPlan {
     }
 
     boolean matches(List<ItemStack> stacks) {
-        return pure(stacks, category) && equal(source, stacks);
+        return accepts(stacks) && equal(source, stacks);
+    }
+
+    boolean accepts(List<ItemStack> stacks) {
+        return pure(stacks, category) || emptySource && stacks.stream().allMatch(ItemStack::isEmpty);
     }
 
     boolean progressed(ItemStack stack) {
@@ -57,6 +64,10 @@ final class PackingPlan {
     static boolean loose(ItemStack stack, String category) {
         return !stack.isEmpty() && !ShulkerSorter.isShulker(stack) && stack.getItem().canBeNested()
             && category.equals(SorterStore.get().rules.categoryOf(Registries.ITEM.getId(stack.getItem()).toString()));
+    }
+
+    static boolean empty(ItemStack stack) {
+        return ShulkerSorter.isShulker(stack) && contents(stack).stream().allMatch(ItemStack::isEmpty);
     }
 
     static boolean partial(ItemStack stack, String category) {
@@ -137,6 +148,6 @@ final class PackingPlan {
     }
 
     private static List<ItemStack> copy(List<ItemStack> stacks) {
-        return stacks.stream().map(ItemStack::copy).collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        return stacks.stream().map(ItemStack::copy).collect(Collectors.toCollection(ArrayList::new));
     }
 }

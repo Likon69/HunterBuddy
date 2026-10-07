@@ -11,6 +11,7 @@ public class SortCategory {
     public String name;
 
     public int priority;
+    public String shulkerColor;
     public Set<String> items = new LinkedHashSet<>();
     public List<String> patterns = new ArrayList<>();
 

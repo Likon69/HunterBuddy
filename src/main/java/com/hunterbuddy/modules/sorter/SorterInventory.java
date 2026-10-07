@@ -138,7 +138,9 @@ final class SorterInventory {
         if (closingRequested) {
             recoveryClicks++;
             if (handler.getCursorStack().isEmpty()) {
-                if (!owner.isPurifying()) owner.closeThen();
+                if (!owner.isPurifying()) {
+                    owner.closeThen();
+                }
                 return false;
             }
         }

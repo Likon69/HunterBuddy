@@ -169,7 +169,9 @@ public final class Purifier {
                 if (pauseReason == null) {
                     pauseStarted = now;
                     owner.stopPathing();
-                    if (state == State.BREAK) mc.interactionManager.cancelBlockBreaking();
+                    if (state == State.BREAK) {
+                        mc.interactionManager.cancelBlockBreaking();
+                    }
                 }
                 pauseReason = reason;
                 return Result.RUNNING;
@@ -456,7 +458,7 @@ public final class Purifier {
 
     private void fill(ShulkerBoxScreenHandler handler) {
         List<ItemStack> contents = PackingPlan.contents(handler);
-        if (!PackingPlan.pure(contents, fillingPlan.category())
+        if (!fillingPlan.accepts(contents)
             || expectedFillContents != null && !PackingPlan.equal(expectedFillContents, contents)) {
             recover("Server changed packed contents");
             return;
@@ -603,7 +605,9 @@ public final class Purifier {
     }
 
     String statusLine() {
-        if (pauseReason != null) return "PURIFY PAUSED: " + pauseReason + " @ " + pos.toShortString();
+        if (pauseReason != null) {
+            return "PURIFY PAUSED: " + pauseReason + " @ " + pos.toShortString();
+        }
         return (isFilling() ? "PACK " : "PURIFY ") + state + " @ " + pos.toShortString();
     }
 

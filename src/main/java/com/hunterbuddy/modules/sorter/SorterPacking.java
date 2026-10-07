@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules.sorter;
 
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
+import com.hunterbuddy.modules.sorter.logic.SortCategory;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Pos;
 import java.util.ArrayList;
@@ -10,6 +11,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
@@ -28,10 +31,13 @@ final class SorterPacking {
         }
     }
 
+    private record EmptyShulker(Pos chest, int slot) { }
+
     private final ShulkerSorter owner;
     private final SorterInventory inventory;
     private final Map<Pos, List<ItemStack>> observations = new LinkedHashMap<>();
     private final List<Category> categories = new ArrayList<>();
+    private final Set<Pos> emptyChests = new LinkedHashSet<>();
     private final Set<Pos> visited = new HashSet<>();
     private int categoryIndex;
     private boolean started;
@@ -42,6 +48,7 @@ final class SorterPacking {
     private PackingPlan plan;
     private List<ItemStack> space;
     private boolean takingShulker;
+    private EmptyShulker selectedEmpty;
 
     SorterPacking(ShulkerSorter owner, SorterInventory inventory) {
         this.owner = owner;
@@ -51,6 +58,7 @@ final class SorterPacking {
     void reset() {
         observations.clear();
         categories.clear();
+        emptyChests.clear();
         visited.clear();
         categoryIndex = 0;
         started = false;
@@ -61,13 +69,16 @@ final class SorterPacking {
         plan = null;
         space = null;
         takingShulker = false;
+        selectedEmpty = null;
     }
 
     void begin(SorterProfile profile) {
         started = true;
         Map<String, Category> grouped = new LinkedHashMap<>();
         for (SorterProfile.Destination destination : profile.destinations) {
-            if (!CategoryRules.MIXED.equals(destination.category)) {
+            if (CategoryRules.SHULKERS.equals(destination.category)) {
+                emptyChests.addAll(destination.chests);
+            } else if (!CategoryRules.MIXED.equals(destination.category)) {
                 Category category = grouped.computeIfAbsent(destination.category, Category::new);
                 category.chests.addAll(destination.chests);
             }
@@ -111,6 +122,9 @@ final class SorterPacking {
         }
         observations.put(pos, stacks);
         if (started) {
+            for (SorterProfile.Destination destination : SorterStore.get().destinationsFor(CategoryRules.SHULKERS)) {
+                emptyChests.addAll(destination.chests);
+            }
             for (Category category : categories) {
                 if (!category.chests.contains(pos) && SorterStore.get().destinationsFor(category.name).stream()
                     .anyMatch(destination -> destination.chests.contains(pos))) {
@@ -133,6 +147,13 @@ final class SorterPacking {
             }
             return null;
         }
+        for (Pos pos : emptyChests) {
+            if (!excluded.contains(pos) && !observations.containsKey(pos)) {
+                collecting = false;
+                selectedEmpty = null;
+                return pos;
+            }
+        }
         while (categoryIndex < categories.size()) {
             Category category = categories.get(categoryIndex);
             collecting = false;
@@ -149,18 +170,34 @@ final class SorterPacking {
                 }
             }
             if (!noProgress && category.trips < category.limit) {
+                Pos partial = null;
+                long loose = 0;
                 for (Pos pos : category.chests) {
-                    if (!excluded.contains(pos) && looseStacks(pos, category.name) > 0 && bestPartial(pos, category.name) >= 0) {
-                        category.trips++;
-                        collecting = true;
-                        visited.clear();
-                        visited.add(pos);
-                        return pos;
+                    if (excluded.contains(pos)) {
+                        continue;
+                    }
+                    long available = looseStacks(pos, category.name);
+                    loose += available;
+                    if (bestPartial(pos, category.name) >= 0 && (partial == null || looseStacks(partial, category.name) == 0 && available > 0)) {
+                        partial = pos;
+                    }
+                }
+                selectedEmpty = null;
+                if (partial != null && loose > 0) {
+                    beginTrip(category, partial);
+                    return partial;
+                }
+                if (partial == null && loose >= 27 && inventory.freeCargoSlots() > 0) {
+                    selectedEmpty = bestEmpty(excluded, category.name);
+                    if (selectedEmpty != null) {
+                        beginTrip(category, selectedEmpty.chest());
+                        return selectedEmpty.chest();
                     }
                 }
             }
             categoryIndex++;
             noProgress = false;
+            selectedEmpty = null;
         }
         finished = true;
         return null;
@@ -186,16 +223,17 @@ final class SorterPacking {
             return abort("Packing shulker pickup changed");
         }
         if (plan == null) {
-            int source = bestPartial(pos, category());
+            int source = selectedEmpty == null ? bestPartial(pos, category())
+                : selectedEmpty.chest().equals(pos) ? selectedEmpty.slot() : -1;
             int reserved = SorterInventory.handlerSlotOf(handler.getRows() * 9, inventory.reservedSlot);
-            if (source < 0 || looseStacks(pos, category()) == 0) {
+            if (source < 0 || source >= handler.getRows() * 9) {
                 return false;
             }
             if (!inventory.isCargoSlot(inventory.reservedSlot) || !handler.getSlot(reserved).getStack().isEmpty()) {
                 return abort("Reserved hotbar slot changed");
             }
             ItemStack shulker = handler.getSlot(source).getStack();
-            if (!PackingPlan.partial(shulker, category())) {
+            if (selectedEmpty == null ? !PackingPlan.partial(shulker, category()) : !PackingPlan.empty(shulker)) {
                 return false;
             }
             plan = new PackingPlan(category(), shulker);
@@ -237,7 +275,9 @@ final class SorterPacking {
     }
 
     private void click(GenericContainerScreenHandler handler, int slot) {
-        if (handler.getCursorStack().isEmpty()) inventory.cursorSourceSlot = slot;
+        if (handler.getCursorStack().isEmpty()) {
+            inventory.cursorSourceSlot = slot;
+        }
         mc.interactionManager.clickSlot(handler.syncId, slot, 0, SlotActionType.PICKUP, mc.player);
         inventory.openingClicks++;
     }
@@ -277,6 +317,46 @@ final class SorterPacking {
         space = null;
         takingShulker = false;
         collecting = false;
+        selectedEmpty = null;
+    }
+
+    private void beginTrip(Category category, Pos pos) {
+        category.trips++;
+        collecting = true;
+        visited.clear();
+        visited.add(pos);
+    }
+
+    private EmptyShulker bestEmpty(Set<Pos> excluded, String category) {
+        String preferred = null;
+        for (SortCategory rule : SorterStore.get().rules.categories) {
+            if (rule.name.equals(category) && rule.shulkerColor != null) {
+                preferred = rule.shulkerColor.trim();
+                break;
+            }
+        }
+        EmptyShulker fallback = null;
+        for (Pos pos : emptyChests) {
+            if (excluded.contains(pos)) {
+                continue;
+            }
+            List<ItemStack> stacks = observations.getOrDefault(pos, List.of());
+            for (int slot = 0; slot < stacks.size(); slot++) {
+                ItemStack stack = stacks.get(slot);
+                if (!PackingPlan.empty(stack)) {
+                    continue;
+                }
+                EmptyShulker candidate = new EmptyShulker(pos, slot);
+                if (fallback == null) {
+                    fallback = candidate;
+                }
+                if (preferred != null && stack.getItem() instanceof BlockItem item && item.getBlock() instanceof ShulkerBoxBlock box
+                    && box.getColor() != null && preferred.equalsIgnoreCase(box.getColor().asString())) {
+                    return candidate;
+                }
+            }
+        }
+        return fallback;
     }
 
     private long looseStacks(Pos pos, String category) {
