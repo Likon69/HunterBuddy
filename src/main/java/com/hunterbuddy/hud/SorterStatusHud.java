@@ -115,7 +115,7 @@ public final class SorterStatusHud extends HudElement {
         renderer.text(fit(renderer, snapshot.state(), contentWidth, shade, scale), left, top, stateColor, shade, scale);
         top += rowHeight;
         if (steps) {
-            String[] names = { "Inputs", "Sort", "Station", "Store" };
+            String[] names = { "Inputs", "Sort", "Station", "Pack", "Store" };
             double segment = contentWidth / names.length;
             for (int i = 0; i < names.length; i++) {
                 boolean current = snapshot.stage().ordinal() == i;
@@ -190,6 +190,8 @@ public final class SorterStatusHud extends HudElement {
             if (results.purified() > 0) {
                 lines.add(new Line("Purification", results.purified() + " completed", WHITE, "purified"));
             }
+            lines.add(new Line("Packed", results.packed() + " shulkers (" + results.packedFull()
+                + " full)", WHITE, "packed"));
             for (Map.Entry<String, Integer> category : results.byCategory().entrySet()) {
                 lines.add(new Line(category.getKey(), category.getValue() + " deliveries", WHITE, "category:" + category.getKey()));
             }
@@ -261,7 +263,7 @@ public final class SorterStatusHud extends HudElement {
         return new SorterRunSnapshot(SorterRunSnapshot.Mode.SORTING, SorterRunSnapshot.Stage.STORE, "Depositing", "",
             new SorterRunSnapshot.Target("Destination", "pvp", "128, 64, -320", 3.2),
             new SorterRunSnapshot.Progress(8, 3, 4, 1),
-            new SorterRunSnapshot.Results(12, 3, 4, 7, Map.of("pvp", 9, "flight", 6, "building", 4)),
+            new SorterRunSnapshot.Results(12, 3, 4, 7, 2, 1, Map.of("pvp", 9, "flight", 6, "building", 4)),
             new SorterRunSnapshot.Capacity(1, 2, List.of()),
             new SorterRunSnapshot.Alert("Reserve at 124, 64, -318 was not empty; marked full.", 2300, false),
             new SorterRunSnapshot.Storage(8, 6, 2, "130 64 -322"), 137_000);

@@ -38,7 +38,7 @@ public final class Purifier {
     }
 
     private enum State {
-        GOTO, PLACE, OPEN, EXTRACT, CLOSE, BREAK, PICKUP
+        GOTO, PLACE, OPEN, TRANSFER, CLOSE, BREAK, PICKUP
     }
 
     private final ShulkerSorter owner;
@@ -47,6 +47,9 @@ public final class Purifier {
     private final Set<Integer> emptyBeforeBreak = new HashSet<>();
     private final Map<Integer, ItemStack> extracted = new LinkedHashMap<>();
     private PurificationPlan plan;
+    private PackingPlan fillingPlan;
+    private List<ItemStack> expectedFillContents;
+    private int contentsSyncId = -1;
     private BlockPos pos;
     private State state;
     private int slot;
@@ -122,6 +125,17 @@ public final class Purifier {
     }
 
     void start(PurificationPlan plan, int slot, int delay) {
+        startJob(plan, null, slot, delay);
+    }
+
+    void startFilling(PackingPlan plan, int slot, int delay) {
+        startJob(new PurificationPlan(plan.category(), List.of()), plan, slot, delay);
+    }
+
+    private void startJob(PurificationPlan plan, PackingPlan fillingPlan, int slot, int delay) {
+        this.fillingPlan = fillingPlan;
+        expectedFillContents = null;
+        contentsSyncId = -1;
         completedShulker = ItemStack.EMPTY;
         this.plan = plan;
         this.slot = slot;
@@ -220,7 +234,7 @@ public final class Purifier {
                     if (!validStation(pos.down())) {
                         return stationFailure("Station obstructed; keeping normal routing");
                     }
-                    if (!ShulkerSorter.isShulker(stack) || !plan.equals(plan(stack))) {
+                    if (!ShulkerSorter.isShulker(stack) || !matchesSource(stack)) {
                         return fail("Source changed; keeping normal routing");
                     }
                     mc.player.getInventory().setSelectedSlot(slot);
@@ -243,13 +257,13 @@ public final class Purifier {
             case OPEN -> {
                 if (mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler) {
                     inventory.resetClicks();
-                    enter(State.EXTRACT);
+                    enter(State.TRANSFER);
                     timer = owner.actionDelay();
                 } else if ((ticks - owner.actionDelay() - 1) % owner.openTimeout() == 0) {
                     owner.interact(pos);
                 }
             }
-            case EXTRACT -> extract();
+            case TRANSFER -> transfer();
             case CLOSE -> {
                 if (!mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
                     if (!(mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler handler)) {
@@ -346,30 +360,51 @@ public final class Purifier {
             return false;
         }
         ItemStack stack = mc.player.getInventory().getStack(slot);
-        return ShulkerSorter.isShulker(stack) && plan.equals(plan(stack));
+        return ShulkerSorter.isShulker(stack) && matchesSource(stack);
     }
 
     private Result finishReturnedSource() {
         inventory.acceptRecovered(slot);
-        return fail("Placement cancelled; shulker returned to inventory, using normal routing");
+        return fail(isFilling() ? "Shulker returned unchanged; no packing progress"
+            : "Placement cancelled; shulker returned to inventory, using normal routing");
     }
 
-    private void extract() {
+    void receiveContents(int syncId) {
+        contentsSyncId = syncId;
+    }
+
+    boolean isFilling() {
+        return fillingPlan != null;
+    }
+
+    private boolean matchesSource(ItemStack stack) {
+        return fillingPlan == null ? plan.equals(plan(stack)) : fillingPlan.matches(stack);
+    }
+
+    private void transfer() {
         if (!(mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler handler)) {
             recover("Station screen closed");
             return;
         }
         if (!contentsChecked) {
-            List<ItemStack> contents = new ArrayList<>();
-            for (int i = 0; i < 27; i++) {
-                contents.add(handler.getSlot(i).getStack());
+            if (contentsSyncId != handler.syncId) {
+                return;
             }
+            List<ItemStack> contents = PackingPlan.contents(handler);
             contentsChecked = true;
-            if (!plan.equals(plan(contents))) {
+            if (fillingPlan == null ? !plan.equals(plan(contents)) : !fillingPlan.matches(contents)) {
                 recover("Source contents changed");
                 return;
             }
         }
+        if (isFilling()) {
+            fill(handler);
+        } else {
+            extract(handler);
+        }
+    }
+
+    private void extract(ShulkerBoxScreenHandler handler) {
         for (Map.Entry<Integer, ItemStack> entry : extracted.entrySet()) {
             if (!ItemStack.areEqual(entry.getValue(), handler.getSlot(entry.getKey()).getStack())) {
                 recover("Server undid extraction clicks");
@@ -419,12 +454,68 @@ public final class Purifier {
         }
     }
 
+    private void fill(ShulkerBoxScreenHandler handler) {
+        List<ItemStack> contents = PackingPlan.contents(handler);
+        if (!PackingPlan.pure(contents, fillingPlan.category())
+            || expectedFillContents != null && !PackingPlan.equal(expectedFillContents, contents)) {
+            recover("Server changed packed contents");
+            return;
+        }
+        for (Map.Entry<Integer, ItemStack> entry : extracted.entrySet()) {
+            if (!ItemStack.areEqual(entry.getValue(), handler.getSlot(entry.getKey()).getStack())) {
+                recover("Server undid filling clicks");
+                return;
+            }
+        }
+        int before = inventory.openingClicks;
+        for (int clicks = 0; clicks < owner.clicksPerTick(); clicks++) {
+            if (inventory.openingClicks >= SorterInventory.clickLimit(handler)) {
+                recover("Too many filling clicks");
+                break;
+            }
+            if (!handler.getCursorStack().isEmpty()) {
+                if (!inventory.emptyCursor(handler)) {
+                    recover("Filling cursor could not be recovered");
+                    break;
+                }
+                continue;
+            }
+            int source = -1;
+            contents = PackingPlan.contents(handler);
+            for (int inv = 0; inv < 36; inv++) {
+                ItemStack stack = mc.player.getInventory().getStack(inv);
+                if (inv != inventory.reservedSlot && inventory.isCargoSlot(inv)
+                    && PackingPlan.loose(stack, fillingPlan.category()) && PackingPlan.capacity(contents, stack) > 0) {
+                    source = SorterInventory.handlerSlotOf(27, inv);
+                    break;
+                }
+            }
+            if (source == -1) {
+                enter(State.CLOSE);
+                break;
+            }
+            ItemStack previous = handler.getSlot(source).getStack().copy();
+            mc.interactionManager.clickSlot(handler.syncId, source, 0, SlotActionType.QUICK_MOVE, mc.player);
+            inventory.openingClicks++;
+            ItemStack after = handler.getSlot(source).getStack();
+            expectedFillContents = PackingPlan.contents(handler);
+            extracted.put(source, after.copy());
+            if (ItemStack.areEqual(previous, after)) {
+                enter(State.CLOSE);
+                break;
+            }
+        }
+        if (inventory.openingClicks > before) {
+            timer = owner.clickDelay();
+        }
+    }
+
     private int stateLimit() {
         return switch (state) {
             case GOTO -> owner.pathTimeout() * 20;
             case PLACE -> 60;
             case OPEN -> owner.openTimeout() * 3 + owner.actionDelay();
-            case EXTRACT, CLOSE -> 126 * (owner.clickDelay() + 1) + 2 * owner.actionDelay() + 40;
+            case TRANSFER, CLOSE -> 126 * (owner.clickDelay() + 1) + 2 * owner.actionDelay() + 40;
             case BREAK -> 200;
             case PICKUP -> 200;
         };
@@ -504,7 +595,7 @@ public final class Purifier {
             case GOTO -> "Station: walking";
             case PLACE -> "Station: placing";
             case OPEN -> "Station: opening";
-            case EXTRACT -> "Station: extracting";
+            case TRANSFER -> isFilling() ? "Station: filling" : "Station: extracting";
             case CLOSE -> "Station: closing";
             case BREAK -> "Station: breaking";
             case PICKUP -> "Station: collecting";
@@ -513,7 +604,7 @@ public final class Purifier {
 
     String statusLine() {
         if (pauseReason != null) return "PURIFY PAUSED: " + pauseReason + " @ " + pos.toShortString();
-        return "PURIFY " + state + " @ " + pos.toShortString();
+        return (isFilling() ? "PACK " : "PURIFY ") + state + " @ " + pos.toShortString();
     }
 
     private void rotate(Vec3d hit, boolean sendPacket) {

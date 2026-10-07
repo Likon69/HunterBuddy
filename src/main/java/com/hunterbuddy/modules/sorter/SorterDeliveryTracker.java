@@ -24,6 +24,8 @@ final class SorterDeliveryTracker {
     private int purified;
     private int purifiedDelivered;
     private int looseStacks;
+    private int packed;
+    private int packedFull;
 
     SorterDeliveryTracker(SorterInventory inventory) {
         this.inventory = inventory;
@@ -37,6 +39,8 @@ final class SorterDeliveryTracker {
         purified = 0;
         purifiedDelivered = 0;
         looseStacks = 0;
+        packed = 0;
+        packedFull = 0;
     }
 
     void resetVisit() {
@@ -120,8 +124,15 @@ final class SorterDeliveryTracker {
         purifiedCargo.add(stack.copy());
     }
 
+    void packed(boolean full) {
+        packed++;
+        if (full) {
+            packedFull++;
+        }
+    }
+
     SorterRunSnapshot.Results results() {
-        return new SorterRunSnapshot.Results(shulkers, purifiedDelivered, purified, looseStacks, byCategory);
+        return new SorterRunSnapshot.Results(shulkers, purifiedDelivered, purified, looseStacks, packed, packedFull, byCategory);
     }
 
     private static int count(List<ItemStack> inventory, ItemStack stack) {
