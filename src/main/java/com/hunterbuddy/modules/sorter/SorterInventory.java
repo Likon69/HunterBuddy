@@ -46,7 +46,11 @@ final class SorterInventory {
 
     int cargoCapacity() {
         int capacity = 0;
-        for (int inv = 0; inv < 36; inv++) if (inv != reservedSlot && isCargoSlot(inv)) capacity++;
+        for (int inv = 0; inv < 36; inv++) {
+            if (inv != reservedSlot && isCargoSlot(inv)) {
+                capacity++;
+            }
+        }
         return capacity;
     }
 
@@ -140,5 +144,4 @@ final class SorterInventory {
         }
         return true;
     }
-
 }

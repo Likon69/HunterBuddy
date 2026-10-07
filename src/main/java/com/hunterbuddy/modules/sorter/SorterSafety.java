@@ -19,19 +19,31 @@ final class SorterSafety {
 
     String driverReason() {
         SpawnerDetector spawner = Modules.get().get(SpawnerDetector.class);
-        if (spawner != null && spawner.isActive()) return "SpawnerDetector active";
+        if (spawner != null && spawner.isActive()) {
+            return "SpawnerDetector active";
+        }
         StashMover mover = Modules.get().get(StashMover.class);
-        if (mover != null && mover.isActive()) return "StashMover active";
+        if (mover != null && mover.isActive()) {
+            return "StashMover active";
+        }
         AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
-        if (regear != null && regear.isRunning()) return "AutoFlyingRegear running";
+        if (regear != null && regear.isRunning()) {
+            return "AutoFlyingRegear running";
+        }
         return null;
     }
 
     String visiblePlayerReason(boolean ignoreFriends) {
-        if (mc.world == null || mc.player == null) return null;
+        if (mc.world == null || mc.player == null) {
+            return null;
+        }
         for (PlayerEntity player : mc.world.getPlayers()) {
-            if (player == mc.player || player.getUuid().equals(mc.player.getUuid())) continue;
-            if (ignoreFriends && Friends.get().isFriend(player)) continue;
+            if (player == mc.player || player.getUuid().equals(mc.player.getUuid())) {
+                continue;
+            }
+            if (ignoreFriends && Friends.get().isFriend(player)) {
+                continue;
+            }
             return "Player visible: " + player.getName().getString();
         }
         return null;

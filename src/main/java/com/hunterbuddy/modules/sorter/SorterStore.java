@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import java.io.File;
+import java.util.ArrayList;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -66,6 +67,9 @@ public final class SorterStore {
             try (Reader r = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
                 SorterProfile profile = GSON.fromJson(r, SorterProfile.class);
                 if (profile != null) {
+                    if (profile.reserves == null) {
+                        profile.reserves = new ArrayList<>();
+                    }
                     if (profile.rules == null || profile.rules.categories == null || profile.rules.categories.isEmpty()) {
                         profile.rules = CategoryRules.defaults();
                     }

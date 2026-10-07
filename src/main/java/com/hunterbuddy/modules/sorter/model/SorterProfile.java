@@ -12,6 +12,7 @@ public class SorterProfile {
     public int version = 1;
 
     public List<Pos> inputs = new ArrayList<>();
+    public List<Pos> reserves = new ArrayList<>();
 
     public List<Destination> destinations = new ArrayList<>();
 
@@ -43,6 +44,9 @@ public class SorterProfile {
     public String whatIs(Pos pos) {
         if (inputs.contains(pos)) {
             return "input";
+        }
+        if (reserves.contains(pos)) {
+            return "reserve";
         }
         for (Destination d : destinations) {
             if (d.chests.contains(pos)) {

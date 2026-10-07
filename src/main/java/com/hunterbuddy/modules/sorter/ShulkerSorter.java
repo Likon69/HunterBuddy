@@ -23,14 +23,19 @@ import java.util.Map;
 import java.util.Set;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.InventoryEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.KeybindSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.ShulkerBoxBlock;
@@ -50,6 +55,14 @@ public class ShulkerSorter extends Module {
     private final SettingGroup sgSort = settings.createGroup("Sorting");
     private final SettingGroup sgSpeed = settings.createGroup("Speed / anticheat");
     private final SettingGroup sgRender = settings.createGroup("Render");
+    private final SorterSetup setup = new SorterSetup(this);
+
+    private final Setting<Keybind> tagKey = sgSort.add(new KeybindSetting.Builder()
+        .name("tag-key")
+        .description("Register the aimed storage block while the sorter is off.")
+        .defaultValue(Keybind.none())
+        .action(setup::tag)
+        .build());
 
     public final Setting<Double> purity = sgSort.add(new DoubleSetting.Builder()
         .name("purity")
@@ -155,6 +168,8 @@ public class ShulkerSorter extends Module {
     private long clearSince;
     private boolean pendingRecovery;
     private boolean pathingStarted;
+    private boolean assignedReserve;
+    private int contentsSyncId = -1;
 
     private final Set<Pos> exhaustedInputs = new HashSet<>();
     private final Set<Pos> excludedChests = new HashSet<>();
@@ -171,11 +186,16 @@ public class ShulkerSorter extends Module {
 
     public ShulkerSorter() {
         super(HunterBuddyAddon.LOGISTICS_CATEGORY, "shulker-sorter",
-            "Sorts shulkers and items from input chests into per-category chests (set up with .sorter).");
+            "Sorts storage by category. Register blocks with tag-key and edit their roles below.");
     }
 
     @Override
     public void onActivate() {
+        if (setup.isInspecting()) {
+            warning("Wait for container tagging to finish before starting the sorter.");
+            toggle();
+            return;
+        }
         if (mc.player == null || mc.world == null) {
             toggle();
             return;
@@ -183,12 +203,12 @@ public class ShulkerSorter extends Module {
         SorterProfile profile = SorterStore.get();
         boolean recovery = !dryRun.get() && purifier.needsRecovery();
         if (!recovery && profile.inputs.isEmpty()) {
-            error("No input chest. Look at one and run .sorter input");
+            error("No input chest. Register one with tag-key and choose its input role in the settings.");
             toggle();
             return;
         }
-        if (!recovery && !dryRun.get() && profile.destinations.isEmpty()) {
-            error("No destination. Look at a chest and run .sorter dest <category>");
+        if (!recovery && !dryRun.get() && profile.destinations.isEmpty() && profile.reserves.isEmpty()) {
+            error("No destination or reserve. Register storage with tag-key first.");
             toggle();
             return;
         }
@@ -219,10 +239,13 @@ public class ShulkerSorter extends Module {
         pauseStarted = 0;
         clearSince = 0;
         pendingRecovery = false;
+        assignedReserve = false;
         setState(State.PICK_INPUT);
         if (!dryRun.get() && purifyMixed.get() && profile.unpackStation != null) {
             inventory.reserveHotbarSlot();
-            if (inventory.reservedSlot == -1) warning("No empty hotbar slot; purification disabled for this run.");
+            if (inventory.reservedSlot == -1) {
+                warning("No empty hotbar slot; purification disabled for this run.");
+            }
         }
         if (recovery) {
             if (safety.waitingReason(ignoreFriends.get()) != null) {
@@ -238,6 +261,10 @@ public class ShulkerSorter extends Module {
 
     @Override
     public void onDeactivate() {
+        if (setup.isInspecting()) {
+            state = State.IDLE;
+            return;
+        }
         stopPathing();
         if (mc.player != null && mc.player.currentScreenHandler != mc.player.playerScreenHandler
             && mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
@@ -302,6 +329,14 @@ public class ShulkerSorter extends Module {
         if (isActive()) toggle();
     }
 
+    @EventHandler
+    private void onInventory(InventoryEvent event) {
+        if (mc.player != null && mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler
+            && event.packet.syncId() == handler.syncId) {
+            contentsSyncId = handler.syncId;
+        }
+    }
+
     private void pickInput() {
         if (pendingRecovery) {
             pendingRecovery = false;
@@ -346,7 +381,12 @@ public class ShulkerSorter extends Module {
         for (String category : cargoCategories()) {
             DestinationChoice choice = resolveDestination(profile, category);
             if (choice != null) {
-                currentDest = choice.destination();
+                assignedReserve = choice.reserve();
+                currentDest = assignedReserve ? setup.assignReserve(choice.category(), choice.chest()) : choice.destination();
+                if (currentDest == null) {
+                    excludedChests.add(choice.chest());
+                    continue;
+                }
                 goTo(Target.DEST, SorterStore.blockPos(choice.chest()));
                 return;
             }
@@ -361,6 +401,7 @@ public class ShulkerSorter extends Module {
     private void goTo(Target t, BlockPos pos) {
         target = t;
         targetPos = pos;
+        contentsSyncId = -1;
         retries = 0;
         pathRelaunches = 0;
         openings = 0;
@@ -655,6 +696,25 @@ public class ShulkerSorter extends Module {
     }
 
     private boolean checkOpening(GenericContainerScreenHandler handler) {
+        if (target == Target.DEST && assignedReserve) {
+            if (contentsSyncId != handler.syncId) {
+                if (stateTicks > openTimeout.get() + actionDelay.get()) {
+                    assignedReserve = false;
+                    abandonOpening("Reserve contents did not arrive");
+                    closeThen();
+                }
+                return false;
+            }
+            assignedReserve = false;
+            if (occupiedSlots(handler) != 0) {
+                currentDest.full.add(SorterStore.pos(targetPos));
+                SorterStore.save();
+                warning("Reserve at %s was not empty; kept assigned to %s and marked full.",
+                    targetPos.toShortString(), currentDest.category);
+                closeThen();
+                return false;
+            }
+        }
         if (openingChecked) {
             return true;
         }
@@ -762,25 +822,60 @@ public class ShulkerSorter extends Module {
             return null;
         }
         DestinationChoice choice = resolveDestination(SorterStore.get(), category);
-        return choice == null ? null : choice.destination().category;
+        return choice == null ? null : choice.category();
     }
 
-    private record DestinationChoice(Destination destination, Pos chest) {
+    private record DestinationChoice(Destination destination, Pos chest, String category, boolean reserve) {
     }
 
     private DestinationChoice resolveDestination(SorterProfile profile, String category) {
         List<Destination> destinations = profile.destinationsFor(category);
-        if (destinations.isEmpty() && fallbackRandom.get() && !CategoryRules.MIXED.equals(category)) {
-            destinations = profile.destinationsFor(CategoryRules.FALLBACK);
-        }
         for (Destination destination : destinations) {
             for (Pos chest : destination.chests) {
                 if (!destination.full.contains(chest) && !excludedChests.contains(chest)) {
-                    return new DestinationChoice(destination, chest);
+                    return new DestinationChoice(destination, chest, destination.category, false);
+                }
+            }
+        }
+        Pos reserve = null;
+        double distance = Double.MAX_VALUE;
+        for (Pos pos : profile.reserves) {
+            if (excludedChests.contains(pos)) {
+                continue;
+            }
+            double candidate = mc.player.getBlockPos().getSquaredDistance(SorterStore.blockPos(pos));
+            if (candidate < distance) {
+                reserve = pos;
+                distance = candidate;
+            }
+        }
+        if (reserve != null) {
+            return new DestinationChoice(null, reserve, category, true);
+        }
+        if (destinations.stream().noneMatch(destination -> !destination.chests.isEmpty())
+            && fallbackRandom.get() && !CategoryRules.MIXED.equals(category)) {
+            for (Destination destination : profile.destinationsFor(CategoryRules.FALLBACK)) {
+                for (Pos chest : destination.chests) {
+                    if (!destination.full.contains(chest) && !excludedChests.contains(chest)) {
+                        return new DestinationChoice(destination, chest, destination.category, false);
+                    }
                 }
             }
         }
         return null;
+    }
+
+    public SorterSetup setup() {
+        return setup;
+    }
+
+    Keybind tagKey() {
+        return tagKey.get();
+    }
+
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        return setup.widget(theme);
     }
 
     ShulkerClassifier.Result classifyShulker(ItemStack stack, CategoryRules rules) {
