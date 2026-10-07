@@ -1,6 +1,5 @@
 package com.hunterbuddy.modules.sorter;
 
-import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.sorter.logic.PurificationPlan;
@@ -43,6 +42,8 @@ public final class Purifier {
     }
 
     private final ShulkerSorter owner;
+    private final SorterInventory inventory;
+    private final SorterSafety safety;
     private final Set<Integer> emptyBeforeBreak = new HashSet<>();
     private final Map<Integer, ItemStack> extracted = new LinkedHashMap<>();
     private PurificationPlan plan;
@@ -56,9 +57,13 @@ public final class Purifier {
     private boolean placed;
     private boolean failed;
     private boolean contentsChecked;
+    private String pauseReason;
+    private long pauseStarted;
 
-    Purifier(ShulkerSorter owner) {
+    Purifier(ShulkerSorter owner, SorterInventory inventory, SorterSafety safety) {
         this.owner = owner;
+        this.inventory = inventory;
+        this.safety = safety;
     }
 
     public static boolean validStation(BlockPos support) {
@@ -126,16 +131,35 @@ public final class Purifier {
         }
         failed = placed && plan != null;
         contentsChecked = false;
+        pauseReason = null;
+        pauseStarted = 0;
         jobTicks = 0;
         index = 0;
         extracted.clear();
         emptyBeforeBreak.clear();
-        owner.resetClicks();
+        inventory.resetClicks();
         enter(State.GOTO);
         walkToStation();
     }
 
     Result tick() {
+        if (pauseReason != null && System.nanoTime() - pauseStarted >= SorterSafety.PAUSE_LIMIT_NANOS) {
+            return stop("Pause exceeded two minutes: " + pauseReason);
+        }
+        if (state == State.PLACE || state == State.BREAK) {
+            String reason = safety.visiblePlayerReason(owner.ignoreFriends());
+            if (reason != null) {
+                long now = System.nanoTime();
+                if (pauseReason == null) {
+                    pauseStarted = now;
+                    owner.stopPathing();
+                    if (state == State.BREAK) mc.interactionManager.cancelBlockBreaking();
+                }
+                pauseReason = reason;
+                return Result.RUNNING;
+            }
+        }
+        pauseReason = null;
         ticks++;
         jobTicks++;
         if (!placed && mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock) {
@@ -185,7 +209,7 @@ public final class Purifier {
                 if (mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock) {
                     placed = true;
                     enter(State.OPEN);
-                    timer = owner.actionDelay.get();
+                    timer = owner.actionDelay();
                 } else if (ticks == 1) {
                     if (nearestDrop() != null) {
                         return stop("Uncollected shulker near the station");
@@ -216,10 +240,10 @@ public final class Purifier {
             }
             case OPEN -> {
                 if (mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler) {
-                    owner.resetClicks();
+                    inventory.resetClicks();
                     enter(State.EXTRACT);
-                    timer = owner.actionDelay.get();
-                } else if ((ticks - owner.actionDelay.get() - 1) % owner.openTimeout.get() == 0) {
+                    timer = owner.actionDelay();
+                } else if ((ticks - owner.actionDelay() - 1) % owner.openTimeout() == 0) {
                     owner.interact(pos);
                 }
             }
@@ -229,11 +253,11 @@ public final class Purifier {
                     if (!(mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler handler)) {
                         return stop("Cursor could not be recovered");
                     }
-                    owner.emptyCursor(handler);
-                    timer = owner.clickDelay.get();
+                    inventory.emptyCursor(handler);
+                    timer = owner.clickDelay();
                 } else if (mc.player.currentScreenHandler != mc.player.playerScreenHandler) {
                     mc.player.closeHandledScreen();
-                    timer = owner.actionDelay.get();
+                    timer = owner.actionDelay();
                 } else {
                     if (!(mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock) && sourceReturned()) {
                         return finishReturnedSource();
@@ -294,7 +318,7 @@ public final class Purifier {
                     if (!ShulkerSorter.isShulker(stack)) {
                         continue;
                     }
-                    owner.acceptRecovered(i);
+                    inventory.acceptRecovered(i);
                     owner.stopPathing();
                     if (owner.classifyShulker(stack, SorterStore.get().rules).isMixed()) {
                         owner.warning("Recovered shulker is still mixed; using normal routing.");
@@ -321,7 +345,7 @@ public final class Purifier {
     }
 
     private Result finishReturnedSource() {
-        owner.acceptRecovered(slot);
+        inventory.acceptRecovered(slot);
         return fail("Placement cancelled; shulker returned to inventory, using normal routing");
     }
 
@@ -353,20 +377,20 @@ public final class Purifier {
                 return;
             }
         }
-        int before = owner.openingClicks;
-        for (int clicks = 0; clicks < owner.clicksPerTick.get(); clicks++) {
-            if (owner.openingClicks >= ShulkerSorter.clickLimit(handler)) {
+        int before = inventory.openingClicks;
+        for (int clicks = 0; clicks < owner.clicksPerTick(); clicks++) {
+            if (inventory.openingClicks >= SorterInventory.clickLimit(handler)) {
                 recover("Too many extraction clicks");
                 break;
             }
             if (!handler.getCursorStack().isEmpty()) {
-                int destination = owner.firstEmptyCargoSlot(handler);
+                int destination = inventory.firstEmptyCargoSlot(handler);
                 if (destination == -1) {
                     recover("Cargo space changed");
                     break;
                 }
                 ItemStack stack = handler.getCursorStack().copy();
-                if (!owner.emptyCursor(handler)) {
+                if (!inventory.emptyCursor(handler)) {
                     break;
                 }
                 extracted.put(destination, stack);
@@ -380,30 +404,30 @@ public final class Purifier {
                     clicks--;
                     continue;
                 }
-                owner.cursorSourceSlot = source;
+                inventory.cursorSourceSlot = source;
                 mc.interactionManager.clickSlot(handler.syncId, source, 0, SlotActionType.PICKUP, mc.player);
-                owner.openingClicks++;
+                inventory.openingClicks++;
             }
         }
-        if (owner.openingClicks > before) {
-            timer = owner.clickDelay.get();
+        if (inventory.openingClicks > before) {
+            timer = owner.clickDelay();
         }
     }
 
     private int stateLimit() {
         return switch (state) {
-            case GOTO -> owner.pathTimeout.get() * 20;
+            case GOTO -> owner.pathTimeout() * 20;
             case PLACE -> 60;
-            case OPEN -> owner.openTimeout.get() * 3 + owner.actionDelay.get();
-            case EXTRACT, CLOSE -> 126 * (owner.clickDelay.get() + 1) + 2 * owner.actionDelay.get() + 40;
+            case OPEN -> owner.openTimeout() * 3 + owner.actionDelay();
+            case EXTRACT, CLOSE -> 126 * (owner.clickDelay() + 1) + 2 * owner.actionDelay() + 40;
             case BREAK -> 200;
             case PICKUP -> 200;
         };
     }
 
     private int globalLimit() {
-        return owner.pathTimeout.get() * 20 + 252 * (owner.clickDelay.get() + 1)
-            + 3 * owner.openTimeout.get() + 5 * owner.actionDelay.get() + 600;
+        return owner.pathTimeout() * 20 + 252 * (owner.clickDelay() + 1)
+            + 3 * owner.openTimeout() + 5 * owner.actionDelay() + 600;
     }
 
     private void enter(State state) {
@@ -431,7 +455,7 @@ public final class Purifier {
     }
 
     private void walk(BlockPos target) {
-        BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(target));
+        owner.pathTo(new GoalBlock(target));
     }
 
     private void recover(String reason) {
@@ -459,6 +483,7 @@ public final class Purifier {
     }
 
     String statusLine() {
+        if (pauseReason != null) return "PURIFY PAUSED: " + pauseReason + " @ " + pos.toShortString();
         return "PURIFY " + state + " @ " + pos.toShortString();
     }
 
