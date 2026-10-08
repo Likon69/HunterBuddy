@@ -67,7 +67,7 @@ public class ThreatBoardHud extends HudElement {
         .defaultValue(false).build());
 
     private final Setting<Double> panelWidth = sgGeneral.add(new DoubleSetting.Builder()
-        .name("width").description("Fixed width, so rows joining and leaving never resize it.")
+        .name("width").description("Minimum panel width; grows with text size to keep columns readable.")
         .defaultValue(230.0).min(160.0).max(400.0).sliderRange(180.0, 320.0).build());
 
     private final Setting<Integer> alertDistance = sgGeneral.add(new IntSetting.Builder()
@@ -164,27 +164,37 @@ public class ThreatBoardHud extends HudElement {
                 if (ghostA != ghostB) return ghostA ? 1 : -1;
                 return Double.compare(a.distance, b.distance);
             });
-            if (rows.size() > maxRows.get()) rows = rows.subList(0, maxRows.get());
-        } else if (isInEditor()) {
-            rows = demoRows();
         } else {
-            setSize(0.0, 0.0);
-            return;
+            rows = new ArrayList<>();
         }
 
-        boolean shadow = textShadow.get();
-        double scale = textScale.get();
-        double pad = panel.padding();
-        double lineH = Math.max(renderer.textHeight(shadow, scale), 16.0 * 0.5) + 2.0 * scale;
-        double w = panelWidth.get();
-
+        if (isInEditor() && rows.stream().noneMatch(track -> now - track.lastSeenAt <= 1_000L)) {
+            rows = demoRows();
+        }
         if (rows.isEmpty()) {
             setSize(0.0, 0.0);
             return;
         }
 
-        double titleH = renderer.textHeight(shadow, scale);
-        double h = titleH + 2.0 + rows.size() * lineH - 2.0 * scale;
+        if (rows.size() > maxRows.get()) {
+            rows = rows.subList(0, maxRows.get());
+        }
+
+        boolean shadow = textShadow.get();
+        double scale = textScale.get();
+        double pad = panel.padding();
+        double textH = renderer.textHeight(shadow, scale);
+        double iconSize = textH;
+        double gap = 4.0 * scale;
+        double lineH = textH + gap;
+        double gearW = 3.0 * iconSize + 2.0 * scale;
+        double distanceW = renderer.textWidth("8888 b", shadow, scale);
+        double vectorW = Math.max(renderer.textWidth("= holding", shadow, scale),
+            Math.max(renderer.textWidth("^ 888 m/s", shadow, scale), renderer.textWidth("v 888 m/s", shadow, scale)));
+        double w = Math.max(panelWidth.get(), renderer.textWidth("WWWWWW", shadow, scale)
+            + distanceW + vectorW + gearW + 3.0 * gap);
+        double nameW = w - distanceW - vectorW - gearW - 3.0 * gap;
+        double h = textH + gap + rows.size() * lineH;
 
         HudGlowPanel.Severity severity = HudGlowPanel.Severity.OK;
         for (Track track : rows) {
@@ -202,11 +212,14 @@ public class ThreatBoardHud extends HudElement {
         double left = x + pad;
         double ty = y + pad;
 
-        renderer.text("threats · " + rows.size(), left, ty, labelColor.get(), shadow, scale);
-        ty += titleH + 2.0;
+        String title = fitText(renderer, "threats · " + rows.size(), w, shadow, scale);
+        renderer.text(title, left + (w - renderer.textWidth(title, shadow, scale)) / 2.0, ty,
+            labelColor.get(), shadow, scale);
+        ty += textH + gap;
 
         for (Track track : rows) {
-            drawRow(renderer, track, left, ty, w, now, shadow, scale);
+            drawRow(renderer, track, left, ty, w, lineH, textH, iconSize, nameW, distanceW, vectorW,
+                now, shadow, scale);
             ty += lineH;
         }
 
@@ -214,6 +227,7 @@ public class ThreatBoardHud extends HudElement {
     }
 
     private void drawRow(HudRenderer renderer, Track track, double left, double top, double w,
+                         double lineH, double textH, double iconSize, double nameW, double distanceW, double vectorW,
                          long now, boolean shadow, double scale) {
         boolean ghost = now - track.lastSeenAt > 1_000L;
         double fade = ghost ? 0.45 : 1.0;
@@ -222,35 +236,65 @@ public class ThreatBoardHud extends HudElement {
             : track.approachSpeed < -1.0 ? recedeColor.get()
             : holdColor.get();
 
-        Color nameColor = fade(ghost ? labelColor.get() : vector, fade);
+        double gap = 4.0 * scale;
+        double textY = top + (lineH - textH) / 2.0;
+        drawCell(renderer, track.name, left, textY, nameW, fade(ghost ? labelColor.get() : vector, fade), shadow, scale);
 
-        double tx = left;
-        String name = track.name.length() > 14 ? track.name.substring(0, 13) + ".." : track.name;
-        renderer.text(name, tx, top, nameColor, shadow, scale);
-        tx += renderer.textWidth("WWWWWWWWWWWWWW", shadow, scale) * 0.72;
-
-        String dist = String.format("%.0f b", track.distance);
-        renderer.text(dist, tx, top, fade(valueColor.get(), fade), shadow, scale);
-        tx += renderer.textWidth("8888 b", shadow, scale) + 4.0 * scale;
+        double distanceX = left + nameW + gap;
+        drawCell(renderer, String.format("%.0f b", track.distance), distanceX, textY, distanceW,
+            fade(valueColor.get(), fade), shadow, scale);
 
         String vectorText = ghost ? "left"
             : track.approachSpeed > 1.0 ? String.format("^ %.0f m/s", track.approachSpeed)
             : track.approachSpeed < -1.0 ? String.format("v %.0f m/s", -track.approachSpeed)
             : "= holding";
-        renderer.text(vectorText, tx, top, fade(vector, fade), shadow, scale);
+        drawCell(renderer, vectorText, distanceX + distanceW + gap, textY, vectorW, fade(vector, fade), shadow, scale);
 
-        // Gear on the right edge: worn elytra, held item, totem — the silhouette of the kit.
-        double ix = left + w - 16.0 * 0.5;
+        double iconY = top + (lineH - iconSize) / 2.0;
+        double iconX = left + w - iconSize;
         if (track.totem) {
-            renderer.item(Items.TOTEM_OF_UNDYING.getDefaultStack(), (int) ix, (int) top, 0.5f, false);
-            ix -= 16.0 * 0.5 + 1.0;
+            drawItem(renderer, Items.TOTEM_OF_UNDYING.getDefaultStack(), iconX, iconY, iconSize);
+            iconX -= iconSize + scale;
         }
         if (!track.hand.isEmpty() && !track.hand.isOf(Items.TOTEM_OF_UNDYING)) {
-            renderer.item(track.hand, (int) ix, (int) top, 0.5f, false);
-            ix -= 16.0 * 0.5 + 1.0;
+            drawItem(renderer, track.hand, iconX, iconY, iconSize);
+            iconX -= iconSize + scale;
         }
         if (track.elytra) {
-            renderer.item(Items.ELYTRA.getDefaultStack(), (int) ix, (int) top, 0.5f, false);
+            drawItem(renderer, Items.ELYTRA.getDefaultStack(), iconX, iconY, iconSize);
+        }
+    }
+
+    private void drawCell(HudRenderer renderer, String text, double left, double top, double width,
+                          Color color, boolean shadow, double scale) {
+        String fitted = fitText(renderer, text, width, shadow, scale);
+        renderer.text(fitted, left + (width - renderer.textWidth(fitted, shadow, scale)) / 2.0, top, color, shadow, scale);
+    }
+
+    private String fitText(HudRenderer renderer, String text, double width, boolean shadow, double scale) {
+        if (renderer.textWidth(text, shadow, scale) <= width) {
+            return text;
+        }
+        String suffix = "..";
+        if (renderer.textWidth(suffix, shadow, scale) > width) {
+            return "";
+        }
+        int end = text.length();
+        while (end > 0 && renderer.textWidth(text.substring(0, end) + suffix, shadow, scale) > width) {
+            end = text.offsetByCodePoints(end, -1);
+        }
+        return text.substring(0, end) + suffix;
+    }
+
+    private void drawItem(HudRenderer renderer, ItemStack stack, double left, double top, double size) {
+        var matrices = renderer.drawContext.getMatrices();
+        double guiScale = MeteorClient.mc.getWindow().getScaleFactor();
+        matrices.pushMatrix();
+        try {
+            matrices.translate((float) (left / guiScale), (float) (top / guiScale));
+            renderer.item(stack, 0, 0, (float) (size / 16.0), false);
+        } finally {
+            matrices.popMatrix();
         }
     }
 
