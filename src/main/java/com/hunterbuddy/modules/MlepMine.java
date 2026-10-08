@@ -991,6 +991,10 @@ public class MlepMine extends Module {
    private void handleBlockUpdatePacket(BlockUpdateS2CPacket packet) {
       if (isCleared(packet.getState())) {
          Long sentAt = this.stopSentAt.remove(packet.getPos());
+         if (sentAt != null) {
+            com.hunterbuddy.util.SessionStats.get().onBlockMined();
+         }
+
          if (sentAt != null && (Boolean)this.grimBalanceLog.get()) {
             HunterBuddyAddon.LOG
                .info(
@@ -1007,10 +1011,6 @@ public class MlepMine extends Module {
          for (MlepMine.MiningData data : this.miningQueue) {
             if (data.hasAttemptedBreak() && data.getPos().equals(packet.getPos())) {
                data.setAttemptedBreak(false);
-
-               // The server confirming the block is gone, which is the only moment a break is
-               // certain: the client-side bar filling proves nothing.
-               com.hunterbuddy.util.SessionStats.get().onBlockMined();
             }
          }
       }
@@ -1604,12 +1604,7 @@ public class MlepMine extends Module {
          // away from breaking.
          this.stopMiningInternal(data);
          this.lastBreak = System.currentTimeMillis();
-
-         // Only while the log is on: this map exists to time the server's answer,
-         // and nothing else reads it.
-         if ((Boolean)this.grimBalanceLog.get()) {
-            this.stopSentAt.put(data.getPos().toImmutable(), this.lastBreak);
-         }
+         this.stopSentAt.put(data.getPos().toImmutable(), this.lastBreak);
       }
    }
 

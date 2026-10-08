@@ -62,7 +62,7 @@ public class SpiralCoverageHud extends HudElement {
 
     private final Setting<SettingColor> flownColor = sgColors.add(new ColorSetting.Builder()
         .name("flown-color").description("Legs already flown.")
-        .defaultValue(new SettingColor(110, 240, 130, 220)).build());
+        .defaultValue(new SettingColor(80, 190, 255, 240)).build());
 
     private final Setting<SettingColor> currentColor = sgColors.add(new ColorSetting.Builder()
         .name("current-color").description("The leg in progress.")
@@ -75,6 +75,10 @@ public class SpiralCoverageHud extends HudElement {
     private final Setting<SettingColor> selfColor = sgColors.add(new ColorSetting.Builder()
         .name("self-color").description("You.")
         .defaultValue(new SettingColor(110, 240, 130, 255)).build());
+
+    private final Setting<SettingColor> mapColor = sgColors.add(new ColorSetting.Builder()
+        .name("map-color").description("Backdrop behind the drawing, so the glow and the sky never wash out the lines.")
+        .defaultValue(new SettingColor(6, 10, 16, 170)).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
 
@@ -194,6 +198,14 @@ public class SpiralCoverageHud extends HudElement {
         double headerY = y + pad;
         double top = headerY + lineH + gap;
 
+        renderer.quad(left, top, box, box, fade(mapColor.get(), appear));
+        SettingColor edge = planColor.get();
+        Color frame = new Color(edge.r, edge.g, edge.b, (int) (edge.a * 0.5 * appear));
+        renderer.quad(left, top, box, 1.0, frame);
+        renderer.quad(left, top + box - 1.0, box, 1.0, frame);
+        renderer.quad(left, top + 1.0, 1.0, box - 2.0, frame);
+        renderer.quad(left + box - 1.0, top + 1.0, 1.0, box - 2.0, frame);
+
         double span = Math.max(1.0, Math.max(maxX - minX, maxZ - minZ));
         double margin = 8.0;
         double fit = (box - margin * 2.0) / span;
@@ -216,6 +228,7 @@ public class SpiralCoverageHud extends HudElement {
 
         double thin = Math.max(1.0, scale);
         double thick = Math.max(1.4, 1.8 * scale);
+        double trail = Math.max(1.2, 1.4 * scale);
 
         double tx = x + pad;
         tx = value(renderer, mode, tx, headerY, shadow, scale, appear);
@@ -243,7 +256,10 @@ public class SpiralCoverageHud extends HudElement {
             double by = b[1] * fit + offZ;
 
             if (i < curSeg) {
-                renderer.line(ax, ay, bx, by, fade(flownColor.get(), appear));
+                SettingColor fc = flownColor.get();
+                stroke(renderer, ax, ay, bx, by, trail + 3.0 * scale,
+                    new Color(fc.r, fc.g, fc.b, (int) (fc.a * 0.22 * appear)));
+                stroke(renderer, ax, ay, bx, by, trail, fade(fc, appear));
             } else if (i == curSeg) {
                 double dxw = b[0] - a[0];
                 double dzw = b[1] - a[1];
