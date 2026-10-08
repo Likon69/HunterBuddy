@@ -12,6 +12,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
@@ -27,6 +28,19 @@ public class SpiralCoverageHud extends HudElement {
         HunterBuddyAddon.HUD_GROUP, "SpiralCoverage",
         "AreaLoader coverage for any mode: flown legs, current leg, planned turns.",
         SpiralCoverageHud::new);
+
+    public enum MapStyle {
+        Clean,
+        Screen,
+        Grid,
+        Radar
+    }
+
+    public enum TrailStyle {
+        Line,
+        Bold,
+        Glow
+    }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgColors = settings.createGroup("Colors");
@@ -44,6 +58,16 @@ public class SpiralCoverageHud extends HudElement {
         .name("animations")
         .description("The marker's glide, its sonar ring and the eased reframing as the spiral grows.")
         .defaultValue(true).build());
+
+    private final Setting<MapStyle> mapStyle = sgGeneral.add(new EnumSetting.Builder<MapStyle>()
+        .name("map-style")
+        .description("Clean draws on the panel, Screen adds a dark backdrop, Grid adds a faint grid, Radar adds a dense backdrop, range rings and corner marks.")
+        .defaultValue(MapStyle.Screen).build());
+
+    private final Setting<TrailStyle> trailStyle = sgGeneral.add(new EnumSetting.Builder<TrailStyle>()
+        .name("trail-style")
+        .description("The legs already flown: a thin line, a bold one, or a bold one with a soft halo.")
+        .defaultValue(TrailStyle.Glow).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
         .name("text-scale").description("Scale of the text.")
@@ -78,7 +102,8 @@ public class SpiralCoverageHud extends HudElement {
 
     private final Setting<SettingColor> mapColor = sgColors.add(new ColorSetting.Builder()
         .name("map-color").description("Backdrop behind the drawing, so the glow and the sky never wash out the lines.")
-        .defaultValue(new SettingColor(6, 10, 16, 170)).build());
+        .defaultValue(new SettingColor(6, 10, 16, 170))
+        .visible(() -> mapStyle.get() != MapStyle.Clean).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
 
@@ -198,13 +223,52 @@ public class SpiralCoverageHud extends HudElement {
         double headerY = y + pad;
         double top = headerY + lineH + gap;
 
-        renderer.quad(left, top, box, box, fade(mapColor.get(), appear));
-        SettingColor edge = planColor.get();
-        Color frame = new Color(edge.r, edge.g, edge.b, (int) (edge.a * 0.5 * appear));
-        renderer.quad(left, top, box, 1.0, frame);
-        renderer.quad(left, top + box - 1.0, box, 1.0, frame);
-        renderer.quad(left, top + 1.0, 1.0, box - 2.0, frame);
-        renderer.quad(left + box - 1.0, top + 1.0, 1.0, box - 2.0, frame);
+        if (mapStyle.get() != MapStyle.Clean) {
+            if (mapStyle.get() == MapStyle.Radar) {
+                SettingColor backdrop = mapColor.get();
+                int alpha = (int) (Math.max(225, backdrop.a) * appear);
+                Color upper = new Color(backdrop.r, backdrop.g, backdrop.b, alpha);
+                Color lower = new Color(backdrop.r / 2, backdrop.g / 2, backdrop.b / 2, alpha);
+                renderer.quad(left, top, box, box, upper, upper, lower, lower);
+            } else {
+                renderer.quad(left, top, box, box, fade(mapColor.get(), appear));
+            }
+            SettingColor edge = planColor.get();
+            Color frame = new Color(edge.r, edge.g, edge.b, (int) (edge.a * 0.5 * appear));
+            renderer.quad(left, top, box, 1.0, frame);
+            renderer.quad(left, top + box - 1.0, box, 1.0, frame);
+            renderer.quad(left, top + 1.0, 1.0, box - 2.0, frame);
+            renderer.quad(left + box - 1.0, top + 1.0, 1.0, box - 2.0, frame);
+
+            if (mapStyle.get() == MapStyle.Grid) {
+                Color grid = new Color(edge.r, edge.g, edge.b, (int) (edge.a * 0.3 * appear));
+                for (int k = 1; k < 4; k++) {
+                    double o = box * k / 4.0;
+                    renderer.quad(left + o, top + 1.0, 1.0, box - 2.0, grid);
+                    renderer.quad(left + 1.0, top + o, box - 2.0, 1.0, grid);
+                }
+            } else if (mapStyle.get() == MapStyle.Radar) {
+                double cx = left + box / 2.0;
+                double cy = top + box / 2.0;
+                Color guides = new Color(120, 160, 190, (int) (26 * appear));
+                for (int k = 1; k <= 3; k++) {
+                    ring(renderer, cx, cy, (box / 2.0 - 8.0) * k / 3.0, 0.75, guides);
+                }
+                Color axes = new Color(120, 160, 190, (int) (16 * appear));
+                dashedLine(renderer, left + 8.0, cy, left + box - 8.0, cy, 0.75, axes, 1.0);
+                dashedLine(renderer, cx, top + 8.0, cx, top + box - 8.0, 0.75, axes, 1.0);
+                double tick = Math.min(12.0, box * 0.08);
+                Color marks = new Color(130, 205, 245, (int) (105 * appear));
+                for (int ix = 0; ix < 2; ix++) {
+                    for (int iy = 0; iy < 2; iy++) {
+                        double cornerX = ix == 0 ? left + 3.0 : left + box - 4.0;
+                        double cornerY = iy == 0 ? top + 3.0 : top + box - 4.0;
+                        renderer.quad(ix == 0 ? cornerX : cornerX - tick + 1.0, cornerY, tick, 1.0, marks);
+                        renderer.quad(cornerX, iy == 0 ? cornerY + 1.0 : cornerY - tick + 1.0, 1.0, tick - 1.0, marks);
+                    }
+                }
+            }
+        }
 
         double span = Math.max(1.0, Math.max(maxX - minX, maxZ - minZ));
         double margin = 8.0;
@@ -257,9 +321,15 @@ public class SpiralCoverageHud extends HudElement {
 
             if (i < curSeg) {
                 SettingColor fc = flownColor.get();
-                stroke(renderer, ax, ay, bx, by, trail + 3.0 * scale,
-                    new Color(fc.r, fc.g, fc.b, (int) (fc.a * 0.22 * appear)));
-                stroke(renderer, ax, ay, bx, by, trail, fade(fc, appear));
+                if (trailStyle.get() == TrailStyle.Line) {
+                    stroke(renderer, ax, ay, bx, by, thin, fade(fc, appear));
+                } else {
+                    if (trailStyle.get() == TrailStyle.Glow) {
+                        stroke(renderer, ax, ay, bx, by, trail + 3.0 * scale,
+                            new Color(fc.r, fc.g, fc.b, (int) (fc.a * 0.22 * appear)));
+                    }
+                    stroke(renderer, ax, ay, bx, by, trail, fade(fc, appear));
+                }
             } else if (i == curSeg) {
                 double dxw = b[0] - a[0];
                 double dzw = b[1] - a[1];

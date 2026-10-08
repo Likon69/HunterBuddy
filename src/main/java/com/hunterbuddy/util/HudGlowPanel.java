@@ -35,6 +35,7 @@ public final class HudGlowPanel {
     private final Setting<Integer> glowLayers;
     private final Setting<Double> glowSpread;
     private final Setting<Integer> glowAlpha;
+    private final Setting<Boolean> glowUnderPanel;
     private final Setting<Boolean> glowFollowsState;
     private final Setting<Boolean> glowIntensifies;
     private final Setting<SettingColor> glowColor;
@@ -82,6 +83,11 @@ public final class HudGlowPanel {
             .name("glow-alpha").description("Opacity of the innermost ring.")
             .defaultValue(90).min(4).max(255).sliderRange(10, 200)
             .visible(glow::get).build());
+
+        glowUnderPanel = group.add(new BoolSetting.Builder()
+            .name("glow-under-panel")
+            .description("Let the halo spread under the panel too, which tints its inside. Off keeps the halo around the panel only.")
+            .defaultValue(false).visible(glow::get).build());
 
         glowFollowsState = group.add(new BoolSetting.Builder()
             .name("glow-follows-state")
@@ -157,10 +163,19 @@ public final class HudGlowPanel {
                 double expansion = spread * i * (glowIntensifies.get() ? Math.max(0.6, boost) : 1.0);
                 double t = (double) (i - 1) / layers;
                 int alpha = Math.max(4, Math.min(255, (int) (base * (1.0 - t * t))));
+                Color ringColor = new Color(tint.r, tint.g, tint.b, alpha);
+                double ox = bx - expansion;
+                double oy = by - expansion;
+                double ow = bw + expansion * 2;
 
-                renderer.quad(bx - expansion, by - expansion,
-                    bw + expansion * 2, bh + expansion * 2,
-                    new Color(tint.r, tint.g, tint.b, alpha));
+                if (glowUnderPanel.get()) {
+                    renderer.quad(ox, oy, ow, bh + expansion * 2, ringColor);
+                } else {
+                    renderer.quad(ox, oy, ow, expansion, ringColor);
+                    renderer.quad(ox, by + bh, ow, expansion, ringColor);
+                    renderer.quad(ox, by, expansion, bh, ringColor);
+                    renderer.quad(bx + bw, by, expansion, bh, ringColor);
+                }
             }
         }
 
