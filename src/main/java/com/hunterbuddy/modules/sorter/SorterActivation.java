@@ -38,6 +38,7 @@ final class SorterActivation {
     private boolean dryRunNotified;
     private long lastAutoStart;
     private boolean pendingResume;
+    private String resumeProfileKey;
     private ClientWorld resumeWorld;
     private long resumeClearSince;
     private boolean internalToggle;
@@ -51,6 +52,7 @@ final class SorterActivation {
     void onToggle() {
         if (!internalToggle) {
             pendingResume = false;
+            resumeProfileKey = null;
             resumeClearSince = 0;
         }
         pendingAutoStart = null;
@@ -133,6 +135,7 @@ final class SorterActivation {
     private void onGameLeft(GameLeftEvent event) {
         if (owner.isActive()) {
             pendingResume = owner.resumeAfterReconnect() && !owner.isWithdrawing();
+            resumeProfileKey = pendingResume ? SorterStore.key() : null;
             internalToggle = true;
             try {
                 owner.stopForDisconnect();
@@ -154,6 +157,7 @@ final class SorterActivation {
         }
         if (!owner.resumeAfterReconnect()) {
             pendingResume = false;
+            resumeProfileKey = null;
         }
         if (!canWatchInput() || mc.world != inputWorld
             || inputHandler != null && mc.player.currentScreenHandler != inputHandler
@@ -177,6 +181,7 @@ final class SorterActivation {
         }
         if (!pendingResume || owner.isActive() || mc.world == null || mc.player == null
             || owner.setup().isInspecting() || !readyScreen()
+            || !SorterStore.key().equals(resumeProfileKey)
             || safety.waitingReason(owner.ignoreFriends()) != null || !nearInput()) {
             resumeClearSince = 0;
             return;
@@ -210,6 +215,7 @@ final class SorterActivation {
 
     private void activate() {
         pendingResume = false;
+        resumeProfileKey = null;
         resumeClearSince = 0;
         internalToggle = true;
         try {

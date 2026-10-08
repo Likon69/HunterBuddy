@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.GenericContainerScreenHandler;
 
@@ -52,7 +52,7 @@ final class SorterDeliveryTracker {
         beforeCargo.clear();
     }
 
-    void begin(GenericContainerScreenHandler handler, String category, Predicate<ItemStack> accepts) {
+    void begin(GenericContainerScreenHandler handler, String category, BiPredicate<Integer, ItemStack> accepts) {
         if (started) {
             return;
         }
@@ -63,20 +63,21 @@ final class SorterDeliveryTracker {
         beforeContainer = containerSnapshot(handler);
         for (int inv = 0; inv < 36; inv++) {
             ItemStack stack = beforeInventory.get(inv);
-            if (inventory.isCargoSlot(inv) && !stack.isEmpty() && accepts.test(stack)) {
+            if (inventory.isCargoSlot(inv) && !stack.isEmpty() && accepts.test(inv, stack)) {
                 beforeCargo.add(new Cargo(inv, stack.copy()));
             }
         }
     }
 
-    void finish(GenericContainerScreenHandler handler) {
+    Map<Integer, Integer> finish(GenericContainerScreenHandler handler) {
         if (visitHandler != handler || !handler.getCursorStack().isEmpty()) {
             resetVisit();
-            return;
+            return Map.of();
         }
         List<ItemStack> afterInventory = inventorySnapshot(handler);
         List<ItemStack> afterContainer = containerSnapshot(handler);
         List<ItemStack> counted = new ArrayList<>();
+        Map<Integer, Integer> confirmedSlots = new LinkedHashMap<>();
         for (Cargo cargo : beforeCargo) {
             ItemStack stack = cargo.stack();
             if (counted.stream().anyMatch(item -> ItemStack.areItemsAndComponentsEqual(item, stack))) {
@@ -98,6 +99,7 @@ final class SorterDeliveryTracker {
                     continue;
                 }
                 confirmed -= moved;
+                confirmedSlots.put(source.slot(), moved);
                 if (ShulkerSorter.isShulker(source.stack())) {
                     shulkers += moved;
                     for (int i = 0; i < moved; i++) {
@@ -117,6 +119,7 @@ final class SorterDeliveryTracker {
             }
         }
         resetVisit();
+        return Map.copyOf(confirmedSlots);
     }
 
     void purified(ItemStack stack) {

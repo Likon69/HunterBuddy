@@ -1,11 +1,10 @@
 package com.hunterbuddy.commands.logistics;
 
-import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
 import com.hunterbuddy.modules.sorter.ShulkerSorter;
 import com.hunterbuddy.modules.sorter.SorterSetup;
+import com.hunterbuddy.modules.sorter.SorterShulkers;
 import com.hunterbuddy.modules.sorter.SorterStore;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
-import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Destination;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -88,13 +87,9 @@ public class SorterCommand extends Command {
             ItemStack stack = mc.player.getMainHandStack();
             SorterProfile p = SorterStore.get();
             if (stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) {
-                List<ShulkerClassifier.Slot> slots = new ArrayList<>();
-                for (ItemStack inner : ShulkerDataParser.parseShulkerContentsAsList(stack)) {
-                    slots.add(new ShulkerClassifier.Slot(Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount()));
-                }
                 ShulkerSorter module = Modules.get().get(ShulkerSorter.class);
                 double purity = module != null ? module.purity.get() : 0.8;
-                info("Shulker: %s", ShulkerClassifier.classify(slots, p.rules, purity).describe());
+                info("Shulker: %s", SorterShulkers.classify(stack, p.rules, purity).describe());
             } else if (!stack.isEmpty()) {
                 info("%s -> %s", Registries.ITEM.getId(stack.getItem()), p.rules.categoryOf(Registries.ITEM.getId(stack.getItem()).toString()));
             } else {

@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
@@ -67,6 +68,20 @@ public final class SorterStore {
             try (Reader r = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
                 SorterProfile profile = GSON.fromJson(r, SorterProfile.class);
                 if (profile != null) {
+                    if (profile.inputs == null) {
+                        profile.inputs = new ArrayList<>();
+                    }
+                    if (profile.destinations == null) {
+                        profile.destinations = new ArrayList<>();
+                    }
+                    for (SorterProfile.Destination destination : profile.destinations) {
+                        if (destination.chests == null) {
+                            destination.chests = new ArrayList<>();
+                        }
+                        if (destination.full == null) {
+                            destination.full = new LinkedHashSet<>();
+                        }
+                    }
                     if (profile.reserves == null) {
                         profile.reserves = new ArrayList<>();
                     }
@@ -91,7 +106,7 @@ public final class SorterStore {
         return new File(new File(new File(MeteorClient.FOLDER, "hunterbuddy"), "sorter"), key + ".json");
     }
 
-    private static String key() {
+    static String key() {
         MinecraftClient mc = MinecraftClient.getInstance();
         String server = "unknown";
         if (mc.getCurrentServerEntry() != null) {

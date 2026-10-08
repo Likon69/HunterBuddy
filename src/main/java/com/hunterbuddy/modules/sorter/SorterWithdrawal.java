@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.sorter;
 
+import com.hunterbuddy.modules.sorter.logic.CategoryRules;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Pos;
 import java.util.ArrayList;
@@ -19,11 +20,12 @@ final class SorterWithdrawal {
 
     private final SorterInventory inventory;
     private final Request request;
-    private final SorterProfile profile;
     private final List<Pos> sources;
     private final Set<Pos> exhausted = new HashSet<>();
     private final Map<Pos, Integer> visits = new LinkedHashMap<>();
     private final Map<Integer, ItemStack> taken = new LinkedHashMap<>();
+    private final Set<Integer> pendingDeposits = new HashSet<>();
+    private final SorterDeliveryTracker deposits;
     private final int visitLimit;
     private final Pos enderChest;
     private ItemStack pending = ItemStack.EMPTY;
@@ -35,17 +37,13 @@ final class SorterWithdrawal {
     SorterWithdrawal(SorterInventory inventory, Request request, SorterProfile profile) {
         this.inventory = inventory;
         this.request = request;
-        this.profile = profile;
+        deposits = new SorterDeliveryTracker(inventory);
         this.enderChest = profile.enderChest;
         Set<Pos> ordered = new LinkedHashSet<>();
         profile.destinationsFor(request.category()).forEach(destination -> ordered.addAll(destination.chests));
         sources = new ArrayList<>(ordered);
         int capacity = Math.max(1, inventory.freeCargoSlots());
         visitLimit = (request.count() + capacity - 1) / capacity + 1;
-    }
-
-    boolean matchesProfile(SorterProfile current) {
-        return profile == current;
     }
 
     Request request() {
@@ -77,6 +75,9 @@ final class SorterWithdrawal {
     private boolean eligible(ItemStack stack) {
         if (!ShulkerSorter.isShulker(stack) || stack.getCount() != 1) {
             return false;
+        }
+        if (CategoryRules.SHULKERS.equals(request.category())) {
+            return PackingPlan.empty(stack);
         }
         List<ItemStack> contents = PackingPlan.contents(stack);
         return PackingPlan.pure(contents, request.category()) && (!request.fullOnly() || PackingPlan.full(contents));
@@ -140,17 +141,37 @@ final class SorterWithdrawal {
 
     boolean cargoChanged() {
         for (Map.Entry<Integer, ItemStack> entry : taken.entrySet()) {
-            if (!ItemStack.areEqual(entry.getValue(), mc.player.getInventory().getStack(entry.getKey()))) {
+            ItemStack current = mc.player.getInventory().getStack(entry.getKey());
+            if (!ItemStack.areEqual(entry.getValue(), current)
+                && !(pendingDeposits.contains(entry.getKey()) && current.isEmpty())) {
                 return true;
             }
         }
         return false;
     }
 
-    void deposited(int inv) {
-        if (mc.player.getInventory().getStack(inv).isEmpty() && taken.remove(inv) != null) {
-            deposited++;
+    void beginDeposit(GenericContainerScreenHandler handler) {
+        deposits.begin(handler, request.category(), this::owns);
+    }
+
+    void depositClicked(int inv) {
+        if (taken.containsKey(inv) && mc.player.getInventory().getStack(inv).isEmpty()) {
+            pendingDeposits.add(inv);
         }
+    }
+
+    void finishDeposit(GenericContainerScreenHandler handler) {
+        for (Map.Entry<Integer, Integer> entry : deposits.finish(handler).entrySet()) {
+            if (taken.remove(entry.getKey()) != null) {
+                deposited += entry.getValue();
+            }
+        }
+        pendingDeposits.clear();
+    }
+
+    void resetDepositVisit() {
+        deposits.resetVisit();
+        pendingDeposits.clear();
     }
 
     int held() {
@@ -164,7 +185,13 @@ final class SorterWithdrawal {
     }
 
     int withdrawn() {
-        return deposited + held();
+        int pendingCount = 0;
+        for (int inv : pendingDeposits) {
+            if (taken.containsKey(inv) && mc.player.getInventory().getStack(inv).isEmpty()) {
+                pendingCount++;
+            }
+        }
+        return deposited + held() + pendingCount;
     }
 
     String summary() {

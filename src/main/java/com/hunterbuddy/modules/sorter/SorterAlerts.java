@@ -18,6 +18,7 @@ final class SorterAlerts {
 
     void clear() {
         message = null;
+        blocking = false;
     }
 
     void discardOtherProfile(SorterProfile current) {

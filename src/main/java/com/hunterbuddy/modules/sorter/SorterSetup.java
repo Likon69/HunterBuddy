@@ -1,7 +1,8 @@
 package com.hunterbuddy.modules.sorter;
 
-import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
+import com.hunterbuddy.modules.sorter.ShulkerSorter.ContainerType;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
+import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Destination;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Pos;
@@ -38,7 +39,6 @@ import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.item.ItemStack;
 import net.minecraft.inventory.Inventory;
-import net.minecraft.registry.Registries;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -394,7 +394,9 @@ public final class SorterSetup {
                         abort("Target is no longer a chest or barrel");
                     } else {
                         attempts++;
-                        owner.interact(tagPos);
+                        if (!owner.interact(tagPos, ContainerType.STORAGE)) {
+                            abort("Target changed or moved out of reach during inspection");
+                        }
                     }
                 }
             }
@@ -433,19 +435,14 @@ public final class SorterSetup {
             }
             occupied = true;
             if (ShulkerSorter.isShulker(stack)) {
-                List<ItemStack> contents = ShulkerDataParser.parseShulkerContentsAsList(stack);
-                boolean hasContents = false;
-                for (ItemStack inner : contents) {
-                    if (!inner.isEmpty()) {
-                        hasContents = true;
-                        categories.add(rules.categoryOf(Registries.ITEM.getId(inner.getItem()).toString()));
-                    }
-                }
-                if (!hasContents) {
+                ShulkerClassifier.Result result = SorterShulkers.classify(stack, rules, owner.purity.get());
+                if (result.empty()) {
                     categories.add(CategoryRules.SHULKERS);
+                } else {
+                    categories.addAll(result.slotsByCategory().keySet());
                 }
             } else {
-                categories.add(rules.categoryOf(Registries.ITEM.getId(stack.getItem()).toString()));
+                categories.add(rules.categoryOf(SorterShulkers.itemId(stack)));
             }
         }
         if (!occupied) {

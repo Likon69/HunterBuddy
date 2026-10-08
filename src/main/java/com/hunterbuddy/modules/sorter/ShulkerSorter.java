@@ -7,14 +7,12 @@ import baritone.api.pathing.goals.GoalGetToBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
-import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
 import com.hunterbuddy.modules.sorter.logic.PurificationPlan;
 import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import com.hunterbuddy.modules.sorter.model.SorterProfile;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Destination;
 import com.hunterbuddy.modules.sorter.model.SorterProfile.Pos;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -37,6 +35,9 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.BarrelBlock;
+import net.minecraft.block.Block;
+import net.minecraft.block.ChestBlock;
 import net.minecraft.block.EnderChestBlock;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.item.BlockItem;
@@ -73,7 +74,7 @@ public class ShulkerSorter extends Module {
 
     private final Setting<Boolean> sortLoose = sgSort.add(new BoolSetting.Builder()
         .name("sort-loose-items")
-        .description("Also move loose items (not in a shulker) from the input chests.")
+        .description("Take loose items from inputs too. Loose cargo from station jobs is always routed.")
         .defaultValue(true)
         .build());
 
@@ -103,7 +104,7 @@ public class ShulkerSorter extends Module {
 
     private final Setting<Boolean> dryRun = sgSort.add(new BoolSetting.Builder()
         .name("dry-run")
-        .description("Open the input chests and report what would go where, without moving anything.")
+        .description("Report input routing without transfers. Read once at activation; changes apply to the next run. Withdrawals always move items.")
         .defaultValue(true)
         .build());
 
@@ -168,11 +169,14 @@ public class ShulkerSorter extends Module {
 
     enum Target { INPUT, DEST, PACK, ENDER }
     private enum RunMode { SORT, WITHDRAW }
+    enum ContainerType { STORAGE, ENDER, SHULKER }
 
     private static final double REACH = 4.5;
 
     private State state = State.IDLE;
     private RunMode runMode = RunMode.SORT;
+    private boolean runDryRun;
+    private SorterProfile runProfile;
     private SorterWithdrawal.Request pendingWithdrawal;
     private SorterWithdrawal withdrawal;
     private Target target;
@@ -192,7 +196,7 @@ public class ShulkerSorter extends Module {
     private boolean pendingRecovery;
     private boolean pathingStarted;
     private boolean assignedReserve;
-    private long packUiWaitSince;
+    private long closedScreenWaitSince;
     private int contentsSyncId = -1;
     private GenericContainerScreenHandler visitHandler;
 
@@ -282,6 +286,7 @@ public class ShulkerSorter extends Module {
         SorterWithdrawal.Request requested = pendingWithdrawal;
         pendingWithdrawal = null;
         runMode = requested == null ? RunMode.SORT : RunMode.WITHDRAW;
+        runDryRun = requested == null && dryRun.get();
         withdrawal = null;
         if (setup.isInspecting()) {
             warning("Wait for container tagging to finish before starting the sorter.");
@@ -293,13 +298,13 @@ public class ShulkerSorter extends Module {
             return;
         }
         SorterProfile profile = SorterStore.get();
-        boolean recovery = !isWithdrawing() && !dryRun.get() && purifier.needsRecovery();
+        boolean recovery = !isWithdrawing() && !runDryRun && purifier.needsRecovery();
         if (!isWithdrawing() && !recovery && profile.inputs.isEmpty()) {
             error("No input chest. Register one with tag-key and choose its input role in the settings.");
             toggle();
             return;
         }
-        if (!isWithdrawing() && !recovery && !dryRun.get() && profile.destinations.isEmpty() && profile.reserves.isEmpty()) {
+        if (!isWithdrawing() && !recovery && !runDryRun && profile.destinations.isEmpty() && profile.reserves.isEmpty()) {
             error("No destination or reserve. Register storage with tag-key first.");
             toggle();
             return;
@@ -309,8 +314,9 @@ public class ShulkerSorter extends Module {
             toggle();
             return;
         }
-        if (!mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-            error("Empty the cursor before starting the sorter.");
+        if (mc.player.currentScreenHandler != mc.player.playerScreenHandler
+            || !mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+            error("Close the container and empty the cursor before starting the sorter.");
             toggle();
             return;
         }
@@ -323,6 +329,7 @@ public class ShulkerSorter extends Module {
         runCompleted = false;
         alerts.clear();
         snapshotProfile = profile;
+        runProfile = profile;
         inventory.reset();
         if (requested != null) {
             withdrawal = new SorterWithdrawal(inventory, requested, profile);
@@ -343,9 +350,9 @@ public class ShulkerSorter extends Module {
         clearSince = 0;
         pendingRecovery = false;
         assignedReserve = false;
-        packUiWaitSince = 0;
+        closedScreenWaitSince = 0;
         setState(State.PICK_INPUT);
-        if (!isWithdrawing() && !dryRun.get() && (purifyMixed.get() || packShulkers.get()) && profile.unpackStation != null) {
+        if (!isWithdrawing() && !runDryRun && (purifyMixed.get() || packShulkers.get()) && profile.unpackStation != null) {
             inventory.reserveHotbarSlot();
             if (inventory.reservedSlot == -1) {
                 warning("No empty hotbar slot; station jobs disabled for this run.");
@@ -364,7 +371,7 @@ public class ShulkerSorter extends Module {
             return;
         }
         info("Started%s. %d input chest(s), %d destination(s).",
-            dryRun.get() ? " (dry run)" : "", profile.inputs.size(), profile.destinations.size());
+            runDryRun ? " (dry run)" : "", profile.inputs.size(), profile.destinations.size());
     }
 
     @Override
@@ -380,6 +387,7 @@ public class ShulkerSorter extends Module {
             blockingWarning("Recovery required at %s.", purifier.position().toShortString());
         }
         stopPathing();
+        purifier.restoreSelectedSlot();
         if (mc.player != null && mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler
             && handler.getCursorStack().isEmpty()) {
             recordVisitClose(handler);
@@ -406,13 +414,15 @@ public class ShulkerSorter extends Module {
         if (mc.player == null || mc.world == null) {
             return;
         }
-        if (isWithdrawing() && withdrawal != null && !withdrawal.matchesProfile(SorterStore.get())) {
-            warning("Profile changed during withdrawal; stopped with cargo in inventory.");
+        if (runProfile != SorterStore.get()) {
+            warning("Profile changed during run; stopped with cargo in inventory.");
+            deliveries.resetVisit();
+            visitHandler = null;
             toggle();
             return;
         }
-        if ((state == State.PACK || isWithdrawing() && (state == State.PICK_INPUT || state == State.PICK_DEST))
-            && waitForPackScreen(System.nanoTime())) {
+        if ((state == State.PACK || state == State.PICK_INPUT || state == State.PICK_DEST)
+            && waitForClosedScreen(System.nanoTime())) {
             return;
         }
         if (state == State.PAUSED) {
@@ -422,9 +432,6 @@ public class ShulkerSorter extends Module {
         if (state == State.PICK_INPUT || state == State.PICK_DEST || state == State.PACK) {
             String reason = safety.waitingReason(ignoreFriends.get());
             if (reason != null) {
-                if (!safeToPause()) {
-                    return;
-                }
                 resumeState = state;
                 pauseReason = reason;
                 pauseStarted = System.nanoTime();
@@ -435,11 +442,11 @@ public class ShulkerSorter extends Module {
             }
         }
         stateTicks++;
-        if (isWithdrawing() && (state == State.TAKE || state == State.DEPOSIT || state == State.CLOSE)) {
+        if (state == State.TAKE || state == State.DEPOSIT || state == State.CLOSE) {
             int slots = mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler ? handler.slots.size() : 90;
             long limit = 4L * slots * (clickDelay.get() + 1L) + openTimeout.get() + 2L * actionDelay.get() + 40;
             if (stateTicks > limit) {
-                warning("Withdrawal container wait exceeded its limit; stopped with cargo in inventory.");
+                warning("Sorter container wait exceeded its limit; stopped with cargo in inventory.");
                 toggle();
                 return;
             }
@@ -453,7 +460,7 @@ public class ShulkerSorter extends Module {
                             deliveries.packed(PackingPlan.full(PackingPlan.contents(completed)));
                         }
                     } else {
-                        ShulkerClassifier.Result result = classifyShulker(completed, SorterStore.get().rules);
+                        ShulkerClassifier.Result result = SorterShulkers.classify(completed, SorterStore.get().rules, purity.get());
                         if (isShulker(completed) && !result.empty() && result.purity() == 1.0) {
                             deliveries.purified(completed);
                         }
@@ -533,7 +540,7 @@ public class ShulkerSorter extends Module {
         }
         SorterProfile profile = SorterStore.get();
 
-        if (!dryRun.get() && inventory.freeCargoSlots() == 0) {
+        if (!runDryRun && inventory.freeCargoSlots() == 0) {
             if (!cargoCategories().isEmpty()) {
                 setState(State.PICK_DEST);
             } else {
@@ -565,18 +572,18 @@ public class ShulkerSorter extends Module {
     }
 
     private boolean canPack() {
-        return packShulkers.get() && !dryRun.get() && !purificationDisabled && inventory.reservedSlot >= 0
+        return packShulkers.get() && !runDryRun && !purificationDisabled && inventory.reservedSlot >= 0
             && SorterStore.get().unpackStation != null;
     }
 
-    private boolean waitForPackScreen(long now) {
+    private boolean waitForClosedScreen(long now) {
         if (safeToPause()) {
-            packUiWaitSince = 0;
+            closedScreenWaitSince = 0;
             return false;
         }
-        if (packUiWaitSince == 0) {
-            packUiWaitSince = now;
-        } else if (now - packUiWaitSince >= SorterSafety.PAUSE_LIMIT_NANOS) {
+        if (closedScreenWaitSince == 0) {
+            closedScreenWaitSince = now;
+        } else if (now - closedScreenWaitSince >= SorterSafety.PAUSE_LIMIT_NANOS) {
             blockingWarning("Sorter waited two minutes for a closed screen and empty cursor; sorter stopped.");
             toggle();
         }
@@ -584,11 +591,6 @@ public class ShulkerSorter extends Module {
     }
 
     private void pickPack() {
-        if (dryRun.get() && hasCargo()) {
-            blockingWarning("Packing stopped with cargo: turn off dry-run before returning it.");
-            toggle();
-            return;
-        }
         if (!canPack() && packing.plan() == null) {
             packing.finish();
             setState(State.DONE);
@@ -719,8 +721,8 @@ public class ShulkerSorter extends Module {
     private void tickOpen() {
         if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler) {
             visitHandler = handler;
-            if (isWithdrawing() && (retries == 0 || target == Target.ENDER && (handler.getRows() != 3
-                || !(mc.world.getBlockState(targetPos).getBlock() instanceof EnderChestBlock)))) {
+            if (retries == 0 || target == Target.ENDER && (handler.getRows() != 3
+                || !(mc.world.getBlockState(targetPos).getBlock() instanceof EnderChestBlock))) {
                 skipTarget();
                 return;
             }
@@ -755,11 +757,27 @@ public class ShulkerSorter extends Module {
                 skipTarget();
                 return;
             }
-            interact(targetPos);
+            if (!interact(targetPos, target == Target.ENDER ? ContainerType.ENDER : ContainerType.STORAGE)) {
+                skipTarget();
+            }
         }
     }
 
-    void interact(BlockPos pos) {
+    boolean interact(BlockPos pos, ContainerType type) {
+        Block block = mc.world.getBlockState(pos).getBlock();
+        boolean valid = switch (type) {
+            case STORAGE -> block instanceof ChestBlock || block instanceof BarrelBlock;
+            case ENDER -> block instanceof EnderChestBlock;
+            case SHULKER -> block instanceof ShulkerBoxBlock;
+        };
+        if (!valid) {
+            warning("Container at %s changed; skipping it.", pos.toShortString());
+            return false;
+        }
+        if (!inReach(pos)) {
+            warning("Container at %s is out of reach; skipping it.", pos.toShortString());
+            return false;
+        }
         Vec3d eye = mc.player.getEyePos();
         Vec3d center = Vec3d.ofCenter(pos);
         Vec3d toEye = eye.subtract(center);
@@ -772,6 +790,7 @@ public class ShulkerSorter extends Module {
         mc.player.networkHandler.sendPacket(new LookAndOnGround(yaw, pitch, mc.player.isOnGround(), mc.player.horizontalCollision));
 
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, new BlockHitResult(hit, face, pos, false));
+        return true;
     }
 
     private void skipTarget() {
@@ -780,7 +799,7 @@ public class ShulkerSorter extends Module {
             inventory.closingRequested = true;
             if (mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
                 closeThen();
-            } else if (!isWithdrawing() && dryRun.get()) {
+            } else if (!isWithdrawing() && runDryRun) {
                 stopWithCursor();
             } else {
                 setState(depositing() ? State.DEPOSIT : State.TAKE);
@@ -801,7 +820,7 @@ public class ShulkerSorter extends Module {
                 setState(State.OPEN);
                 return;
             }
-            if ((packing.inProgress() || isWithdrawing()) && handler != visitHandler) {
+            if (handler != visitHandler) {
                 blockingWarning("Sorter container screen changed; sorter stopped with cargo.");
                 toggle();
                 return;
@@ -820,7 +839,7 @@ public class ShulkerSorter extends Module {
                 return;
             }
 
-            if (!isWithdrawing() && dryRun.get()) {
+            if (!isWithdrawing() && runDryRun) {
                 if (!handler.getCursorStack().isEmpty()) {
                     stopWithCursor();
                     return;
@@ -894,7 +913,7 @@ public class ShulkerSorter extends Module {
                     if (!purificationDisabled && inventory.reservedSlot >= 0 && purifyMixed.get()
                         && SorterStore.get().unpackStation != null
                         && mc.player.getInventory().getStack(inventory.reservedSlot).isEmpty()
-                        && isShulker(stack) && classifyShulker(stack, SorterStore.get().rules).isMixed()
+                        && isShulker(stack) && SorterShulkers.classify(stack, SorterStore.get().rules, purity.get()).isMixed()
                         && !attemptedSources.getOrDefault(SorterStore.pos(targetPos), Set.of()).contains(i)) {
                         PurificationPlan plan = Purifier.plan(stack);
                         int capacity = inventory.cargoCapacity();
@@ -918,7 +937,7 @@ public class ShulkerSorter extends Module {
                             }
                         }
                     }
-                    if (!stack.isEmpty() && routedCategory(stack) != null) {
+                    if (!stack.isEmpty() && inputDestination(stack) != null) {
                         source = i;
                         break;
                     }
@@ -946,10 +965,13 @@ public class ShulkerSorter extends Module {
         try {
             if (!(mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler)) {
                 deliveries.resetVisit();
+                if (isWithdrawing()) {
+                    withdrawal.resetDepositVisit();
+                }
                 setState(State.OPEN);
                 return;
             }
-            if ((packing.inProgress() || isWithdrawing()) && handler != visitHandler) {
+            if (handler != visitHandler) {
                 blockingWarning("Sorter container screen changed; sorter stopped with cargo.");
                 toggle();
                 return;
@@ -967,8 +989,10 @@ public class ShulkerSorter extends Module {
                 }
                 return;
             }
-            if (!isWithdrawing()) {
-                deliveries.begin(handler, currentDest.category, stack -> currentDest.category.equals(routedCategory(stack)));
+            if (isWithdrawing()) {
+                withdrawal.beginDeposit(handler);
+            } else {
+                deliveries.begin(handler, currentDest.category, (inv, stack) -> currentDest.category.equals(routedCategory(stack)));
             }
             int clicks = 0;
             boolean leftover = false;
@@ -999,7 +1023,7 @@ public class ShulkerSorter extends Module {
                 }
                 mc.interactionManager.clickSlot(handler.syncId, SorterInventory.handlerSlotOf(containerSlots, inv), 0, SlotActionType.QUICK_MOVE, mc.player);
                 if (isWithdrawing()) {
-                    withdrawal.deposited(inv);
+                    withdrawal.depositClicked(inv);
                 }
                 clicks++;
                 inventory.openingClicks++;
@@ -1055,7 +1079,16 @@ public class ShulkerSorter extends Module {
             if (stateTicks > openTimeout.get() + actionDelay.get()) {
                 assignedReserve = false;
                 abandonOpening("Container contents did not arrive");
-                closeThen();
+                if (!handler.getCursorStack().isEmpty()) {
+                    if (runDryRun) {
+                        stopWithCursor();
+                    } else {
+                        inventory.emptyCursor(handler);
+                    }
+                }
+                if (isActive() && handler.getCursorStack().isEmpty()) {
+                    closeThen();
+                }
             }
             return false;
         }
@@ -1080,7 +1113,7 @@ public class ShulkerSorter extends Module {
             abandonOpening("the server undid our clicks");
             if (handler.getCursorStack().isEmpty()) {
                 closeThen();
-            } else if (!isWithdrawing() && dryRun.get()) {
+            } else if (!isWithdrawing() && runDryRun) {
                 stopWithCursor();
             }
             return false;
@@ -1116,7 +1149,7 @@ public class ShulkerSorter extends Module {
 
     private void tickClose() {
         if (!mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
-            if (++cursorReappearances > 3 || !isWithdrawing() && dryRun.get()
+            if (++cursorReappearances > 3 || !isWithdrawing() && runDryRun
                 || !(mc.player.currentScreenHandler instanceof GenericContainerScreenHandler)) {
                 stopWithCursor();
             } else {
@@ -1152,7 +1185,7 @@ public class ShulkerSorter extends Module {
             }
         }
         if (target == Target.INPUT) {
-            boolean deliverNow = !dryRun.get() && !cargoCategories().isEmpty()
+            boolean deliverNow = !runDryRun && !cargoCategories().isEmpty()
                 && (deliverBeforePurifying || inventory.freeCargoSlots() == 0 || exhaustedInputs.contains(SorterStore.pos(targetPos))
                     || excludedChests.contains(SorterStore.pos(targetPos)));
             setState(deliverNow ? State.PICK_DEST : State.PICK_INPUT);
@@ -1166,12 +1199,16 @@ public class ShulkerSorter extends Module {
         runCompleted = true;
         if (isWithdrawing()) {
             info("%s", withdrawal.summary());
-        } else if (dryRun.get()) {
+        } else if (runDryRun) {
             info("Dry run report (%d kinds):", report.size());
             report.forEach((k, v) -> info("  %dx %s", v, k));
             info("Turn off dry-run to actually move things.");
         } else {
-            info("Done: nothing routable left in the input chests.");
+            String reason = hasCargo() && cargoCategories().isEmpty()
+                ? (inventory.freeCargoSlots() == 0 ? "inventory full of cargo with no free destination" : "cargo has no free destination")
+                : inventory.freeCargoSlots() == 0 ? "inventory full: no cargo space"
+                : SorterStore.get().inputs.stream().anyMatch(excludedChests::contains) ? "inputs excluded" : "nothing routable left";
+            info("Done: %s.", reason);
         }
         SorterStore.save();
         toggle();
@@ -1184,6 +1221,9 @@ public class ShulkerSorter extends Module {
         }
         if (isWithdrawing()) {
             withdrawal.settle(handler);
+            if (target == Target.ENDER) {
+                withdrawal.finishDeposit(handler);
+            }
             if (contentsSyncId == handler.syncId) {
                 occupiedOnClose.put(SorterStore.pos(targetPos), occupiedSlots(handler));
             }
@@ -1205,7 +1245,7 @@ public class ShulkerSorter extends Module {
                 }
             }
         }
-        if (target == Target.DEST && !dryRun.get()) {
+        if (target == Target.DEST && !runDryRun) {
             deliveries.finish(handler);
         } else if (target == Target.INPUT && targetPos != null && contentsSyncId == handler.syncId && occupiedSlots(handler) == 0) {
             emptiedInputs.add(SorterStore.pos(targetPos));
@@ -1215,13 +1255,7 @@ public class ShulkerSorter extends Module {
     private String categoryOf(ItemStack stack) {
         SorterProfile profile = SorterStore.get();
         if (isShulker(stack)) {
-            return classifyShulker(stack, profile.rules).category();
-        }
-        if (packing.inProgress() && PackingPlan.loose(stack, packing.category())) {
-            return packing.category();
-        }
-        if (!sortLoose.get()) {
-            return null;
+            return SorterShulkers.classify(stack, profile.rules, purity.get()).category();
         }
         return profile.rules.categoryOf(Registries.ITEM.getId(stack.getItem()).toString());
     }
@@ -1288,19 +1322,18 @@ public class ShulkerSorter extends Module {
         return setup.widget(theme);
     }
 
-    ShulkerClassifier.Result classifyShulker(ItemStack stack, CategoryRules rules) {
-        List<ShulkerClassifier.Slot> slots = new ArrayList<>();
-        for (ItemStack inner : ShulkerDataParser.parseShulkerContentsAsList(stack)) {
-            slots.add(new ShulkerClassifier.Slot(Registries.ITEM.getId(inner.getItem()).toString(), inner.getCount()));
+    private DestinationChoice inputDestination(ItemStack stack) {
+        if (!isShulker(stack) && !sortLoose.get()) {
+            return null;
         }
-        return ShulkerClassifier.classify(slots, rules, purity.get());
+        return resolveDestination(SorterStore.get(), categoryOf(stack));
     }
 
     private String describe(ItemStack stack) {
-        if (isShulker(stack)) {
-            return "shulker -> " + classifyShulker(stack, SorterStore.get().rules).describe();
-        }
-        return Registries.ITEM.getId(stack.getItem()).getPath() + " -> " + SorterStore.get().rules.categoryOf(Registries.ITEM.getId(stack.getItem()).toString());
+        String item = isShulker(stack) ? "shulker (" + SorterShulkers.classify(stack, SorterStore.get().rules, purity.get()).describe() + ")"
+            : Registries.ITEM.getId(stack.getItem()).getPath();
+        DestinationChoice choice = inputDestination(stack);
+        return item + " -> " + (choice == null ? "stays" : choice.category() + " at " + choice.chest());
     }
 
     static boolean isShulker(ItemStack stack) {
@@ -1373,7 +1406,7 @@ public class ShulkerSorter extends Module {
         }
     }
 
-    boolean isPurifying() {
+    boolean isAtStation() {
         return state == State.PURIFY;
     }
 
@@ -1386,7 +1419,7 @@ public class ShulkerSorter extends Module {
     }
 
     boolean dryRun() {
-        return dryRun.get();
+        return isActive() ? runDryRun : dryRun.get();
     }
 
     boolean ignoreFriends() {
@@ -1465,10 +1498,10 @@ public class ShulkerSorter extends Module {
             snapshotProfile = profile;
         }
         snapshot = snapshotBuilder.build(new SorterSnapshotBuilder.View(
-            new SorterSnapshotBuilder.Run(profile != null, isActive(), autoStart.get(), dryRun.get(), isWithdrawing(),
+            new SorterSnapshotBuilder.Run(profile != null, isActive(), autoStart.get(), runDryRun, isWithdrawing(),
                 runCompleted, runStarted, runEnded),
             new SorterSnapshotBuilder.Work(state, resumeState, target, targetPos, currentDest == null ? "" : currentDest.category,
-                pauseReason, packing.inProgress(), packing.category(), packUiWaitSince != 0, purifier.position(),
+                pauseReason, packing.inProgress(), packing.category(), closedScreenWaitSince != 0, purifier.position(),
                 isActive() && state == State.PURIFY ? purifier.pauseReason() : null, state == State.PURIFY ? purifier.hudState() : ""),
             new SorterSnapshotBuilder.Inputs(exhaustedInputs, excludedChests, emptiedInputs),
             profile == null ? null : SorterSnapshotBuilder.storage(profile), deliveries.results(), this::missingCargoCategories,

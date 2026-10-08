@@ -71,7 +71,7 @@ Restocking, inventory handling, and stash transfer tools.
 | `PearlLoader` | Anti-AFK loop with pearl-loading support. |
 | `replenish` | Replenishes hotbar items using shift-click packets. |
 | `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
-| `shulker-sorter` | Sorts shulkers and items from input chests into category chests, purifies mixed shulkers and fills partial ones at a station, and withdraws shulkers on request. Set it up with `tag-key` and the buttons in its settings. |
+| `shulker-sorter` | Sorts shulkers and items from input chests into category chests, purifies mixed shulkers and fills partial ones at a station. Fills an empty shulker when a category has at least 27 loose stacks; optional `shulkerColor` in the JSON prefers its dye color. Withdraws only 100% pure shulkers, or empty ones for `shulkers`. Set it up with `tag-key` and the buttons in its settings. |
 | `stash-mover` | Moves items between selected input and output stash areas using pearl loading. |
 
 ### Utility (15)

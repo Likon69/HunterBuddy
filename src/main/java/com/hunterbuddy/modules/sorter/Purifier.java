@@ -2,6 +2,7 @@ package com.hunterbuddy.modules.sorter;
 
 import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
+import com.hunterbuddy.modules.sorter.ShulkerSorter.ContainerType;
 import com.hunterbuddy.modules.sorter.logic.PurificationPlan;
 import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import java.util.ArrayList;
@@ -52,6 +53,8 @@ public final class Purifier {
     private int contentsSyncId = -1;
     private BlockPos pos;
     private State state;
+    private State afterGoto;
+    private int selectedSlot = -1;
     private int slot;
     private int ticks;
     private int jobTicks;
@@ -62,6 +65,7 @@ public final class Purifier {
     private boolean contentsChecked;
     private String pauseReason;
     private long pauseStarted;
+    private long clearSince;
     private ItemStack completedShulker = ItemStack.EMPTY;
 
     Purifier(ShulkerSorter owner, SorterInventory inventory, SorterSafety safety) {
@@ -134,6 +138,7 @@ public final class Purifier {
 
     private void startJob(PurificationPlan plan, PackingPlan fillingPlan, int slot, int delay) {
         this.fillingPlan = fillingPlan;
+        selectedSlot = mc.player.getInventory().getSelectedSlot();
         expectedFillContents = null;
         contentsSyncId = -1;
         completedShulker = ItemStack.EMPTY;
@@ -146,9 +151,11 @@ public final class Purifier {
             owner.warning("Recovering the shulker left at %s.", pos.toShortString());
         }
         failed = placed && plan != null;
+        afterGoto = placed ? State.CLOSE : State.PLACE;
         contentsChecked = false;
         pauseReason = null;
         pauseStarted = 0;
+        clearSince = 0;
         jobTicks = 0;
         index = 0;
         extracted.clear();
@@ -163,9 +170,9 @@ public final class Purifier {
             return stop("Pause exceeded two minutes: " + pauseReason);
         }
         if (state == State.PLACE || state == State.BREAK) {
-            String reason = safety.visiblePlayerReason(owner.ignoreFriends());
+            String reason = safety.waitingReason(owner.ignoreFriends());
+            long now = System.nanoTime();
             if (reason != null) {
-                long now = System.nanoTime();
                 if (pauseReason == null) {
                     pauseStarted = now;
                     owner.stopPathing();
@@ -174,10 +181,21 @@ public final class Purifier {
                     }
                 }
                 pauseReason = reason;
+                clearSince = 0;
                 return Result.RUNNING;
             }
+            if (pauseReason != null) {
+                if (clearSince == 0) {
+                    clearSince = now;
+                }
+                if (now - clearSince < SorterSafety.RESUME_DELAY_NANOS) {
+                    return Result.RUNNING;
+                }
+                pauseReason = null;
+                pauseStarted = 0;
+                clearSince = 0;
+            }
         }
-        pauseReason = null;
         ticks++;
         jobTicks++;
         if (!placed && mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock) {
@@ -204,6 +222,17 @@ public final class Purifier {
             }
             recover("Station deadline reached");
         }
+        if ((state == State.PLACE || state == State.OPEN || state == State.BREAK)
+            && (!owner.inReach(pos) || state == State.PLACE && !owner.inReach(pos.down()))) {
+            if (state == State.BREAK) {
+                mc.interactionManager.cancelBlockBreaking();
+            }
+            afterGoto = state;
+            enter(State.GOTO);
+            timer = 0;
+            walkToStation();
+            return Result.RUNNING;
+        }
         if (timer > 0) {
             timer--;
             return Result.RUNNING;
@@ -218,7 +247,7 @@ public final class Purifier {
                     && owner.inReach(pos) && owner.inReach(pos.down())
                     && !mc.player.getBoundingBox().intersects(new Box(pos))) {
                     owner.stopPathing();
-                    enter(placed ? State.CLOSE : State.PLACE);
+                    enter(afterGoto);
                 } else if (ticks % 40 == 0) {
                     walkToStation();
                 }
@@ -262,7 +291,12 @@ public final class Purifier {
                     enter(State.TRANSFER);
                     timer = owner.actionDelay();
                 } else if ((ticks - owner.actionDelay() - 1) % owner.openTimeout() == 0) {
-                    owner.interact(pos);
+                    if (!owner.interact(pos, ContainerType.SHULKER)) {
+                        if (sourceReturned()) {
+                            return finishReturnedSource();
+                        }
+                        recover("Station shulker disappeared");
+                    }
                 }
             }
             case TRANSFER -> transfer();
@@ -290,21 +324,23 @@ public final class Purifier {
                         return stop("No room to collect the shulker");
                     }
                     BlockState block = mc.world.getBlockState(pos);
-                    int best = slot >= 0 && mc.player.getInventory().getStack(slot).isEmpty()
-                        ? slot : mc.player.getInventory().getSelectedSlot();
-                    for (int i = 0; i < 9; i++) {
-                        if (mc.player.getInventory().getStack(i).isEmpty()) {
-                            best = i;
-                            break;
-                        }
-                    }
+                    int best = -1;
                     float speed = 1;
                     for (int i = 0; i < 9; i++) {
-                        float candidate = mc.player.getInventory().getStack(i).getMiningSpeedMultiplier(block);
+                        ItemStack stack = mc.player.getInventory().getStack(i);
+                        if (stack.isDamageable() && stack.getMaxDamage() - stack.getDamage() < 10) {
+                            continue;
+                        }
+                        float candidate = stack.getMiningSpeedMultiplier(block);
                         if (candidate > speed) {
                             speed = candidate;
                             best = i;
+                        } else if (best < 0 && !stack.isDamageable()) {
+                            best = i;
                         }
+                    }
+                    if (best < 0) {
+                        return stop("No safe tool or hand slot to break the shulker");
                     }
                     mc.player.getInventory().setSelectedSlot(best);
                     enter(State.BREAK);
@@ -338,12 +374,13 @@ public final class Purifier {
                     }
                     inventory.acceptRecovered(i);
                     owner.stopPathing();
-                    if (owner.classifyShulker(stack, SorterStore.get().rules).isMixed()) {
+                    if (SorterShulkers.classify(stack, SorterStore.get().rules, owner.purity.get()).isMixed()) {
                         owner.warning("Recovered shulker is still mixed; using normal routing.");
                     }
                     if (!failed) {
                         completedShulker = stack.copy();
                     }
+                    restoreSelectedSlot();
                     return failed ? Result.FAILURE : Result.DONE;
                 }
                 if (ticks >= 10 && ticks % 20 == 10) {
@@ -565,19 +602,29 @@ public final class Purifier {
     private Result stationFailure(String reason) {
         owner.disablePurification(reason + " at " + pos.toShortString());
         owner.stopPathing();
+        restoreSelectedSlot();
         return Result.FAILURE;
     }
 
     private Result fail(String reason) {
         owner.warning("%s at %s.", reason, pos.toShortString());
         owner.stopPathing();
+        restoreSelectedSlot();
         return Result.FAILURE;
     }
 
     private Result stop(String reason) {
         owner.blockingWarning("%s; sorter stopped. Recover the shulker at %s.", reason, pos.toShortString());
         owner.stopPathing();
+        restoreSelectedSlot();
         return Result.STOP;
+    }
+
+    void restoreSelectedSlot() {
+        if (selectedSlot >= 0 && mc.player != null) {
+            mc.player.getInventory().setSelectedSlot(selectedSlot);
+        }
+        selectedSlot = -1;
     }
 
     ItemStack completedShulker() {
@@ -606,7 +653,7 @@ public final class Purifier {
 
     String statusLine() {
         if (pauseReason != null) {
-            return "PURIFY PAUSED: " + pauseReason + " @ " + pos.toShortString();
+            return (isFilling() ? "PACK PAUSED: " : "PURIFY PAUSED: ") + pauseReason + " @ " + pos.toShortString();
         }
         return (isFilling() ? "PACK " : "PURIFY ") + state + " @ " + pos.toShortString();
     }

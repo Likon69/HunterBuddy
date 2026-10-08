@@ -25,6 +25,7 @@ final class SorterSnapshotBuilder {
             emptied = Set.copyOf(emptied);
         }
     }
+
     private record ChestGroup(List<Pos> chests, Set<Pos> full) { }
     record Storage(List<Pos> inputs, List<ChestGroup> destinations, int reserves, String station) { }
     record View(Run run, Work work, Inputs inputs, Storage storage, SorterRunSnapshot.Results results,
@@ -132,7 +133,9 @@ final class SorterSnapshotBuilder {
         }
         SorterRunSnapshot.Withdrawal hudWithdrawal = (active || done) && view.run().withdrawing() && view.withdrawal() != null ? view.withdrawal().get() : null;
         if (hudWithdrawal != null) {
-            stateText = "Withdraw";
+            if (mode != SorterRunSnapshot.Mode.PAUSED) {
+                stateText = "Withdraw";
+            }
             stage = null;
             if (hudTarget != null) {
                 hudTarget = new SorterRunSnapshot.Target(view.work().target() == Target.ENDER ? "Ender chest" : "Source",
