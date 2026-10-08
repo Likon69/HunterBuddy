@@ -61,6 +61,8 @@ public final class Purifier {
     private int index;
     private int timer;
     private boolean placed;
+    private boolean placementSent;
+    private int placeTicks;
     private boolean failed;
     private boolean contentsChecked;
     private String pauseReason;
@@ -150,6 +152,8 @@ public final class Purifier {
         if (placed) {
             owner.warning("Recovering the shulker left at %s.", pos.toShortString());
         }
+        placementSent = false;
+        placeTicks = 0;
         failed = placed && plan != null;
         afterGoto = placed ? State.CLOSE : State.PLACE;
         contentsChecked = false;
@@ -166,6 +170,12 @@ public final class Purifier {
     }
 
     Result tick() {
+        if (state == State.BREAK && !(mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock)) {
+            enter(State.PICKUP);
+            pauseReason = null;
+            pauseStarted = 0;
+            clearSince = 0;
+        }
         if (pauseReason != null && System.nanoTime() - pauseStarted >= SorterSafety.PAUSE_LIMIT_NANOS) {
             return stop("Pause exceeded two minutes: " + pauseReason);
         }
@@ -198,13 +208,16 @@ public final class Purifier {
         }
         ticks++;
         jobTicks++;
+        if (state == State.PLACE) {
+            placeTicks++;
+        }
         if (!placed && mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock) {
             placed = true;
         }
         if (jobTicks > globalLimit()) {
             return stop("Job deadline reached");
         }
-        if (ticks > stateLimit()) {
+        if ((state == State.PLACE ? placeTicks : ticks) > stateLimit()) {
             if (state == State.BREAK || state == State.PICKUP || state == State.CLOSE) {
                 return stop("Recovery deadline reached");
             }
@@ -257,6 +270,10 @@ public final class Purifier {
                     placed = true;
                     enter(State.OPEN);
                     timer = owner.actionDelay();
+                } else if (placementSent) {
+                    if (sourceReturned()) {
+                        return finishReturnedSource();
+                    }
                 } else if (ticks == 1) {
                     if (nearestDrop() != null) {
                         return stop("Uncollected shulker near the station");
@@ -277,6 +294,7 @@ public final class Purifier {
                     mc.player.input.playerInput = sneaking;
                     mc.player.networkHandler.sendPacket(new PlayerInputC2SPacket(sneaking));
                     try {
+                        placementSent = true;
                         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND,
                             new BlockHitResult(hit, Direction.UP, pos.down(), false));
                     } finally {
@@ -347,17 +365,13 @@ public final class Purifier {
                 }
             }
             case BREAK -> {
-                if (!(mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock)) {
-                    enter(State.PICKUP);
+                rotate(Vec3d.ofCenter(pos), ticks == 1);
+                if (ticks == 1) {
+                    mc.interactionManager.attackBlock(pos, Direction.UP);
                 } else {
-                    rotate(Vec3d.ofCenter(pos), ticks == 1);
-                    if (ticks == 1) {
-                        mc.interactionManager.attackBlock(pos, Direction.UP);
-                    } else {
-                        mc.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
-                    }
-                    mc.player.swingHand(Hand.MAIN_HAND);
+                    mc.interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
                 }
+                mc.player.swingHand(Hand.MAIN_HAND);
             }
             case PICKUP -> {
                 if (mc.world.getBlockState(pos).getBlock() instanceof ShulkerBoxBlock) {

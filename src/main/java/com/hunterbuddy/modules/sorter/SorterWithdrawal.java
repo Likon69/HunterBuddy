@@ -33,6 +33,7 @@ final class SorterWithdrawal {
     private int pendingSource = -1;
     private GenericContainerScreenHandler pendingHandler;
     private int deposited;
+    private int withdrawn;
 
     SorterWithdrawal(SorterInventory inventory, Request request, SorterProfile profile) {
         this.inventory = inventory;
@@ -91,6 +92,9 @@ final class SorterWithdrawal {
                 || inventory.firstEmptyCargoSlot(handler) != pendingSlot) {
                 return false;
             }
+            if (!prepareCargoSlot(handler, pendingSlot)) {
+                return false;
+            }
             inventory.emptyCursor(handler);
             settle(handler);
             return true;
@@ -99,7 +103,8 @@ final class SorterWithdrawal {
             return false;
         }
         int destination = inventory.firstEmptyCargoSlot(handler);
-        if (destination < 0 || inventory.openingClicks + 2 > SorterInventory.clickLimit(handler)) {
+        if (destination < 0 || inventory.openingClicks + 2 > SorterInventory.clickLimit(handler)
+            || !prepareCargoSlot(handler, destination)) {
             return false;
         }
         for (int source = 0; source < handler.getRows() * 9; source++) {
@@ -126,13 +131,24 @@ final class SorterWithdrawal {
         }
         if (handler.getSlot(pendingSource).getStack().isEmpty()
             && ItemStack.areEqual(handler.getSlot(pendingSlot).getStack(), pending)) {
-            int containerSlots = handler.getRows() * 9;
-            int inv = pendingSlot - containerSlots;
-            inv = inv < 27 ? inv + 9 : inv - 27;
-            taken.put(inv, pending.copy());
+            int inv = inventorySlot(handler, pendingSlot);
+            if (!pendingDeposits.contains(inv) && !taken.containsKey(inv)) {
+                taken.put(inv, pending.copy());
+            }
         }
         pending = ItemStack.EMPTY;
         pendingHandler = null;
+    }
+
+    private boolean prepareCargoSlot(GenericContainerScreenHandler handler, int slot) {
+        int inv = inventorySlot(handler, slot);
+        confirmEmptyDeposit(inv);
+        return !pendingDeposits.contains(inv) && !taken.containsKey(inv);
+    }
+
+    private static int inventorySlot(GenericContainerScreenHandler handler, int slot) {
+        int inv = slot - handler.getRows() * 9;
+        return inv < 27 ? inv + 9 : inv - 27;
     }
 
     boolean owns(int inv, ItemStack stack) {
@@ -169,9 +185,21 @@ final class SorterWithdrawal {
         pendingDeposits.clear();
     }
 
-    void resetDepositVisit() {
+    void finishClosedDeposit() {
         deposits.resetVisit();
+        for (int inv : new HashSet<>(pendingDeposits)) {
+            confirmEmptyDeposit(inv);
+        }
         pendingDeposits.clear();
+    }
+
+    private void confirmEmptyDeposit(int inv) {
+        if (pendingDeposits.contains(inv) && mc.player.getInventory().getStack(inv).isEmpty()) {
+            if (taken.remove(inv) != null) {
+                deposited++;
+            }
+            pendingDeposits.remove(inv);
+        }
     }
 
     int held() {
@@ -191,7 +219,8 @@ final class SorterWithdrawal {
                 pendingCount++;
             }
         }
-        return deposited + held() + pendingCount;
+        withdrawn = Math.max(withdrawn, deposited + held() + pendingCount);
+        return withdrawn;
     }
 
     String summary() {

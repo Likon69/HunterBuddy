@@ -197,6 +197,7 @@ public class ShulkerSorter extends Module {
     private boolean pathingStarted;
     private boolean assignedReserve;
     private long closedScreenWaitSince;
+    private int closedDepositTicks;
     private int contentsSyncId = -1;
     private GenericContainerScreenHandler visitHandler;
 
@@ -351,8 +352,9 @@ public class ShulkerSorter extends Module {
         pendingRecovery = false;
         assignedReserve = false;
         closedScreenWaitSince = 0;
+        closedDepositTicks = 0;
         setState(State.PICK_INPUT);
-        if (!isWithdrawing() && !runDryRun && (purifyMixed.get() || packShulkers.get()) && profile.unpackStation != null) {
+        if (!isWithdrawing() && (purifyMixed.get() || packShulkers.get()) && profile.unpackStation != null) {
             inventory.reserveHotbarSlot();
             if (inventory.reservedSlot == -1) {
                 warning("No empty hotbar slot; station jobs disabled for this run.");
@@ -480,6 +482,9 @@ public class ShulkerSorter extends Module {
                 }
                 default -> { }
             }
+            return;
+        }
+        if (waitForClosedDeposit()) {
             return;
         }
         if (timer > 0) {
@@ -774,10 +779,6 @@ public class ShulkerSorter extends Module {
             warning("Container at %s changed; skipping it.", pos.toShortString());
             return false;
         }
-        if (!inReach(pos)) {
-            warning("Container at %s is out of reach; skipping it.", pos.toShortString());
-            return false;
-        }
         Vec3d eye = mc.player.getEyePos();
         Vec3d center = Vec3d.ofCenter(pos);
         Vec3d toEye = eye.subtract(center);
@@ -960,14 +961,34 @@ public class ShulkerSorter extends Module {
         }
     }
 
+    private boolean waitForClosedDeposit() {
+        if (!isWithdrawing() || target != Target.ENDER || state != State.DEPOSIT && state != State.CLOSE) {
+            return false;
+        }
+        if (mc.player.currentScreenHandler != mc.player.playerScreenHandler) {
+            closedDepositTicks = 0;
+            return false;
+        }
+        if (mc.currentScreen != null || !mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
+            closedDepositTicks = 0;
+            return true;
+        }
+        if (++closedDepositTicks < actionDelay.get()) {
+            return true;
+        }
+        withdrawal.finishClosedDeposit();
+        closedDepositTicks = 0;
+        visitHandler = null;
+        timer = actionDelay.get();
+        setState(withdrawal.cargoChanged() ? State.DONE : withdrawal.held() > 0 ? State.PICK_DEST : State.PICK_INPUT);
+        return true;
+    }
+
     private void tickDeposit() {
         int clicksBefore = inventory.openingClicks;
         try {
             if (!(mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler)) {
                 deliveries.resetVisit();
-                if (isWithdrawing()) {
-                    withdrawal.resetDepositVisit();
-                }
                 setState(State.OPEN);
                 return;
             }
@@ -1330,10 +1351,19 @@ public class ShulkerSorter extends Module {
     }
 
     private String describe(ItemStack stack) {
-        String item = isShulker(stack) ? "shulker (" + SorterShulkers.classify(stack, SorterStore.get().rules, purity.get()).describe() + ")"
-            : Registries.ITEM.getId(stack.getItem()).getPath();
+        SorterProfile profile = SorterStore.get();
+        ShulkerClassifier.Result result = isShulker(stack) ? SorterShulkers.classify(stack, profile.rules, purity.get()) : null;
+        String item = result != null ? "shulker (" + result.describe() + ")" : Registries.ITEM.getId(stack.getItem()).getPath();
+        if (result != null && result.isMixed() && purifyMixed.get() && !purificationDisabled
+            && inventory.reservedSlot >= 0 && profile.unpackStation != null) {
+            PurificationPlan plan = Purifier.plan(stack);
+            if (plan.requiredCargoSlots() <= inventory.cargoCapacity() && resolveDestination(profile, plan.retainedCategory()) != null) {
+                return item + " -> station: keeps " + plan.retainedCategory();
+            }
+        }
         DestinationChoice choice = inputDestination(stack);
-        return item + " -> " + (choice == null ? "stays" : choice.category() + " at " + choice.chest());
+        return item + " -> " + (choice == null ? "stays" : choice.reserve() ? "a reserve (if still free)"
+            : choice.category() + " at " + choice.chest());
     }
 
     static boolean isShulker(ItemStack stack) {
