@@ -813,7 +813,6 @@ public class SpawnerDetector extends Module {
     private int autoAscendTimeoutBaseTick;
     private int autoAscendSurfacedCount;
     private BlockPos autoAscendArrivedAt;
-    private int autoSelfAscendReturns;
 
     private int autoSelfAscendDirIndex;
     private final boolean[] autoSelfAscendTried = new boolean[4];
@@ -1017,7 +1016,6 @@ public class SpawnerDetector extends Module {
         autoAscendTimeoutBaseTick = 0;
         autoAscendSurfacedCount = 0;
         autoAscendArrivedAt = null;
-        autoSelfAscendReturns = 0;
         resetSelfAscendState(true);
         autoWalkBestDist = -1;
         autoWalkBestDistTick = 0;
@@ -3048,29 +3046,12 @@ public class SpawnerDetector extends Module {
 
     private void enterState(AutoState next, String details) {
         if (state == AutoState.EXIT && next != AutoState.EXIT) restoreExitReturnSettings();
-        boolean widenAscend = false;
-        if (state == AutoState.SELF_ASCEND && next == AutoState.ASCEND) {
-            autoSelfAscendReturns++;
-            if (autoSelfAscendReturns >= 2) {
-                widenAscend = autoAscendRadius < 96;
-                if (!widenAscend) next = AutoState.TAKEOFF_SPOT;
-            }
-        }
-        if (next == AutoState.SELF_ASCEND && state != AutoState.SWIM_UP
-            && (autoSelfAscendReturns >= 2 || mc.player.getBlockPos().getY() <= autoSite.room.cy() + 4)) {
-            widenAscend = autoAscendRadius < 96;
-            next = widenAscend ? AutoState.ASCEND : AutoState.TAKEOFF_SPOT;
-            details = "self ascend unavailable, " + (widenAscend ? "wider takeoff search" : "takeoff spot");
-            BaritoneHelper.stopAllPathing();
-            releaseAllAutoKeys();
-        }
         if (autoSite != null && next != AutoState.RESUME && next != AutoState.FAILED) protectAutoThrowawayItems();
         state = next;
         stateTicks = 0;
         setChestplateHold(autoChestplateAllowed && (next == AutoState.DIG || next == AutoState.SIDE_DIG
             || next == AutoState.ROOM || next == AutoState.ROOM_CLIMB || next == AutoState.TUNNEL));
         autoLog(next.name(), autoSite.center, details);
-        if (widenAscend) ascendRetryBiggerRadius();
     }
 
     private void protectAutoThrowawayItems() {
@@ -3871,6 +3852,8 @@ public class SpawnerDetector extends Module {
             if (rim != null) holeTopY = rr.holeTopY();
         }
 
+        if (rim == null && !water && holeTopY <= sc.bottomFeet() + 3) return new SideHoleAttempt(null, "open hole without rim");
+
         boolean skyBlocked = false;
         for (int sy = holeTopY; sy <= exitY + SKY_CHECK_HEIGHT; sy++) {
             cursor.set(x, sy, z);
@@ -4276,7 +4259,6 @@ public class SpawnerDetector extends Module {
         autoSoloTarget = target;
         autoSite = target;
         autoColumn = soloTravelColumn();
-        autoSelfAscendReturns = 0;
         autoChestplateAllowed = false;
         autoSoloBestDistSq = Double.MAX_VALUE;
         autoSoloBestDistTick = 0;
@@ -4375,7 +4357,6 @@ public class SpawnerDetector extends Module {
 
     private void startAutoRun(Site site, ColumnPlan plan) {
         autoSite = site;
-        autoSelfAscendReturns = 0;
         autoColumn = plan;
         autoSoloMode = configuredSoloMode();
         autoSoloTransitOnly = false;
@@ -4904,7 +4885,9 @@ public class SpawnerDetector extends Module {
                 ? autoColumn.rim()
                 : autoColumn.water() && mc.player.getBlockPos().getY() >= autoColumn.exitY() - 1
                     ? new BlockPos(autoColumn.x(), autoColumn.exitY() - 1, autoColumn.z())
-                    : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
+                    : autoColumn.side() && !autoColumn.water() && autoColumn.rim() == null && mc.player.getBlockPos().getY() > autoColumn.startY() + 3
+                        ? new BlockPos(autoColumn.x(), autoColumn.holeTopY(), autoColumn.z())
+                        : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
             bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
         }
     }
@@ -5212,7 +5195,8 @@ public class SpawnerDetector extends Module {
         }
 
         int feetYNow = mc.player.getBlockPos().getY();
-        boolean belowHoleTop = feetYNow < autoColumn.startY() && feetYNow > autoSite.room.cy();
+        boolean belowHoleTop = (autoColumn.side() && !autoColumn.water() && autoColumn.rim() == null
+            ? feetYNow <= autoColumn.holeTopY() : feetYNow < autoColumn.startY()) && feetYNow > autoSite.room.cy();
         if (horiz <= 0.5 && belowHoleTop) {
             if (bt != null) bt.getPathingBehavior().cancelEverything();
             if (centerOnColumn(autoColumn.x(), autoColumn.z(), 0.2)) {
@@ -5281,7 +5265,9 @@ public class SpawnerDetector extends Module {
         boolean baritoneGaveUp = bt == null || !bt.getCustomGoalProcess().isActive();
         int nearKeyX = gateRim != null ? gateRim.getX() : autoColumn.x();
         int nearKeyZ = gateRim != null ? gateRim.getZ() : autoColumn.z();
-        int nearKeyY = gateRim != null ? gateRim.getY() : autoColumn.startY();
+        int nearKeyY = gateRim != null ? gateRim.getY()
+            : autoColumn.side() && !autoColumn.water() && autoColumn.rim() == null && mc.player.getBlockPos().getY() > autoColumn.startY() + 3
+                ? autoColumn.holeTopY() : autoColumn.startY();
         int feetY = mc.player.getBlockPos().getY();
         boolean nearHole = Math.hypot((nearKeyX + 0.5) - mc.player.getX(), (nearKeyZ + 0.5) - mc.player.getZ()) <= 3.0
             && (feetY == nearKeyY || (gateRim == null && feetY == nearKeyY - 1));
@@ -5331,7 +5317,9 @@ public class SpawnerDetector extends Module {
                 BlockPos goal = gateRim != null ? gateRim
                     : autoColumn.water() && mc.player.getBlockPos().getY() >= autoColumn.exitY() - 1
                         ? new BlockPos(autoColumn.x(), autoColumn.exitY() - 1, autoColumn.z())
-                        : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
+                        : autoColumn.side() && !autoColumn.water() && autoColumn.rim() == null && mc.player.getBlockPos().getY() > autoColumn.startY() + 3
+                            ? new BlockPos(autoColumn.x(), autoColumn.holeTopY(), autoColumn.z())
+                            : new BlockPos(autoColumn.x(), autoColumn.startY(), autoColumn.z());
                 bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
             }
         } else if (!pathing && baritoneGaveUp && (autoBaritoneRetries >= 3 || nearHole)) {
@@ -7025,7 +7013,6 @@ public class SpawnerDetector extends Module {
             lower.center.getX(), lower.center.getY(), lower.center.getZ()));
 
         autoSite = lower;
-        autoSelfAscendReturns = 0;
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
         autoRoomFoundItems = 0;
@@ -7111,7 +7098,6 @@ public class SpawnerDetector extends Module {
 
         autoSite = chainSite;
         autoRunAbandoned = false;
-        autoSelfAscendReturns = 0;
         autoRoomFoundShulkers = 0;
         autoRoomFoundItems = 0;
 
@@ -7875,7 +7861,6 @@ public class SpawnerDetector extends Module {
 
         autoSite = chainSite;
         autoColumn = chainPlan;
-        autoSelfAscendReturns = 0;
         autoChestplateAllowed = !chainPlan.water();
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
@@ -7962,21 +7947,8 @@ public class SpawnerDetector extends Module {
         if (!autoExitTrailDirectTried && !mc.player.isTouchingWater() && dy >= 2 && mc.world.getFluidState(target).isEmpty()) {
             autoLog("EXIT", autoSite.center, String.format("trail climbs dy=%d to %d,%d,%d, back with baritone",
                 dy, target.getX(), target.getY(), target.getZ()));
-            if (autoExitReturnSettingsSaved) {
-                autoExitTrailDirectTried = true;
-                autoExitRetracingTrail = false;
-                autoExitReturning = true;
-                autoExitNoPathChecks = 0;
-                autoExitSelfWalk = false;
-                autoExitSelfBestDist = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).distanceTo(Vec3d.ofBottomCenter(
-                    new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z())));
-                autoExitSelfStuckTicks = 0;
-                IBaritone bt = primaryBaritone();
-                if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(
-                    new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z())));
-            } else {
-                finishExitTunnelTrail(true, "trail climb, baritone");
-            }
+            restoreExitReturnSettings();
+            finishExitTunnelTrail(true, "trail climb, baritone");
             return;
         }
 
@@ -10135,7 +10107,7 @@ public class SpawnerDetector extends Module {
                 int ng = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, nx, nz) - 1;
                 ng = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, nx, nz, ng, groundY - 1, false, cursor) + 1;
                 if (ng > groundY + 1) return false;
-                for (int dy = 1; dy <= 2; dy++) {
+                for (int dy = 1; dy <= 8; dy++) {
                     cursor.set(nx, groundY + dy, nz);
                     if (!isOpenState(mc.world.getBlockState(cursor), cursor)) return false;
                 }
@@ -10156,14 +10128,12 @@ public class SpawnerDetector extends Module {
                 int x = cx + dx, z = cz + dz;
                 int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
                 if (topY > maxTakeoffY) continue;
-                int groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, topY - 1, mc.world.getBottomY(), false, cursor) + 1;
-                if (groundY != topY) continue;
+                int groundY = topY;
 
                 cursor.set(x, groundY - 1, z);
                 BlockState belowState = mc.world.getBlockState(cursor);
                 if (belowState.getCollisionShape(mc.world, cursor).isEmpty()) continue;
                 if (!belowState.getFluidState().isEmpty()) continue;
-                if (belowState.isIn(BlockTags.LEAVES)) continue;
 
                 cursor.set(x, groundY, z);
                 if (mc.world.getFluidState(cursor).isIn(FluidTags.WATER)) continue;
@@ -10185,7 +10155,7 @@ public class SpawnerDetector extends Module {
         List<BlockPos> points = new ArrayList<>();
         for (BlockPos p : candidates) {
             if (points.size() >= 12) break;
-            if (!hasBlockAbove(p.getX(), p.getY(), p.getZ(), SKY_CHECK_HEIGHT)) points.add(p);
+            points.add(p);
         }
         return points;
     }
@@ -10225,7 +10195,9 @@ public class SpawnerDetector extends Module {
             autoLog("ASCEND", autoSite.center, "takeoff points found=" + autoAscendTargets.size()
                 + (nearest != null ? " nearest=" + nearest.getX() + "," + nearest.getY() + "," + nearest.getZ() : ""));
             IBaritone bt = primaryBaritone();
-            if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+            if (bt != null && (!autoAscendTargets.isEmpty() || (autoColumn.water() && autoAscendRadius >= 96))) {
+                bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+            }
         }
 
         if (stateTicks - autoAscendTimeoutBaseTick > 120 * 20) {
@@ -10247,16 +10219,28 @@ public class SpawnerDetector extends Module {
             return;
         }
 
+        if (autoAscendTargets.isEmpty()) {
+            if (autoAscendRadius < 96) {
+                ascendRetryBiggerRadius();
+                return;
+            }
+            if (!autoColumn.water()) {
+                IBaritone bt = primaryBaritone();
+                if (bt != null) bt.getPathingBehavior().cancelEverything();
+                releaseAllAutoKeys();
+                enterState(AutoState.SELF_ASCEND, "no surface takeoff point, self ascend");
+                return;
+            }
+        }
+
         boolean arrived = false;
         BlockPos arrivedAt = null;
-
         if (!autoAscendTargets.isEmpty()) {
-            BlockPos feet = mc.player.getBlockPos();
             for (BlockPos p : autoAscendTargets) {
                 double dxz = Math.hypot((p.getX() + 0.5) - mc.player.getX(), (p.getZ() + 0.5) - mc.player.getZ());
                 double dy = Math.abs(mc.player.getY() - p.getY());
                 if (dxz <= 1.0 && dy <= 1.0) {
-                    arrived = mc.player.isOnGround() && !mc.player.isClimbing() && !hasBlockAbove(feet.getX(), feet.getY(), feet.getZ(), SKY_CHECK_HEIGHT);
+                    arrived = mc.player.isOnGround() && !mc.player.isClimbing() && isTrueSkyHere();
                     arrivedAt = p;
                     break;
                 }
@@ -10264,7 +10248,7 @@ public class SpawnerDetector extends Module {
         } else {
             double dxz = Math.hypot((autoColumn.x() + 0.5) - mc.player.getX(), (autoColumn.z() + 0.5) - mc.player.getZ());
             double dy = Math.abs(mc.player.getY() - autoColumn.exitY());
-            arrived = dxz <= 1.0 && dy <= 1.0 && mc.player.isOnGround();
+            arrived = dxz <= 1.0 && dy <= 1.0 && mc.player.isOnGround() && isTrueSkyHere();
             arrivedAt = new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z());
         }
 
@@ -10284,27 +10268,8 @@ public class SpawnerDetector extends Module {
                 return;
             }
 
-            if (!autoAscendTargets.isEmpty()) {
-                autoAscendArrivedAt = arrivedAt;
-                enterState(AutoState.TAKEOFF, "");
-                return;
-            }
-
-            boolean blocked = autoColumn.skyBlocked() || hasBlockAbove(autoColumn.x(), autoColumn.exitY(), autoColumn.z(), SKY_CHECK_HEIGHT);
-            if (blocked) {
-                if (autoAscendRadius >= 96) {
-                    releaseAllAutoKeys();
-                    IBaritone bt = primaryBaritone();
-                    if (bt != null) bt.getPathingBehavior().cancelEverything();
-                    autoLog("ASCEND", autoSite.center, "no takeoff spot, self ascend");
-                    enterState(AutoState.SELF_ASCEND, "no takeoff spot");
-                } else {
-                    enterState(AutoState.TAKEOFF_SPOT, "");
-                }
-            } else {
-                autoAscendArrivedAt = arrivedAt;
-                enterState(AutoState.TAKEOFF, "");
-            }
+            autoAscendArrivedAt = arrivedAt;
+            enterState(AutoState.TAKEOFF, "");
             return;
         }
 
@@ -10362,7 +10327,7 @@ public class SpawnerDetector extends Module {
         if (bt != null) bt.getPathingBehavior().cancelEverything();
         releaseAllAutoKeys();
         if (autoAscendRadius >= 96) {
-            enterState(AutoState.TAKEOFF_SPOT, "ascend search exhausted");
+            enterState(AutoState.SELF_ASCEND, "surface path exhausted, self ascend");
             return;
         }
         autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
@@ -10371,6 +10336,13 @@ public class SpawnerDetector extends Module {
         autoAscendStuckPos = null;
         autoAscendStuckTicks = 0;
         autoAscendTimeoutBaseTick = stateTicks;
+        if (autoAscendTargets.isEmpty()) {
+            if (autoAscendRadius < 96) return;
+            if (!autoColumn.water()) {
+                enterState(AutoState.SELF_ASCEND, "no surface takeoff point, self ascend");
+                return;
+            }
+        }
         if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
     }
 
@@ -10412,6 +10384,7 @@ public class SpawnerDetector extends Module {
         if (stateTicks > 180 * 20) {
             releaseAllAutoKeys();
             autoLog("SELF_ASCEND", autoSite.center, "self ascend timeout, fallback ASCEND");
+            autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
             enterState(AutoState.ASCEND, "self ascend timeout");
             return;
         }
@@ -10429,7 +10402,17 @@ public class SpawnerDetector extends Module {
             if (autoSelfAscendPillarMode) {
                 releaseAllAutoKeys();
                 autoLog("SELF_ASCEND", autoSite.center, "self ascend pillar stuck");
-                enterState(AutoState.ASCEND, "self ascend pillar stuck");
+                if (!autoColumn.water() && autoAscendRadius >= 96) {
+                    resetSelfAscendState(true);
+                    autoAscendFailedPoints.retainAll(Set.of(mc.player.getBlockPos()));
+                    autoAscendRadius = 16;
+                    autoAscendTargets = List.of();
+                    autoTakeoffSpot = null;
+                    enterState(AutoState.ASCEND, "new search cycle, radius=16");
+                } else {
+                    autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+                    enterState(AutoState.ASCEND, "self ascend pillar stuck");
+                }
                 return;
             }
             failSelfAscendDirection("no climb");
@@ -10550,7 +10533,17 @@ public class SpawnerDetector extends Module {
         if (!isOpenState(breakState, breakPos) && breakState.getFluidState().isEmpty()) {
             if (!setSelfAscendBreakTarget(breakPos)) {
                 releaseAllAutoKeys();
-                enterState(AutoState.ASCEND, "self ascend pillar blocked");
+                if (!autoColumn.water() && autoAscendRadius >= 96) {
+                    resetSelfAscendState(true);
+                    autoAscendFailedPoints.retainAll(Set.of(mc.player.getBlockPos()));
+                    autoAscendRadius = 16;
+                    autoAscendTargets = List.of();
+                    autoTakeoffSpot = null;
+                    enterState(AutoState.ASCEND, "new search cycle, radius=16");
+                } else {
+                    autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+                    enterState(AutoState.ASCEND, "self ascend pillar blocked");
+                }
                 return;
             }
             if (autoMineTick("SELF_ASCEND", autoSelfAscendBreakPos, false)) {
@@ -10573,7 +10566,17 @@ public class SpawnerDetector extends Module {
             if (isOpenState(placeState, placePos) && placeState.getFluidState().isEmpty()) {
                 if (ensureThrowawayInHotbar() < 0) {
                     releaseAllAutoKeys();
-                    enterState(AutoState.ASCEND, "self ascend no throwaway");
+                    if (!autoColumn.water() && autoAscendRadius >= 96) {
+                        resetSelfAscendState(true);
+                        autoAscendFailedPoints.retainAll(Set.of(mc.player.getBlockPos()));
+                        autoAscendRadius = 16;
+                        autoAscendTargets = List.of();
+                        autoTakeoffSpot = null;
+                        enterState(AutoState.ASCEND, "new search cycle, radius=16");
+                    } else {
+                        autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+                        enterState(AutoState.ASCEND, "self ascend no throwaway");
+                    }
                     return;
                 }
                 tickSelfAscendPlaceStep(placePos);
@@ -10845,7 +10848,7 @@ public class SpawnerDetector extends Module {
     private boolean takeoffIfSkyClear() {
         BlockPos feet = mc.player.getBlockPos();
         if (autoAscendFailedPoints.contains(feet) || !mc.player.isOnGround() || mc.player.isTouchingWater() || mc.player.isClimbing()
-            || !isTrueSkyHere() || !isClearTakeoffGround(feet.getX(), feet.getZ(), feet.getY())) return false;
+            || !isTrueSkyHere() || !isClearSkyHere() || !isClearTakeoffGround(feet.getX(), feet.getZ(), feet.getY())) return false;
         IBaritone bt = primaryBaritone();
         if (bt != null) bt.getPathingBehavior().cancelEverything();
         releaseAllAutoKeys();
@@ -10875,8 +10878,7 @@ public class SpawnerDetector extends Module {
                 int x = cx + dx, z = cz + dz;
                 int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
                 if (topY > maxTakeoffY) continue;
-                int groundY = descendPastFloatingBlocks(autoSite != null ? autoSite.center : null, x, z, topY - 1, mc.world.getBottomY(), false, cursor) + 1;
-                if (groundY != topY) continue;
+                int groundY = topY;
                 BlockPos candidate = new BlockPos(x, groundY, z);
                 if (autoAscendFailedPoints.contains(candidate)) continue;
                 boolean open = true;
@@ -10887,7 +10889,6 @@ public class SpawnerDetector extends Module {
                 }
                 if (!open) continue;
                 if (!isClearTakeoffGround(x, z, groundY)) continue;
-                if (hasBlockAbove(x, groundY, z, SKY_CHECK_HEIGHT)) continue;
                 best = candidate;
                 bestDistSq = distSq;
             }
@@ -10905,15 +10906,15 @@ public class SpawnerDetector extends Module {
             BlockPos spot = findTakeoffSpot();
             autoTakeoffSpot = spot;
             if (spot == null) {
-                if (autoAscendRadius >= 96) {
-                    IBaritone bt = primaryBaritone();
-                    if (bt != null) bt.getPathingBehavior().cancelEverything();
-                    releaseAllAutoKeys();
-                    autoLog("TAKEOFF_SPOT", autoSite.center, "no takeoff spot at maximum radius, new search cycle in 30s");
-                    return;
+                IBaritone bt = primaryBaritone();
+                if (bt != null) bt.getPathingBehavior().cancelEverything();
+                releaseAllAutoKeys();
+                if (autoAscendRadius >= 96 && !autoColumn.water()) {
+                    enterState(AutoState.SELF_ASCEND, "no takeoff spot, self ascend");
+                } else {
+                    autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
+                    enterState(AutoState.ASCEND, "no takeoff spot");
                 }
-                autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
-                enterState(AutoState.ASCEND, "no takeoff spot");
                 return;
             }
             autoLog("TAKEOFF_SPOT", autoSite.center, String.format("spot=%d,%d,%d dist=%.1f",
@@ -10931,11 +10932,7 @@ public class SpawnerDetector extends Module {
             if (bt != null) bt.getPathingBehavior().cancelEverything();
             releaseAllAutoKeys();
             if (autoAscendRadius >= 96) {
-                autoAscendFailedPoints.retainAll(Set.of(mc.player.getBlockPos()));
-                autoAscendRadius = 16;
-                autoAscendTargets = List.of();
-                autoTakeoffSpot = null;
-                enterState(AutoState.ASCEND, "new takeoff search cycle, radius=16");
+                enterState(AutoState.SELF_ASCEND, "takeoff spot unreachable, self ascend");
                 return;
             }
             autoAscendRadius = Math.min(96, Math.max(16, autoAscendRadius) * 2);
@@ -11176,7 +11173,6 @@ public class SpawnerDetector extends Module {
             }
             autoSoloTarget = target;
             autoSite = target;
-            autoSelfAscendReturns = 0;
             autoSoloBestDistSq = Double.MAX_VALUE;
             autoSoloBestDistTick = stateTicks;
             autoSoloNearUnloadedTicks = 0;
