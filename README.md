@@ -108,21 +108,19 @@ Commands use the configured Meteor command prefix.
 | `stashstatus` | Show the selected areas and current StashMover status. |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-## HUD elements (30)
+## HUD elements (27)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
 | HUD name | Description |
 |---|---|
 | `ChunkRadar` | Top-down view of the 1.12 trail the chunk-radar module is following. |
-| `DimensionBanner` | A heraldic banner per dimension, crossfading at portals. |
 | `DimensionCoords` | Coordinates for both Overworld and Nether. |
 | `DubCounter` | Counts all containers in render distance. |
 | `elytra-helper` | Central flight panel: elytra durability, flight time estimates, session stats, and hunt module status. |
 | `ElytraStatus` | Compact one-line elytra status: speed, pitch, rockets, durability. |
 | `EntityList` | Lists nearby entities. |
 | `FindsTicker` | Recent finds and sightings as a fading feed. |
-| `FollowerCockpit` | The waypoint follower's state, or its problem, plus route, consumables and session. |
 | `FollowerHeading` | A heading tape for the waypoint follower: the target as a sliding diamond, the next turns as ghosts. |
 | `FollowerRoute` | The follower's route as a line of milestones: reach halo on the current one, +N for the rest. |
 | `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
@@ -134,7 +132,6 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `PingMeter` | Ping with sparkline, jitter, and keepalive freshness. |
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
 | `RegearStatus` | The regear's identity badge, its station on its line, stocks and gains, counters, next-regear estimate and last event. |
-| `SessionTimeline` | The session as coloured activity segments with find markers. |
 | `SorterStatus` | Shulker sorter state, target, input progress, confirmed deliveries, purified and packed shulkers, capacity and alerts. |
 | `SpeedKMH` | Movement speed in km/h. |
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
@@ -144,15 +141,6 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `TimerSpeed` | Meteor Timer's current multiplier. |
 | `TpsCardiogram` | Server TPS as a scrolling cardiogram, flatlining on lag. |
 | `Travel` | Distance, ETA, and speed toward a named waypoint, checked against elytra range. |
-
-## Module interactions
-
-- `elytra-auto-fly` drives `pitch40-classic`; enable the cycle module, not both by hand.
-- `Pitch40` synchronizes its bounds with Meteor's own ElytraFly.
-- `ElytraRecast` is a watchdog meant to run alongside a flight module, not a flight module itself.
-- Run one flight controller at a time (`control-fly`, `ElytraBounce`, `elytra-auto-fly`, `pitch40-classic`, `RocketFly`).
-- `stash-mover` is configured entirely through the `setinput` / `setoutput` / `stashstatus` / `setclear` commands.
-- The `trails` command manages the memory the `chunk-radar` module builds.
 
 ## Dependencies
 
@@ -175,11 +163,6 @@ Java 21 is required. Use the included Gradle wrapper:
 
 The built addon JAR is written to `build/libs/hunterbuddy-1.0.0.jar`.
 
-## Project notes
-
-- `.reference/` is gitignored and used locally as read-only source material; it is not built with HunterBuddy.
-- AI instruction files such as `agent.md`, `AGENTS.md`, and `CLAUDE.md` are gitignored.
-
 ## Credits and provenance
 
 Several modules started as ports from other addons rather than being written from scratch, credited where the code itself says so:
@@ -187,7 +170,5 @@ Several modules started as ports from other addons rather than being written fro
 - **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
 - **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepMine`, `MlepScaffold`, `MlepAirPlace`).
 - **Jeff mod** (miles352, [meteor-stashhunting-addon](https://github.com/miles352/meteor-stashhunting-addon)) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
-- **RusherHack** — the height-threshold shape `elytra-auto-fly` climbs and dives by; its settings keep RusherHack's own names ("Max Height", "Min Height", "Down Pitch").
-- **FutureClient** — `f-totem`, ported from its `combat/autoTotem` the way Future 2.9 did it.
 - **riths** — Hunting Utilities ("Tim").
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
