@@ -11,6 +11,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.ItemStack;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.Hand;
 
 public class ElytraSwap extends Module {
@@ -437,14 +438,50 @@ public class ElytraSwap extends Module {
          switch (this.chestplateSwapStage) {
             case 1:
                if (this.chestplateSlot >= 9) {
-                  int hotbarSlot = 0;
+                  int hotbarSlot = -1;
+                  int hotbarRank = 0;
 
                   for (int i = 0; i < 9; i++) {
                      ItemStack stack = this.mc.player.getInventory().getStack(i);
-                     if (stack.isEmpty() || !this.isEssentialItem(stack)) {
-                        hotbarSlot = i;
-                        break;
+                     int rank = 0;
+                     if (stack.isEmpty()) {
+                        rank = 3;
+                     } else if (stack.getItem().equals(Items.OBSIDIAN)) {
+                        rank = 2;
+                     } else if (!this.isEssentialItem(stack)
+                           && !stack.isIn(ItemTags.SWORDS)
+                           && !stack.isIn(ItemTags.AXES)
+                           && !stack.getItem().equals(Items.MACE)
+                           && !stack.getItem().equals(Items.TRIDENT)
+                           && !stack.isIn(ItemTags.PICKAXES)
+                           && !stack.getItem().equals(Items.FIREWORK_ROCKET)) {
+                        rank = 1;
                      }
+
+                     if (rank > hotbarRank) {
+                        hotbarRank = rank;
+                        hotbarSlot = i;
+                     }
+                  }
+
+                  if (hotbarSlot == -1) {
+                     this.needsChestplateSwap = false;
+                     this.chestplateSwapStage = 0;
+                     this.chestplateSwapFailures++;
+                     if ((Boolean)this.notifySwap.get()) {
+                        this.warning("Chestplate swap failed - no hotbar slot to put it in (attempt %d)", this.chestplateSwapFailures);
+                     }
+
+                     if (this.chestplateSwapFailures >= 5) {
+                        this.protectionActive = false;
+                        this.storedElytra = ItemStack.EMPTY;
+                        this.chestplateSwapFailures = 0;
+                        if ((Boolean)this.notifySwap.get()) {
+                           this.warning("Giving up on the chestplate swap after %d failed attempts.", 5);
+                        }
+                     }
+
+                     return;
                   }
 
                   InvUtils.move().from(this.chestplateSlot).toHotbar(hotbarSlot);
