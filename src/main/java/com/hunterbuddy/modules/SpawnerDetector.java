@@ -9612,6 +9612,11 @@ public class SpawnerDetector extends Module {
                 if (wasPaused) {
                     IBaritone bt = primaryBaritone();
                     BlockPos goal = autoExitReturning ? shaftBottom : autoExitTrailGoal;
+                    if (autoExitRetracingTrail && goal != null && !autoExitSelfWalk) {
+                        autoExitSelfStuckTicks = 0;
+                        autoExitNoPathChecks = 0;
+                        autoExitSelfBestDist = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()).distanceTo(Vec3d.ofBottomCenter(goal));
+                    }
                     if (bt != null && goal != null && !autoExitSelfWalk) {
                         bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(goal));
                     }
