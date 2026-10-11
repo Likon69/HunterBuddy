@@ -150,6 +150,8 @@ import net.minecraft.world.RaycastContext;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.Palette;
 import net.minecraft.world.chunk.WorldChunk;
+import xaeroplus.module.ModuleManager;
+import xaeroplus.module.impl.PaletteNewChunks;
 
 public class SpawnerDetector extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -549,7 +551,11 @@ public class SpawnerDetector extends Module {
     private record VisitedEntry(int x, int y, int z, String outcome, long time) {}
 
     private ShipwreckRun autoShipwreckRun;
+    private long autoShipwreckDigProgressMs;
+    private double autoShipwreckDigProgressY;
+    private int autoShipwreckDigProgressMined;
     private BlockPos autoShipwreckNextChest;
+    private BlockPos autoShipwreckEntryColumn;
     private BlockPos autoShipwreckEmergencyGoal;
     private long autoShipwreckEmergencySearchMs;
     private long autoShipwreckEmergencyGoalMs;
@@ -592,6 +598,8 @@ public class SpawnerDetector extends Module {
     private final List<VisitedEntry> visitedEntries = new ArrayList<>();
     private final Set<Long> exitLootedKeys = new java.util.HashSet<>();
     private final Map<BlockPos, Long> autoSkipLoggedAt = new HashMap<>();
+    private final Set<ShipwreckSite> autoShipwreckAgeSkipped = new HashSet<>();
+    private boolean autoShipwreckPaletteMissingLogged;
     private String roomRejectInfo;
     private double roomRejectFit = -1;
     private String spawnerlessLossInfo;
@@ -990,6 +998,8 @@ public class SpawnerDetector extends Module {
         purgeAllState();
         totalTicks = 0;
         scanCooldown = 0;
+        autoShipwreckAgeSkipped.clear();
+        autoShipwreckPaletteMissingLogged = false;
         resetAutoState();
         loadVisited();
         retryAbandonedSites();
@@ -1013,6 +1023,7 @@ public class SpawnerDetector extends Module {
         restoreShipwreckSettings();
         autoShipwreckRun = null;
         autoShipwreckNextChest = null;
+        autoShipwreckEntryColumn = null;
         autoShipwreckEmergencyGoal = null;
         autoShipwreckFailedExits.clear();
         autoShipwreckPlatformTried = false;
@@ -3045,13 +3056,14 @@ public class SpawnerDetector extends Module {
 
     private boolean isShipwreckLooted(BlockPos chest, Map<Long, String> outcomes) {
         String outcome = outcomes.get(chest.asLong());
-        return "shipwreck:processed".equals(outcome) || "shipwreck:shulkers".equals(outcome);
+        return "shipwreck:processed".equals(outcome) || "shipwreck:shulkers".equals(outcome) || "shipwreck:chest absent".equals(outcome);
     }
 
     private int shipwreckLootedChests(ShipwreckSite wreck, Map<Long, String> outcomes) {
         int looted = 0;
         for (ShipwreckSite.Chest chest : wreck.chests()) {
-            if (chest.status() == ShipwreckSite.ChestStatus.PRESENT && isShipwreckLooted(chest.pos(), outcomes)) looted++;
+            if (chest.status() == ShipwreckSite.ChestStatus.PRESENT
+                && (isShipwreckLooted(chest.pos(), outcomes) || isFailureOutcome(outcomes.get(chest.pos().asLong())))) looted++;
         }
         return looted;
     }
@@ -3071,6 +3083,7 @@ public class SpawnerDetector extends Module {
     }
 
     private void renderShipwrecks(Render3DEvent event, Map<Long, String> outcomes, Vec3d eye, double maxDistance, double maxDistanceSq) {
+        if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
         for (ShipwreckSite wreck : ShipwreckDetector.foundSites()) {
             ShipwreckSite.Bounds bounds = wreck.bounds();
             if (bounds == null) continue;
@@ -3088,6 +3101,7 @@ public class SpawnerDetector extends Module {
             for (ShipwreckSite.Chest chest : wreck.chests()) {
                 if (chest.status() != ShipwreckSite.ChestStatus.PRESENT) continue;
                 boolean chestLooted = isShipwreckLooted(chest.pos(), outcomes);
+                boolean chestFailed = isFailureOutcome(outcomes.get(chest.pos().asLong()));
                 if (chestLooted && lootedStyle.get() == LootedStyle.HIDE) continue;
                 base = chestLooted ? farmedColor.get() : shipwreckColor.get();
                 line = new Color(base.r, base.g, base.b, (int) (base.a * factor));
@@ -3095,13 +3109,15 @@ public class SpawnerDetector extends Module {
                 BlockPos pos = chest.pos();
                 event.renderer.box(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1.0, pos.getY() + 1.0,
                     pos.getZ() + 1.0, side, line, shapeMode.get(), 0);
-                if (chestLooted && lootedStyle.get() == LootedStyle.CROSS) drawTopCross(event, pos, line);
+                if (chestFailed) drawTopCross(event, pos, new Color(AMBER.r, AMBER.g, AMBER.b, (int) (255 * factor)));
+                else if (chestLooted && lootedStyle.get() == LootedStyle.CROSS) drawTopCross(event, pos, line);
             }
         }
     }
 
     private void renderShipwreckLabels(meteordevelopment.meteorclient.events.render.Render2DEvent event,
                                       Map<Long, String> outcomes, Vec3d eye, double maxDistance, double maxDistanceSq) {
+        if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
         for (ShipwreckSite wreck : ShipwreckDetector.foundSites()) {
             ShipwreckSite.Bounds bounds = wreck.bounds();
             if (bounds == null) continue;
@@ -4326,10 +4342,25 @@ public class SpawnerDetector extends Module {
 
     private List<Site> shipwreckTargets() {
         List<Site> targets = new ArrayList<>();
-        if (!autoFarm.get() || !detectShipwrecks.get()) return targets;
+        if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD || !autoFarm.get() || !detectShipwrecks.get()) return targets;
+        PaletteNewChunks module = ModuleManager.getModule(PaletteNewChunks.class);
+        if (module == null) {
+            if (!autoShipwreckPaletteMissingLogged) {
+                autoShipwreckPaletteMissingLogged = true;
+                if (log.get()) HunterBuddyAddon.LOG.info("[SpawnerDetector/auto] skip shipwrecks reason=PaletteNewChunks unavailable");
+            }
+            return targets;
+        }
         for (ShipwreckSite wreck : ShipwreckDetector.foundSites()) {
             ShipwreckSite.Chest chest = wreck.nearestChest(mc.player.getX(), mc.player.getY(), mc.player.getZ(), this::isVisited);
-            if (chest != null) targets.add(new Site(wreck, chest.pos()));
+            if (chest == null) continue;
+            int chunkX = chest.pos().getX() >> 4, chunkZ = chest.pos().getZ() >> 4;
+            if (!module.isInverseNewChunk(chunkX, chunkZ, net.minecraft.world.World.OVERWORLD)) {
+                if (autoShipwreckAgeSkipped.add(wreck)) logSkipOnce(wreck.origin(),
+                    module.isNewChunk(chunkX, chunkZ, net.minecraft.world.World.OVERWORLD) ? "fresh chunk" : "chunk age unknown");
+                continue;
+            }
+            targets.add(new Site(wreck, chest.pos()));
         }
         return targets;
     }
@@ -4375,21 +4406,25 @@ public class SpawnerDetector extends Module {
         return QualResult.ok(plan);
     }
 
+    private boolean isShipwreckPassable(BlockState state, BlockPos pos) {
+        return !state.getFluidState().isIn(FluidTags.LAVA) && state.getCollisionShape(mc.world, pos).isEmpty();
+    }
+
     private ColumnPlan planShipwreckColumn(BlockPos chest) {
         int x = chest.getX(), z = chest.getZ();
         if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return null;
         if (!mc.world.getBlockState(chest).isOf(Blocks.CHEST)) return null;
-        int top = Math.max(chest.getY() + 1, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z));
+        int top = Math.max(chest.getY() + 1, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z));
         int blocks = 0, water = 0, gap = 0, maxGap = 0;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         for (int y = chest.getY() + 1; y < top; y++) {
             cursor.set(x, y, z);
             BlockState state = mc.world.getBlockState(cursor);
             if (state.getFluidState().isIn(FluidTags.LAVA) || state.getBlock() == Blocks.COBWEB || state.getHardness(mc.world, cursor) < 0) return null;
-            if (state.getFluidState().isIn(FluidTags.WATER)) {
+            if (state.getFluidState().isIn(FluidTags.WATER) && isShipwreckPassable(state, cursor)) {
                 water++;
                 gap = 0;
-            } else if (isOpenState(state, cursor)) {
+            } else if (isShipwreckPassable(state, cursor)) {
                 maxGap = Math.max(maxGap, ++gap);
             } else {
                 blocks++;
@@ -4431,7 +4466,7 @@ public class SpawnerDetector extends Module {
     private void shipwreckExitColumn(boolean atPlayer) {
         int x = atPlayer ? mc.player.getBlockX() : autoColumn.x();
         int z = atPlayer ? mc.player.getBlockZ() : autoColumn.z();
-        int top = Math.max(mc.player.getBlockY() + 1, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z));
+        int top = Math.max(mc.player.getBlockY() + 1, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z));
         autoExitShaft = new ExitShaft(x, z, Math.min(mc.player.getBlockY(), autoSite.center.getY() + 1), top,
             mc.player.isTouchingWater() || autoColumn.water(), false, null);
         autoExitShaftForeign = false;
@@ -4467,7 +4502,7 @@ public class SpawnerDetector extends Module {
             recoverShipwreckExit("surface timeout");
             return true;
         }
-        if (!isVisited(autoSite.center) && autoShipwreckRun.chestExpired(now)) {
+        if (!autoPaused && !isVisited(autoSite.center) && autoShipwreckRun.chestExpired(now)) {
             abandonShipwreckChest("duration", now);
             return true;
         }
@@ -4475,23 +4510,6 @@ public class SpawnerDetector extends Module {
             && (mc.player.isInLava() || mc.player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.MINING_FATIGUE))) {
             abandonShipwreckChest("safety", now);
             return true;
-        }
-        if (mc.player.isSubmergedInWater() && !autoShipwreckRun.returning() && !autoShipwreckRun.departing()) {
-            int top = Math.max(autoColumn.exitY(), mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
-                mc.player.getBlockX(), mc.player.getBlockZ()));
-            int threshold = autoShipwreckRun.airThreshold(top - mc.player.getEyePos().y,
-                mc.player.getAttributeValue(EntityAttributes.OXYGEN_BONUS));
-            if (mc.player.getAir() <= threshold) {
-                stopShipwreckAction();
-                shipwreckExitColumn(true);
-                if (!autoShipwreckRun.returnForAir(now)) {
-                    abandonShipwreckChest("air", now);
-                } else {
-                    autoLog("AIR", autoSite.center, "air surface " + autoShipwreckRun.airReturns() + "/3 air=" + mc.player.getAir() + " threshold=" + threshold);
-                    enterState(AutoState.SWIM_UP, "air surface, retry same chest");
-                }
-                return true;
-            }
         }
         if (autoShipwreckRun.returning()) {
             if (resumeShipwreckAtSurface()) return true;
@@ -4516,18 +4534,56 @@ public class SpawnerDetector extends Module {
         autoRunAbandoned = !outcome.equals("processed") && !outcome.equals("shulkers");
         autoAscendFromAbort = false;
         if (next != null) {
-            autoShipwreckRun.beginReturn(now, false);
-            shipwreckExitColumn(mc.player.isTouchingWater());
-            autoLog("CHAIN", autoSite.center, "next chest " + next.pos().toShortString() + ", surface first");
-        } else {
-            autoShipwreckRun.depart(now);
-            restoreShipwreckSettings();
-            autoLog("EXIT", autoSite.center, "shipwreck done");
+            if (mc.player.isTouchingWater()) {
+                if (startNextShipwreckChest("next chest, underwater travel")) return;
+            } else {
+                autoShipwreckRun.beginReturn(now);
+                shipwreckExitColumn(false);
+                autoLog("CHAIN", autoSite.center, "next chest " + next.pos().toShortString() + ", surface first");
+                enterState(AutoState.EXIT, "shipwreck chest complete");
+                return;
+            }
+        }
+        departShipwreck(now);
+    }
+
+    private void departShipwreck(long now) {
+        autoShipwreckRun.depart(now);
+        restoreShipwreckSettings();
+        autoLog("EXIT", autoSite.center, "shipwreck done");
+        if (mc.player.isTouchingWater()) {
+            if (!shipwreckSkyOpen() && autoShipwreckEntryColumn != null) {
+                enterState(AutoState.WALK, "shipwreck return to entry column");
+                return;
+            }
+            shipwreckExitColumn(true);
         }
         enterState(AutoState.EXIT, "shipwreck chest complete");
     }
 
+    private boolean shipwreckSkyOpen() {
+        int x = mc.player.getBlockX(), z = mc.player.getBlockZ();
+        int top = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int y = mc.player.getBlockY() + 1; y < top; y++) {
+            cursor.set(x, y, z);
+            if (!mc.world.getBlockState(cursor).getCollisionShape(mc.world, cursor).isEmpty()) return false;
+        }
+        return true;
+    }
+
     private void leaveShipwreckForLater(String reason, long now) {
+        if (!autoSoloTransitOnly && !autoShipwreckDeferred && autoShipwreckNextChest == null
+            && !isVisited(autoSite.center) && !autoAbandonedOnce.add(autoSite.center)) {
+            stopShipwreckAction();
+            markVisited(autoSite.center, "failed:shipwreck " + reason);
+            autoLog("CHEST", autoSite.center, "marked failed reason=" + reason);
+            autoRunAbandoned = true;
+            autoAscendFromAbort = false;
+            if (startNextShipwreckChest("next chest after failure")) return;
+            departShipwreck(now);
+            return;
+        }
         stopShipwreckAction();
         restoreShipwreckSettings();
         autoShipwreckDeferred = true;
@@ -4567,58 +4623,42 @@ public class SpawnerDetector extends Module {
         releaseAllAutoKeys();
         BaritoneHelper.stopAllPathing();
         Utils.setPressed(mc.options.jumpKey, mc.player.isTouchingWater());
-        if (mc.player.getAir() < mc.player.getMaxAir()) return true;
-        boolean retry = autoShipwreckRun.retryChest() && !isVisited(autoSite.center);
-        Site target = retry ? autoSite : null;
+        autoShipwreckRun.endReturn();
+        if (startNextShipwreckChest("next chest, surface travel")) return true;
+        autoShipwreckRun.depart(System.currentTimeMillis());
+        restoreShipwreckSettings();
+        autoLog("EXIT", autoSite.center, "shipwreck done");
+        enterState(AutoState.EXIT, "shipwreck all chests visited");
+        return true;
+    }
+
+    private boolean startNextShipwreckChest(String details) {
+        ShipwreckSite wreck = autoSite.shipwreck;
+        Site target = null;
         ColumnPlan plan = null;
-        if (retry) {
+        while (true) {
+            ShipwreckSite.Chest next = wreck.nearestChest(mc.player.getX(), mc.player.getY(), mc.player.getZ(), this::isVisited);
+            if (next == null) break;
+            autoShipwreckNextChest = next.pos();
+            target = new Site(wreck, autoShipwreckNextChest);
             QualResult qr = evaluateShipwreckQualification(target, true);
             if (qr.reject() == null) {
                 plan = qr.plan();
-            } else {
-                if (!"chest absent".equals(qr.reject())) {
-                    leaveShipwreckForLater(qr.reject(), System.currentTimeMillis());
-                    return true;
-                }
-                if (!isVisited(autoSite.center)) markVisited(autoSite.center, "shipwreck:" + qr.reject());
-                retry = false;
+                break;
             }
-        }
-        if (!retry) {
-            ShipwreckSite wreck = autoSite.shipwreck;
-            while (true) {
-                ShipwreckSite.Chest next = wreck.nearestChest(mc.player.getX(), mc.player.getY(), mc.player.getZ(), this::isVisited);
-                if (next == null) break;
-                autoShipwreckNextChest = next.pos();
-                target = new Site(wreck, autoShipwreckNextChest);
-                QualResult qr = evaluateShipwreckQualification(target, true);
-                if (qr.reject() == null) {
-                    plan = qr.plan();
-                    break;
-                }
-                if (!"chest absent".equals(qr.reject())) {
-                    autoLog("CHEST", next.pos(), "chest deferred reason=" + qr.reject());
-                    leaveShipwreckForLater(qr.reject(), System.currentTimeMillis());
-                    return true;
-                }
-                markVisited(next.pos(), "shipwreck:" + qr.reject());
-                autoLog("CHEST", next.pos(), "chest visited reason=" + qr.reject());
-                target = null;
+            if (!"chest absent".equals(qr.reject())) {
+                autoLog("CHEST", next.pos(), "chest deferred reason=" + qr.reject());
+                leaveShipwreckForLater(qr.reject(), System.currentTimeMillis());
+                return true;
             }
+            markVisited(next.pos(), "shipwreck:" + qr.reject());
+            autoLog("CHEST", next.pos(), "chest visited reason=" + qr.reject());
+            target = null;
         }
-        autoShipwreckRun.endReturn();
         autoShipwreckNextChest = null;
-        if (target == null || plan == null) {
-            autoShipwreckRun.depart(System.currentTimeMillis());
-            restoreShipwreckSettings();
-            autoLog("EXIT", autoSite.center, "shipwreck done");
-            enterState(AutoState.EXIT, "shipwreck all chests visited");
-            return true;
-        }
-        if (!retry) {
-            autoShipwreckRun.startChest(System.currentTimeMillis());
-            autoLog("CHAIN", target.center, "next chest from surface");
-        }
+        if (target == null || plan == null) return false;
+        autoShipwreckRun.startChest(System.currentTimeMillis());
+        autoLog("CHAIN", target.center, details);
         autoSite = target;
         autoColumn = plan;
         autoExitShaft = null;
@@ -4631,7 +4671,7 @@ public class SpawnerDetector extends Module {
         autoAscendFromAbort = false;
         autoWalkReapproach = false;
         logShipwreckChest(target);
-        enterState(AutoState.WALK, retry ? "air full, same chest" : "next chest, surface travel");
+        enterState(AutoState.WALK, details);
         return true;
     }
 
@@ -4640,29 +4680,36 @@ public class SpawnerDetector extends Module {
         if (stateTicks == 1) resetBreach();
         saveShipwreckSettings();
         if (mc.player.isInLava()) { abort("lava"); return; }
-        double gap = Math.hypot(autoColumn.x() + 0.5 - mc.player.getX(), autoColumn.z() + 0.5 - mc.player.getZ());
-        BlockPos goal = new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z());
+        boolean returningToEntry = autoShipwreckRun.departing() && !autoShipwreckDeferred && autoShipwreckEntryColumn != null;
+        int x = returningToEntry ? autoShipwreckEntryColumn.getX() : autoColumn.x();
+        int z = returningToEntry ? autoShipwreckEntryColumn.getZ() : autoColumn.z();
+        double gap = Math.hypot(x + 0.5 - mc.player.getX(), z + 0.5 - mc.player.getZ());
+        int goalY = mc.player.isTouchingWater() ? autoSite.shipwreck.bounds().maxY() + 1 : autoColumn.exitY();
+        BlockPos goal = new BlockPos(x, goalY, z);
         IBaritone bt = primaryBaritone();
         if (stateTicks % 40 == 0) logNavTelemetry(String.format("WALK shipwreck gap=%.2f water=%s calculating=%s", gap,
             mc.player.isTouchingWater(), bt != null && bt.getPathingBehavior().getInProgress().isPresent()), goal, 0);
-        if (gap <= 0.15 && (!mc.player.isSubmergedInWater() || standingOnContainer(autoSite.center))) {
+        if (gap <= 0.15) {
             releaseAllAutoKeys();
             BaritoneHelper.stopAllPathing();
-            if (mc.player.isTouchingWater() && mc.player.getAir() < mc.player.getMaxAir()) {
-                Utils.setPressed(mc.options.jumpKey, true);
-                return;
+            if (returningToEntry) {
+                shipwreckExitColumn(true);
+                enterState(AutoState.EXIT, "shipwreck entry column reached");
+            } else {
+                enterDigState("shipwreck above current chest");
             }
-            enterDigState("shipwreck above current chest");
             return;
         }
         if (stateTicks > 60 * 20) { abort("walk timeout"); return; }
         if (mc.player.isTouchingWater()) {
-            BaritoneHelper.stopAllPathing();
-            recenterDig(autoColumn.x(), autoColumn.z(), 0.12);
-            mc.player.setPitch(mc.player.isSubmergedInWater() ? -45.0f : 0.0f);
-            Utils.setPressed(mc.options.jumpKey, true);
-            Utils.setPressed(mc.options.sneakKey, false);
-            Utils.setPressed(mc.options.sprintKey, gap > 2);
+            if (bt != null && (bt.getPathingBehavior().isPathing() || bt.getPathingBehavior().getInProgress().isPresent())) BaritoneHelper.stopAllPathing();
+            releaseAllAutoKeys();
+            double y = mc.player.getY();
+            recenterDig(x, z, 0.12);
+            mc.player.setPitch(0.0f);
+            Utils.setPressed(mc.options.jumpKey, y < goalY - 0.15 || mc.player.horizontalCollision);
+            Utils.setPressed(mc.options.sneakKey, y > goalY + 0.6);
+            Utils.setPressed(mc.options.sprintKey, gap > 2 && y >= goalY - 0.5);
         } else {
             boolean breaching = autoBreachPos != null;
             tickBreach("WALK", goal);
@@ -4685,18 +4732,44 @@ public class SpawnerDetector extends Module {
     private void tickShipwreckDig() {
         stateTicks++;
         if (stateTicks == 1) {
+            if (autoShipwreckEntryColumn == null) autoShipwreckEntryColumn = new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z());
             if (!autoShipwreckRun.attempt()) { abort("attempts"); return; }
             autoDigQueuedPos = null;
+            autoDigBlockRetries.clear();
             autoDigBlockStartMs = System.currentTimeMillis();
+            autoShipwreckDigProgressMs = autoDigBlockStartMs;
+            autoShipwreckDigProgressY = mc.player.getY();
+            autoShipwreckDigProgressMined = com.hunterbuddy.util.SessionStats.get().blocksMined();
         }
         if (!mc.world.getChunkManager().isChunkLoaded(autoSite.center.getX() >> 4, autoSite.center.getZ() >> 4)) { abort("chunk not loaded"); return; }
         if (!mc.world.getBlockState(autoSite.center).isOf(Blocks.CHEST)) { abort("chest absent"); return; }
         if (handleAutoPause(true)) return;
+        if (otherPlayerPresent()) { abort("player appeared"); return; }
+        long now = System.currentTimeMillis();
+        int mined = com.hunterbuddy.util.SessionStats.get().blocksMined();
+        if (mc.player.getY() <= autoShipwreckDigProgressY - 0.5 || mined > autoShipwreckDigProgressMined
+            || autoDigQueuedPos != null) {
+            autoShipwreckDigProgressMs = now;
+            autoShipwreckDigProgressY = mc.player.getY();
+            autoShipwreckDigProgressMined = mined;
+        } else if (now - autoShipwreckDigProgressMs >= 10_000L) {
+            releaseAllAutoKeys();
+            mc.interactionManager.cancelBlockBreaking();
+            enterState(AutoState.WALK, "shipwreck dig no progress");
+            return;
+        }
+        long perBlockTimeout = 15_000L;
+        if (mc.player.isSubmergedInWater() && mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED) < 0.99) perBlockTimeout *= 5;
         recenterDig(autoColumn.x(), autoColumn.z(), 0.12);
         Utils.setPressed(mc.options.jumpKey, false);
         Utils.setPressed(mc.options.sprintKey, false);
         mc.player.setSprinting(false);
         double gap = Math.hypot(autoColumn.x() + 0.5 - mc.player.getX(), autoColumn.z() + 0.5 - mc.player.getZ());
+        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && gap <= 0.15);
+        if (stateTicks % 40 == 0) logNavTelemetry(String.format("DIG shipwreck gap=%.2f onGround=%s water=%s submerged=%s shift=%s below=%s", gap,
+            mc.player.isOnGround(), mc.player.isTouchingWater(), mc.player.isSubmergedInWater(), mc.options.sneakKey.isPressed(),
+            Registries.BLOCK.getId(mc.world.getBlockState(mc.player.getBlockPos().down()).getBlock()).getPath()), autoSite.center,
+            autoDigQueuedPos == null ? 0 : autoDigBlockRetries.getOrDefault(autoDigQueuedPos, 0));
         if (gap <= 0.15 && standingOnContainer(autoSite.center)) {
             releaseAllAutoKeys();
             mc.interactionManager.cancelBlockBreaking();
@@ -4705,7 +4778,6 @@ public class SpawnerDetector extends Module {
             return;
         }
         if (mc.player.getY() < autoSite.center.getY() + 0.5) { enterState(AutoState.WALK, "shipwreck recenter below chest"); return; }
-        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater());
         if (gap > 0.6) {
             if (stateTicks > 60) enterState(AutoState.WALK, "shipwreck recenter at surface");
             return;
@@ -4713,17 +4785,28 @@ public class SpawnerDetector extends Module {
         int y = Math.max(autoSite.center.getY() + 1, (int) Math.floor(mc.player.getY() - 0.05));
         BlockPos below = new BlockPos(autoColumn.x(), y, autoColumn.z());
         BlockState state = mc.world.getBlockState(below);
-        if (isOpenState(state, below)) {
+        if (isLavaNearShaft(below, mc.player.getBlockPos())) { abort("lava next to the shaft"); return; }
+        if (isShipwreckPassable(state, below)) {
             autoDigQueuedPos = null;
             return;
         }
         if (state.getFluidState().isIn(FluidTags.LAVA) || state.getHardness(mc.world, below) < 0) { abort("unsafe column"); return; }
         if (!below.equals(autoDigQueuedPos)) {
+            if (!mc.player.isOnGround()) return;
             autoDigQueuedPos = below;
             autoDigBlockStartMs = System.currentTimeMillis();
         }
-        if (System.currentTimeMillis() - autoDigBlockStartMs >= 30_000L) { abort("dig block timeout"); return; }
         autoMineTick("DIG", below, true);
+        if (autoDigQueuedPos != null && now - autoDigBlockStartMs > perBlockTimeout) {
+            if (autoDigBlockRetries.merge(autoDigQueuedPos.toImmutable(), 1, Integer::sum) >= 2) {
+                abort("dig block timeout");
+            } else {
+                Utils.setPressed(mc.options.attackKey, false);
+                autoDigQueuedPos = null;
+                autoDigBlockStartMs = now;
+                autoLog("DIG", autoSite.center, "dig block retry");
+            }
+        }
     }
 
     private void tickShipwreckRoom() {
@@ -4817,7 +4900,7 @@ public class SpawnerDetector extends Module {
             Utils.setPressed(mc.options.sneakKey, false);
             Utils.setPressed(mc.options.sprintKey, true);
             BlockPos head = mc.player.getBlockPos().up(2);
-            if (!isOpenState(mc.world.getBlockState(head), head)) autoMineTick("SWIM_UP", head, false);
+            if (!isShipwreckPassable(mc.world.getBlockState(head), head)) autoMineTick("SWIM_UP", head, false);
             return;
         }
         if (autoShipwreckEmergencyGoal == null && now - autoShipwreckEmergencySearchMs >= 5_000L) {
@@ -4945,10 +5028,6 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean soloMemoryCandidate(Site site) {
-        if (site.shipwreck != null) {
-            return qualifiesForAuto(site) && !autoSoloRejectedThisSession.contains(site.center)
-                && evaluateShipwreckQualification(site, true).reject() == null;
-        }
         if (autoWatchdogRetryBlocked(site)) return false;
         AutoFlyingRegear regear = autoFlyingRegearModule();
         if (regear != null && regear.wantsRegear()) return false;
@@ -4958,7 +5037,7 @@ public class SpawnerDetector extends Module {
         if (isVisited(site.center)) return false;
         if (autoSoloRejectedThisSession.contains(site.center)) return false;
         if (countRockets() <= autoMinRockets.get()) return false;
-        if (site.room.cy() < 0) return false;
+        if (site.shipwreck == null && site.room.cy() < 0) return false;
         double dx = site.center.getX() + 0.5 - mc.player.getX();
         double dz = site.center.getZ() + 0.5 - mc.player.getZ();
         return Math.hypot(dx, dz) <= autoMaxDistance.get();
@@ -5141,6 +5220,7 @@ public class SpawnerDetector extends Module {
             }
             autoShipwreckRun = new ShipwreckRun(System.currentTimeMillis());
             autoShipwreckNextChest = null;
+            autoShipwreckEntryColumn = null;
             autoShipwreckEmergencyGoal = null;
             autoShipwreckFailedExits.clear();
             autoShipwreckPlatformTried = false;
@@ -6489,10 +6569,12 @@ public class SpawnerDetector extends Module {
 
     private void shiftAutoPauseTimers(long pausedMs) {
         if (pausedMs <= 0) return;
+        if (isShipwreck() && autoShipwreckRun != null) autoShipwreckRun.shiftChestTimer(pausedMs);
         switch (state) {
             case DIG -> {
                 autoDigTotalStartMs += pausedMs;
                 autoDigBlockStartMs += pausedMs;
+                autoShipwreckDigProgressMs += pausedMs;
                 if (autoDigDisplacedSinceMs != 0) autoDigDisplacedSinceMs += pausedMs;
             }
             case ROOM -> {
@@ -8035,7 +8117,7 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean tickStepOffContainer(BlockPos target) {
-        if (mc.player.isTouchingWater()) {
+        if (mc.player.isTouchingWater() || isShipwreck()) {
             if (autoRoomStepOffTarget != null || autoRoomStepOffCell != null) releaseAllAutoKeys();
             autoRoomStepOffTarget = null;
             autoRoomStepOffCell = null;
@@ -10739,7 +10821,6 @@ public class SpawnerDetector extends Module {
 
     private void tickSwimUp() {
         if (isShipwreck() && autoShipwreckRun != null) {
-            autoShipwreckRun.measureAscent(mc.player.getY(), mc.player.isSubmergedInWater());
             if (autoShipwreckRun.returning() && resumeShipwreckAtSurface()) return;
         }
         stateTicks++;
@@ -10812,7 +10893,7 @@ public class SpawnerDetector extends Module {
             for (int up = 2; up >= 1; up--) {
                 BlockPos p = new BlockPos(swimUpFeet.getX(), swimUpFeet.getY() + up, swimUpFeet.getZ());
                 BlockState pState = mc.world.getBlockState(p);
-                boolean solid = !isOpenState(pState, p) && !pState.getFluidState().isIn(FluidTags.LAVA);
+                boolean solid = !(isShipwreck() ? isShipwreckPassable(pState, p) : isOpenState(pState, p)) && !pState.getFluidState().isIn(FluidTags.LAVA);
                 if (solid && !isLavaNearShaft(p, p.up())) {
                     target = p;
                     break;
