@@ -30,13 +30,21 @@ import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.EnchantmentEffectComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
+import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.MovementType;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 import net.minecraft.network.packet.s2c.play.CloseScreenS2CPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
@@ -289,11 +297,19 @@ public class ElytraBounce extends Module {
                .defaultValue(true)
             .build()
       );
+   private final Setting<Boolean> fakeFly = this.sgGeneral
+      .add(
+         new Builder().name("chestplate-fakefly")
+                  .description("Bounces with a chest piece worn and the glider in a hand: each re-deploy swaps the glider in, sends the glide start and swaps the chest piece back inside one tick, so the glider is never worn across a landing and never loses durability. Needs the pair — a glider and a chest piece, one worn and the other in either hand; stops and says why once when it's missing, and resumes on its own once it's back.")
+               .defaultValue(false)
+            .build()
+      );
    private final Setting<Boolean> toggleElytra = this.sgGeneral
       .add(
          new Builder().name("toggle-elytra")
                      .description("Equips an elytra on activate, and a chestplate on deactivate.")
                   .defaultValue(false)
+               .visible(() -> !(Boolean)this.fakeFly.get())
                .build()
       );
    private int lastDurability = -1;
@@ -327,6 +343,17 @@ public class ElytraBounce extends Module {
    private boolean jumpKeyDownLastTick = false;
 
    private boolean forcePressThisTick = false;
+
+   private Hand fakeFlyBurstHand = null;
+   private int fakeFlyPendingSequence = -1;
+   private long fakeFlyAckedAt = -1L;
+   private boolean fakeFlyDesynced = false;
+   private boolean fakeFlyArmedForSend = false;
+   private String fakeFlyBlockedReason = null;
+   private boolean fakeFlyPairReady = true;
+   private volatile boolean fakeFlyLastSentOnGround = true;
+   private volatile boolean fakeFlyPrevSentOnGround = true;
+   private volatile long fakeFlyLastStartAge = Long.MIN_VALUE / 2;
 
    private volatile int preTick;
    private final ArrayDeque<Integer> heldPongs = new ArrayDeque<>();
@@ -364,6 +391,17 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onReceivePacket(Receive event) {
       this.probeReceive(event.packet);
+      if (event.packet instanceof InventoryS2CPacket inventory && inventory.syncId() == 0) {
+         this.fakeFlyPendingSequence = -1;
+         this.fakeFlyAckedAt = -1L;
+         this.fakeFlyDesynced = false;
+      }
+      if (this.fakeFlyPendingSequence >= 0
+         && this.mc.player != null
+         && event.packet instanceof PlayerActionResponseS2CPacket ack
+         && ack.sequence() >= this.fakeFlyPendingSequence) {
+         this.fakeFlyAckedAt = this.mc.player.age;
+      }
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
          this.teleports.incrementAndGet();
          if (this.enabled() && this.bounce.get() && this.realGliding) {
@@ -399,6 +437,19 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onSendPacket(meteordevelopment.meteorclient.events.packets.PacketEvent.Send event) {
       this.probeSend(event.packet);
+      if (this.fakeFlyArmedForSend && event.packet instanceof PlayerInteractItemC2SPacket interact) {
+         this.fakeFlyPendingSequence = interact.getSequence();
+         this.fakeFlyAckedAt = -1L;
+      }
+      if (event.packet instanceof net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket move) {
+         this.fakeFlyPrevSentOnGround = this.fakeFlyLastSentOnGround;
+         this.fakeFlyLastSentOnGround = move.isOnGround();
+      }
+      if (this.mc.player != null
+         && event.packet instanceof ClientCommandC2SPacket command
+         && command.getMode() == ClientCommandC2SPacket.Mode.START_FALL_FLYING) {
+         this.fakeFlyLastStartAge = this.mc.player.age;
+      }
       if (this.flushingPackets) return;
       if (this.shouldQueuePackets()) {
          this.sendQueue.add(event.packet);
@@ -413,6 +464,7 @@ public class ElytraBounce extends Module {
          && (Boolean)this.motionYBoost.get()
          && (Boolean)this.tunnelBounce.get()
          && (Boolean)this.fakeLag.get()
+         && !(Boolean)this.fakeFly.get()
          && this.enabled()
          && this.mc.player != null
          && this.mc.player.isGliding()
@@ -527,11 +579,12 @@ public class ElytraBounce extends Module {
          .info(
             String.format(
                java.util.Locale.ROOT,
-               "[ElytraBounce durability] %d/%d lost=%d worn=%b gliding=%b tick=%d",
+               "[ElytraBounce durability] %d/%d lost=%d worn=%b fakefly=%b gliding=%b tick=%d",
                left,
                glider.getMaxDamage(),
                lost,
                isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)),
+               (Boolean)this.fakeFly.get(),
                this.mc.player.isGliding(),
                this.mc.player.age
             )
@@ -572,6 +625,15 @@ public class ElytraBounce extends Module {
          this.wasOnGroundLastTick = this.mc.player.isOnGround();
          this.jumpKeyDownLastTick = false;
          this.forcePressThisTick = false;
+         this.fakeFlyBurstHand = null;
+         this.fakeFlyPendingSequence = -1;
+         this.fakeFlyAckedAt = -1L;
+         this.fakeFlyDesynced = false;
+         this.fakeFlyBlockedReason = null;
+         this.fakeFlyPairReady = true;
+         this.fakeFlyLastStartAge = Long.MIN_VALUE / 2;
+         this.fakeFlyLastSentOnGround = true;
+         this.fakeFlyPrevSentOnGround = true;
          this.realGliding = false;
          this.sendQueue.clear();
          this.pingQueue.clear();
@@ -664,6 +726,7 @@ public class ElytraBounce extends Module {
          }
          this.mc.player.setSprinting(this.startSprinting);
          if (this.toggleElytra.get()
+            && !(Boolean)this.fakeFly.get()
             && !this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().toString().contains("chestplate")) {
             this.deferSwap(() -> Modules.get().get(ChestSwap.class).swap());
          }
@@ -694,6 +757,7 @@ public class ElytraBounce extends Module {
       }
       this.updateAutoPitch();
       this.serviceGlideClear();
+      this.serviceFakeFlyBurst();
       this.updateJumpKey();
       this.probeTick();
       if (this.rubberBandCooldown > 0) {
@@ -701,7 +765,7 @@ public class ElytraBounce extends Module {
          return;
       }
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
-         if ((Boolean)this.toggleElytra.get() && !this.elytraToggled) {
+         if ((Boolean)this.toggleElytra.get() && !(Boolean)this.fakeFly.get() && !this.elytraToggled) {
             if (!this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA)) {
                this.deferSwap(() -> Modules.get().get(ChestSwap.class).swap());
                return;
@@ -993,6 +1057,139 @@ public class ElytraBounce extends Module {
       return !stack.isEmpty() && LivingEntity.canGlideWith(stack, EquipmentSlot.CHEST);
    }
 
+   private static boolean isChestPiece(ItemStack stack) {
+      if (stack.isEmpty()) return false;
+      EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
+      return equippable != null && equippable.slot() == EquipmentSlot.CHEST && !isGlider(stack);
+   }
+
+   private Hand fakeFlyReadyHand() {
+      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+      ItemStack main = this.mc.player.getStackInHand(Hand.MAIN_HAND);
+      ItemStack off = this.mc.player.getStackInHand(Hand.OFF_HAND);
+      Hand handGlider = isGlider(main) ? Hand.MAIN_HAND : (isGlider(off) ? Hand.OFF_HAND : null);
+
+      if (!isChestPiece(worn) || handGlider == null) {
+         this.reportFakeFlyBlocked("chestplate-fakefly needs a glider and a chest piece, one worn and the other in a hand");
+         return null;
+      }
+
+      if (EnchantmentHelper.hasAnyEnchantmentsWith(worn, EnchantmentEffectComponentTypes.PREVENT_ARMOR_CHANGE) && !this.mc.player.isCreative()) {
+         this.reportFakeFlyBlocked("chest piece has Curse of Binding");
+         return null;
+      }
+
+      ItemStack glider = handGlider == Hand.MAIN_HAND ? main : off;
+      if (glider.willBreakNextUse()) {
+         this.reportFakeFlyBlocked("elytra is spent");
+         return null;
+      }
+
+      this.fakeFlyBlockedReason = null;
+      return handGlider;
+   }
+
+   private void reportFakeFlyBlocked(String reason) {
+      if (reason.equals(this.fakeFlyBlockedReason)) return;
+      this.fakeFlyBlockedReason = reason;
+      this.info(reason, new Object[0]);
+   }
+
+   private void serviceFakeFlyBurst() {
+      if (this.mc.player == null || !(Boolean)this.bounce.get() || !(Boolean)this.fakeFly.get() || !this.enabled()) {
+         this.fakeFlyPendingSequence = -1;
+         this.fakeFlyAckedAt = -1L;
+         this.fakeFlyDesynced = false;
+         this.fakeFlyBurstHand = null;
+         this.fakeFlyPairReady = true;
+         return;
+      }
+
+      long age = this.mc.player.age;
+      boolean screenOpen = this.mc.currentScreen instanceof HandledScreen<?>;
+
+      if (this.fakeFlyPendingSequence >= 0 && this.fakeFlyAckedAt >= 0 && age > this.fakeFlyAckedAt) {
+         this.fakeFlyPendingSequence = -1;
+         this.fakeFlyAckedAt = -1L;
+         this.fakeFlyDesynced = true;
+      }
+
+      if (this.fakeFlyDesynced) {
+         this.fakeFlyPairReady = false;
+         this.reportFakeFlyBlocked("the server refused the chest swap, open your inventory to resync");
+         return;
+      }
+
+      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+
+      if (isGlider(worn)) {
+         this.fakeFlyPairReady = true;
+         this.fakeFlyBlockedReason = null;
+
+         if (age % 2L != 0L || screenOpen) return;
+
+         ItemStack main = this.mc.player.getStackInHand(Hand.MAIN_HAND);
+         ItemStack off = this.mc.player.getStackInHand(Hand.OFF_HAND);
+         Hand chestHand = isChestPiece(main) ? Hand.MAIN_HAND : (isChestPiece(off) ? Hand.OFF_HAND : null);
+
+         if (chestHand != null) {
+            this.swapFakeFlyHand(chestHand);
+         } else if (this.mc.player.isOnGround()) {
+            int slot = -1;
+            for (int i = 0; i < 9; i++) {
+               if (isChestPiece(this.mc.player.getInventory().getStack(i))) {
+                  slot = i;
+                  break;
+               }
+            }
+
+            if (slot >= 0) {
+               this.mc.player.getInventory().setSelectedSlot(slot);
+               this.swapFakeFlyHand(Hand.MAIN_HAND);
+            } else {
+               this.reportFakeFlyBlocked("chest piece must be in the hotbar");
+            }
+         }
+
+         return;
+      }
+
+      Hand gliderHand = this.fakeFlyReadyHand();
+      this.fakeFlyPairReady = gliderHand != null;
+      if (gliderHand == null) return;
+
+      if (!this.isFreeTick() || this.mc.player.isGliding()) return;
+
+      if (!this.fakeFlyPrevSentOnGround && !this.fakeFlyLastSentOnGround) {
+         if (screenOpen) {
+            BounceProbe.get().line("FAKEFLY-WAIT", "reason=screen");
+            return;
+         }
+
+         if (age - this.fakeFlyLastStartAge < 2L) {
+            BounceProbe.get().line("FAKEFLY-WAIT", "reason=start");
+            return;
+         }
+
+         this.swapFakeFlyHand(gliderHand);
+         this.fakeFlyBurstHand = gliderHand;
+         this.forcePressThisTick = true;
+         BounceProbe.get().line("FAKEFLY-SWAP-IN", "hand=" + gliderHand);
+      } else {
+         BounceProbe.get().line("FAKEFLY-WAIT", "reason=ground");
+      }
+   }
+
+   private void swapFakeFlyHand(Hand hand) {
+      this.fakeFlyArmedForSend = true;
+
+      try {
+         this.mc.interactionManager.interactItem(this.mc.player, hand);
+      } finally {
+         this.fakeFlyArmedForSend = false;
+      }
+   }
+
    private void deferSwap(Runnable action) {
       if (this.mc.player == null || this.mc.world == null || this.deferred != null && !this.deferred.finished) return;
       var player = this.mc.player;
@@ -1016,13 +1213,19 @@ public class ElytraBounce extends Module {
    @EventHandler
    private void onBeforeSendPosition(SendMovementPacketsEvent.Pre event) {
       if (this.mc.player == null) return;
+      if (this.fakeFlyBurstHand != null) {
+         Hand hand = this.fakeFlyBurstHand;
+         this.fakeFlyBurstHand = null;
+         this.swapFakeFlyHand(hand);
+         BounceProbe.get().line("FAKEFLY-SWAP-OUT", "hand=" + hand);
+      }
       if (Deferred.quiet) this.mc.player.setSprinting(false);
    }
 
    public boolean enabled() {
       return this.isActive() && !this.paused && !Deferred.quiet && this.rubberBandCooldown <= 0
          && this.mc.player != null && this.mc.world != null
-         && this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA);
+         && (this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
    }
 
    public boolean modifyIsGliding(boolean original) {
@@ -1139,7 +1342,7 @@ public class ElytraBounce extends Module {
    }
 
    public boolean shouldAutoJump() {
-      return this.bounce.get();
+      return this.bounce.get() && (!this.fakeFly.get() || this.fakeFlyPairReady);
    }
 
    @EventHandler
