@@ -302,8 +302,7 @@ public class RocketBoost extends Module {
       // firework tick leaves velocity at v + 0.1 look + 0.5 (m look - v), m being the constant the mixin replaces,
       // which settles at (m + 0.2) look. Our own speed alone is what this used to go by, and right after a turn or
       // a server correction it is low: the lookahead shrank to its floor of 8 blocks and the whole extra went
-      // through towards a wall a second away. VelocityBoost looks ahead from its speed cap whatever the moment; flown an
-      // hour each on 2026-09-10, it hit walls less than half as often per 1000 blocks, if for more reasons than this.
+      // through towards a wall a second away.
       double speed = Math.max(mc.player.getVelocity().length(), asked + 0.2);
       double reach = Math.max(8.0, speed * lookahead.get());
 

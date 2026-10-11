@@ -15,7 +15,7 @@ Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, M
 
 Only modules registered by `HunterBuddyAddon` are listed below. Source files that are present but deliberately not registered are not documented as available modules.
 
-### Hunt (21)
+### Hunt (19)
 
 Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissance.
 

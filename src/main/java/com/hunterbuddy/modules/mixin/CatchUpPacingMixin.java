@@ -1,7 +1,5 @@
 package com.hunterbuddy.modules.mixin;
 
-import com.hunterbuddy.boost.VelocityBoost;
-import com.hunterbuddy.boost.TimedRocketFly;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.Pitch40;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -43,14 +41,8 @@ public abstract class CatchUpPacingMixin {
             return false;
         }
 
-        VelocityBoost boost = modules.get(VelocityBoost.class);
-        if (boost == null || !boost.catchUpPacing.get()) {
-            return false;
-        }
-
         Pitch40 pitch40 = modules.get(Pitch40.class);
-        TimedRocketFly rocketFly = modules.get(TimedRocketFly.class);
         ElytraBounce bounce = modules.get(ElytraBounce.class);
-        return pitch40 != null && pitch40.isActive() || rocketFly != null && rocketFly.isActive() || bounce != null && bounce.isActive();
+        return pitch40 != null && pitch40.isActive() || bounce != null && bounce.isActive();
     }
 }

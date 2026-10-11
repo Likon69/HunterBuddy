@@ -91,16 +91,7 @@ public abstract class LivingEntityMixin {
          return (Float)original.call(new Object[]{entity});
       }
 
-      // Both rotation systems are asked here, and here only. GlideMixin used to
-      // wrap this very instruction as well, which put two wrappers from two mixin
-      // configs on one call with nothing to order them by -- and elytra bounce,
-      // whose gliding latch lives in this same mixin, stopped working the day that
-      // second wrapper arrived.
       Float pitch = RotationUtils.getInstance().getMovementPitch();
-      if (pitch == null) {
-         pitch = com.hunterbuddy.boost.GlideRotations.getInstance().getMovementPitch();
-      }
-
       return pitch != null ? pitch : (Float)original.call(new Object[]{entity});
    }
 }

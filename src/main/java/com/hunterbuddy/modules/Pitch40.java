@@ -112,16 +112,6 @@ public class Pitch40 extends Module {
                .visible(() -> this.rockets.get() == RocketMode.Boost)
                .build()
       );
-   public final Setting<Boolean> rocketBoost = this.sgFirework
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("rocket-boost")
-                  .description(
-                     "Ride the boost window on each of these rockets. While a rocket is attached the server accepts any velocity inside a box around its own prediction, and the ride flies the fastest point of that box for the rocket's whole life. Turns the Boost mode's forty blocks a second into about fifty-six on the same rockets."
-                  ).defaultValue(false)
-               .visible(() -> this.rockets.get() != RocketMode.Off)
-            .build()
-      );
    public final Setting<Boolean> autoRecast = this.sgRecast
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -223,8 +213,6 @@ public class Pitch40 extends Module {
    private long rocketHoldUntil = 0L;
    private int climbsSinceRocket = 0;
    private float lastPitch = 0.0F;
-   private com.hunterbuddy.boost.VelocityBoost velocityBoost = null;
-   private boolean boostToggledByUs = false;
    private int lastTickAge = -1;
    private int lastClearanceDepth = 0;
    private boolean clearanceWasOk = true;
@@ -316,13 +304,6 @@ public class Pitch40 extends Module {
          this.elytraRecast.toggle();
       }
 
-      this.velocityBoost = Modules.get().get(com.hunterbuddy.boost.VelocityBoost.class);
-      this.boostToggledByUs = false;
-      if ((Boolean)this.rocketBoost.get() && this.velocityBoost != null && !this.velocityBoost.isActive()) {
-         this.velocityBoost.toggle();
-         this.boostToggledByUs = true;
-      }
-
       if ((Boolean)this.autoFirework.get() && this.getElytraFly().settings.get("auto-firework") instanceof BoolSetting boolSetting) {
          this.oldElytraAutoFirework = (Boolean)boolSetting.get();
          boolSetting.set(false);
@@ -343,12 +324,6 @@ public class Pitch40 extends Module {
          this.elytraRecast.toggle();
       }
 
-      if (this.boostToggledByUs && this.velocityBoost != null && this.velocityBoost.isActive()) {
-         this.velocityBoost.toggle();
-      }
-
-      this.boostToggledByUs = false;
-
       this.handBackGlide();
       GlideClearHolder.release(this);
       this.releaseChestSwapJump();
@@ -368,10 +343,6 @@ public class Pitch40 extends Module {
          }
 
          this.lastTickAge = this.mc.player.age;
-         if ((Boolean)this.rocketBoost.get() && this.velocityBoost != null && this.velocityBoost.isActive() && this.mc.player.isGliding()) {
-            this.velocityBoost.declareTravelling();
-         }
-
          this.serviceChestSwap();
          RegistryKey<World> currentDimension = this.mc.world.getRegistryKey();
          if (this.lastDimension != null && !this.lastDimension.equals(currentDimension)) {
