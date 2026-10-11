@@ -15,13 +15,12 @@ Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, M
 
 Only modules registered by `HunterBuddyAddon` are listed below. Source files that are present but deliberately not registered are not documented as available modules.
 
-### Hunt (19)
+### Hunt (18)
 
 Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissance.
 
 | Meteor name | Description |
 |---|---|
-| `angle-calculator` | Continuously locks your view toward a target coordinate to travel straight along it (highway trails). |
 | `arealoader` | Loads chunks along a rectangle, spiral, zigzag, or circle route; routes can be saved and resumed. |
 | `auto-portal` | Builds a nether portal frame, lights it, and optionally paths the player into it via Baritone. |
 | `chest-tracker` | Records the contents of containers you open, with a browser screen and JSON storage. |
@@ -41,7 +40,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `waypoint-follower` | Follows Xaero waypoints with multi-dimensional travel support. Once the last one is reached it stops where it is, in the air or on the ground, by switching itself off or by leaving the server. |
 | `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
 
-### Visuals (12)
+### Visuals (11)
 
 ESP, overlays, and render helpers.
 
@@ -52,7 +51,6 @@ ESP, overlays, and render helpers.
 | `entity-view` | Rescales mobs and players, shows their gear above them through walls, names dropped items on the ground, and outlines nether portals with a tracer to the nearest one. |
 | `FlightTrail` | A light two-trail wake behind the elytra while gliding, with speed-reactive flames at the wingtips, instead of dbrighthd's heavier particle trail. |
 | `flow-esp` | Detects chunk activity from fluid-spread analysis. |
-| `ItemSearchBar` | Searches and highlights items in inventories and containers. |
 | `LoreLocator` | Highlights inventory slots holding rare, unique, or anomalous items. |
 | `rotation-detector` | Finds horizontally placed blocks that only generate vertically in nature. |
 | `shader` | Entity glow/outline shader. |
@@ -60,9 +58,9 @@ ESP, overlays, and render helpers.
 | `SpawnerDetector` | Finds spawners a player has already visited, and whether the loot is still there. |
 | `VanityESP` | Unified ESP for decorative items and selected special blocks. |
 
-### Logistics (7)
+### Logistics (6)
 
-Restocking, inventory handling, and stash transfer tools.
+Restocking and inventory handling tools.
 
 | Meteor name | Description |
 |---|---|
@@ -72,9 +70,8 @@ Restocking, inventory handling, and stash transfer tools.
 | `replenish` | Replenishes hotbar items using shift-click packets. |
 | `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
 | `shulker-sorter` | Sorts shulkers and items from input chests into category chests, purifies mixed shulkers and fills partial ones at a station. Fills an empty shulker when a category has at least 27 loose stacks; optional `shulkerColor` in the JSON prefers its dye color. Withdraws only 100% pure shulkers, or empty ones for `shulkers`. Set it up with `tag-key` and the buttons in its settings. |
-| `stash-mover` | Moves items between selected input and output stash areas using pearl loading. |
 
-### Utility (15)
+### Utility (13)
 
 | Meteor name | Description |
 |---|---|
@@ -84,7 +81,6 @@ Restocking, inventory handling, and stash transfer tools.
 | `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
 | `disconnect-sound` | Plays a sound when the disconnect screen appears (e.g. when kicked). |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
-| `ghost-container` | Adds a button that closes a container screen without sending the close packet, leaving it open server-side. |
 | `h-mine` | Fast block mining, with a configurable swing animation. |
 | `kill-aura-plus` | Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage. |
 | `mlep-air-place` | Places a block in air where your crosshair is pointing. |
@@ -92,20 +88,15 @@ Restocking, inventory handling, and stash transfer tools.
 | `NoHurtCam` | Removes the hurt-camera tilt and shake. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatically computed speed multiplier; can trace every boosted tick to a CSV for tuning. |
-| `unfocused-fps` | Limits FPS while the game window is unfocused. |
 
-## Commands (7)
+## Commands (3)
 
 Commands use the configured Meteor command prefix.
 
 | Command | Description |
 |---|---|
 | `arealoaderreset` | Delete every AreaLoader saved profile, not just the selected one. |
-| `setclear` | Clear both StashMover selections. |
-| `setinput` | Select the StashMover input area with two left-clicked corners. |
-| `setoutput` | Select the StashMover output area with two left-clicked corners. |
 | `sorter` | Fallback setup and withdrawal for the shulker sorter (`input`, `dest`, `reserve`, `station`, `remove`, `list`, `get`…). |
-| `stashstatus` | Show the selected areas and current StashMover status. |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
 ## HUD elements (27)
@@ -169,6 +160,7 @@ Several modules started as ports from other addons rather than being written fro
 
 - **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
 - **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepMine`, `MlepScaffold`, `MlepAirPlace`).
-- **Jeff mod** (miles352, [meteor-stashhunting-addon](https://github.com/miles352/meteor-stashhunting-addon)) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
-- **riths** — Hunting Utilities ("Tim").
+- **[Jeff mod](https://github.com/miles352/meteor-stashhunting-addon)** (miles352) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
+- **riths** — Hunting Utilities ([Tim](https://github.com/rithsgit/Tim)).
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
+- **0xTas** — [Stardust](https://github.com/0xTas/stardust): the firework hooks of `rocket-boost` (stronger push, rocket kept alive) are ported from its `RocketMan`; the speed control built on them is our own.

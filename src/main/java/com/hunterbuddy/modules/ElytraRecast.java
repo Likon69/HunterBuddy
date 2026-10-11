@@ -18,8 +18,6 @@ import net.minecraft.item.Item;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode;
 import net.minecraft.util.Hand;
 import net.minecraft.world.World;
 
@@ -219,7 +217,7 @@ public class ElytraRecast extends Module {
       }
 
       boolean currentlyGliding = this.mc.player.isGliding();
-      if (com.hunterbuddy.util.ChestSwapBurst.rocketAttached(this.mc.player)) {
+      if (this.rocketAttached()) {
          this.wasGliding = currentlyGliding;
          return;
       }
@@ -317,7 +315,7 @@ public class ElytraRecast extends Module {
       this.tickCounter = 0;
       this.rocketTickCounter = (Integer)this.rocketDelay.get();
       this.usedActivationRocket = false;
-      com.hunterbuddy.util.ChestSwapBurst.wearGlider(this.mc.player);
+      this.wearGlider();
       if (this.mc.player.isGliding()) {
          this.enterAscending();
       } else {
@@ -516,7 +514,49 @@ public class ElytraRecast extends Module {
 
    private boolean hasElytraEquipped() {
       return this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA
-         || com.hunterbuddy.util.ChestSwapBurst.hasGlider(this.mc.player);
+         || isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) || this.spareGliderSlot() != -1;
+   }
+
+   private static boolean isGlider(ItemStack stack) {
+      return !stack.isEmpty() && net.minecraft.entity.LivingEntity.canGlideWith(stack, EquipmentSlot.CHEST);
+   }
+
+   private int spareGliderSlot() {
+      for (int i = 0; i < 36; i++) {
+         ItemStack stack = this.mc.player.getInventory().getStack(i);
+         if (isGlider(stack) && !stack.willBreakNextUse()) {
+            return i;
+         }
+      }
+
+      return -1;
+   }
+
+   private void wearGlider() {
+      if (isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) {
+         return;
+      }
+
+      int slot = this.spareGliderSlot();
+      if (slot != -1) {
+         InvUtils.move().from(slot).toArmor(2);
+      }
+   }
+
+   private boolean rocketAttached() {
+      if (this.mc.world == null) {
+         return false;
+      }
+
+      for (net.minecraft.entity.Entity entity : this.mc.world.getEntities()) {
+         if (entity instanceof net.minecraft.entity.projectile.FireworkRocketEntity firework
+            && firework.isAlive()
+            && ((com.hunterbuddy.modules.mixin.accessors.FireworkRocketEntityAccessor)firework).getShooter() == this.mc.player) {
+            return true;
+         }
+      }
+
+      return false;
    }
 
    private boolean isInNether() {

@@ -1,13 +1,11 @@
 package com.hunterbuddy.modules.chesttracker;
 
-import com.hunterbuddy.modules.ItemSearchBar;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
-import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.client.gui.DrawContext;
@@ -57,29 +55,16 @@ public class ChestTrackerScreen extends Screen {
 
    protected void init() {
       super.init();
-      ItemSearchBar itemSearchBar = (ItemSearchBar)Modules.get().get(ItemSearchBar.class);
-      String initialSearch = "";
-      if (itemSearchBar != null && itemSearchBar.isActive()) {
-         initialSearch = (String)itemSearchBar.searchQuery.get();
-      }
-
       this.searchField = new TextFieldWidget(this.textRenderer, this.width / 2 - 110, 20, 200, 20, Text.literal("Search items..."));
       this.searchField.setMaxLength(50);
       this.searchField.setPlaceholder(Text.literal("Search items..."));
       this.searchField.setChangedListener(this::onSearchChanged);
-      if (!initialSearch.isEmpty()) {
-         this.searchField.setText(initialSearch);
-         this.searchQuery = initialSearch;
-      }
 
       this.addSelectableChild(this.searchField);
       this.clearSearchButton = ButtonWidget.builder(Text.literal("§cx"), button -> {
          this.searchField.setText("");
          this.searchQuery = "";
          this.filterItems();
-         if (itemSearchBar != null && itemSearchBar.isActive()) {
-            itemSearchBar.updateSearchQuery("");
-         }
       }).dimensions(this.width / 2 + 95, 20, 20, 20).build();
       this.addDrawableChild(this.clearSearchButton);
       this.sortButton = ButtonWidget.builder(Text.literal("Sort: " + this.currentSortMode.getDisplayName()), button -> {
@@ -158,10 +143,6 @@ public class ChestTrackerScreen extends Screen {
    private void onSearchChanged(String query) {
       this.searchQuery = query;
       this.filterItems();
-      ItemSearchBar itemSearchBar = (ItemSearchBar)Modules.get().get(ItemSearchBar.class);
-      if (itemSearchBar != null && itemSearchBar.isActive()) {
-         itemSearchBar.updateSearchQuery(query);
-      }
    }
 
    private void updateCachedBounds() {
@@ -335,10 +316,6 @@ public class ChestTrackerScreen extends Screen {
 
                   tooltip.add(Text.literal(""));
                   tooltip.add(Text.literal("§e§l» Click to Highlight All Within Range «"));
-                  ItemSearchBar itemSearchBar = (ItemSearchBar)Modules.get().get(ItemSearchBar.class);
-                  if (itemSearchBar != null && itemSearchBar.isActive()) {
-                     tooltip.add(Text.literal("§77(Also searches in ItemSearchBar)"));
-                  }
 
                   context.drawTooltip(this.textRenderer, tooltip, mouseX, mouseY);
                   return;
@@ -412,14 +389,6 @@ public class ChestTrackerScreen extends Screen {
    private void onItemClicked(ChestTrackerScreen.ItemEntry entry) {
       List<TrackedContainer> results = this.data.searchItem(entry.item);
       this.module.searchItem(entry.item);
-      ItemSearchBar itemSearchBar = (ItemSearchBar)Modules.get().get(ItemSearchBar.class);
-      if (itemSearchBar != null && itemSearchBar.isActive()) {
-         String itemName = entry.item.getName().getString();
-         itemSearchBar.updateSearchQuery(itemName);
-         this.searchField.setText(itemName);
-         this.searchQuery = itemName;
-         this.filterItems();
-      }
 
       int withinRange = 0;
       if (this.client != null && this.client.player != null) {

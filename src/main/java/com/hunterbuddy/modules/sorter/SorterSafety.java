@@ -2,7 +2,6 @@ package com.hunterbuddy.modules.sorter;
 
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.SpawnerDetector;
-import com.hunterbuddy.modules.logistics.StashMover;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.entity.player.PlayerEntity;
@@ -21,10 +20,6 @@ final class SorterSafety {
         SpawnerDetector spawner = Modules.get().get(SpawnerDetector.class);
         if (spawner != null && spawner.isActive()) {
             return "SpawnerDetector active";
-        }
-        StashMover mover = Modules.get().get(StashMover.class);
-        if (mover != null && mover.isActive()) {
-            return "StashMover active";
         }
         AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
         if (regear != null && regear.isRunning()) {

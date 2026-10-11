@@ -8,16 +8,13 @@ import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.util.BouncePlanCache;
 import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.util.BounceSolver;
-import com.hunterbuddy.util.ChestSwapBurst;
 import java.util.ArrayDeque;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
-import meteordevelopment.meteorclient.events.world.PlaySoundEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
@@ -33,8 +30,6 @@ import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.MovementType;
@@ -44,7 +39,6 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.s2c.play.CloseScreenS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
@@ -288,13 +282,6 @@ public class ElytraBounce extends Module {
                .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.highwayObstaclePasser.get() && (Boolean)this.avoidPortalTraps.get())
                .build()
       );
-   private final Setting<Boolean> fakeFly = this.sgGeneral
-      .add(
-         new Builder().name("chestplate-fakefly")
-                  .description("Bounces with a chest piece worn and the glider in a hand: each re-deploy swaps the glider in, sends the glide start and swaps the chest piece back inside one tick, so the glider is never worn across a landing and never loses durability. Needs the pair — a glider and a chest piece, one worn and the other in either hand; stops and says why once when it's missing, and resumes on its own once it's back.")
-               .defaultValue(false)
-            .build()
-      );
    private final Setting<Boolean> logDurability = this.sgGeneral
       .add(
          new Builder().name("log-flight")
@@ -307,7 +294,6 @@ public class ElytraBounce extends Module {
          new Builder().name("toggle-elytra")
                      .description("Equips an elytra on activate, and a chestplate on deactivate.")
                   .defaultValue(false)
-               .visible(() -> !(Boolean)this.fakeFly.get())
                .build()
       );
    private int lastDurability = -1;
@@ -342,20 +328,9 @@ public class ElytraBounce extends Module {
 
    private boolean forcePressThisTick = false;
 
-   private boolean chestMode;
-   private volatile boolean deployEdge;
-   private volatile boolean atomicOutPending;
    private volatile int preTick;
-   private volatile int glideStartTick = -2;
-   private int lastOutTick = -2;
-   private String chestBlockedReason;
-   private boolean chestPairReady = true;
-   private volatile int groundClearTicks;
-   private volatile boolean clearanceEngaged;
    private final ArrayDeque<Integer> heldPongs = new ArrayDeque<>();
    private Deferred deferred;
-   private final AtomicInteger deploys = new AtomicInteger();
-   private final AtomicInteger swapsRefused = new AtomicInteger();
    private final AtomicInteger teleports = new AtomicInteger();
    private final AtomicInteger grimSetbacks = new AtomicInteger();
    private final AtomicInteger clearsPlaced = new AtomicInteger();
@@ -391,14 +366,10 @@ public class ElytraBounce extends Module {
       this.probeReceive(event.packet);
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
          this.teleports.incrementAndGet();
-         if (this.enabled() && this.bounce.get() && (this.realGliding || this.preTick - this.glideStartTick <= 2)) {
+         if (this.enabled() && this.bounce.get() && this.realGliding) {
             this.grimSetbacks.incrementAndGet();
          }
          this.releaseHeldGlideState();
-         this.atomicOutPending = false;
-         this.deployEdge = false;
-         this.clearanceEngaged = false;
-         this.groundClearTicks = 0;
          this.rubberBandCooldown = this.setbackPause.get();
          this.realGliding = false;
          if (this.mc.player != null) this.mc.player.stopGliding();
@@ -408,10 +379,6 @@ public class ElytraBounce extends Module {
          this.pitchPlans.invalidate();
          this.flyingPlan = null;
          this.pitchKey = null;
-         this.atomicOutPending = false;
-         this.deployEdge = false;
-         this.clearanceEngaged = false;
-         this.groundClearTicks = 0;
          this.realGliding = false;
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket velocity
          && this.mc.player != null && velocity.getEntityId() == this.mc.player.getId()) {
@@ -446,7 +413,6 @@ public class ElytraBounce extends Module {
          && (Boolean)this.motionYBoost.get()
          && (Boolean)this.tunnelBounce.get()
          && (Boolean)this.fakeLag.get()
-         && !(Boolean)this.fakeFly.get()
          && this.enabled()
          && this.mc.player != null
          && this.mc.player.isGliding()
@@ -561,12 +527,11 @@ public class ElytraBounce extends Module {
          .info(
             String.format(
                java.util.Locale.ROOT,
-               "[ElytraBounce durability] %d/%d lost=%d worn=%b fakefly=%b gliding=%b tick=%d",
+               "[ElytraBounce durability] %d/%d lost=%d worn=%b gliding=%b tick=%d",
                left,
                glider.getMaxDamage(),
                lost,
                isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)),
-               (Boolean)this.fakeFly.get(),
                this.mc.player.isGliding(),
                this.mc.player.age
             )
@@ -584,20 +549,9 @@ public class ElytraBounce extends Module {
       this.pitchKey = null;
       this.ticksSinceJump = 0;
       this.preTick = 0;
-      this.chestMode = this.fakeFly.get();
-      this.deployEdge = false;
-      this.atomicOutPending = false;
-      this.glideStartTick = -2;
-      this.lastOutTick = -2;
-      this.chestBlockedReason = null;
-      this.chestPairReady = true;
-      this.groundClearTicks = 0;
-      this.clearanceEngaged = false;
       synchronized (this.heldPongs) {
          this.heldPongs.clear();
       }
-      this.deploys.set(0);
-      this.swapsRefused.set(0);
       this.teleports.set(0);
       this.grimSetbacks.set(0);
       this.clearsPlaced.set(0);
@@ -699,10 +653,6 @@ public class ElytraBounce extends Module {
       this.realGliding = false;
       this.jumpKeyDown = false;
       this.jumpKeyDownLastTick = false;
-      this.deployEdge = false;
-      this.atomicOutPending = false;
-      this.clearanceEngaged = false;
-      this.groundClearTicks = 0;
       this.fakeLagTicks = 0;
       this.releaseHeldGlideState();
       this.flushPackets();
@@ -713,9 +663,7 @@ public class ElytraBounce extends Module {
             BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoal(null);
          }
          this.mc.player.setSprinting(this.startSprinting);
-         if (this.chestMode) {
-            this.restoreGlider();
-         } else if (this.toggleElytra.get()
+         if (this.toggleElytra.get()
             && !this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().toString().contains("chestplate")) {
             this.deferSwap(() -> Modules.get().get(ChestSwap.class).swap());
          }
@@ -727,8 +675,6 @@ public class ElytraBounce extends Module {
       this.preTick++;
       if (this.mc.player == null || this.mc.world == null) {
          this.jumpKeyDown = false;
-         this.deployEdge = false;
-         this.atomicOutPending = false;
          this.pitchPlans.invalidate();
          this.flyingPlan = null;
          this.pitchKey = null;
@@ -737,17 +683,6 @@ public class ElytraBounce extends Module {
          return;
       }
       this.ticksSinceJump = this.mc.player.isOnGround() ? 0 : this.ticksSinceJump + 1;
-      boolean previousChestMode = this.chestMode;
-      this.chestMode = this.fakeFly.get();
-      if (previousChestMode != this.chestMode) {
-         this.deployEdge = false;
-         this.atomicOutPending = false;
-         this.clearanceEngaged = false;
-         this.groundClearTicks = 0;
-         this.chestPairReady = true;
-         this.chestBlockedReason = null;
-         if (previousChestMode) this.restoreGlider();
-      }
       this.watchDurability();
       this.watchSpeed();
       this.watchStats();
@@ -757,8 +692,6 @@ public class ElytraBounce extends Module {
          this.releaseHeldGlideState();
          return;
       }
-      this.prepareChestMode();
-      if (Deferred.quiet) return;
       this.updateAutoPitch();
       this.serviceGlideClear();
       this.updateJumpKey();
@@ -768,7 +701,7 @@ public class ElytraBounce extends Module {
          return;
       }
       if (this.mc.player != null && !this.mc.player.getAbilities().allowFlying) {
-         if ((Boolean)this.toggleElytra.get() && !(Boolean)this.fakeFly.get() && !this.elytraToggled) {
+         if ((Boolean)this.toggleElytra.get() && !this.elytraToggled) {
             if (!this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA)) {
                this.deferSwap(() -> Modules.get().get(ChestSwap.class).swap());
                return;
@@ -1060,143 +993,12 @@ public class ElytraBounce extends Module {
       return !stack.isEmpty() && LivingEntity.canGlideWith(stack, EquipmentSlot.CHEST);
    }
 
-   private static boolean isChestPiece(ItemStack stack) {
-      if (stack.isEmpty()) return false;
-      EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
-      return equippable != null && equippable.slot() == EquipmentSlot.CHEST && !isGlider(stack);
-   }
-
-   private int findHotbarGliderSlot() {
-      for (int i = 0; i < 9; i++) {
-         if (isGlider(this.mc.player.getInventory().getStack(i))) return i;
-      }
-
-      return -1;
-   }
-
-   private Hand pairHand(ItemStack worn) {
-      return isGlider(worn) ? ChestSwapBurst.chestPieceHand(this.mc.player) : ChestSwapBurst.gliderHand(this.mc.player);
-   }
-
-   private void reportChestBlocked(String reason) {
-      if (reason.equals(this.chestBlockedReason)) return;
-      this.chestBlockedReason = reason;
-      this.info(reason, new Object[0]);
-   }
-
-   private void prepareChestMode() {
-      this.chestPairReady = true;
-      if (!this.chestMode) return;
-      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-      Hand hand = this.pairHand(worn);
-      if (isGlider(worn) && hand == null && this.mc.player.isOnGround()) {
-         this.chestPairReady = false;
-         this.deferSwap(() -> {
-            if (!isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) return;
-            Modules.get().get(ChestSwap.class).swap();
-            int slot = this.findHotbarGliderSlot();
-            if (slot >= 0) this.mc.player.getInventory().setSelectedSlot(slot);
-            else this.reportChestBlocked("elytra must be in the hotbar");
-         });
-         return;
-      }
-      if (hand == null || !(isGlider(worn) || isChestPiece(worn))) {
-         this.chestPairReady = false;
-         this.reportChestBlocked("chestplate-fakefly needs a glider and a chest piece, one worn and the other in a hand");
-      } else if (!ChestSwapBurst.canSwap(hand)) {
-         this.chestPairReady = false;
-         this.reportChestBlocked("chest equipment cannot be swapped: binding, stack size or identical items");
-      } else if ((isGlider(worn) ? worn : this.mc.player.getStackInHand(hand)).willBreakNextUse()) {
-         this.chestPairReady = false;
-         this.reportChestBlocked("elytra is spent");
-      } else {
-         this.chestBlockedReason = null;
-      }
-   }
-
-   @EventHandler(priority = -100)
-   private void onTickEnd(Pre event) {
-      this.updateChestMode();
-   }
-
-   private void updateChestMode() {
-      if (!this.chestMode || !this.bounce.get() || !this.enabled() || !this.chestPairReady
-         || this.mc.world == null || this.mc.getNetworkHandler() == null) return;
-      boolean wasEngaged = this.clearanceEngaged;
-      if (!this.groundClear()) {
-         if (wasEngaged) {
-            this.clearanceEngaged = false;
-            this.groundClearTicks = 0;
-            this.restoreGlider();
-         }
-         this.deployEdge = false;
-         return;
-      }
-      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-      Hand hand = this.pairHand(worn);
-      if (hand == null) return;
-      if (this.deployEdge && !this.mc.player.isOnGround() && this.preTick - this.glideStartTick >= 2) {
-         if (!isGlider(worn) && !this.sendSwap(hand, false)) return;
-         this.releaseHeldGlideState();
-         this.atomicOutPending = true;
-         this.glideStartTick = this.preTick;
-         this.clearanceEngaged = this.airBelow(2.0);
-         this.deploys.incrementAndGet();
-         this.deployEdge = false;
-      } else if (isGlider(worn) && this.preTick - this.lastOutTick >= 2) {
-         this.sendSwap(hand, true);
-      }
-   }
-
-   private boolean sendSwap(Hand hand, boolean out) {
-      if (ChestSwapBurst.useSwap(hand) < 0) {
-         this.swapsRefused.incrementAndGet();
-         return false;
-      }
-      if (out) this.lastOutTick = this.preTick;
-      BounceProbe.get().line(out ? "FAKEFLY-SWAP-OUT" : "FAKEFLY-SWAP-IN", "hand=" + hand);
-      return true;
-   }
-
-   private boolean groundClear() {
-      if (this.mc.player.isOnGround() || !this.clearanceEngaged && !this.airBelow(2.0)) {
-         this.clearanceEngaged = false;
-         this.groundClearTicks = 0;
-         return true;
-      }
-      var handler = this.mc.getNetworkHandler();
-      var entry = handler == null ? null : handler.getPlayerListEntry(this.mc.player.getUuid());
-      int rttTicks = entry == null ? 0 : Math.max(0, (int) Math.ceil(entry.getLatency() / 50.0));
-      double vertical = this.mc.player.getVelocity().y;
-      double travel = vertical < 0.0 ? -vertical * (rttTicks + 4) : vertical * (rttTicks / 2 + 2);
-      double need = 6.0 + travel + (this.clearanceEngaged ? 0.0 : 2.0);
-      boolean clear = this.airBelow(need);
-      if (this.clearanceEngaged) return clear;
-      this.groundClearTicks = clear ? this.groundClearTicks + 1 : 0;
-      return this.groundClearTicks >= 10;
-   }
-
-   private boolean airBelow(double depth) {
-      return this.mc.player != null && this.mc.world != null
-         && this.mc.world.isBlockSpaceEmpty(this.mc.player, this.mc.player.getBoundingBox().stretch(0.0, -depth, 0.0));
-   }
-
-   private void restoreGlider() {
-      if (this.mc.player == null || isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) return;
-      Hand hand = ChestSwapBurst.gliderHand(this.mc.player);
-      if (hand != null) this.deferSwap(() -> {
-         if (isGlider(this.mc.player.getStackInHand(hand))
-            && !isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) this.sendSwap(hand, false);
-      });
-   }
-
    private void deferSwap(Runnable action) {
       if (this.mc.player == null || this.mc.world == null || this.deferred != null && !this.deferred.finished) return;
       var player = this.mc.player;
       var world = this.mc.world;
       this.jumpKeyDown = false;
       this.jumpKeyDownLastTick = false;
-      this.deployEdge = false;
       this.forcePressThisTick = false;
       this.deferred = new Deferred(2, true, () -> {
          if (this.mc.player == player && this.mc.world == world) action.run();
@@ -1206,8 +1008,8 @@ public class ElytraBounce extends Module {
    private void watchStats() {
       if (!this.logDurability.get() || this.preTick % 400 != 0) return;
       HunterBuddyAddon.LOG.info(String.format(java.util.Locale.ROOT,
-         "[ElytraBounce stats] deploys=%d swapsRefused=%d teleports=%d grimSetbacks=%d clearsPlaced=%d clearsLetGo=%d",
-         this.deploys.get(), this.swapsRefused.get(), this.teleports.get(), this.grimSetbacks.get(),
+         "[ElytraBounce stats] teleports=%d grimSetbacks=%d clearsPlaced=%d clearsLetGo=%d",
+         this.teleports.get(), this.grimSetbacks.get(),
          this.clearsPlaced.get(), this.clearsLetGo.get()));
    }
 
@@ -1215,20 +1017,12 @@ public class ElytraBounce extends Module {
    private void onBeforeSendPosition(SendMovementPacketsEvent.Pre event) {
       if (this.mc.player == null) return;
       if (Deferred.quiet) this.mc.player.setSprinting(false);
-      if (!this.atomicOutPending) return;
-      this.atomicOutPending = false;
-      if (!this.mc.player.isGliding()) return;
-      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-      if (isGlider(worn)) {
-         Hand hand = this.pairHand(worn);
-         if (hand != null) this.sendSwap(hand, true);
-      }
    }
 
    public boolean enabled() {
       return this.isActive() && !this.paused && !Deferred.quiet && this.rubberBandCooldown <= 0
          && this.mc.player != null && this.mc.world != null
-         && (this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
+         && this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA);
    }
 
    public boolean modifyIsGliding(boolean original) {
@@ -1259,7 +1053,6 @@ public class ElytraBounce extends Module {
       } else {
          this.jumpKeyDown = !previous;
       }
-      this.deployEdge = this.jumpKeyDown && !previous && !ground && !flying;
       this.forcePressThisTick = false;
       this.jumpKeyDownLastTick = this.jumpKeyDown;
    }
@@ -1346,33 +1139,7 @@ public class ElytraBounce extends Module {
    }
 
    public boolean shouldAutoJump() {
-      return this.bounce.get() && (!this.chestMode || this.chestPairReady);
-   }
-
-   public boolean isFakeFlyEnabled() {
-      return (Boolean)this.fakeFly.get();
-   }
-
-   @EventHandler
-   private void onPlaySound(PlaySoundEvent event) {
-      if ((Boolean)this.fakeFly.get()) {
-         for (Identifier identifier : List.of(
-            Identifier.of("minecraft:item.armor.equip_generic"),
-            Identifier.of("minecraft:item.armor.equip_netherite"),
-            Identifier.of("minecraft:item.armor.equip_elytra"),
-            Identifier.of("minecraft:item.armor.equip_diamond"),
-            Identifier.of("minecraft:item.armor.equip_gold"),
-            Identifier.of("minecraft:item.armor.equip_iron"),
-            Identifier.of("minecraft:item.armor.equip_chain"),
-            Identifier.of("minecraft:item.armor.equip_leather"),
-            Identifier.of("minecraft:item.elytra.flying")
-         )) {
-            if (identifier.equals(event.sound.getId())) {
-               event.cancel();
-               break;
-            }
-         }
-      }
+      return this.bounce.get();
    }
 
    @EventHandler
