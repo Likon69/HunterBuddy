@@ -5,7 +5,7 @@ import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.Utils;
-import com.hunterbuddy.util.BouncePlanCache;
+import com.hunterbuddy.util.PlanSlot;
 import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.util.BounceSolver;
 import java.util.ArrayDeque;
@@ -306,7 +306,7 @@ public class ElytraBounce extends Module {
 
    private int ticksSinceJump;
    private volatile BounceSolver.Plan flyingPlan;
-   private final BouncePlanCache<AutoPitchKey, BounceSolver.Plan> pitchPlans = new BouncePlanCache<>();
+   private final PlanSlot<AutoPitchKey, BounceSolver.Plan> pitchPlans = new PlanSlot<>();
    private volatile AutoPitchKey pitchKey;
 
    private double solvedHeadroom = -1.0;
@@ -840,7 +840,7 @@ public class ElytraBounce extends Module {
       if (cachedPlan != null) this.flyingPlan = cachedPlan;
       else if (this.flyingPlan != null && !(this.flyingPlan.headroom >= 1.2)) this.flyingPlan = null;
       if (this.flyingPlan != null) this.predictedSpeed = this.flyingPlan.speed;
-      BouncePlanCache.Request<AutoPitchKey> request = this.pitchPlans.request();
+      PlanSlot.Ticket<AutoPitchKey> request = this.pitchPlans.request();
       if (request == null) return;
       MeteorExecutor.execute(() -> {
          try {
