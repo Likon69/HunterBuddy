@@ -186,6 +186,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new LoreLocator());
         Modules.get().add(new VisualRangeNotifier());
         Commands.add(new com.hunterbuddy.commands.logistics.SorterCommand());
+        Commands.add(new com.hunterbuddy.behavior.command.BehaviorCommand());
         Commands.add(new com.hunterbuddy.commands.AreaLoaderReset());
         Commands.add(new com.hunterbuddy.commands.Trails());
         ExperienceTraderModule module = new ExperienceTraderModule(UTILITY_CATEGORY);
