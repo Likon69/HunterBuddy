@@ -55,7 +55,7 @@ ESP, overlays, and render helpers.
 | `rotation-detector` | Finds horizontally placed blocks that only generate vertically in nature. |
 | `shader` | Entity glow/outline shader. |
 | `sign-render` | Renders sign text through walls, clustered to stay readable. |
-| `SpawnerDetector` | Finds spawners a player has already visited, and whether the loot is still there. |
+| `SpawnerDetector` | Finds classic monster-room dungeons, with or without their spawner, along with activated trial spawners and shipwrecks. It scores the player traces around each room: placed lights, ender chests, player blocks, a broken spawner, mobs, tunnels and filled shafts. Colored boxes and labels show which rooms are traced and which still hold chests. With `auto-farm` it flies to a traced room on its own, or to any room with a chest with `auto-farm-all`. It digs down, mines the spawner, loots the chests, climbs back out and hands flight back to your flight module. With `detect-shipwrecks` it also loots shipwreck chests in old chunks. It will not leave below a health or rocket minimum, nor while a non-friend player is loaded. |
 | `VanityESP` | Unified ESP for decorative items and selected special blocks. |
 
 ### Logistics (6)
@@ -69,9 +69,9 @@ Restocking and inventory handling tools.
 | `PearlLoader` | Anti-AFK loop with pearl-loading support. |
 | `replenish` | Replenishes hotbar items using shift-click packets. |
 | `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
-| `shulker-sorter` | Sorts shulkers and items from input chests into category chests, purifies mixed shulkers and fills partial ones at a station. Fills an empty shulker when a category has at least 27 loose stacks; optional `shulkerColor` in the JSON prefers its dye color. Withdraws only 100% pure shulkers, or empty ones for `shulkers`. Set it up with `tag-key` and the buttons in its settings. |
+| `shulker-sorter` | Sorts the shulkers and loose items in your input chests into category chests, walking between them with Baritone. At a station it keeps only the dominant category in mixed shulkers and tops up partial pure shulkers with loose items. It fills an empty shulker once a category has at least 27 loose stacks; an optional `shulkerColor` in the JSON prefers its dye color. Withdrawals take only 100% pure shulkers, or empty ones for `shulkers`. It pauses while another player is in sight (friends allowed with `ignore-friends`), while SpawnerDetector is on and while the regear runs, and it can resume after a reconnect. Register chests with `tag-key` and set their roles with the buttons in its settings; `dry-run` reports where inputs would go without moving them. |
 
-### Utility (13)
+### Utility (15)
 
 | Meteor name | Description |
 |---|---|
@@ -80,6 +80,7 @@ Restocking and inventory handling tools.
 | `auto-log-plus` | Additional logout triggers. |
 | `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
 | `disconnect-sound` | Plays a sound when the disconnect screen appears (e.g. when kicked). |
+| `Experience Trader Starter` | Switches Villager Trading on once per in-game day, at the in-game time you choose (13:00 by default), with a fresh list of clerics to visit. |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
 | `h-mine` | Fast block mining, with a configurable swing animation. |
 | `kill-aura-plus` | Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage. |
@@ -88,6 +89,7 @@ Restocking and inventory handling tools.
 | `NoHurtCam` | Removes the hurt-camera tilt and shake. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatically computed speed multiplier; can trace every boosted tick to a CSV for tuning. |
+| `Villager Trading` | Buys experience bottles from clerics with emeralds. Each round it visits every cleric within `villagers-searching-radius`, nearest first, and walks next to it with Baritone. It buys the emerald-for-bottles trade as long as the price stays at or under `experience-max-price`, until that trade sells out. When emeralds run low, it drops its bottles in the experience chest, takes emeralds from the emerald chest and crafts emerald blocks back into emeralds. Once no cleric is left, it switches off and walks back to its home position. It waits while AutoEat is eating. |
 
 ## Commands (3)
 
