@@ -635,7 +635,7 @@ public class TrailFollower extends Module {
                 return;
             }
             if (!this.started) {
-                if (this.mc.player.age < 20) return;
+                if (this.mc.player.age < 20 || !this.isActive()) return;
                 this.started = true;
                 this.onActivate();
                 if (!this.isActive()) {
