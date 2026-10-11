@@ -15,6 +15,8 @@ public final class Guard extends Decorator {
     private long started;
     private int failureCooldown;
     private boolean flightAware = true;
+    private boolean entered;
+    private long cooldownUntil;
 
     public Guard(Condition condition, Node child) {
         super("guard(" + condition.name() + ")", child);
@@ -59,16 +61,23 @@ public final class Guard extends Decorator {
 
     public boolean eligible(TickContext ctx) {
         if (!flightAware && ctx.sensors().gliding()) return false;
-        if (active() && ctx.tick() - started < minTicks) return true;
-        return (active() ? stay : enter).test(ctx.sensors());
+        if (!active()) return enter.test(ctx.sensors());
+        if (!entered) return false;
+        if (ctx.tick() - started < minTicks) return true;
+        return stay.test(ctx.sensors());
     }
 
-    public int failureCooldown() {
-        return failureCooldown;
+    public boolean cooledDown(long tick) {
+        return tick >= cooldownUntil;
+    }
+
+    public void failedAt(long tick) {
+        cooldownUntil = tick + failureCooldown;
     }
 
     @Override
     protected void onStart(TickContext ctx) {
+        entered = enter.test(ctx.sensors()) && (flightAware || !ctx.sensors().gliding());
         started = ctx.tick();
     }
 

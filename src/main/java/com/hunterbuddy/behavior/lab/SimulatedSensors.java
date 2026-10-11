@@ -11,8 +11,20 @@ public final class SimulatedSensors {
     }
 
     public static Sensors capture(boolean dead, boolean eating, boolean combat, boolean gliding, long blocks, long setbacks) {
+        return capture(dead, eating, combat, gliding, blocks, setbacks, 0);
+    }
+
+    public static Sensors position(double x) {
+        return capture(false, false, false, false, 0, 0, x);
+    }
+
+    public static Sensors position(double x, long setbacks) {
+        return capture(false, false, false, false, 0, setbacks, x);
+    }
+
+    private static Sensors capture(boolean dead, boolean eating, boolean combat, boolean gliding, long blocks, long setbacks, double x) {
         return new Sensors(
-            0, 64, 0, 0, 64, 0,
+            x, 64, 0, (int) Math.floor(x), 64, 0,
             0, 0, 0, 0, 0,
             !gliding, false, false, false,
             gliding, false, false,

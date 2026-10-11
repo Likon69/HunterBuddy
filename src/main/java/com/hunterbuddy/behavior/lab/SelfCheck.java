@@ -72,6 +72,7 @@ public final class SelfCheck {
         check.fault();
         check.checkRecovery();
         check.trace();
+        check.checks.addAll(RegressionChecks.run());
         return new SelfCheckReport(400, check.checks);
     }
 

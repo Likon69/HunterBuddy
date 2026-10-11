@@ -5,6 +5,7 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.Recovery;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.core.TreeValidator;
+import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -22,6 +24,8 @@ public final class TreeHooks {
     private List<HookEntry> entries = List.of();
     private ReactiveSelector root = new ReactiveSelector("root");
     private Recovery recovery;
+    private final Map<Guard, Long> entryIds = new IdentityHashMap<>();
+    private long nextId;
 
     public TreeHooks(Consumer<String> rejected) {
         this.rejected = Objects.requireNonNull(rejected);
@@ -43,6 +47,27 @@ public final class TreeHooks {
 
     public void remove(String owner, Hook hook) {
         pending.add(next -> next.removeIf(entry -> entry.owner().equals(owner) && entry.hook() == hook));
+    }
+
+    public void discardPendingChanges() {
+        pending.clear();
+    }
+
+    public void haltAll(TickContext ctx, ExitReason reason) {
+        RuntimeException failure = null;
+        List<Node> installed = new ArrayList<>();
+        installed.add(root);
+        entries.stream().map(HookEntry::guard).forEach(installed::add);
+        for (Node node : installed) {
+            try {
+                node.halt(ctx, reason);
+            } catch (RuntimeException ex) {
+                if (failure == null) failure = ex;
+                else if (failure != ex) failure.addSuppressed(ex);
+            }
+        }
+        root = build(entries);
+        if (failure != null) throw failure;
     }
 
     public boolean applyPendingChanges(TickContext ctx) {
@@ -71,6 +96,7 @@ public final class TreeHooks {
             }
         }
         entries = List.copyOf(next);
+        entryIds.keySet().removeIf(guard -> entries.stream().noneMatch(entry -> entry.guard() == guard));
         root = build(entries);
         ctx.event(root, Kind.HOOK, null, "rebuilt", "entries=" + entries.size());
         return true;
@@ -98,7 +124,8 @@ public final class TreeHooks {
     private ReactiveSelector build(List<HookEntry> installed) {
         for (HookEntry entry : installed) {
             if (!entry.guard().active()) entry.guard().flightAware(entry.flightAware());
-            TreeValidator.bind(entry.guard(), "root/" + entry.hook() + "/" + entry.owner() + "/" + entry.guard().name(), entry.owner(), entry.hook());
+            long id = entryIds.computeIfAbsent(entry.guard(), ignored -> ++nextId);
+            TreeValidator.bind(entry.guard(), "root/" + entry.hook() + "/" + entry.owner() + "/" + id + ":" + entry.guard().name(), entry.owner(), entry.hook());
         }
         return new ReactiveSelector("root", installed.stream().map(HookEntry::guard).toArray(Node[]::new));
     }
@@ -109,5 +136,9 @@ public final class TreeHooks {
 
     public List<HookEntry> entries() {
         return entries;
+    }
+
+    public String taskOwner() {
+        return entries.stream().filter(entry -> entry.hook() == Hook.BOT).map(HookEntry::owner).findFirst().orElse("core");
     }
 }

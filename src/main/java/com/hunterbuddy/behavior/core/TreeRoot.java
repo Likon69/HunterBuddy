@@ -25,9 +25,12 @@ public final class TreeRoot {
         hooks.recovery(recovery);
         TreeValidator.validate(hooks.build(), recovery);
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
+        recovery.taskOwner(hooks.taskOwner());
+        ctx.stopHandler(reason -> stop(ExitReason.STOPPED));
     }
 
     public void start() {
+        if (state == RootState.RUNNING) return;
         mutate(() -> {
             if (state == RootState.RUNNING) return;
             recovery.reset();
@@ -45,7 +48,7 @@ public final class TreeRoot {
         state = RootState.STOPPED;
         RuntimeException failure = null;
         try {
-            hooks.build().halt(ctx, reason);
+            hooks.haltAll(ctx, reason);
         } catch (RuntimeException ex) {
             failure = ex;
         }
@@ -70,51 +73,86 @@ public final class TreeRoot {
     public void tick(Sensors sensors) {
         if (ticking) throw new IllegalStateException("reentrant root tick");
         ticking = true;
-        ctx.begin(sensors);
         try {
-            if (state != RootState.RUNNING) return;
-            ctx.clock().countActive();
-            ctx.monitor().sample(ctx.clock(), sensors);
-            if (!recovering && ctx.monitor().fired()) {
-                ctx.event(hooks.build(), Kind.MONITOR, FailureCode.NO_PROGRESS, "fired", "inactiveMs=" + ctx.monitor().inactiveMs());
-                enterRecovery();
-            }
-            Node active = recovering ? recovery : hooks.build();
-            NodeResult result = active.execute(ctx);
-            if (ctx.evidenceSequence() != evidenceSequence) {
-                evidenceSequence = ctx.evidenceSequence();
-                completions.clear();
-            }
-            if (result instanceof Running) return;
-            if (recovering) {
-                if (result instanceof Failure) recovery.next(ctx);
-                else recovering = false;
-            } else {
-                completions.addLast(ctx.tick());
-                while (!completions.isEmpty() && ctx.tick() - completions.peekFirst() >= 20) completions.removeFirst();
-                if (completions.size() >= 20 && ctx.monitor().inactiveMs() > 0) {
-                    ctx.event(active, Kind.MONITOR, FailureCode.LOOP, "root loop", "completions=20");
-                    enterRecovery();
-                }
-            }
+            ctx.begin(sensors);
+            if (state == RootState.RUNNING) tickRunning(sensors);
+            while (!pending.isEmpty()) pending.removeFirst().run();
+            hooks.applyPendingChanges(ctx);
+            ctx.end();
         } catch (RuntimeException ex) {
-            ctx.event(hooks.build(), Kind.FAULT, FailureCode.FAULT, ex.getClass().getSimpleName(), Objects.toString(ex.getMessage(), ""));
-            try {
-                stopNow(ExitReason.FAULT);
-            } catch (RuntimeException cleanup) {
-                if (cleanup != ex) ex.addSuppressed(cleanup);
-            }
+            fault(ex);
         } finally {
-            try {
-                while (!pending.isEmpty()) pending.removeFirst().run();
-                hooks.applyPendingChanges(ctx);
-            } catch (RuntimeException ex) {
-                ctx.event(hooks.build(), Kind.FAULT, FailureCode.FAULT, "pending change failed", Objects.toString(ex.getMessage(), ""));
-                stopNow(ExitReason.FAULT);
-            } finally {
-                ticking = false;
-                ctx.end();
-            }
+            ticking = false;
+        }
+    }
+
+    private void fault(RuntimeException ex) {
+        pending.clear();
+        hooks.discardPendingChanges();
+        ctx.event(hooks.build(), Kind.FAULT, FailureCode.FAULT, ex.getClass().getSimpleName(), Objects.toString(ex.getMessage(), ""));
+        try {
+            stopNow(ExitReason.FAULT);
+        } catch (RuntimeException cleanup) {
+            if (cleanup != ex) ex.addSuppressed(cleanup);
+        } finally {
+            pending.clear();
+            hooks.discardPendingChanges();
+            ctx.leases().releaseAll();
+        }
+        try {
+            ctx.end();
+        } catch (RuntimeException sinkFailure) {
+            if (sinkFailure != ex) ex.addSuppressed(sinkFailure);
+        }
+    }
+
+    private void tickRunning(Sensors sensors) {
+        synchronizeTaskOwner();
+        ctx.clock().countActive();
+        ctx.monitor().sample(ctx.clock(), sensors);
+        if (!recovering && ctx.monitor().fired()) {
+            ctx.event(hooks.build(), Kind.MONITOR, FailureCode.NO_PROGRESS, "fired", "inactiveMs=" + ctx.monitor().inactiveMs());
+            enterRecovery();
+        }
+        Node active = recovering ? recovery : hooks.build();
+        NodeResult result = active.execute(ctx);
+        if (ctx.evidenceSequence() != evidenceSequence) {
+            evidenceSequence = ctx.evidenceSequence();
+            completions.clear();
+            if (ctx.monitor().sustainedFor(60_000)) recovery.provenProgress();
+        }
+        if (result instanceof Running) return;
+        if (recovering) {
+            completeRecovery(result);
+            return;
+        }
+        if (result instanceof Success && hooks.build().successfulHook() == Hook.BOT) recovery.provenProgress();
+        completions.addLast(ctx.tick());
+        while (!completions.isEmpty() && ctx.tick() - completions.peekFirst() >= 20) completions.removeFirst();
+        if (completions.size() >= 20 && ctx.monitor().inactiveMs() > 0) {
+            ctx.event(active, Kind.MONITOR, FailureCode.LOOP, "root loop", "completions=20");
+            enterRecovery();
+        }
+    }
+
+    private void synchronizeTaskOwner() {
+        String owner = hooks.taskOwner();
+        if (recovery.taskOwner().equals(owner)) return;
+        recovery.halt(ctx, ExitReason.STOPPED);
+        recovery.reset();
+        recovering = false;
+        recovery.taskOwner(owner);
+    }
+
+    private void completeRecovery(NodeResult result) {
+        if (result instanceof Failure) {
+            recovery.next(ctx);
+            return;
+        }
+        recovering = false;
+        if (recovery.restartReady()) {
+            recovery.reset();
+            completions.clear();
         }
     }
 

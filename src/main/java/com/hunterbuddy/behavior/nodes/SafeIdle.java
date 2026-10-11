@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.nodes;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
+import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.Objects;
@@ -10,6 +11,8 @@ import java.util.function.Consumer;
 
 public final class SafeIdle extends Node {
     private final Consumer<String> alert;
+    private long started;
+    private long frozenAtStart;
 
     public SafeIdle(Consumer<String> alert) {
         super("safe-idle");
@@ -18,6 +21,8 @@ public final class SafeIdle extends Node {
 
     @Override
     protected void onStart(TickContext ctx) {
+        started = ctx.nowMs();
+        frozenAtStart = ctx.clock().frozenMs();
         ctx.leases().releaseAll();
         ctx.event(this, Kind.RECOVERY, null, "safe idle", "leases=0");
         alert.accept("SafeIdle: resources released");
@@ -25,6 +30,7 @@ public final class SafeIdle extends Node {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
+        if (ctx.nowMs() - started - (ctx.clock().frozenMs() - frozenAtStart) >= 30_000) return Success.INSTANCE;
         return new Running("safe idle");
     }
 }

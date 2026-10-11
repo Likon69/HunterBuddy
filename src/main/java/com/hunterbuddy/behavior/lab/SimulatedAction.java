@@ -8,10 +8,12 @@ import com.hunterbuddy.behavior.core.TickContext;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 public final class SimulatedAction extends Action {
     private final Function<TickContext, NodeResult> work;
+    private final BiConsumer<TickContext, ExitReason> stopping;
     private final List<ExitReason> stops = new ArrayList<>();
     private int starts;
     private int ticks;
@@ -22,8 +24,13 @@ public final class SimulatedAction extends Action {
     }
 
     public SimulatedAction(String name, Function<TickContext, NodeResult> work) {
+        this(name, work, (ctx, reason) -> { });
+    }
+
+    public SimulatedAction(String name, Function<TickContext, NodeResult> work, BiConsumer<TickContext, ExitReason> stopping) {
         super(name);
         this.work = Objects.requireNonNull(work);
+        this.stopping = Objects.requireNonNull(stopping);
     }
 
     @Override
@@ -41,6 +48,7 @@ public final class SimulatedAction extends Action {
     @Override
     protected void onActionStop(TickContext ctx, ExitReason reason) {
         stops.add(reason);
+        stopping.accept(ctx, reason);
     }
 
     public int starts() {

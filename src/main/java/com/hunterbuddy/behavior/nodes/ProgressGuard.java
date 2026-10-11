@@ -4,19 +4,23 @@ import com.hunterbuddy.behavior.core.Decorator;
 import com.hunterbuddy.behavior.core.EvidenceKind;
 import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.ProgressEvidence;
 import com.hunterbuddy.behavior.core.ProgressSensor;
+import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.core.TickContext;
 import java.util.Objects;
+import java.util.function.Function;
 
 public final class ProgressGuard extends Decorator {
     private final ProgressSensor sensor;
     private final double minGain;
     private final int window;
-    private double best;
     private int inactive;
+    private String activeKey;
+    private Function<TickContext, String> target = ctx -> path();
 
     public ProgressGuard(ProgressSensor sensor, double minGain, int windowTicks, Node child) {
         super("progress-guard", child);
@@ -28,21 +32,39 @@ public final class ProgressGuard extends Decorator {
 
     @Override
     protected void onStart(TickContext ctx) {
-        best = sensor.value(ctx.sensors());
-        inactive = 0;
+        String key = Objects.requireNonNull(target.apply(ctx));
+        if (!key.equals(activeKey)) inactive = 0;
+        activeKey = key;
+    }
+
+    public ProgressGuard keyedBy(Function<TickContext, String> target) {
+        if (active()) throw new IllegalStateException("cannot configure an active ProgressGuard");
+        this.target = Objects.requireNonNull(target);
+        return this;
     }
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
         double value = sensor.value(ctx.sensors());
-        double gain = value - best;
-        if (Double.isFinite(gain) && gain >= minGain && ctx.progress(new ProgressEvidence(EvidenceKind.GOAL_BEST, gain, "goal best"))) {
+        Key<Double> key = new Key<>("progress-best/" + activeKey, Double.class, Scope.OWNER, false);
+        Double best = ctx.bb().get(ctx.owner(), key).orElse(null);
+        if (best == null && Double.isFinite(value) && ctx.monitor().samplesValid(ctx.tick())) {
             best = value;
+            ctx.bb().set(ctx.owner(), key, best);
+        }
+        double gain = best == null ? 0 : value - best;
+        if (Double.isFinite(gain) && gain >= minGain && ctx.progress(new ProgressEvidence(EvidenceKind.GOAL_BEST, gain, "goal best"))) {
+            ctx.bb().set(ctx.owner(), key, value);
             inactive = 0;
         } else if (++inactive >= window) {
             child().halt(ctx, ExitReason.ABORTED);
             return fail(FailureCode.NO_PROGRESS, "window=" + window);
         }
         return child().execute(ctx);
+    }
+
+    @Override
+    protected void onReset() {
+        inactive = 0;
     }
 }

@@ -14,6 +14,7 @@ public record Tree(Node root, Recovery recovery) {
         Tree tree = new Tree(root, recovery);
         TreeValidator.bind(root, "root", "core", Hook.BOT);
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
+        recovery.taskOwner(recovery.taskOwner());
         return tree;
     }
 }

@@ -5,8 +5,10 @@ import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.Trace;
 import com.hunterbuddy.behavior.trace.TraceEvent;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 public final class TickContext {
+    public static final Key<String> CURRENT_TARGET = new Key<>("current-target", String.class, Scope.OWNER, false);
     private final Clock clock;
     private final Blackboard blackboard;
     private final ResourceArbiter leases;
@@ -17,6 +19,7 @@ public final class TickContext {
     private Sensors sensors;
     private Node current;
     private long evidenceSequence;
+    private Consumer<String> stopHandler;
 
     public TickContext(Clock clock, Blackboard blackboard, ResourceArbiter leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
@@ -108,5 +111,14 @@ public final class TickContext {
 
     public long evidenceSequence() {
         return evidenceSequence;
+    }
+
+    public void stopHandler(Consumer<String> handler) {
+        stopHandler = Objects.requireNonNull(handler);
+    }
+
+    public void stopBot(String reason) {
+        if (stopHandler == null) throw new IllegalStateException("no bot stop handler installed");
+        stopHandler.accept(Objects.requireNonNull(reason));
     }
 }

@@ -5,6 +5,8 @@ public final class ProgressMonitor {
     private long inactiveMs;
     private long setbacks;
     private long invalidUntilTick;
+    private long activeMs;
+    private long firstProgressAt = -1;
 
     public ProgressMonitor(ProgressPolicy policy) {
         this.policy = policy;
@@ -14,16 +16,23 @@ public final class ProgressMonitor {
         if (sensors.setbacks() > setbacks) invalidUntilTick = clock.tick() + 20;
         setbacks = sensors.setbacks();
         inactiveMs += clock.activeGapMs();
+        activeMs = clock.activeMs();
+        if (inactiveMs >= policy.noProgressMs()) firstProgressAt = -1;
     }
 
     public boolean accept(long tick, ProgressEvidence evidence) {
-        if (tick < invalidUntilTick || !policy.accepted().contains(evidence.kind())) return false;
+        if (!samplesValid(tick) || !policy.accepted().contains(evidence.kind())) return false;
         inactiveMs = 0;
+        if (firstProgressAt < 0) firstProgressAt = activeMs;
         return true;
     }
 
     public boolean fired() {
         return inactiveMs >= policy.noProgressMs();
+    }
+
+    public boolean samplesValid(long tick) {
+        return tick >= invalidUntilTick;
     }
 
     public long inactiveMs() {
@@ -32,5 +41,9 @@ public final class ProgressMonitor {
 
     public long remainingMs() {
         return Math.max(0, policy.noProgressMs() - inactiveMs);
+    }
+
+    public boolean sustainedFor(long ms) {
+        return firstProgressAt >= 0 && activeMs - firstProgressAt >= ms && inactiveMs < policy.noProgressMs();
     }
 }
