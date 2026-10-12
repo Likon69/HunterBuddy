@@ -218,11 +218,6 @@ public final class TickContext {
         return evidenceSequence;
     }
 
-    public void stopHandler(Consumer<String> handler) {
-        Objects.requireNonNull(handler);
-        stopReportHandler((reason, detail) -> handler.accept(detail));
-    }
-
     public void stopReportHandler(BiConsumer<ExitReason, String> handler) {
         stopHandler = Objects.requireNonNull(handler);
     }

@@ -66,10 +66,6 @@ public final class ProgressMonitor {
         return inactiveMs;
     }
 
-    public long remainingMs() {
-        return Math.max(0, policy.noProgressMs() - inactiveMs);
-    }
-
     public long windowMs() {
         return policy.noProgressMs();
     }

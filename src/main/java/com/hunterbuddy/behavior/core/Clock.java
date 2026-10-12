@@ -46,10 +46,6 @@ public final class Clock {
         return nowMs;
     }
 
-    public long gapMs() {
-        return gapMs;
-    }
-
     public long activeMs() {
         return activeMs;
     }

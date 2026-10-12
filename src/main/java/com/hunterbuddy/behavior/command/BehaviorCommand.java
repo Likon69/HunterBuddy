@@ -3,8 +3,6 @@ package com.hunterbuddy.behavior.command;
 import com.hunterbuddy.behavior.core.BehaviorStatus;
 import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.lab.LabScenario;
-import com.hunterbuddy.behavior.lab.SelfCheck;
-import com.hunterbuddy.behavior.lab.SelfCheckReport;
 import com.hunterbuddy.modules.TreeJava;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -20,7 +18,6 @@ public final class BehaviorCommand extends Command {
 
     @Override
     public void build(LiteralArgumentBuilder<CommandSource> builder) {
-        builder.then(literal("selfcheck").executes(context -> selfcheck()));
         builder.then(literal("bots").executes(context -> control(() ->
             info("Bots: %s", String.join(", ", module().botNames())))));
         builder.then(literal("start").then(literal("lab").executes(context -> control(() -> {
@@ -75,17 +72,6 @@ public final class BehaviorCommand extends Command {
             return SINGLE_SUCCESS;
         } catch (RuntimeException ex) {
             error("%s", ex.getMessage());
-            return 0;
-        }
-    }
-
-    private int selfcheck() {
-        try {
-            SelfCheckReport report = SelfCheck.run();
-            info("Foundation OK: %d checks, %d simulated ticks. Live scenarios require in-game acceptance.", report.checks().size(), report.ticks());
-            return SINGLE_SUCCESS;
-        } catch (RuntimeException ex) {
-            error("SelfCheck failed: %s", ex.getMessage());
             return 0;
         }
     }

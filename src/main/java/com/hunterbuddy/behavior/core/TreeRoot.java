@@ -44,10 +44,6 @@ public final class TreeRoot {
         });
     }
 
-    public void stop(ExitReason reason) {
-        stop(reason, Objects.requireNonNull(reason).name());
-    }
-
     public void stop(ExitReason reason, String detail) {
         Objects.requireNonNull(reason);
         Objects.requireNonNull(detail);

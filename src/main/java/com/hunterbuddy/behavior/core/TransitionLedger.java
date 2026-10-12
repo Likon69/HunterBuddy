@@ -13,8 +13,4 @@ public final class TransitionLedger {
     public void progress() {
         starts.clear();
     }
-
-    public int count(String path, String target) {
-        return starts.getOrDefault(path, Map.of()).getOrDefault(target, 0);
-    }
 }

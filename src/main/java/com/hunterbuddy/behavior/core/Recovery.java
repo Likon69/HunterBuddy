@@ -14,22 +14,17 @@ import java.util.function.Consumer;
 public final class Recovery extends Composite {
     private int level;
     private final RecoveryContext target;
-    private final RestartBudget restarts;
     private final SafeRestart idle;
     private boolean restartReady;
     private int activeLevel;
     private final Node levelTwo;
     private final Node levelThree;
 
-    public Recovery(Node levelTwo, Node levelThree, Consumer<String> alert) {
-        this(levelTwo, levelThree, alert, new RestartBudget());
-    }
-
     public Recovery(Node levelTwo, Node levelThree, Consumer<String> alert, RestartBudget restarts) {
-        this(new RecoveryContext(), levelTwo, levelThree, new SafeRestart(alert, restarts), restarts);
+        this(new RecoveryContext(), levelTwo, levelThree, new SafeRestart(alert, restarts));
     }
 
-    private Recovery(RecoveryContext target, Node levelTwo, Node levelThree, SafeRestart idle, RestartBudget restarts) {
+    private Recovery(RecoveryContext target, Node levelTwo, Node levelThree, SafeRestart idle) {
         super("recovery",
             new Sequence("reset-task", new ClearScope(Scope.TASK, ctx -> target.taskOwner()), new Succeed()),
             new Timeout(12_000, levelTwo),
@@ -37,7 +32,6 @@ public final class Recovery extends Composite {
                 new ResetBudget("all", ctx -> target.taskOwner()), levelThree, new Succeed())),
             idle);
         this.target = target;
-        this.restarts = restarts;
         this.idle = idle;
         this.levelTwo = levelTwo;
         this.levelThree = levelThree;
@@ -89,10 +83,6 @@ public final class Recovery extends Composite {
 
     public boolean restartReady() {
         return restartReady;
-    }
-
-    public int restartCount() {
-        return restarts.count();
     }
 
     public void provenProgress() {
