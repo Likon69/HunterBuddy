@@ -371,7 +371,7 @@ public class TravelHud extends HudElement {
                 // alternating between zero and several times the truth. The average of that is
                 // right, but only on average, and every irregularity in frame pacing leans on
                 // it. The velocity vector is already a per-tick displacement and needs nothing
-                // but the factor twenty; it is what SpeedKMH has always used in this addon.
+                // but the factor twenty.
                 var velocity = MeteorClient.mc.player.getVelocity();
                 double instant = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z) * 20.0;
 

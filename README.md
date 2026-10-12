@@ -17,7 +17,7 @@ Target: **Minecraft 1.21.11 only** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.
 
 Only modules registered by `HunterBuddyAddon` are listed below. Source files that are present but deliberately not registered are not documented as available modules.
 
-### Hunt (17)
+### Hunt (16)
 
 Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissance.
 
@@ -26,7 +26,6 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `300kmfly` | Fast firework flight on a fixed heading. Holds an altitude band with alternating dive and climb legs (or a smooth level mode), turning the pitch a few degrees per tick. Turns `rocket-boost` on by itself and, with `auto-speed` checked, switches on its auto-speed for the flight and puts it back after; unchecked, it leaves `rocket-boost` exactly as you set it. Relights each rocket just before `rocket-boost`'s extension runs out. Takes off from the ground, rises over terrain and flips a leg when terrain is ahead, glides level once the rockets run out, and never lights one in water or lava. Logs its speed, altitude, leg and rockets per minute every second. |
 | `arealoader` | Loads chunks along a rectangle, spiral, zigzag, or circle route; routes can be saved and resumed. |
 | `auto-portal` | Builds a nether portal frame, lights it, and optionally paths the player into it via Baritone. |
-| `chest-tracker` | Records the contents of containers you open, with a browser screen and JSON storage. |
 | `chunk-radar` | Follows the 1.12 trail from the blocks in each arriving chunk, fits a line through the hits, and calls out when it is acquired, lost, turning, or thick enough to be a stash. Remembers trails between sessions. Overworld only. |
 | `elytra-auto-fly` | Flight cycle driving `pitch40-classic`: climb, then manual-pitch descent, looped. |
 | `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer, and portal-trap avoidance. `solve-pitch` picks the fastest bounce angle for the ceiling above you, and `chestplate-fakefly` bounces with a chest piece worn and the elytra in a hand, swapping the elytra in only for the take-off so it never loses durability. |
@@ -99,24 +98,19 @@ Commands use the configured Meteor command prefix.
 | `sorter` | Fallback setup and withdrawal for the shulker sorter (`input`, `dest`, `reserve`, `station`, `remove`, `list`, `get`…). |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-## HUD elements (27)
+## HUD elements (21)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
 | HUD name | Description |
 |---|---|
 | `ChunkRadar` | Top-down view of the 1.12 trail the chunk-radar module is following. |
-| `DimensionCoords` | Coordinates for both Overworld and Nether. |
-| `DubCounter` | Counts all containers in render distance. |
 | `elytra-helper` | Central flight panel: elytra durability, flight time estimates, session stats, and hunt module status. |
 | `ElytraStatus` | Compact one-line elytra status: speed, pitch, rockets, durability. |
-| `EntityList` | Lists nearby entities. |
 | `FindsTicker` | Recent finds and sightings as a fading feed. |
 | `FollowerHeading` | A heading tape for the waypoint follower: the target as a sliding diamond, the next turns as ghosts. |
 | `FollowerRoute` | The follower's route as a line of milestones: reach halo on the current one, +N for the rest. |
 | `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
-| `item-counter` | Selected items and their inventory counts. |
-| `MobInfo` | Tracks mob spawns and density. |
 | `movement-status` | Current sneaking and sprinting status. |
 | `Odometer` | Session distance on mechanical drums, lifetime total below. |
 | `Performance` | FPS, ping and server TPS in one line, coloured by level and flashing on spikes and drops. |
@@ -124,7 +118,6 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
 | `RegearStatus` | The regear's identity badge, its station on its line, stocks and gains, counters, next-regear estimate and last event. |
 | `SorterStatus` | Shulker sorter state, target, input progress, confirmed deliveries, purified and packed shulkers, capacity and alerts. |
-| `SpeedKMH` | Movement speed in km/h. |
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
 | `SpiralCoverage` | AreaLoader coverage for any mode: flown legs, current leg, planned turns. |
 | `SystemStats` | RAM and CPU usage with line graphs. |
@@ -145,7 +138,7 @@ These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.
 ## Files and network
 
 - `chunk-radar` persists its trail memory to `hunterbuddy/trails.json` (plus a backup) under the Meteor folder; `rocket-boost` can append a per-tick trace to `hunterbuddy/rocketboost-trace.csv` when its trace setting is on.
-- `chest-tracker`, AreaLoader routes, and the lifetime odometer stats are also stored as JSON.
+- AreaLoader routes and the lifetime odometer stats are also stored as JSON.
 - `old-chunk-notifier` and `visual-range-notifier` post to a Discord webhook if one is configured.
 
 ## Build

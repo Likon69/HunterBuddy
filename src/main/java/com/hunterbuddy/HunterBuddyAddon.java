@@ -1,17 +1,11 @@
 package com.hunterbuddy;
 
 
-import com.hunterbuddy.hud.DimensionCoords;
-import com.hunterbuddy.hud.DubCounterHud;
 import com.hunterbuddy.hud.ElytraHelperHud;
 import com.hunterbuddy.hud.ElytraStatusHud;
-import com.hunterbuddy.hud.EntityList;
 import com.hunterbuddy.hud.HuntTallyHud;
-import com.hunterbuddy.hud.ItemCounterHud;
-import com.hunterbuddy.hud.MobInfo;
 import com.hunterbuddy.hud.MovementStatusHud;
 import com.hunterbuddy.hud.RegearStatusHud;
-import com.hunterbuddy.hud.SpeedKMH;
 import com.hunterbuddy.hud.SystemStatsHud;
 import com.hunterbuddy.hud.TimerSpeedHud;
 import com.hunterbuddy.hud.TravelHud;
@@ -23,7 +17,6 @@ import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.CaveAirESP;
 import com.hunterbuddy.modules.ChunkRadar;
-import com.hunterbuddy.modules.chesttracker.ChestTrackerModule;
 import com.hunterbuddy.modules.ClientSideTime;
 import com.hunterbuddy.modules.DisconnectSound;
 import com.hunterbuddy.modules.ElytraAutoFly;
@@ -98,13 +91,7 @@ public class HunterBuddyAddon extends MeteorAddon {
 
 
         Hud.get().register(ElytraHelperHud.INFO);
-        Hud.get().register(SpeedKMH.INFO);
         Hud.get().register(MovementStatusHud.INFO);
-        Hud.get().register(DubCounterHud.INFO);
-        Hud.get().register(MobInfo.INFO);
-        Hud.get().register(ItemCounterHud.INFO);
-        Hud.get().register(EntityList.INFO);
-        Hud.get().register(DimensionCoords.INFO);
         Hud.get().register(TimerSpeedHud.INFO);
         Hud.get().register(SystemStatsHud.INFO);
         Hud.get().register(ElytraStatusHud.INFO);
@@ -174,7 +161,6 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new com.hunterbuddy.modules.Shader());
         Modules.get().add(new RocketBoost());
-        Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
         Modules.get().add(new DisconnectSound());
         Modules.get().add(new VisualRangeNotifier());
         Modules.get().add(new com.hunterbuddy.modules.TreeJava());
