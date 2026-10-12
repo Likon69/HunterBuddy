@@ -6,7 +6,6 @@ import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
-import com.hunterbuddy.behavior.trace.Kind;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -26,8 +25,7 @@ public final class SafeIdle extends Node {
         started = ctx.nowMs();
         frozenAtStart = ctx.clock().frozenMs();
         ctx.leases().releaseAll();
-        ctx.event(this, Kind.RECOVERY, null, "safe idle", "leases=0");
-        alert.accept("SafeIdle: resources released");
+        ctx.announceIdle(this, alert);
     }
 
     @Override

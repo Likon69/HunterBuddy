@@ -14,15 +14,25 @@ import java.util.Set;
 public final class ReactiveSelector extends Composite {
     private int selected = -1;
     private Hook successfulHook;
+    private final boolean hookRoot;
 
     public ReactiveSelector(String name, Node... children) {
+        this(name, false, children);
+    }
+
+    private ReactiveSelector(String name, boolean hookRoot, Node... children) {
         super(name, children);
+        this.hookRoot = hookRoot;
         for (int i = 0; i < children.length; i++) {
             if (children[i].active()) {
                 if (selected >= 0) throw new IllegalArgumentException("multiple active ReactiveSelector branches");
                 selected = i;
             }
         }
+    }
+
+    public static ReactiveSelector hooks(Node... entries) {
+        return new ReactiveSelector("root", true, entries);
     }
 
     @Override
@@ -39,13 +49,18 @@ public final class ReactiveSelector extends Composite {
             Guard guard = (Guard) children().get(candidate);
             selected = candidate;
             NodeResult result = guard.execute(ctx);
+            if (hookRoot && guard.hook() == Hook.BOT && !(result instanceof Failure)) endIdleWait(ctx);
             if (result instanceof Running) return result;
             selected = -1;
             if (!(result instanceof Failure)) {
                 successfulHook = guard.hook();
+                if (successfulHook == Hook.IDLE) resumeBotRetries();
                 return result;
             }
             guard.failedAt(ctx.tick());
+            if (hookRoot && guard.hook() == Hook.BOT && children().stream().anyMatch(child -> child.hook() == Hook.IDLE)) {
+                guard.deferRetry();
+            }
             candidate = firstEligible(ctx, candidate + 1, children().size());
         }
         return fail(FailureCode.NO_OPTION, name());
@@ -68,8 +83,22 @@ public final class ReactiveSelector extends Composite {
         return successfulHook;
     }
 
+    public void resumeBotRetries() {
+        for (Node child : children()) {
+            if (child instanceof Guard guard && child.hook() == Hook.BOT) guard.resumeRetries();
+        }
+    }
+
+    private void endIdleWait(TickContext ctx) {
+        ctx.endIdlePeriod();
+        for (Node child : children()) {
+            if (child.hook() == Hook.IDLE && !child.active()) child.resetMemory();
+        }
+    }
+
     @Override
     protected void onStop(TickContext ctx, ExitReason reason) {
         selected = -1;
+        if (reason == ExitReason.STOPPED) resumeBotRetries();
     }
 }

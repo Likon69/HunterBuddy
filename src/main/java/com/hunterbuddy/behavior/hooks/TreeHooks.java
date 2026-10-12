@@ -22,7 +22,7 @@ public final class TreeHooks {
     private final List<Consumer<List<HookEntry>>> pending = new ArrayList<>();
     private final Consumer<String> rejected;
     private List<HookEntry> entries = List.of();
-    private ReactiveSelector root = new ReactiveSelector("root");
+    private ReactiveSelector root = ReactiveSelector.hooks();
     private Recovery recovery;
     private final Map<Guard, Long> entryIds = new IdentityHashMap<>();
     private long nextId;
@@ -104,7 +104,7 @@ public final class TreeHooks {
 
     private void validateCandidate(List<HookEntry> candidate) {
         TreeValidator.validate(candidate);
-        if (recovery != null) TreeValidator.validate(new ReactiveSelector("root", candidate.stream()
+        if (recovery != null) TreeValidator.validate(ReactiveSelector.hooks(candidate.stream()
             .map(HookEntry::guard).toArray(Node[]::new)), recovery);
         Set<Node> attached = Collections.newSetFromMap(new IdentityHashMap<>());
         collect(root, attached);
@@ -127,7 +127,7 @@ public final class TreeHooks {
             long id = entryIds.computeIfAbsent(entry.guard(), ignored -> ++nextId);
             TreeValidator.bind(entry.guard(), "root/" + entry.hook() + "/" + entry.owner() + "/" + id + ":" + entry.guard().name(), entry.owner(), entry.hook());
         }
-        return new ReactiveSelector("root", installed.stream().map(HookEntry::guard).toArray(Node[]::new));
+        return ReactiveSelector.hooks(installed.stream().map(HookEntry::guard).toArray(Node[]::new));
     }
 
     public ReactiveSelector build() {

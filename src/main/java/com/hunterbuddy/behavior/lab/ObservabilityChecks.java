@@ -161,11 +161,11 @@ public final class ObservabilityChecks {
         for (int i = 0; i < 10; i++) sim.tick(root, SimulatedSensors.idle());
         require(chat.size() == 1 && sim.ctx().leases().snapshot().isEmpty(), "SafeIdle wait does not flood chat or hold resources");
         for (int i = 0; i < 3_000 && root.state() != RootState.STOPPED; i++) sim.tick(root, SimulatedSensors.idle());
-        require(root.state() == RootState.STOPPED && chat.size() == 4
+        require(root.state() == RootState.STOPPED && chat.size() == 2
             && chat.stream().allMatch(message -> message.equals("SafeIdle: resources released")),
-            "restart exhaustion emits four SafeIdle alerts without duplicate terminal stop alert");
+            "restart exhaustion announces the two distinct idle periods without duplicate terminal stop alert");
         messages.stopped(root.stopReport().orElseThrow());
-        require(chat.size() == 5 && chat.getLast().equals("Stopped [STOPPED]: automatic restart limit reached"),
+        require(chat.size() == 3 && chat.getLast().equals("Stopped [STOPPED]: automatic restart limit reached"),
             "terminal restart exhaustion is announced once through its precise stop report");
         sim.ctx().end();
     }

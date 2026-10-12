@@ -23,6 +23,7 @@ public final class TickContext {
     private long evidenceSequence;
     private BiConsumer<ExitReason, String> stopHandler;
     private int monitorDepth;
+    private boolean idleAnnounced;
 
     public TickContext(Clock clock, Blackboard blackboard, Leases leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
@@ -68,6 +69,17 @@ public final class TickContext {
 
     public void event(Node node, Kind kind, FailureCode code, String reason, String detail) {
         trace.emit(new TraceEvent(tick(), nowMs(), node.hook(), node.owner(), node.path(), kind, code, reason, detail));
+    }
+
+    public void announceIdle(Node node, Consumer<String> alert) {
+        if (idleAnnounced) return;
+        idleAnnounced = true;
+        event(node, Kind.RECOVERY, null, "safe idle", "leases=0");
+        alert.accept("SafeIdle: resources released");
+    }
+
+    public void endIdlePeriod() {
+        idleAnnounced = false;
     }
 
     public void progress(String reason) {

@@ -133,7 +133,7 @@ public final class IdleChecks {
         require(sim.ring().snapshot().stream().anyMatch(event -> event.kind() == Kind.BOT
             && event.hook() == Hook.IDLE && event.reason().equals("restart")), "Idle automatic restart appears in important event trace");
         tick(sim, root, 1_803);
-        require(root.state() == RootState.STOPPED && restarts.count() == 3 && alerts.size() == 4
+        require(root.state() == RootState.STOPPED && restarts.count() == 3 && alerts.size() == 1
             && root.stopReport().orElseThrow().detail().equals("automatic restart limit reached"),
             "IdleRoutine permits three restarts per hour and stops on the fourth attempt with a precise cause");
         require(sim.ctx().leases().snapshot().isEmpty() && action.starts() == 0 && sim.ctx().evidenceSequence() == 0,

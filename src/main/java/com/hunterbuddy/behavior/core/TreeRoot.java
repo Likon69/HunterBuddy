@@ -70,6 +70,7 @@ public final class TreeRoot {
             if (failure == null) failure = ex;
             else if (failure != ex) failure.addSuppressed(ex);
         } finally {
+            ctx.endIdlePeriod();
             ctx.leases().releaseAll();
             ctx.utilityFailures().clear();
             hooks.build().resetMemory();
@@ -196,6 +197,7 @@ public final class TreeRoot {
         }
         if (recovery.level() == 4 && !recovery.restartReady()) return;
         recovering = false;
+        hooks.build().resumeBotRetries();
         beginAttempt();
         ctx.event(hooks.build(), Kind.RECOVERY, null, "task resume",
             "windowMs=" + ctx.monitor().windowMs() + " inactiveMs=" + ctx.monitor().inactiveMs());

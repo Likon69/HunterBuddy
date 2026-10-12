@@ -17,6 +17,7 @@ public final class Guard extends Decorator {
     private boolean flightAware = true;
     private boolean entered;
     private long cooldownUntil;
+    private boolean retryDeferred;
 
     public Guard(Condition condition, Node child) {
         super("guard(" + condition.name() + ")", child);
@@ -61,7 +62,11 @@ public final class Guard extends Decorator {
 
     public boolean eligible(TickContext ctx) {
         if (!flightAware && ctx.sensors().gliding()) return false;
-        if (!active()) return enter.test(ctx.sensors());
+        if (!active()) {
+            boolean eligible = enter.test(ctx.sensors());
+            if (!eligible) retryDeferred = false;
+            return eligible && !retryDeferred;
+        }
         if (!entered) return false;
         if (ctx.tick() - started < minTicks) return true;
         return stay.test(ctx.sensors());
@@ -73,6 +78,20 @@ public final class Guard extends Decorator {
 
     public void failedAt(long tick) {
         cooldownUntil = tick + failureCooldown;
+    }
+
+    public void deferRetry() {
+        if (active()) throw new IllegalStateException("cannot defer an active Guard");
+        retryDeferred = true;
+    }
+
+    public void resumeRetries() {
+        retryDeferred = false;
+    }
+
+    @Override
+    protected void onReset() {
+        retryDeferred = false;
     }
 
     @Override
