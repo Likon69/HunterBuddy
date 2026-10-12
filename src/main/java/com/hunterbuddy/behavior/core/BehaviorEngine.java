@@ -14,6 +14,7 @@ import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.plugin.PluginRegistry;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
+import com.hunterbuddy.behavior.routine.DeathPolicy;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
 import com.hunterbuddy.behavior.routine.IdleRoutine;
 import com.hunterbuddy.behavior.routine.Routine;
@@ -45,6 +46,7 @@ public final class BehaviorEngine {
     private final Deque<Runnable> pending = new ArrayDeque<>();
     private final Sensors sensors = SimulatedSensors.idle();
     private Bot bot;
+    private BotContext botContext;
     private String botOwner;
     private StopReport announced;
     private boolean ticking;
@@ -65,7 +67,8 @@ public final class BehaviorEngine {
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
         plugins = new PluginRegistry(ctx, hooks, alerts);
-        routineContext = new RoutineContext(ctx);
+        routineContext = new RoutineContext(ctx,
+            () -> botContext == null ? DeathPolicy.STOP : botContext.config().deathPolicy());
         for (Routine routine : routines) routine.entries(routineContext).forEach(hooks::insert);
         hooks.applyPendingChanges(ctx);
         recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "no simulated alternative"), new Succeed(), alerts, restarts);
@@ -110,6 +113,7 @@ public final class BehaviorEngine {
         hooks.applyPendingChanges(ctx);
         plugins.applyPendingCleanup();
         bot = next;
+        botContext = context;
         ctx.monitor().configure(context.config().progress());
         evidenceBaseline = ctx.evidenceSequence();
         routines.forEach(routine -> routine.onInstall(routineContext));
