@@ -12,8 +12,8 @@ import java.util.function.Function;
 public final class RepeatWhileProgress extends Decorator {
     private final ProgressGuard progress;
 
-    public RepeatWhileProgress(ProgressSensor sensor, int windowTicks, Node child) {
-        this(new ProgressGuard(sensor, Double.MIN_VALUE, windowTicks, child));
+    public RepeatWhileProgress(ProgressSensor sensor, double minGain, int windowTicks, Node child) {
+        this(new ProgressGuard(sensor, minGain, windowTicks, child));
     }
 
     private RepeatWhileProgress(ProgressGuard progress) {
