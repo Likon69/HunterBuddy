@@ -22,6 +22,7 @@ import meteordevelopment.meteorclient.settings.StringListSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;
@@ -144,6 +145,8 @@ public class PearlButler extends Module {
     private LoadLocation activePlace = null;
     private BlockPos goal = null;
     private long phaseStart = 0L;
+    private long approachStart = 0L;
+    private int recloses = 0;
     private long lastClick = 0L;
     private int aimSteps = 0;
     private Boolean baritoneKnown = null;
@@ -271,25 +274,17 @@ public class PearlButler extends Module {
     }
 
     private String findSender(String message) {
-        if (message.contains(" whispers: ")) {
-            String head = stripColors(message.substring(0, message.indexOf(" whispers: "))).trim();
-            String[] parts = head.split(" ");
-            String name = parts[parts.length - 1];
+        String line = stripColors(message).replaceFirst("^\\s*\\[[0-9:]+\\]\\s*", "");
+        java.util.regex.Matcher whisper = java.util.regex.Pattern.compile("^([A-Za-z0-9_]{1,16}) whispers: ").matcher(line);
+        if (whisper.find()) {
+            String name = whisper.group(1);
             trace("Extracted whisper sender: " + name);
             return name;
         }
-        if (message.contains(": ")) {
-            String head = stripColors(message.substring(0, message.indexOf(": ")));
-            int open = head.lastIndexOf('<');
-            int close = head.lastIndexOf('>');
-            if (open >= 0 && close >= 0 && open < close) {
-                String name = head.substring(open + 1, close).trim();
-                trace("Extracted public sender: " + name);
-                return name;
-            }
-            String[] parts = head.trim().split(" ");
-            String name = parts[parts.length - 1].replaceAll("[<>\\[\\]]", "").trim();
-            trace("Extracted sender: " + name);
+        java.util.regex.Matcher pub = java.util.regex.Pattern.compile("^<([A-Za-z0-9_]{1,16})>").matcher(line);
+        if (pub.find()) {
+            String name = pub.group(1);
+            trace("Extracted public sender: " + name);
             return name;
         }
         if (verbose.get()) warning("Could not extract sender from message: " + message.replace("%", "%%"));
@@ -361,6 +356,8 @@ public class PearlButler extends Module {
         if (loading) return;
         loading = true;
         activePlace = place;
+        approachStart = System.currentTimeMillis();
+        recloses = 0;
         haltWalking();
         if (place.kind == LoadMode.TRAPDOOR) {
             phase = Phase.DOOR_APPROACH;
@@ -447,6 +444,11 @@ public class PearlButler extends Module {
     }
 
     private void stepDoorApproach() {
+        if (System.currentTimeMillis() - approachStart > 60000L) {
+            error("Cannot reach the trapdoor, giving up this load.");
+            backToLoop();
+            return;
+        }
         BlockPos stand = standingSpotFor(activePlace.spot);
         if (isNear(stand)) {
             haltWalking();
@@ -466,6 +468,7 @@ public class PearlButler extends Module {
         } else if (settled()) {
             enter(Phase.DOOR_AIM);
             aimSteps = 0;
+            recloses = 0;
             trace("Aiming at the trapdoor");
         }
     }
@@ -475,6 +478,11 @@ public class PearlButler extends Module {
         BlockState state = mc.world.getBlockState(activePlace.spot);
         if (!(state.getBlock() instanceof TrapdoorBlock)) {
             error("No trapdoor at the saved spot.");
+            backToLoop();
+            return;
+        }
+        if (state.isOf(Blocks.IRON_TRAPDOOR)) {
+            error("Iron trapdoor at the saved spot, it cannot be opened by hand.");
             backToLoop();
             return;
         }
@@ -505,6 +513,11 @@ public class PearlButler extends Module {
     private void stepDoorHold() {
         long elapsed = inPhase();
         if (elapsed > RECLOSE_CHECK_MS && doorIsOpen()) {
+            if (++recloses > 5) {
+                error("The trapdoor will not stay shut, giving up this load.");
+                backToLoop();
+                return;
+            }
             enter(Phase.DOOR_CLOSE);
             trace("Trapdoor still open, closing it again");
             return;

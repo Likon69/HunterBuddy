@@ -8,6 +8,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -833,6 +834,15 @@ public class RocketBoost extends Module {
 
    public boolean isBoosting() {
       return boosting;
+   }
+
+   @EventHandler
+   private void onGameLeft(GameLeftEvent event) {
+      pongQueue.clear();
+      boosting = false;
+      boostStartMs = -1;
+      trackStartMs = -1;
+      trackedRocketId = -1;
    }
 
    public void flushAndStop() {

@@ -922,7 +922,9 @@ public class TrailFollower extends Module {
     private void log(String message) {
         this.info(message);
         if (!this.webhookLink.get().isEmpty()) {
-            Utils.sendWebhook(this.webhookLink.get(), "TrailFollower", message, null, this.mc.player.getGameProfile().name());
+            String link = this.webhookLink.get();
+            String sender = this.mc.player.getGameProfile().name();
+            meteordevelopment.meteorclient.utils.network.MeteorExecutor.execute(() -> Utils.sendWebhook(link, "TrailFollower", message, null, sender));
         }
     }
 

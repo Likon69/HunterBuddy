@@ -62,7 +62,7 @@ public class TimerGaugeHud extends HudElement {
         double speed = 1.0;
         if (inGame) {
             Timer timer = Modules.get().get(Timer.class);
-            if (timer != null && timer.isActive()) speed = timer.getMultiplier();
+            if (timer != null) speed = timer.getMultiplier();
         }
 
         String value = String.format("%." + decimals.get() + "fx", speed);

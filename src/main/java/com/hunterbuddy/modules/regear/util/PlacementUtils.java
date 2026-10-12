@@ -153,7 +153,7 @@ public class PlacementUtils {
          double maxX = minX + 1.0;
          double maxY = minY + 1.0;
          double maxZ = minZ + 1.0;
-         double s = 0.001;
+         double s = 0.0;
          double reachSq = reach * reach;
          BlockHitResult best = null;
          double bestDist = Double.MAX_VALUE;
