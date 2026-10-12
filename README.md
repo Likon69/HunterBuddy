@@ -17,12 +17,13 @@ Target: **Minecraft 1.21.11 only** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.
 
 Only modules registered by `HunterBuddyAddon` are listed below. Source files that are present but deliberately not registered are not documented as available modules.
 
-### Hunt (18)
+### Hunt (19)
 
 Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissance.
 
 | Meteor name | Description |
 |---|---|
+| `300kmfly` | Fast firework flight on a fixed heading: keeps a rocket lit at all times, rides `rocket-boost`, and holds an altitude band with alternating dive and climb legs (or a smooth level mode). Takes off from the ground, rises over terrain ahead, and stops lighting rockets under a minimum stock. |
 | `arealoader` | Loads chunks along a rectangle, spiral, zigzag, or circle route; routes can be saved and resumed. |
 | `auto-portal` | Builds a nether portal frame, lights it, and optionally paths the player into it via Baritone. |
 | `chest-tracker` | Records the contents of containers you open, with a browser screen and JSON storage. |

@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules.mixin;
 
 import com.hunterbuddy.modules.ElytraBounce;
+import com.hunterbuddy.modules.Fly300km;
 import com.hunterbuddy.modules.Pitch40;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.render.RenderTickCounter;
@@ -43,6 +44,7 @@ public abstract class CatchUpPacingMixin {
 
         Pitch40 pitch40 = modules.get(Pitch40.class);
         ElytraBounce bounce = modules.get(ElytraBounce.class);
-        return pitch40 != null && pitch40.isActive() || bounce != null && bounce.isActive();
+        Fly300km fly300 = modules.get(Fly300km.class);
+        return pitch40 != null && pitch40.isActive() || bounce != null && bounce.isActive() || fly300 != null && fly300.isActive();
     }
 }

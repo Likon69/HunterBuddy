@@ -629,6 +629,7 @@ public class AutoFlyingRegear extends Module {
       this.flightModules.put("Replenish", Modules.get().get(Replenish.class));
       this.flightModules.put("AreaLoader", Modules.get().get(AreaLoader.class));
       this.flightModules.put("RocketFly", Modules.get().get(RocketFly.class));
+      this.flightModules.put("Fly300km", Modules.get().get(Fly300km.class));
       this.flightModules.put("WaypointFollower", Modules.get().get(WaypointFollower.class));
       this.flightModules.put("ElytraBounce", Modules.get().get(ElytraBounce.class));
       this.flightModules.put("Pitch40", Modules.get().get(Pitch40.class));
