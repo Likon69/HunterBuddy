@@ -25,10 +25,13 @@ public final class TreeJava extends Module {
         .defaultValue(LabScenario.WORK).onChanged(this::scenarioChanged).build());
     private final Setting<Boolean> hud = general.add(new BoolSetting.Builder()
         .name("hud").description("Show the registered TreeJava behavior HUD.").defaultValue(true).build());
+    private final Setting<Boolean> fullTraceLog = general.add(new BoolSetting.Builder()
+        .name("lab-full-trace-log").description("Write every LabBot trace event to the game log during laboratory tests.")
+        .defaultValue(false).build());
     private final BehaviorMessages messages = new BehaviorMessages(text -> info("%s", text), HunterBuddyAddon.LOG::info,
         () -> mc.world != null);
     private final BehaviorEngine engine = new BehaviorEngine(new Clock(), messages::stopped,
-        messages::alert, new LogSink(HunterBuddyAddon.LOG::info));
+        messages::alert, new LogSink(HunterBuddyAddon.LOG::info, fullTraceLog::get));
 
     public TreeJava() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TreeJava", "Central behavior tree: simulated LabBot in phase 1.");

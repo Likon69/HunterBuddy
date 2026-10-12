@@ -48,6 +48,7 @@ public final class ObservabilityChecks {
         check.messages();
         check.safeIdle();
         check.logFiltering();
+        check.fullLogging();
         return List.copyOf(check.checks);
     }
 
@@ -221,5 +222,48 @@ public final class ObservabilityChecks {
         engine.stopBot(ExitReason.STOPPED, "active filter check finished");
         require(logs.size() == 3 && logs.getLast().contains("kind=STOP") && logs.getLast().contains("reason=STOPPED"),
             "explicit stop of active root logs one event without descendant spam");
+    }
+
+    private void fullLogging() {
+        List<String> logs = new ArrayList<>();
+        RingSink ring = new RingSink();
+        boolean[] full = {false};
+        long[] time = {0};
+        BehaviorEngine engine = new BehaviorEngine(new Clock(() -> time[0]), report -> { }, message -> { },
+            new LogSink(logs::add, () -> full[0]), ring);
+        engine.startBot(new LabBot(LabScenario.WORK));
+        time[0] += 50;
+        engine.tick();
+        require(logs.size() == 1 && logs.getFirst().contains("reason=started"),
+            "disabled full trace setting preserves filtered game log");
+        full[0] = true;
+        logs.clear();
+        int before = ring.snapshot().size();
+        for (int i = 0; i < 40; i++) {
+            time[0] += 50;
+            engine.tick();
+        }
+        require(logs.size() == ring.snapshot().size() - before && !logs.isEmpty(),
+            "enabled full trace logs every new LabBot event without restarting engine");
+        require(logs.stream().anyMatch(line -> line.contains("kind=START"))
+            && logs.stream().anyMatch(line -> line.contains("kind=SUCCESS"))
+            && logs.stream().anyMatch(line -> line.contains("kind=PROGRESS"))
+            && logs.stream().anyMatch(line -> line.contains("kind=LEASE")),
+            "full laboratory log includes node lifecycle progress and lease diagnostics");
+        require(engine.snapshot().status().completed() == 1 && engine.snapshot().evidence() == 1 && engine.snapshot().leases() == 1,
+            "changing trace verbosity preserves simulated task progress and lease lifecycle");
+        full[0] = false;
+        logs.clear();
+        for (int i = 0; i < 40; i++) {
+            time[0] += 50;
+            engine.tick();
+        }
+        require(logs.isEmpty() && ring.snapshot().size() > before,
+            "disabling full trace restores filtering immediately while detailed ring continues");
+        full[0] = true;
+        before = ring.snapshot().size();
+        engine.stopBot(ExitReason.STOPPED, "full trace check finished");
+        require(logs.size() == ring.snapshot().size() - before && engine.snapshot().leases() == 0,
+            "full trace includes complete stop cleanup events with no retained lease");
     }
 }
