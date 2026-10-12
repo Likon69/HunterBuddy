@@ -215,7 +215,7 @@ public class PearlLoader extends Module {
         phaseStart = System.currentTimeMillis();
         goal = loopB.get();
         walkTo(goal);
-        info("Pearl Loader activated - Starting anti-AFK loop");
+        info("pearl-butler on: walking the anti-AFK loop.");
     }
 
     @Override
@@ -225,7 +225,7 @@ public class PearlLoader extends Module {
         phase = Phase.LOOP_TO_SECOND;
         phaseStart = 0L;
         goal = null;
-        info("Pearl Loader deactivated");
+        info("pearl-butler off.");
     }
 
     private void say(String text) {
@@ -315,7 +315,7 @@ public class PearlLoader extends Module {
                 .getCustomGoalProcess()
                 .setGoalAndPath(new baritone.api.pathing.goals.GoalBlock(pos));
         } else {
-            error("Baritone not available!");
+            error("Baritone is missing, cannot walk.");
         }
     }
 
@@ -474,7 +474,7 @@ public class PearlLoader extends Module {
         if (!aimAt(Vec3d.ofCenter(activePlace.spot))) return;
         BlockState state = mc.world.getBlockState(activePlace.spot);
         if (!(state.getBlock() instanceof TrapdoorBlock)) {
-            error("No trapdoor found at specified position!");
+            error("No trapdoor at the saved spot.");
             backToLoop();
             return;
         }
@@ -484,7 +484,7 @@ public class PearlLoader extends Module {
 
     private boolean tooFarFromDoor() {
         if (gap(activePlace.spot) <= SAFE_REACH) return false;
-        error("Too far from trapdoor to interact safely! Restarting approach.");
+        error("Trapdoor out of reach, walking back to it.");
         phase = Phase.DOOR_APPROACH;
         walkTo(standingSpotFor(activePlace.spot));
         return true;
@@ -606,7 +606,7 @@ public class PearlLoader extends Module {
             LoadLocation fresh = new LoadLocation();
             fresh.word = "!pearl" + (places.size() + 1);
             places.add(fresh);
-            info("Load location added. Close and reopen settings to see changes.");
+            info("Spot saved. Reopen the settings to see it.");
         };
 
         for (int i = 0; i < places.size(); i++) {
@@ -617,7 +617,7 @@ public class PearlLoader extends Module {
         WButton test = root.add(theme.button("Test Walking Loop")).expandX().widget();
         test.action = () -> {
             if (isActive()) {
-                info("Testing walking loop");
+                info("Walking the loop once to test it.");
                 backToLoop();
             }
         };
@@ -632,7 +632,7 @@ public class PearlLoader extends Module {
         WButton remove = head.add(theme.button("-")).widget();
         remove.action = () -> {
             places.remove(place);
-            info("Load location removed. Close and reopen settings to see changes.");
+            info("Spot deleted. Reopen the settings to see it.");
         };
         WButton trigger = head.add(theme.button("Trigger")).widget();
         trigger.action = () -> {

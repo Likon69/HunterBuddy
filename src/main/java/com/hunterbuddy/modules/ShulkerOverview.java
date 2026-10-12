@@ -38,7 +38,7 @@ public class ShulkerOverview extends Module {
         .build()
     );
 
-    private final Setting<IconPosition> iconPosition = sgMain.add(new EnumSetting.Builder<IconPosition>()
+    private final Setting<IconPosition> badgeSpot = sgMain.add(new EnumSetting.Builder<IconPosition>()
         .name("icon-position")
         .description("Where in the slot the item is drawn.")
         .defaultValue(IconPosition.Center)
@@ -99,7 +99,7 @@ public class ShulkerOverview extends Module {
         int s = iconSize.get();
         int cornerX;
         int cornerY;
-        switch (iconPosition.get()) {
+        switch (badgeSpot.get()) {
             case BottomRight -> {
                 cornerX = x + 16 - s;
                 cornerY = y + 16 - s;
