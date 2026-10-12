@@ -32,7 +32,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
-public class PearlLoader extends Module {
+public class PearlButler extends Module {
     private static final String SAVE_KEY = "loadLocations";
     private static final long CLICK_GAP_MS = 500L;
     private static final long RECLOSE_CHECK_MS = 500L;
@@ -148,7 +148,7 @@ public class PearlLoader extends Module {
     private int aimSteps = 0;
     private Boolean baritoneKnown = null;
 
-    public PearlLoader() {
+    public PearlButler() {
         super(HunterBuddyAddon.LOGISTICS_CATEGORY, "pearl-butler", "Walks back and forth to stay online, and loads an ender pearl stasis when a chat keyword arrives.", "PearlLoader");
     }
 

@@ -117,7 +117,7 @@ public class HuntTallyHud extends HudElement {
         .name("show-xp-bottles").description("Experience bottles thrown.").defaultValue(true).build());
 
     private final Setting<Boolean> showBlocks = sgFields.add(new BoolSetting.Builder()
-        .name("show-blocks").description("Blocks MlepMine broke.").defaultValue(true).build());
+        .name("show-blocks").description("Blocks h-mine broke.").defaultValue(true).build());
 
     private final Setting<Boolean> showJumps = sgFields.add(new BoolSetting.Builder()
         .name("show-jumps").description("Jumps this session.").defaultValue(true).build());

@@ -50,7 +50,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
-public class MlepMine extends Module {
+public class HMine extends Module {
     public enum SpeedmineMode {
         PACKET,
         DAMAGE
@@ -398,7 +398,7 @@ public class MlepMine extends Module {
     private long lastAutoAt;
     private long lastCrawlAt;
 
-    public MlepMine() {
+    public HMine() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "h-mine", "Breaks blocks with packets, faster and more quietly than holding the button.");
     }
 
@@ -477,11 +477,11 @@ public class MlepMine extends Module {
         }
 
         private BlockState state() {
-            return MlepMine.this.mc.world.getBlockState(this.position);
+            return HMine.this.mc.world.getBlockState(this.position);
         }
 
         private int bestTool() {
-            return BreakMath.bestToolSlotOrNone(MlepMine.this.mc.player, this.state());
+            return BreakMath.bestToolSlotOrNone(HMine.this.mc.player, this.state());
         }
 
         @Override

@@ -34,7 +34,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Vector3d;
 
-public class SignRender extends Module {
+public class SignReader extends Module {
     private static final int PAD = 4;
     private static final int MAX_LINE_CHARS = 100;
 
@@ -278,7 +278,7 @@ public class SignRender extends Module {
     private int frameCount;
     private TextRenderer font;
 
-    public SignRender() {
+    public SignReader() {
         super(HunterBuddyAddon.VISUALS_CATEGORY, "sign-reader", "Shows the text of nearby signs on screen, through walls, grouping the ones that overlap.", "sign-render");
     }
 

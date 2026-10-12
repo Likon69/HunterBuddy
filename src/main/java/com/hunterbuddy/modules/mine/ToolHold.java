@@ -1,6 +1,6 @@
 package com.hunterbuddy.modules.mine;
 
-import com.hunterbuddy.modules.MlepMine;
+import com.hunterbuddy.modules.HMine;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.util.ServerSlot;
 import java.util.function.Predicate;
@@ -13,7 +13,7 @@ import net.minecraft.util.math.BlockPos;
 
 public class ToolHold {
     private final MinecraftClient mc = MeteorClient.mc;
-    private final Supplier<MlepMine.Swap> mode;
+    private final Supplier<HMine.Swap> mode;
     private int taken = -1;
     private int origin = -1;
     private BlockPos heldPos;
@@ -21,7 +21,7 @@ public class ToolHold {
     private boolean own;
     private boolean silentUsed;
 
-    public ToolHold(Supplier<MlepMine.Swap> mode) {
+    public ToolHold(Supplier<HMine.Swap> mode) {
         this.mode = mode;
     }
 
@@ -30,14 +30,14 @@ public class ToolHold {
     }
 
     public void prepare() {
-        if (this.mode.get() == MlepMine.Swap.SILENT) {
+        if (this.mode.get() == HMine.Swap.SILENT) {
             ServerSlot.get();
             this.silentUsed = true;
         }
     }
 
     public void holdFor(BlockState s, BlockPos pos) {
-        if (this.mode.get() == MlepMine.Swap.OFF || this.mc.player == null) {
+        if (this.mode.get() == HMine.Swap.OFF || this.mc.player == null) {
             return;
         }
 
@@ -77,7 +77,7 @@ public class ToolHold {
             return;
         }
 
-        boolean playerLeft = this.mode.get() == MlepMine.Swap.NORMAL && this.selected() != this.taken;
+        boolean playerLeft = this.mode.get() == HMine.Swap.NORMAL && this.selected() != this.taken;
         if (!playerLeft) {
             this.returnTo(this.origin);
         }
@@ -88,7 +88,7 @@ public class ToolHold {
     public void shutDown() {
         if (this.taken != -1 && this.origin != -1) {
             this.returnTo(this.origin);
-        } else if (this.mode.get() == MlepMine.Swap.SILENT && this.silentUsed) {
+        } else if (this.mode.get() == HMine.Swap.SILENT && this.silentUsed) {
             ServerSlot.get().resync();
         }
 

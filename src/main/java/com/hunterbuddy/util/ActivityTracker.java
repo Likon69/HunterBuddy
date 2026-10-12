@@ -1,7 +1,7 @@
 package com.hunterbuddy.util;
 
 import com.hunterbuddy.modules.AutoFlyingRegear;
-import com.hunterbuddy.modules.MlepMine;
+import com.hunterbuddy.modules.HMine;
 import java.util.ArrayList;
 import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
@@ -40,7 +40,7 @@ public final class ActivityTracker {
 
     private final List<Segment> segments = new ArrayList<>();
 
-    private MlepMine mine;
+    private HMine mine;
     private AutoFlyingRegear regear;
 
     private double lastX = Double.NaN;
@@ -142,7 +142,7 @@ public final class ActivityTracker {
 
     private Activity classify() {
         if (regear == null) regear = Modules.get().get(AutoFlyingRegear.class);
-        if (mine == null) mine = Modules.get().get(MlepMine.class);
+        if (mine == null) mine = Modules.get().get(HMine.class);
 
         if (regear != null && regear.isActive() && regear.isBusy()) return Activity.REGEAR;
         if (mine != null && mine.isActive() && mine.isMining()) return Activity.MINE;

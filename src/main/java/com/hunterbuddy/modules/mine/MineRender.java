@@ -1,6 +1,6 @@
 package com.hunterbuddy.modules.mine;
 
-import com.hunterbuddy.modules.MlepMine;
+import com.hunterbuddy.modules.HMine;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -26,7 +26,7 @@ import net.minecraft.world.World;
 import org.joml.Vector3d;
 
 public class MineRender {
-    public record Look(MlepMine.RenderStyle style, ShapeMode shape, SettingColor mine, SettingColor done, SettingColor queue,
+    public record Look(HMine.RenderStyle style, ShapeMode shape, SettingColor mine, SettingColor done, SettingColor queue,
                        boolean outline, boolean chain, boolean numbers, boolean queueOn, double pulseRate, int fadeMs) {
     }
 
@@ -59,31 +59,31 @@ public class MineRender {
     }
 
     private final MinecraftClient mc = MeteorClient.mc;
-    private final Map<MlepMine.MiningData, Fade> fades = new HashMap<>();
+    private final Map<HMine.MiningData, Fade> fades = new HashMap<>();
 
     public void clear() {
         this.fades.clear();
     }
 
-    public void draw3D(Render3DEvent e, World world, List<MlepMine.MiningData> active, ToDoubleFunction<MlepMine.MiningData> fullAt,
+    public void draw3D(Render3DEvent e, World world, List<HMine.MiningData> active, ToDoubleFunction<HMine.MiningData> fullAt,
                        List<BlockPos> waiting, Look look) {
         if (look.queueOn() && !waiting.isEmpty()) {
             this.drawWaiting(e, world, active, waiting, look);
         }
 
-        for (MlepMine.MiningData d : active) {
+        for (HMine.MiningData d : active) {
             if (!this.cleared(world, d.pos()) && !this.fades.containsKey(d)) {
                 this.fades.put(d, new Fade(true, look.fadeMs()));
             }
         }
 
-        for (Map.Entry<MlepMine.MiningData, Fade> entry : this.fades.entrySet()) {
-            MlepMine.MiningData k = entry.getKey();
+        for (Map.Entry<HMine.MiningData, Fade> entry : this.fades.entrySet()) {
+            HMine.MiningData k = entry.getKey();
             entry.getValue().set(active.contains(k) && !this.cleared(world, k.pos()));
         }
 
-        List<MlepMine.MiningData> expired = new ArrayList<>();
-        for (Map.Entry<MlepMine.MiningData, Fade> entry : this.fades.entrySet()) {
+        List<HMine.MiningData> expired = new ArrayList<>();
+        for (Map.Entry<HMine.MiningData, Fade> entry : this.fades.entrySet()) {
             Fade fade = entry.getValue();
             float factor = fade.factor();
             this.drawBlock(e, world, entry.getKey(), factor, fade.instant, fullAt, look);
@@ -92,7 +92,7 @@ public class MineRender {
             }
         }
 
-        for (MlepMine.MiningData k : expired) {
+        for (HMine.MiningData k : expired) {
             this.fades.remove(k);
         }
     }
@@ -115,9 +115,9 @@ public class MineRender {
         }
     }
 
-    private void drawWaiting(Render3DEvent e, World world, List<MlepMine.MiningData> active, List<BlockPos> waiting, Look look) {
+    private void drawWaiting(Render3DEvent e, World world, List<HMine.MiningData> active, List<BlockPos> waiting, Look look) {
         Vec3d previous = null;
-        for (MlepMine.MiningData d : active) {
+        for (HMine.MiningData d : active) {
             if (!this.cleared(world, d.pos())) {
                 previous = d.pos().toCenterPos();
                 break;
@@ -141,8 +141,8 @@ public class MineRender {
         }
     }
 
-    private void drawBlock(Render3DEvent e, World world, MlepMine.MiningData k, float factor, long since,
-                           ToDoubleFunction<MlepMine.MiningData> fullAt, Look look) {
+    private void drawBlock(Render3DEvent e, World world, HMine.MiningData k, float factor, long since,
+                           ToDoubleFunction<HMine.MiningData> fullAt, Look look) {
         if (factor <= 0.0F) {
             return;
         }
@@ -169,7 +169,7 @@ public class MineRender {
         double height = full.maxY - full.minY;
         double depth = full.maxZ - full.minZ;
 
-        if (look.style() == MlepMine.RenderStyle.CLASSIC) {
+        if (look.style() == HMine.RenderStyle.CLASSIC) {
             double cx = (full.minX + full.maxX) / 2.0;
             double cy = (full.minY + full.maxY) / 2.0;
             double cz = (full.minZ + full.maxZ) / 2.0;
@@ -181,7 +181,7 @@ public class MineRender {
             return;
         }
 
-        boolean pulse = look.style() == MlepMine.RenderStyle.PULSE;
+        boolean pulse = look.style() == HMine.RenderStyle.PULSE;
         double beat = pulse ? this.breath(since, look) : 0.0;
         double level = full.minY + height * scale;
 

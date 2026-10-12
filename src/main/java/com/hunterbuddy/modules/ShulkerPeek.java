@@ -16,7 +16,7 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
-public class ShulkerOverview extends Module {
+public class ShulkerPeek extends Module {
     public enum IconPosition {
         BottomRight,
         BottomLeft,
@@ -70,7 +70,7 @@ public class ShulkerOverview extends Module {
         .build()
     );
 
-    public ShulkerOverview() {
+    public ShulkerPeek() {
         super(HunterBuddyAddon.LOGISTICS_CATEGORY, "shulker-peek", "Draws the main item of each shulker box over its icon, in inventories and on the hotbar.", "shulker-overview");
     }
 

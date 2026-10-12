@@ -17,7 +17,7 @@ import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 
-public class DisconnectSound extends Module {
+public class KickAlarm extends Module {
     private static final SoundEvent DEFAULT_SOUND = SoundEvents.BLOCK_NOTE_BLOCK_PLING.value();
 
     private final SettingGroup sgMain = settings.getDefaultGroup();
@@ -47,7 +47,7 @@ public class DisconnectSound extends Module {
         .build()
     );
 
-    public DisconnectSound() {
+    public KickAlarm() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "kick-alarm", "Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed.", "disconnect-sound");
     }
 

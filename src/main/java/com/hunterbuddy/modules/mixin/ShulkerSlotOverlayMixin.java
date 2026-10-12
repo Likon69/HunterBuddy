@@ -1,6 +1,6 @@
 package com.hunterbuddy.modules.mixin;
 
-import com.hunterbuddy.modules.ShulkerOverview;
+import com.hunterbuddy.modules.ShulkerPeek;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
@@ -17,7 +17,7 @@ public abstract class ShulkerSlotOverlayMixin {
         Modules modules = Modules.get();
         if (modules == null) return;
 
-        ShulkerOverview overview = modules.get(ShulkerOverview.class);
+        ShulkerPeek overview = modules.get(ShulkerPeek.class);
         if (overview != null && overview.isActive()) {
             overview.drawOverlay(context, slot.x, slot.y, slot.getStack());
         }

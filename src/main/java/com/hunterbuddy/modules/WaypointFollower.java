@@ -1533,7 +1533,7 @@ public class WaypointFollower extends Module {
         // packet mine and never touches the selected hotbar slot. Mining bare
         // handed got nowhere on anything harder than netherrack, and the block
         // in front of a lava pocket is rarely netherrack.
-        MlepMine mine = Modules.get().get(MlepMine.class);
+        HMine mine = Modules.get().get(HMine.class);
         if (mine != null && mine.isActive()) {
             if (this.lavaEscapeMineTicks % 40 == 0) {
                 mine.queueMiningData(mine.new MiningData(breakTarget, face));

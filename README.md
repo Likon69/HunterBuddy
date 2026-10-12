@@ -159,7 +159,7 @@ The built addon JAR is written to `build/libs/hunterbuddy-1.0.0.jar`.
 Several modules started as ports from other addons rather than being written from scratch, credited where the code itself says so:
 
 - **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
-- **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepMine`, `MlepScaffold`, `MlepAirPlace`). Its code is used under the MIT License, see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+- **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepScaffold`, `MlepAirPlace`). Its code is used under the MIT License, see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 - **[Jeff mod](https://github.com/miles352/meteor-stashhunting-addon)** (miles352) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
 - **riths** — Hunting Utilities ([Tim](https://github.com/rithsgit/Tim)).
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.

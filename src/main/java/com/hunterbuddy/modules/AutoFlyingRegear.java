@@ -619,14 +619,14 @@ public class AutoFlyingRegear extends Module {
       if (this.mlepScaffold == null && (Boolean)this.debugMessages.get()) {
          this.error("MlepScaffold module not found - regear scaffolding will not work!", new Object[0]);
       }
-      this.mlepMine = Modules.get().get(MlepMine.class);
+      this.mlepMine = Modules.get().get(HMine.class);
       this.autoEatModule = (AutoEat)Modules.get().get(AutoEat.class);
       this.autoEatSyncModule = Modules.get().get(AutoEatSync.class);
       if (this.mlepMine != null) {
          this.mlepMineWasActive = this.mlepMine.isActive();
       }
 
-      this.flightModules.put("Replenish", Modules.get().get(Replenish.class));
+      this.flightModules.put("hotbar-refill", Modules.get().get(HotbarRefill.class));
       this.flightModules.put("AreaLoader", Modules.get().get(AreaLoader.class));
       this.flightModules.put("RocketFly", Modules.get().get(RocketFly.class));
       this.flightModules.put("Fly300km", Modules.get().get(Fly300km.class));
@@ -1877,7 +1877,7 @@ public class AutoFlyingRegear extends Module {
                      breakDirection = dy > 0.0 ? Direction.UP : Direction.DOWN;
                   }
 
-                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(above, breakDirection));
+                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(above, breakDirection));
                   if ((Boolean)this.debugMessages.get()) {
                      this.info("Platform spot " + pos.toShortString() + " stuck after " + totalAttempts + " attempts, mining " + above.toShortString(), new Object[0]);
                   }
@@ -2104,7 +2104,7 @@ public class AutoFlyingRegear extends Module {
                   );
                }
 
-               ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(pos.toImmutable(), this.faceFromEye(pos)));
+               ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(pos.toImmutable(), this.faceFromEye(pos)));
             }
 
             if (this.placementAttempts >= 10) {
@@ -2320,9 +2320,9 @@ public class AutoFlyingRegear extends Module {
             this.mc.player.setPitch(rotations[1]);
             if (this.mlepMine != null && this.mlepMine.isActive()) {
                if (this.clearingProgress == 0 || this.clearingProgress % 40 == 0) {
-                  ((MlepMine)this.mlepMine)
+                  ((HMine)this.mlepMine)
                      .queueMiningData(
-                        ((MlepMine)this.mlepMine).new MiningData(this.currentClearingPos.toImmutable(), this.faceFromEye(this.currentClearingPos))
+                        ((HMine)this.mlepMine).new MiningData(this.currentClearingPos.toImmutable(), this.faceFromEye(this.currentClearingPos))
                      );
                }
 
@@ -2588,8 +2588,8 @@ public class AutoFlyingRegear extends Module {
             this.mc.player.setYaw(rotations[0]);
             this.mc.player.setPitch(rotations[1]);
             if (this.mlepMine != null && this.mlepMine.isActive()) {
-               ((MlepMine)this.mlepMine)
-                  .queueMiningData(((MlepMine)this.mlepMine).new MiningData(above.toImmutable(), this.faceFromEye(above)));
+               ((HMine)this.mlepMine)
+                  .queueMiningData(((HMine)this.mlepMine).new MiningData(above.toImmutable(), this.faceFromEye(above)));
             } else {
                this.mc.interactionManager.attackBlock(above, this.faceFromEye(above));
                this.mc.player.swingHand(Hand.MAIN_HAND);
@@ -4277,7 +4277,7 @@ public class AutoFlyingRegear extends Module {
             }
 
             if (this.mlepMine != null && this.mlepMine.isActive()) {
-               // MlepMine takes the chest the way the cleanup hands it the box: queued once, then left to it. The
+               // HMine takes the chest the way the cleanup hands it the box: queued once, then left to it. The
                // pickaxe goes in hand first, for an auto-swap that is off and mines with whatever is held; the
                // game's own tick sends the slot on before the break can finish, so the drop is the pickaxe's.
                if (!this.topUpBreakStarted) {
@@ -4286,7 +4286,7 @@ public class AutoFlyingRegear extends Module {
 
                // the queue drops a repeat of a block it is still working on, so this nudge only matters if it let go
                if (!this.topUpBreakStarted || this.topUpStepTicks % 40 == 0) {
-                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(this.echestPos, Direction.UP));
+                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(this.echestPos, Direction.UP));
                   this.topUpBreakStarted = true;
                }
 
@@ -4478,14 +4478,14 @@ public class AutoFlyingRegear extends Module {
             this.info("Found " + this.cleanupBlocks.size() + " blocks to clean up for flight clearance", new Object[0]);
          }
 
-         // Hand the teardown to MlepMine: it was disabled for the shulker ops, turn it back on now so
+         // Hand the teardown to HMine: it was disabled for the shulker ops, turn it back on now so
          // it packet-mines the box for us. It holds the pickaxe itself for each block, so the regear no
          // longer grabs the selected hotbar slot every tick - which is what used to keep AutoEat from
          // ever holding a gap and eating.
          if (this.mlepMineWasActive && this.mlepMine != null && !this.mlepMine.isActive()) {
             this.mlepMine.toggle();
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Re-enabled MlepMine for cleanup teardown", new Object[0]);
+               this.info("Re-enabled h-mine for cleanup teardown", new Object[0]);
             }
          }
 
@@ -4504,7 +4504,7 @@ public class AutoFlyingRegear extends Module {
                this.cleanupBlockIndex++;
                this.cleanupBlockAttempts = 0;
                // The watchdog's thirty seconds count from the last block the cleanup got through, not from
-               // its start, so the limit grows with the box. Twenty blocks mined by MlepMine at about 2.7 s
+               // its start, so the limit grows with the box. Twenty blocks mined by HMine at about 2.7 s
                // each ran 54 s and were cut at 30 in the log that changed this. A block that stalls is skipped
                // by its own 150 attempts, well inside those thirty seconds; one that never lines up for the hand
                // break never counts an attempt, and these thirty seconds, still running from the block before,
@@ -4547,7 +4547,7 @@ public class AutoFlyingRegear extends Module {
                // is what lets AutoEat keep a gap in hand and actually eat when a ghast hits us. The
                // queue dedups by position, so re-issuing it while it is still working is a no-op.
                if (this.cleanupBlockAttempts == 0) {
-                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(pos, breakDirection));
+                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(pos, breakDirection));
                   if ((Boolean)this.debugMessages.get()) {
                      this.info("Mining block " + (this.cleanupBlockIndex + 1) + "/" + this.cleanupBlocks.size() + " via mine module", new Object[0]);
                   }
@@ -4557,7 +4557,7 @@ public class AutoFlyingRegear extends Module {
                // Backstop only: if the module has not taken the block down after a while, nudge it
                // back into the queue. Still no hotbar grab, still no per-tick spam.
                if (this.cleanupBlockAttempts % 40 == 0) {
-                  ((MlepMine)this.mlepMine).queueMiningData(((MlepMine)this.mlepMine).new MiningData(pos, breakDirection));
+                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(pos, breakDirection));
                }
 
                this.timer = 2;
@@ -4855,7 +4855,7 @@ public class AutoFlyingRegear extends Module {
       if (this.stateTickCounter == 12 && this.mlepMineWasActive && this.mlepMine != null && !this.mlepMine.isActive()) {
          this.mlepMine.toggle();
          if ((Boolean)this.debugMessages.get()) {
-            this.info("Re-enabled MlepMine", new Object[0]);
+            this.info("Re-enabled h-mine", new Object[0]);
          }
       }
 

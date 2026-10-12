@@ -15,11 +15,11 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 
-public class TimerSpeedHud extends HudElement {
-    public static final HudElementInfo<TimerSpeedHud> INFO = new HudElementInfo<>(
+public class TimerGaugeHud extends HudElement {
+    public static final HudElementInfo<TimerGaugeHud> INFO = new HudElementInfo<>(
         HunterBuddyAddon.HUD_GROUP, "TimerGauge",
         "Shows the speed Meteor's Timer module runs the game at.",
-        TimerSpeedHud::new);
+        TimerGaugeHud::new);
 
     private final SettingGroup group = settings.getDefaultGroup();
 
@@ -47,7 +47,7 @@ public class TimerSpeedHud extends HudElement {
         .name("speed-color").description("Colour of the value.")
         .defaultValue(new SettingColor(0, 255, 255, 255)).build());
 
-    public TimerSpeedHud() {
+    public TimerGaugeHud() {
         super(INFO);
     }
 

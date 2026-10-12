@@ -190,7 +190,7 @@ public final class SessionStats {
         return jumps;
     }
 
-    /** Called by MlepMine when the server confirms a block it was mining is gone. */
+    /** Called by HMine when the server confirms a block it was mining is gone. */
     public void onBlockMined() {
         blocksMined++;
     }
@@ -286,7 +286,7 @@ public final class SessionStats {
      * Declares that you have just lit something at this position.
      *
      * <p>Public so a module that builds portals without ever sending a click can say so itself,
-     * the way MlepMine reports a broken block. Anything going through
+     * the way HMine reports a broken block. Anything going through
      * {@code interactionManager.interactBlock} is picked up on its own and needs no call.
      */
     public void onPortalLit(BlockPos pos) {

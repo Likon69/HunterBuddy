@@ -28,7 +28,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 
-public class Replenish extends Module {
+public class HotbarRefill extends Module {
     private static final int HOTBAR_SIZE = 9;
     private static final int MAIN_FIRST = 9;
     private static final int MAIN_LAST = 35;
@@ -209,7 +209,7 @@ public class Replenish extends Module {
     private final Deque<Integer> pendingMoves = new ArrayDeque<>();
     private int waitTicks;
 
-    public Replenish() {
+    public HotbarRefill() {
         super(HunterBuddyAddon.LOGISTICS_CATEGORY, "hotbar-refill", "Tops up hotbar stacks from your inventory before they run out.", "replenish");
     }
 

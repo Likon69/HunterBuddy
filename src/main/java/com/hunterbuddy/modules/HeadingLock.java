@@ -12,7 +12,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.math.MathHelper;
 
-public class YawLock extends Module {
+public class HeadingLock extends Module {
     private final SettingGroup sgMain = settings.getDefaultGroup();
 
     private final Setting<Boolean> bypass = sgMain.add(new BoolSetting.Builder()
@@ -47,7 +47,7 @@ public class YawLock extends Module {
     private float wobble;
     private int ticks;
 
-    public YawLock() {
+    public HeadingLock() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "heading-lock", "Holds your yaw on the nearest multiple of 45 degrees, optionally with a tiny random wobble.", "yaw-lock");
     }
 
