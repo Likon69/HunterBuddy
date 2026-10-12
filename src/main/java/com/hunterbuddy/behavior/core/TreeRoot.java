@@ -160,6 +160,11 @@ public final class TreeRoot {
             completeRecovery(result);
             return;
         }
+        if (result instanceof Success && hooks.build().successfulHook() == Hook.IDLE) {
+            recovery.reset();
+            beginAttempt();
+            return;
+        }
         if (result instanceof Success && hooks.build().successfulHook() == Hook.BOT) recovery.provenProgress();
         completions.addLast(ctx.tick());
         while (!completions.isEmpty() && ctx.tick() - completions.peekFirst() >= 20) completions.removeFirst();

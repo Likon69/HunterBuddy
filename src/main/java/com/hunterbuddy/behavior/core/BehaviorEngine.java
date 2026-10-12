@@ -13,6 +13,7 @@ import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
+import com.hunterbuddy.behavior.routine.IdleRoutine;
 import com.hunterbuddy.behavior.routine.Routine;
 import com.hunterbuddy.behavior.routine.RoutineContext;
 import com.hunterbuddy.behavior.routine.SessionRoutine;
@@ -34,7 +35,7 @@ public final class BehaviorEngine {
     private final TreeHooks hooks;
     private final Recovery recovery;
     private final TreeRoot root;
-    private final List<Routine> routines = List.of(new SessionRoutine(), new DeathRoutine());
+    private final List<Routine> routines;
     private final RoutineContext routineContext;
     private final RingSink ring = new RingSink();
     private final Consumer<StopReport> stopped;
@@ -51,6 +52,8 @@ public final class BehaviorEngine {
         this.clock = Objects.requireNonNull(clock);
         this.stopped = Objects.requireNonNull(stopped);
         Objects.requireNonNull(alerts);
+        RestartBudget restarts = new RestartBudget();
+        routines = List.of(new SessionRoutine(), new DeathRoutine(), new IdleRoutine(alerts, restarts));
         List<TraceSink> allSinks = new ArrayList<>(List.of(sinks));
         allSinks.add(ring);
         ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(),
@@ -61,7 +64,7 @@ public final class BehaviorEngine {
         routineContext = new RoutineContext(ctx);
         for (Routine routine : routines) routine.entries(routineContext).forEach(hooks::insert);
         hooks.applyPendingChanges(ctx);
-        recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "no simulated alternative"), new Succeed(), alerts);
+        recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "no simulated alternative"), new Succeed(), alerts, restarts);
         root = new TreeRoot(ctx, hooks, recovery);
     }
 

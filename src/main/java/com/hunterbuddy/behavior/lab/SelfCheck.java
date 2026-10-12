@@ -89,6 +89,7 @@ public final class SelfCheck {
         check.checks.addAll(SessionChecks.run());
         check.checks.addAll(LandingChecks.run());
         check.checks.addAll(FlightKeeperChecks.run());
+        check.checks.addAll(IdleChecks.run());
         return new SelfCheckReport(400, check.checks);
     }
 
