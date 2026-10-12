@@ -217,7 +217,7 @@ public class ElytraRecast extends Module {
       }
 
       boolean currentlyGliding = this.mc.player.isGliding();
-      if (this.rocketAttached()) {
+      if (com.hunterbuddy.util.GliderSwap.rocketAttached(this.mc.player)) {
          this.wasGliding = currentlyGliding;
          return;
       }
@@ -315,7 +315,7 @@ public class ElytraRecast extends Module {
       this.tickCounter = 0;
       this.rocketTickCounter = (Integer)this.rocketDelay.get();
       this.usedActivationRocket = false;
-      this.wearGlider();
+      com.hunterbuddy.util.GliderSwap.wearGlider(this.mc.player);
       if (this.mc.player.isGliding()) {
          this.enterAscending();
       } else {
@@ -514,49 +514,7 @@ public class ElytraRecast extends Module {
 
    private boolean hasElytraEquipped() {
       return this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA
-         || isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) || this.spareGliderSlot() != -1;
-   }
-
-   private static boolean isGlider(ItemStack stack) {
-      return !stack.isEmpty() && net.minecraft.entity.LivingEntity.canGlideWith(stack, EquipmentSlot.CHEST);
-   }
-
-   private int spareGliderSlot() {
-      for (int i = 0; i < 36; i++) {
-         ItemStack stack = this.mc.player.getInventory().getStack(i);
-         if (isGlider(stack) && !stack.willBreakNextUse()) {
-            return i;
-         }
-      }
-
-      return -1;
-   }
-
-   private void wearGlider() {
-      if (isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) {
-         return;
-      }
-
-      int slot = this.spareGliderSlot();
-      if (slot != -1) {
-         InvUtils.move().from(slot).toArmor(2);
-      }
-   }
-
-   private boolean rocketAttached() {
-      if (this.mc.world == null) {
-         return false;
-      }
-
-      for (net.minecraft.entity.Entity entity : this.mc.world.getEntities()) {
-         if (entity instanceof net.minecraft.entity.projectile.FireworkRocketEntity firework
-            && firework.isAlive()
-            && ((com.hunterbuddy.modules.mixin.accessors.FireworkRocketEntityAccessor)firework).getShooter() == this.mc.player) {
-            return true;
-         }
-      }
-
-      return false;
+         || com.hunterbuddy.util.GliderSwap.hasGlider(this.mc.player);
    }
 
    private boolean isInNether() {
