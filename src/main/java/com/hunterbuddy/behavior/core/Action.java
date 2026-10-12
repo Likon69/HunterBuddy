@@ -19,7 +19,7 @@ public abstract class Action extends Node {
     @Override
     protected final void onStart(TickContext ctx) {
         ticks = 0;
-        allowed = ctx.transitions().start(path(), target(ctx));
+        allowed = ctx.monitoring() || ctx.transitions().start(path(), target(ctx));
         if (allowed) onActionStart(ctx);
     }
 

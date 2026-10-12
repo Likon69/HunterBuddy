@@ -20,6 +20,7 @@ public final class TickContext {
     private Node current;
     private long evidenceSequence;
     private Consumer<String> stopHandler;
+    private int monitorDepth;
 
     public TickContext(Clock clock, Blackboard blackboard, ResourceArbiter leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
@@ -47,6 +48,19 @@ public final class TickContext {
 
     void leave(Node previous) {
         current = previous;
+    }
+
+    public NodeResult executeMonitor(Node node) {
+        monitorDepth++;
+        try {
+            return node.execute(this);
+        } finally {
+            monitorDepth--;
+        }
+    }
+
+    boolean monitoring() {
+        return monitorDepth > 0;
     }
 
     public void event(Node node, Kind kind, FailureCode code, String reason, String detail) {
