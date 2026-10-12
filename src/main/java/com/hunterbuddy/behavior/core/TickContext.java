@@ -1,6 +1,6 @@
 package com.hunterbuddy.behavior.core;
 
-import com.hunterbuddy.behavior.resource.ResourceArbiter;
+import com.hunterbuddy.behavior.resource.Leases;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.Trace;
 import com.hunterbuddy.behavior.trace.TraceEvent;
@@ -12,7 +12,7 @@ public final class TickContext {
     public static final Key<String> CURRENT_TARGET = new Key<>("current-target", String.class, Scope.OWNER, false);
     private final Clock clock;
     private final Blackboard blackboard;
-    private final ResourceArbiter leases;
+    private final Leases leases;
     private final Trace trace;
     private final ProgressMonitor monitor;
     private final UtilityFailures utilityFailures;
@@ -24,7 +24,7 @@ public final class TickContext {
     private BiConsumer<ExitReason, String> stopHandler;
     private int monitorDepth;
 
-    public TickContext(Clock clock, Blackboard blackboard, ResourceArbiter leases, Trace trace, ProgressPolicy policy) {
+    public TickContext(Clock clock, Blackboard blackboard, Leases leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
         this.blackboard = Objects.requireNonNull(blackboard);
         this.leases = Objects.requireNonNull(leases);
@@ -110,7 +110,7 @@ public final class TickContext {
         return blackboard;
     }
 
-    public ResourceArbiter leases() {
+    public Leases leases() {
         return leases;
     }
 

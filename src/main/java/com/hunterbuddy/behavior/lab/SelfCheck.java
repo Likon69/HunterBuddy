@@ -42,6 +42,7 @@ import com.hunterbuddy.behavior.nodes.WithLease;
 import com.hunterbuddy.behavior.resource.Lease;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.LeaseState;
+import com.hunterbuddy.behavior.resource.Leases;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.trace.Kind;
@@ -232,7 +233,7 @@ public final class SelfCheck {
     }
 
     private void resources() {
-        ResourceArbiter arbiter = new ResourceArbiter();
+        Leases arbiter = new ResourceArbiter();
         Lease legacy = arbiter.request("gate:legacy", Set.of(Resource.LOOK)).orElseThrow();
         require(arbiter.request("bot:lab", Set.of(Resource.BARITONE)).isEmpty()
             && arbiter.holder(Resource.MOVEMENT).isEmpty(), "lease acquisition is all-or-nothing with implications");
