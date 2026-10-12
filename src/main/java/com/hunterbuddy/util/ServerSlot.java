@@ -90,6 +90,10 @@ public final class ServerSlot {
         }
     }
 
+    public int slot() {
+        return this.serverSlot;
+    }
+
     private void send(int slot) {
         this.sending = true;
 
