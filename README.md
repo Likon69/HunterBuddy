@@ -11,7 +11,7 @@ flight shape in `elytra-auto-fly`, Future's totem swap in `f-totem`). mlep's cod
 grew from, and bits of Jeff mod's code went in without much hesitation where they were useful. Have
 fun with it, and open a GitHub issue if you hit a problem.
 
-Target: **Minecraft 1.21.11** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
+Target: **Minecraft 1.21.11 only** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
 
 ## Categories and modules
 
@@ -139,8 +139,12 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 
 ## Dependencies
 
-- **Xaero's Minimap / World Map (with XaeroPlus)** — compile-time libs under `libs/`; must be installed at runtime for `waypoint-follower`, chunk-radar's waypoint marks, and the `Travel` HUD.
-- **Baritone** — compiled against [meteordevelopment/baritone](https://github.com/meteordevelopment/baritone) (compile-only), but at runtime the elytra flight, `auto-portal`, and the regear/travel helpers are built for [our own fork](https://github.com/Likon69/hunterbuddy-baritone), which carries the fixes those features actually need.
+You need **Minecraft 1.21.11**, **Java 21**, **Fabric Loader** and a **Meteor Client build for 1.21.11**.
+
+- **Baritone** is required for automatic dungeon farming, pathfinding and travel. We recommend [HunterBuddy Baritone](https://github.com/Likon69/hunterbuddy-baritone), our fork for Minecraft 1.21.11. The elytra flight and regear helpers use fixes and APIs from this fork.
+- **Xaero's Minimap, Xaero's World Map and XaeroPlus** are required for map and waypoint features, including `waypoint-follower`, chunk-radar's waypoint marks and the `Travel` HUD. Install the Fabric versions for Minecraft 1.21.11.
+
+These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.0.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
 
 ## Files and network
 
