@@ -21,6 +21,7 @@ public final class TickContext {
     private final UtilityFailures utilityFailures;
     private final TransitionLedger transitions = new TransitionLedger();
     private final BudgetLedger budgets = new BudgetLedger();
+    private final Series series = new Series();
     private Sensors sensors;
     private Node current;
     private long evidenceSequence;
@@ -44,6 +45,8 @@ public final class TickContext {
         this.sensors = Objects.requireNonNull(sensors);
         current = null;
         executedHook = null;
+        monitor.observeSetbacks(tick(), sensors.setbacks());
+        series.sample(tick(), sensors, monitor.samplesValid(tick()));
     }
 
     public void end() {
@@ -169,6 +172,20 @@ public final class TickContext {
 
     public ProgressMonitor monitor() {
         return monitor;
+    }
+
+    public Series series() {
+        return series;
+    }
+
+    public void goalDistance(String target, double distance) {
+        if (pluginAccess()) throw new IllegalStateException("Plugins cannot report goal distance");
+        series.distance(target, distance);
+    }
+
+    void resetSeries() {
+        series.reset();
+        series.sample(tick(), sensors(), monitor.samplesValid(tick()));
     }
 
     public UtilityFailures utilityFailures() {

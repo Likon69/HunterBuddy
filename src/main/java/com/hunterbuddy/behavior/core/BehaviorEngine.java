@@ -149,6 +149,7 @@ public final class BehaviorEngine {
         stats.startSession();
         ctx.botStats(stats);
         ctx.monitor().configure(context.config().progress());
+        ctx.resetSeries();
         evidenceBaseline = ctx.evidenceSequence();
         routines.forEach(routine -> routine.onInstall(routineContext));
         lifecycleBot = next;
