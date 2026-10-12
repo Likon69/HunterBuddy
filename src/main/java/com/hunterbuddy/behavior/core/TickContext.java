@@ -7,6 +7,7 @@ import com.hunterbuddy.behavior.trace.TraceEvent;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public final class TickContext {
     public static final Key<String> CURRENT_TARGET = new Key<>("current-target", String.class, Scope.OWNER, false);
@@ -24,6 +25,7 @@ public final class TickContext {
     private BiConsumer<ExitReason, String> stopHandler;
     private int monitorDepth;
     private boolean idleAnnounced;
+    private String pluginOwner;
 
     public TickContext(Clock clock, Blackboard blackboard, Leases leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
@@ -87,6 +89,7 @@ public final class TickContext {
     }
 
     public boolean progress(ProgressEvidence evidence) {
+        if (pluginAccess()) throw new IllegalStateException("Plugins cannot report progress evidence");
         if (current == null) throw new IllegalStateException("progress outside node execution");
         boolean accepted = monitor.accept(tick(), evidence);
         event(current, Kind.PROGRESS, null, evidence.reason(), "kind=" + evidence.kind() + " accepted=" + accepted);
@@ -98,6 +101,7 @@ public final class TickContext {
     }
 
     public String owner() {
+        if (pluginOwner != null) return pluginOwner;
         if (current == null) throw new IllegalStateException("owner outside node execution");
         return current.owner();
     }
@@ -123,7 +127,26 @@ public final class TickContext {
     }
 
     public Leases leases() {
+        if (pluginAccess()) throw new IllegalStateException("Plugins cannot access resource leases");
         return leases;
+    }
+
+    public <T> T plugin(String owner, Supplier<T> work) {
+        Objects.requireNonNull(work);
+        if (owner == null || !owner.startsWith("plugin:") || owner.substring(7).isBlank()) {
+            throw new IllegalArgumentException("invalid plugin owner");
+        }
+        String previous = pluginOwner;
+        pluginOwner = owner;
+        try {
+            return work.get();
+        } finally {
+            pluginOwner = previous;
+        }
+    }
+
+    private boolean pluginAccess() {
+        return pluginOwner != null || current != null && current.owner().startsWith("plugin:");
     }
 
     public ProgressMonitor monitor() {

@@ -11,6 +11,7 @@ import com.hunterbuddy.behavior.lab.SimulatedSensors;
 import com.hunterbuddy.behavior.nodes.Fail;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
+import com.hunterbuddy.behavior.plugin.PluginRegistry;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
 import com.hunterbuddy.behavior.routine.IdleRoutine;
@@ -37,6 +38,7 @@ public final class BehaviorEngine {
     private final TreeRoot root;
     private final List<Routine> routines;
     private final RoutineContext routineContext;
+    private final PluginRegistry plugins;
     private final RingSink ring = new RingSink();
     private final Consumer<StopReport> stopped;
     private final Deque<Runnable> pending = new ArrayDeque<>();
@@ -61,6 +63,7 @@ public final class BehaviorEngine {
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
+        plugins = new PluginRegistry(ctx, hooks, alerts);
         routineContext = new RoutineContext(ctx);
         for (Routine routine : routines) routine.entries(routineContext).forEach(hooks::insert);
         hooks.applyPendingChanges(ctx);
@@ -103,6 +106,7 @@ public final class BehaviorEngine {
         botOwner = entry.owner();
         hooks.insert(entry);
         hooks.applyPendingChanges(ctx);
+        plugins.applyPendingCleanup();
         bot = next;
         evidenceBaseline = ctx.evidenceSequence();
         routines.forEach(routine -> routine.onInstall(routineContext));
@@ -143,7 +147,10 @@ public final class BehaviorEngine {
         try {
             try {
                 clock.advance();
+                ctx.begin(simulatedSensors);
+                plugins.pulse();
                 root.tick(simulatedSensors);
+                plugins.applyPendingCleanup();
                 if (running()) {
                     while (!pending.isEmpty()) pending.removeFirst().run();
                 }
@@ -166,6 +173,7 @@ public final class BehaviorEngine {
         if (announced == report) return;
         try {
             BotCleanup.remove(ctx, hooks, botOwner);
+            plugins.applyPendingCleanup();
             botOwner = null;
             ctx.end();
         } catch (RuntimeException ex) {
@@ -192,6 +200,10 @@ public final class BehaviorEngine {
 
     public List<Routine> routines() {
         return routines;
+    }
+
+    public PluginRegistry plugins() {
+        return plugins;
     }
 
     private boolean running() {
