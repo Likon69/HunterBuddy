@@ -23,6 +23,7 @@ import com.hunterbuddy.behavior.nodes.WithLease;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.routine.DeathPolicy;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -57,6 +58,13 @@ public final class LabBot implements Bot {
         Node task = new UtilitySelector("lab-task", new UtilityOption(work, ctx -> 1, ctx -> "simulated:" + scenario));
         return new HookEntry(Hook.BOT, context.owner(), Contributor.BOT, 0,
             new Guard(new Condition("lab-ready", sensors -> this.context != null), task), true, task);
+    }
+
+    @Override
+    public List<HookEntry> extraEntries(BotContext context) {
+        Objects.requireNonNull(context);
+        if (!context.owner().equals("bot:" + name())) throw new IllegalArgumentException("wrong LabBot owner");
+        return List.of();
     }
 
     @Override

@@ -12,6 +12,7 @@ import com.hunterbuddy.behavior.hooks.TreeHooks;
 import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.SimulatedSensors;
 import com.hunterbuddy.behavior.nodes.Fail;
+import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.plugin.PluginRegistry;
@@ -29,19 +30,24 @@ import com.hunterbuddy.behavior.trace.TraceEvent;
 import com.hunterbuddy.behavior.trace.TraceSink;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public final class BehaviorEngine {
     private final Clock clock;
     private final TickContext ctx;
     private final TreeHooks hooks;
-    private final Recovery recovery;
-    private final TreeRoot root;
+    private Recovery recovery;
+    private TreeRoot root;
+    private final RestartBudget restarts = new RestartBudget();
+    private final Consumer<String> alerts;
+    private List<ReactiveSelector> recoveryGroups = List.of();
     private final List<Routine> routines;
     private final RoutineContext routineContext;
     private final PluginRegistry plugins;
@@ -65,8 +71,7 @@ public final class BehaviorEngine {
     public BehaviorEngine(Clock clock, Consumer<StopReport> stopped, Consumer<String> alerts, TraceSink... sinks) {
         this.clock = Objects.requireNonNull(clock);
         this.stopped = Objects.requireNonNull(stopped);
-        Objects.requireNonNull(alerts);
-        RestartBudget restarts = new RestartBudget();
+        this.alerts = Objects.requireNonNull(alerts);
         routines = List.of(new SessionRoutine(), new DeathRoutine(), new IdleRoutine(alerts, restarts));
         List<TraceSink> allSinks = new ArrayList<>(List.of(sinks));
         allSinks.add(ring);
@@ -121,14 +126,23 @@ public final class BehaviorEngine {
         stats = null;
         ctx.botStats(null);
         BotContext context = new BotContext(ctx, "bot:" + next.name(), next.config());
-        HookEntry entry = next.taskEntry(context);
-        if (entry.hook() != Hook.BOT || entry.contributor() != Contributor.BOT
-            || !entry.owner().equals("bot:" + next.name())) throw new IllegalArgumentException("invalid bot entry");
-        TreeValidator.validate(List.of(entry));
-        botOwner = entry.owner();
-        hooks.insert(entry);
+        List<HookEntry> entries = botEntries(next, context);
+        List<HookEntry> mainEntries = entries.stream().filter(entry -> entry.hook() != Hook.RECOVERY).toList();
+        List<ReactiveSelector> groups = new ArrayList<>();
+        Recovery nextRecovery = new Recovery(
+            recoveryOptions(2, entries, groups), recoveryOptions(3, entries, groups), alerts, restarts);
+        List<HookEntry> candidate = new ArrayList<>(hooks.entries());
+        candidate.addAll(mainEntries);
+        TreeValidator.validate(candidate);
+        TreeValidator.validate(ReactiveSelector.hooks(candidate.stream().map(HookEntry::guard).toArray(Node[]::new)), nextRecovery);
+        botOwner = context.owner();
+        recoveryGroups = List.copyOf(groups);
+        hooks.recovery(nextRecovery);
+        mainEntries.forEach(hooks::insert);
         hooks.applyPendingChanges(ctx);
         plugins.applyPendingCleanup();
+        recovery = nextRecovery;
+        root = new TreeRoot(ctx, hooks, recovery);
         bot = next;
         botContext = context;
         stats = statsByBot.computeIfAbsent(next.name(), name -> new BotStats());
@@ -142,6 +156,45 @@ public final class BehaviorEngine {
         root.start();
         ctx.event(hooks.build(), Kind.BOT, null, reason, next.description());
         ctx.end();
+    }
+
+    private List<HookEntry> botEntries(Bot next, BotContext context) {
+        HookEntry task = Objects.requireNonNull(next.taskEntry(context));
+        if (task.hook() != Hook.BOT || task.contributor() != Contributor.BOT
+            || !task.owner().equals(context.owner())) throw new IllegalArgumentException("invalid bot entry");
+        List<HookEntry> entries = new ArrayList<>();
+        entries.add(task);
+        for (HookEntry entry : List.copyOf(next.extraEntries(context))) {
+            if (entry.contributor() != Contributor.BOT || !entry.owner().equals(context.owner())) {
+                throw new IllegalArgumentException("invalid bot extra entry owner or contributor");
+            }
+            if (entry.hook() != Hook.BOT_PRE && entry.hook() != Hook.BOT_POST && entry.hook() != Hook.RECOVERY) {
+                throw new IllegalArgumentException("bot extra hook forbidden: " + entry.hook());
+            }
+            entries.add(entry);
+        }
+        TreeValidator.validateContributions(entries);
+        entries.forEach(entry -> checkInactive(entry.guard()));
+        return List.copyOf(entries);
+    }
+
+    private void checkInactive(Node node) {
+        if (node.active()) throw new IllegalArgumentException("bot entry node active in another tree: " + node.name());
+        node.children().forEach(this::checkInactive);
+    }
+
+    private Node recoveryOptions(int level, List<HookEntry> entries, List<ReactiveSelector> groups) {
+        List<HookEntry> selected = entries.stream()
+            .filter(entry -> entry.hook() == Hook.RECOVERY && entry.recoveryLevel() == level)
+            .sorted(Comparator.comparingInt(HookEntry::priority).reversed()).toList();
+        if (selected.isEmpty()) {
+            return level == 2 ? new Fail(FailureCode.NO_OPTION, "no simulated alternative") : new Succeed();
+        }
+        selected.forEach(entry -> entry.guard().flightAware(entry.flightAware()));
+        ReactiveSelector choices = new ReactiveSelector("bot-recovery-options-" + level,
+            selected.stream().map(HookEntry::guard).toArray(Node[]::new));
+        groups.add(choices);
+        return choices;
     }
 
     public void stopBot(ExitReason reason, String detail) {
@@ -218,6 +271,8 @@ public final class BehaviorEngine {
             }
         }
         try {
+            for (ReactiveSelector group : recoveryGroups) group.detachForRebuild(Set.copyOf(group.children()));
+            recoveryGroups = List.of();
             BotCleanup.remove(ctx, hooks, botOwner);
             plugins.applyPendingCleanup();
             botOwner = null;

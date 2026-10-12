@@ -23,6 +23,14 @@ public final class TreeValidator {
     }
 
     public static void validate(List<HookEntry> entries) {
+        validateEntries(entries, false);
+    }
+
+    public static void validateContributions(List<HookEntry> entries) {
+        validateEntries(entries, true);
+    }
+
+    private static void validateEntries(List<HookEntry> entries, boolean recoveryAllowed) {
         Set<Node> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         long bots = entries.stream().filter(entry -> entry.hook() == Hook.BOT).count();
         if (bots > 1) throw new IllegalArgumentException("BOT accepts one entry");
@@ -30,14 +38,19 @@ public final class TreeValidator {
             if (!admitted(entry.hook(), entry.contributor())) {
                 throw new IllegalArgumentException("contributor " + entry.contributor() + " forbidden in " + entry.hook());
             }
-            if (entry.hook() == Hook.RECOVERY) throw new IllegalArgumentException("RECOVERY is outside the root");
+            if (entry.hook() == Hook.RECOVERY) {
+                if (!recoveryAllowed) throw new IllegalArgumentException("RECOVERY is outside the root");
+                if (entry.recoveryLevel() != 2 && entry.recoveryLevel() != 3) {
+                    throw new IllegalArgumentException("RECOVERY requires level 2 or 3");
+                }
+            }
             if (entry.contributor() == Contributor.PLUGIN && containsLease(entry.node())) {
                 throw new IllegalArgumentException("PLUGIN cannot request a resource: " + entry.owner());
             }
             visit(entry.guard(), false, false, visited);
             if (entry.contributor() == Contributor.ROUTINE && entries.stream()
                 .filter(other -> other.hook() == entry.hook() && other.owner().equals(entry.owner())).count() > 1
-                && entry.hook() != Hook.BOT_PRE && entry.hook() != Hook.BOT_POST) {
+                && entry.hook() != Hook.BOT_PRE && entry.hook() != Hook.BOT_POST && entry.hook() != Hook.RECOVERY) {
                 throw new IllegalArgumentException("routine accepts one principal entry: " + entry.owner());
             }
         }
