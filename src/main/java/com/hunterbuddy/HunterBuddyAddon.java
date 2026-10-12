@@ -9,7 +9,6 @@ import com.hunterbuddy.hud.RegearStatusHud;
 import com.hunterbuddy.hud.SystemStatsHud;
 import com.hunterbuddy.hud.TimerSpeedHud;
 import com.hunterbuddy.hud.TravelHud;
-import com.hunterbuddy.modules.AFKVanillaFly;
 import com.hunterbuddy.modules.AutoEatSync;
 import com.hunterbuddy.modules.AutoEXPPlus;
 import com.hunterbuddy.modules.AutoLogPlus;

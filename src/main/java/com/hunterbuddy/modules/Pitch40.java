@@ -115,6 +115,15 @@ public class Pitch40 extends Module {
                .visible(() -> this.rockets.get() == RocketMode.Boost)
                .build()
       );
+   private final Setting<Boolean> useRocketBoost = this.sgFirework
+      .add(
+         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                        .name("use-rocket-boost")
+                     .description("Turns RocketBoost on when Pitch40 starts if it is off, and back off when Pitch40 stops if Pitch40 turned it on.")
+                  .defaultValue(false)
+               .visible(() -> this.rockets.get() != RocketMode.Off)
+               .build()
+      );
    public final Setting<Boolean> autoRecast = this.sgRecast
       .add(
          new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
@@ -200,6 +209,7 @@ public class Pitch40 extends Module {
    private double peakY = 0.0;
    private double troughY = 0.0;
    private ElytraRecast elytraRecast = null;
+   private boolean rocketBoostEnabledByUs = false;
    private boolean oldElytraAutoFirework = false;
    private RegistryKey<World> lastDimension = null;
    private boolean userDisabledElytraFly = false;
@@ -315,6 +325,15 @@ public class Pitch40 extends Module {
          this.elytraRecast.toggle();
       }
 
+      this.rocketBoostEnabledByUs = false;
+      if (this.useRocketBoost.get()) {
+         RocketBoost rocketBoost = Modules.get().get(RocketBoost.class);
+         if (rocketBoost != null && !rocketBoost.isActive()) {
+            rocketBoost.toggle();
+            this.rocketBoostEnabledByUs = true;
+         }
+      }
+
       if ((Boolean)this.autoFirework.get() && this.getElytraFly().settings.get("auto-firework") instanceof BoolSetting boolSetting) {
          this.oldElytraAutoFirework = (Boolean)boolSetting.get();
          boolSetting.set(false);
@@ -334,6 +353,13 @@ public class Pitch40 extends Module {
       if ((Boolean)this.autoRecast.get() && this.elytraRecast != null && this.elytraRecast.isActive()) {
          this.elytraRecast.toggle();
       }
+
+      RocketBoost rocketBoostToStop = Modules.get().get(RocketBoost.class);
+      if (this.rocketBoostEnabledByUs && rocketBoostToStop != null && rocketBoostToStop.isActive()) {
+         rocketBoostToStop.toggle();
+      }
+
+      this.rocketBoostEnabledByUs = false;
 
       if ((Boolean)this.chestSwap.get() && this.mc.player != null && this.mc.player.isGliding()) {
          this.handBackGlide();
@@ -728,23 +754,8 @@ public class Pitch40 extends Module {
 
    @EventHandler
    private void onPlaySound(meteordevelopment.meteorclient.events.world.PlaySoundEvent event) {
-      if ((Boolean)this.chestSwap.get()) {
-         for (net.minecraft.util.Identifier identifier : java.util.List.of(
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_generic"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_netherite"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_elytra"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_diamond"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_gold"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_iron"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_chain"),
-            net.minecraft.util.Identifier.of("minecraft:item.armor.equip_leather"),
-            net.minecraft.util.Identifier.of("minecraft:item.elytra.flying")
-         )) {
-            if (identifier.equals(event.sound.getId())) {
-               event.cancel();
-               break;
-            }
-         }
+      if ((Boolean)this.chestSwap.get() && event.sound != null && GliderSwap.isSwapSound(event.sound.getId())) {
+         event.cancel();
       }
    }
 

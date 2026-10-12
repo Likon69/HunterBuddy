@@ -1,5 +1,7 @@
 package com.hunterbuddy.util;
 
+import net.minecraft.util.math.MathHelper;
+
 public final class TrailHeading {
     public enum Verdict { OUTSIDE, BEHIND, SIDE, AHEAD }
 
@@ -28,7 +30,7 @@ public final class TrailHeading {
     }
 
     public double turn(double maxDegPerTick) {
-        double diff = TrailUtils.angleDifference(wanted, steady);
+        double diff = MathHelper.wrapDegrees(wanted - steady);
         if (Math.abs(diff) <= maxDegPerTick) {
             steady = wanted;
         } else {
@@ -38,7 +40,7 @@ public final class TrailHeading {
     }
 
     public double offset(double yaw) {
-        return TrailUtils.angleDifference(steady, yaw);
+        return MathHelper.wrapDegrees(steady - yaw);
     }
 
     public Verdict judge(double chunkYaw, double maxDeviation, boolean ignoreBehind, double behindAngle) {

@@ -3,6 +3,7 @@ package com.hunterbuddy.modules;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.elytraboost.FireworkBoostTracker;
 import com.hunterbuddy.modules.mixin.accessors.EntityVelocityUpdateS2CPacketAccessor;
+import com.hunterbuddy.util.GlideWindow;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import meteordevelopment.orbit.EventHandler;
@@ -494,25 +495,7 @@ public class RocketBoost extends Module {
     * would make the logged offsets read as violations that never happened.
     */
    private void computeGrimBounds(Vec3d velocity, Vec3d look, Vec3d pairLook, float pitch, double gravity) {
-      Vec3d predicted = applyGlide(velocity, look, pitch, gravity);
-
-      for (int axis = 0; axis < 3; axis++) {
-         double dir = axisOf(look, axis);
-         double pair = axisOf(pairLook, axis);
-         double boxMin = Math.max(
-            -GRIM_FIREWORK_SCALE,
-            (Math.min(-ANTI_TICK_SKIPPING, dir) + Math.min(-ANTI_TICK_SKIPPING, pair)) * GRIM_FIREWORK_SCALE
-         );
-         double boxMax = Math.min(
-            GRIM_FIREWORK_SCALE,
-            (Math.max(ANTI_TICK_SKIPPING, dir) + Math.max(ANTI_TICK_SKIPPING, pair)) * GRIM_FIREWORK_SCALE
-         );
-         double had = axisOf(velocity, axis);
-         double centre = axisOf(predicted, axis);
-
-         traceLo[axis] = centre + Math.min(0.0, boxMin - had);
-         traceHi[axis] = centre + Math.max(0.0, boxMax - had);
-      }
+      GlideWindow.bounds(velocity, look, pairLook, pitch, gravity, GRIM_FIREWORK_SCALE, traceLo, traceHi);
 
       traceValid = true;
    }
@@ -521,7 +504,7 @@ public class RocketBoost extends Module {
    private boolean fitsGrimBound(double multiplier, Vec3d velocity, Vec3d look, float pitch, double gravity) {
       double margin = autoYMargin.get();
       Vec3d boosted = velocity.multiply(0.5).add(look.multiply(0.1 + 0.5 * multiplier));
-      Vec3d moved = applyGlide(boosted, look, pitch, gravity);
+      Vec3d moved = GlideWindow.applyGlide(boosted, look, pitch, gravity);
 
       for (int axis = 0; axis < 3; axis++) {
          double low = traceLo[axis] + margin;
@@ -682,48 +665,6 @@ public class RocketBoost extends Module {
       tracePending = 0;
       tracePrevValid = false;
       lastTraceAge = -1;
-   }
-
-   /**
-    * Vanilla's fall-flying step, ported from {@code LivingEntity#updateFallFlyingMovement}.
-    *
-    * <p>Grim replays this same step to predict where a gliding player ends up, so it is the
-    * difference between the velocity we hand the firework and the movement the server judges.
-    * Kept in the order the original writes it, down to reading the horizontal speed before
-    * gravity is added, because the climb term feeds on that earlier value.
-    */
-   private static Vec3d applyGlide(Vec3d velocity, Vec3d look, float pitch, double gravity) {
-      // Kept as a float, and the sine taken from MathHelper's table rather than Math: vanilla does
-      // both, and the table differs from the real sine by enough to matter on the vertical axis.
-      float pitchRad = pitch * 0.017453292F;
-      double lookHorizontal = Math.sqrt(look.x * look.x + look.z * look.z);
-      double speedHorizontal = velocity.horizontalLength();
-      double cosSquared = MathHelper.square(Math.cos(pitchRad));
-
-      double x = velocity.x;
-      double y = velocity.y + gravity * (-1.0 + cosSquared * 0.75);
-      double z = velocity.z;
-
-      if (y < 0.0 && lookHorizontal > 0.0) {
-         double fall = y * -0.1 * cosSquared;
-         x += look.x * fall / lookHorizontal;
-         y += fall;
-         z += look.z * fall / lookHorizontal;
-      }
-
-      if (pitchRad < 0.0F && lookHorizontal > 0.0) {
-         double climb = speedHorizontal * -MathHelper.sin(pitchRad) * 0.04;
-         x += -look.x * climb / lookHorizontal;
-         y += climb * 3.2;
-         z += -look.z * climb / lookHorizontal;
-      }
-
-      if (lookHorizontal > 0.0) {
-         x += (look.x / lookHorizontal * speedHorizontal - x) * 0.1;
-         z += (look.z / lookHorizontal * speedHorizontal - z) * 0.1;
-      }
-
-      return new Vec3d(x * 0.99, y * 0.98, z * 0.99);
    }
 
    public int trackedRocketId = -1;

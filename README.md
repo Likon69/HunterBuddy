@@ -23,7 +23,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 
 | Meteor name | Description |
 |---|---|
-| `300kmfly` | Fast firework flight on a fixed heading. Holds an altitude band with alternating dive and climb legs (or a smooth level mode), turning the pitch a few degrees per tick. Turns `rocket-boost` on by itself and, with `auto-speed` checked, switches on its auto-speed for the flight and puts it back after; unchecked, it leaves `rocket-boost` exactly as you set it. Relights each rocket just before `rocket-boost`'s extension runs out. Takes off from the ground, rises over terrain and flips a leg when terrain is ahead, glides level once the rockets run out, and never lights one in water or lava. Logs its speed, altitude, leg and rockets per minute every second. |
+| `300kmfly` | Fast firework flight on a fixed heading. Holds an altitude band with alternating dive and climb legs (or a smooth level mode), turning the pitch a few degrees per tick. `boost-mode` WINDOW (default): every gliding tick with a rocket attached follows the fastest point of the movement window Grim accepts. The heading stays exact and the slope may differ from where you look by at most `pitch-tolerance`; the speed is capped by `speed-cap` and braked near terrain and unloaded chunks. It uses its own angles, `window-dive-pitch` and `window-climb-pitch` (28/66), and `rocket-boost` is turned off during the flight and back on after. `boost-mode` ROCKET_BOOST: turns `rocket-boost` on by itself and, with `auto-speed` checked, switches on its auto-speed for the flight and puts it back after; unchecked, it leaves `rocket-boost` exactly as you set it; it uses the `dive-pitch` and `climb-pitch` angles. Relights each rocket just before the current one runs out (just before `rocket-boost`'s extension runs out in ROCKET_BOOST). Takes off from the ground, rises over terrain and flips a leg when terrain is ahead, glides level once the rockets run out, and never lights one in water or lava. Logs its speed, altitude, leg and rockets per minute every second, plus the share of ticks flown in the window and the reason for the last refusal. |
 | `arealoader` | Loads chunks along a rectangle, spiral, zigzag, or circle route; routes can be saved and resumed. |
 | `auto-portal` | Builds a nether portal frame, lights it, and optionally paths the player into it via Baritone. |
 | `chunk-radar` | Follows the 1.12 trail from the blocks in each arriving chunk, fits a line through the hits, and calls out when it is acquired, lost, turning, or thick enough to be a stash. Remembers trails between sessions. Overworld only. |
@@ -69,7 +69,7 @@ Restocking and inventory handling tools.
 | `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
 | `shulker-sorter` | Sorts the shulkers and loose items in your input chests into category chests, walking between them with Baritone. At a station it keeps only the dominant category in mixed shulkers and tops up partial pure shulkers with loose items. It fills an empty shulker once a category has at least 27 loose stacks; an optional `shulkerColor` in the JSON prefers its dye color. Withdrawals take only 100% pure shulkers, or empty ones for `shulkers`. It pauses while another player is in sight (friends allowed with `ignore-friends`), while SpawnerDetector is on and while the regear runs, and it can resume after a reconnect. Register chests with `tag-key` and set their roles with the buttons in its settings; `dry-run` reports where inputs would go without moving them. |
 
-### Utility (14)
+### Utility (15)
 
 | Meteor name | Description |
 |---|---|
@@ -81,6 +81,7 @@ Restocking and inventory handling tools.
 | `Experience Trader Starter` | Switches Villager Trading on once per in-game day, at the in-game time you choose (13:00 by default), with a fresh list of clerics to visit. |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
 | `h-mine` | Fast block mining, with a configurable swing animation. |
+| `inventory-cleaner` | Throws out every item that is not on its list, or in blacklist mode only the listed ones, one stack every `delay` ticks; the hotbar is optional. Works with no screen or the inventory open, and optionally in a crafting table or a container. |
 | `kill-aura-plus` | Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage. |
 | `mlep-air-place` | Places a block in air where your crosshair is pointing. |
 | `mlep-scaffold` | Places blocks beneath you as you move. |
@@ -98,7 +99,7 @@ Commands use the configured Meteor command prefix.
 | `sorter` | Fallback setup and withdrawal for the shulker sorter (`input`, `dest`, `reserve`, `station`, `remove`, `list`, `get`…). |
 | `trails` | List, forget, or clear the trails chunk-radar remembers. |
 
-## HUD elements (21)
+## HUD elements (23)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
@@ -118,6 +119,8 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
 | `RegearStatus` | The regear's identity badge, its station on its line, stocks and gains, counters, next-regear estimate and last event. |
 | `SorterStatus` | Shulker sorter state, target, input progress, confirmed deliveries, purified and packed shulkers, capacity and alerts. |
+| `SpawnerFarm` | SpawnerDetector auto-farm tally with item icons: spawners, chests, shulkers, rooms and the automaton's state, stacked or in one row. |
+| `SpawnerRun` | The current step of the spawner farm run while SpawnerDetector is on, as a scrolling console log, a compact card, a single line or a timeline band. |
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
 | `SpiralCoverage` | AreaLoader coverage for any mode: flown legs, current leg, planned turns. |
 | `SystemStats` | RAM and CPU usage with line graphs. |

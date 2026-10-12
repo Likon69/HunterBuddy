@@ -9,6 +9,7 @@ import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
 
 public final class GliderSwap {
    private GliderSwap() {
@@ -25,6 +26,15 @@ public final class GliderSwap {
       mc.player.handSwingTicks = 0;
       mc.player.handSwingProgress = 0.0F;
       mc.player.lastHandSwingProgress = 0.0F;
+   }
+
+   public static boolean isSwapSound(Identifier id) {
+      if (id == null || !"minecraft".equals(id.getNamespace())) {
+         return false;
+      }
+
+      String path = id.getPath();
+      return path.startsWith("item.armor.equip_") || path.equals("item.elytra.flying");
    }
 
    public static boolean isGlider(ItemStack stack) {

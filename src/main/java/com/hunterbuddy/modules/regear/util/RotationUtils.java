@@ -1,6 +1,5 @@
 package com.hunterbuddy.modules.regear.util;
 
-import com.hunterbuddy.modules.regear.config.MlepConfig;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Send;
@@ -119,7 +118,7 @@ public class RotationUtils {
    }
 
    public void setRotationSilent(float yaw, float pitch) {
-      this.setRotationSmooth(yaw, pitch, MlepConfig.getRotationTurnSpeed(), false);
+      this.setRotationSmooth(yaw, pitch, DEFAULT_TURN_SPEED, false);
    }
 
    public void setRotationSilent(float yaw, float pitch, double turnSpeed) {
@@ -127,7 +126,7 @@ public class RotationUtils {
    }
 
    public void setRotationFull(float yaw, float pitch) {
-      this.setRotationSmooth(yaw, pitch, MlepConfig.getRotationTurnSpeed(), true);
+      this.setRotationSmooth(yaw, pitch, DEFAULT_TURN_SPEED, true);
    }
 
    public void setRotationFull(float yaw, float pitch, double turnSpeed) {

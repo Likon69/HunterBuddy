@@ -12,20 +12,20 @@ public final class HopPlanner {
 
     public static final class Route {
         public final double speed;
-        public final double headroom;
-        public final int cycle;
+        public final double room;
+        public final int hopTicks;
         private final float[] angles;
 
-        private Route(double speed, double headroom, int cycle, int[] table) {
+        private Route(double speed, double room, int hopTicks, int[] table) {
             this.speed = speed;
-            this.headroom = headroom;
-            this.cycle = cycle;
+            this.room = room;
+            this.hopTicks = hopTicks;
             this.angles = new float[TABLE_SIZE];
             for (int i = 0; i < TABLE_SIZE; i++) angles[i] = table[i];
         }
 
-        public float pitchAt(int ticksSinceJump) {
-            return angles[Math.max(0, Math.min(TABLE_SIZE - 1, ticksSinceJump))];
+        public float angleAt(int airTick) {
+            return angles[Math.max(0, Math.min(TABLE_SIZE - 1, airTick))];
         }
 
         public float lowestPitch() {
@@ -41,7 +41,7 @@ public final class HopPlanner {
         }
 
         private int span() {
-            return Math.max(1, Math.min(cycle, TABLE_SIZE));
+            return Math.max(1, Math.min(hopTicks, TABLE_SIZE));
         }
     }
 
@@ -55,7 +55,7 @@ public final class HopPlanner {
     private HopPlanner() {
     }
 
-    public static double headroomAbove(PlayerEntity player, World world) {
+    public static double roomAbove(PlayerEntity player, World world) {
         Body body = Body.DEFAULT;
         double half = body.width() / 2.0;
         Box base = new Box(player.getX() - half, player.getY(), player.getZ() - half,
@@ -67,8 +67,8 @@ public final class HopPlanner {
         return steps * STEP;
     }
 
-    public static Route plan(double headroom, boolean perTick, Body body) {
-        Search search = new Search(headroom, body);
+    public static Route plan(double room, boolean perTick, Body body) {
+        Search search = new Search(room, body);
         int[] best = new int[TABLE_SIZE];
         Outcome bestOutcome = null;
         for (int angle = 0; angle <= 90; angle++) {
@@ -126,7 +126,7 @@ public final class HopPlanner {
                 best = current;
             }
         }
-        return new Route(bestOutcome.speed, headroom, bestOutcome.cycle, best);
+        return new Route(bestOutcome.speed, room, bestOutcome.hopTicks, best);
     }
 
     private static int[] constant(int angle) {
@@ -135,16 +135,16 @@ public final class HopPlanner {
         return table;
     }
 
-    private record Outcome(double speed, int cycle) {
+    private record Outcome(double speed, int hopTicks) {
     }
 
     private static final class Search {
-        private final double headroom;
+        private final double room;
         private final Body body;
         private int used;
 
-        Search(double headroom, Body body) {
-            this.headroom = headroom;
+        Search(double room, Body body) {
+            this.room = room;
             this.body = body;
         }
 
@@ -154,13 +154,13 @@ public final class HopPlanner {
 
         Outcome run(int[] table) {
             used++;
-            double y = Math.min(0.3, headroom);
+            double height = Math.min(0.3, room);
             double f = 0;
             double v = 0;
             boolean grounded = false;
             int since = 0;
             double advance = 0;
-            int lastLanding = -1;
+            int prevTouchdown = -1;
             int gapSum = 0;
             int gapCount = 0;
             for (int t = 0; t < TOTAL_TICKS; t++) {
@@ -192,28 +192,28 @@ public final class HopPlanner {
                 if (c > 0) f += (h0 - f) * 0.1;
                 f *= 0.99;
                 v *= 0.98;
-                double next = y + v;
+                double next = height + v;
                 boolean nowGrounded;
                 if (next < 0) {
                     next = 0;
                     v = 0;
                     nowGrounded = true;
-                } else if (next > headroom) {
-                    next = headroom;
+                } else if (next > room) {
+                    next = room;
                     v = 0;
                     nowGrounded = false;
                 } else {
                     nowGrounded = false;
                 }
-                y = next;
+                height = next;
                 if (t >= TOTAL_TICKS - WINDOW) {
                     advance += f;
                     if (!grounded && nowGrounded) {
-                        if (lastLanding >= 0) {
-                            gapSum += t - lastLanding;
+                        if (prevTouchdown >= 0) {
+                            gapSum += t - prevTouchdown;
                             gapCount++;
                         }
-                        lastLanding = t;
+                        prevTouchdown = t;
                     }
                 }
                 grounded = nowGrounded;

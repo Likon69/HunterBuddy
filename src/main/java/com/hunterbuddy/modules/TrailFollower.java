@@ -5,7 +5,8 @@ import baritone.api.pathing.goals.GoalXZ;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.util.TrailHeading;
 import com.hunterbuddy.util.TrailScan;
-import com.hunterbuddy.util.TrailUtils;
+import com.hunterbuddy.modules.regear.util.BaritoneHelper;
+import com.hunterbuddy.modules.regear.util.Utils;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -25,6 +26,7 @@ import net.minecraft.text.Text;
 import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.util.math.Vec3d;
@@ -477,7 +479,7 @@ public class TrailFollower extends Module {
                     && currentDimension.equals(this.resumeDimension)
                     && this.mc.player.getEntityPos().distanceTo(this.resumePos) <= this.resumeMaxDistance.get()
                     && now - this.resumeAt <= resumeWindowMs
-                    && Math.abs(TrailUtils.angleDifference(this.mc.player.getYaw(), this.resumeYaw)) <= 90.0;
+                    && Math.abs(MathHelper.wrapDegrees(this.mc.player.getYaw() - this.resumeYaw)) <= 90.0;
                 this.initialYaw = resuming ? this.resumeYaw : this.getActualYaw(this.mc.player.getYaw());
                 this.hasInitialDirection = true;
                 double seedYaw = resuming ? this.resumeYaw : this.mc.player.getYaw();
@@ -658,7 +660,7 @@ public class TrailFollower extends Module {
                             if (!this.trail.isEmpty()) {
                                 Vec3d baritoneTarget;
                                 if (this.netherPathMode.get() == TrailFollower.NetherPathMode.AVERAGE) {
-                                    baritoneTarget = TrailUtils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, this.pathDistanceActual);
+                                    baritoneTarget = this.offsetAlongYaw(this.mc.player.getEntityPos(), this.targetYaw, this.pathDistanceActual);
                                 } else {
                                     baritoneTarget = this.trail.getLast();
                                 }
@@ -669,7 +671,7 @@ public class TrailFollower extends Module {
                                     .setGoalAndPath(new GoalXZ((int)baritoneTarget.x, (int)baritoneTarget.z));
                             }
                         } else {
-                            Vec3d targetPos = TrailUtils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, this.pathDistanceActual);
+                            Vec3d targetPos = this.offsetAlongYaw(this.mc.player.getEntityPos(), this.targetYaw, this.pathDistanceActual);
                             BaritoneAPI.getProvider()
                                 .getPrimaryBaritone()
                                 .getCustomGoalProcess()
@@ -677,7 +679,7 @@ public class TrailFollower extends Module {
                         }
 
                         if (this.autoElytra.get()
-                            && TrailUtils.hasElytraProcess()
+                            && BaritoneHelper.hasElytraProcess()
                             && BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().currentDestination() == null) {
                             BaritoneAPI.getSettings().elytraTermsAccepted.value = true;
                             BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute("elytra");
@@ -687,7 +689,7 @@ public class TrailFollower extends Module {
                 case YAWLOCK:
                     this.mc
                         .player
-                        .setYaw(TrailUtils.smoothRotation(this.getActualYaw(this.mc.player.getYaw()), this.targetYaw, this.rotateScaling.get()));
+                        .setYaw(this.smoothYaw(this.getActualYaw(this.mc.player.getYaw()), this.targetYaw, this.rotateScaling.get()));
             }
         }
     }
@@ -695,7 +697,7 @@ public class TrailFollower extends Module {
     @EventHandler
     private void onRender(Render3DEvent event) {
         if (this.started && this.debug.get()) {
-            Vec3d targetPos = TrailUtils.positionInDirection(this.mc.player.getEntityPos(), this.targetYaw, 10.0);
+            Vec3d targetPos = this.offsetAlongYaw(this.mc.player.getEntityPos(), this.targetYaw, 10.0);
             event.renderer
                 .line(
                     this.mc.player.getX(),
@@ -761,7 +763,7 @@ public class TrailFollower extends Module {
 
                             if (this.hasInitialDirection) {
                                 double chunkAngleToPlayer = Rotations.getYaw(pos);
-                                double angleDiffFromInitial = TrailUtils.angleDifference(this.initialYaw, chunkAngleToPlayer);
+                                double angleDiffFromInitial = MathHelper.wrapDegrees(this.initialYaw - chunkAngleToPlayer);
                                 if (Math.abs(angleDiffFromInitial) > this.forwardConeAngle.get()) {
                                     return;
                                 }
@@ -878,6 +880,15 @@ public class TrailFollower extends Module {
         return totalWeight <= 0.0 ? null : new Vec3d(sumX / totalWeight, 0.0, sumZ / totalWeight);
     }
 
+    private Vec3d offsetAlongYaw(Vec3d pos, double yaw, double distance) {
+        double rad = Math.toRadians(yaw);
+        return new Vec3d(pos.x - Math.sin(rad) * distance, pos.y, pos.z + Math.cos(rad) * distance);
+    }
+
+    private float smoothYaw(double current, double target, double scaling) {
+        return (float) (current + MathHelper.wrapDegrees(target - current) * scaling);
+    }
+
     private double getDecayedInitialWeight() {
         if (this.hasInitialDirection && !(this.startDirectionWeighting.get() <= 0.0)) {
             int decayChunks = this.maxTrailLength.get() * 2;
@@ -911,7 +922,7 @@ public class TrailFollower extends Module {
     private void log(String message) {
         this.info(message);
         if (!this.webhookLink.get().isEmpty()) {
-            TrailUtils.sendWebhook(this.webhookLink.get(), "TrailFollower", message, null, this.mc.player.getGameProfile().name());
+            Utils.sendWebhook(this.webhookLink.get(), "TrailFollower", message, null, this.mc.player.getGameProfile().name());
         }
     }
 

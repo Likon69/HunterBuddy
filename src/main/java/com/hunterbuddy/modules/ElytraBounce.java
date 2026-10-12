@@ -5,6 +5,7 @@ import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.Utils;
+import com.hunterbuddy.util.GliderSwap;
 import com.hunterbuddy.util.PlanSlot;
 import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.util.HopPlanner;
@@ -15,6 +16,7 @@ import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
+import meteordevelopment.meteorclient.events.world.PlaySoundEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
@@ -355,8 +357,8 @@ public class ElytraBounce extends Module {
    private volatile boolean fakeFlyPrevSentOnGround = true;
    private volatile long fakeFlyLastStartAge = Long.MIN_VALUE / 2;
 
-   private volatile int preTick;
-   private final ArrayDeque<Integer> heldPongs = new ArrayDeque<>();
+   private volatile int tickCount;
+   private final ArrayDeque<Integer> pendingPongs = new ArrayDeque<>();
    private SwapWindow pendingSwap;
    private final AtomicInteger teleports = new AtomicInteger();
    private final AtomicInteger grimSetbacks = new AtomicInteger();
@@ -543,14 +545,14 @@ public class ElytraBounce extends Module {
                   this.solvePitch.get() && this.activeRoute != null && !(this.measuredRoom >= 0.0 && this.measuredRoom < 1.2)
                      ? this.expectedSpeed : 0.0,
                   this.measuredRoom,
-                  this.effectivePitch()
+                  this.bouncePitch()
                )
             );
          this.peakSpeed = 0.0;
       }
    }
 
-   private void watchDurability() {
+   private void logGliderWear() {
       if (!(Boolean)this.logDurability.get() || this.mc.player == null) {
          return;
       }
@@ -601,9 +603,9 @@ public class ElytraBounce extends Module {
       this.activeRoute = null;
       this.routeKey = null;
       this.airTicks = 0;
-      this.preTick = 0;
-      synchronized (this.heldPongs) {
-         this.heldPongs.clear();
+      this.tickCount = 0;
+      synchronized (this.pendingPongs) {
+         this.pendingPongs.clear();
       }
       this.teleports.set(0);
       this.grimSetbacks.set(0);
@@ -735,7 +737,7 @@ public class ElytraBounce extends Module {
 
    @EventHandler
    private void onTick(Pre event) {
-      this.preTick++;
+      this.tickCount++;
       if (this.mc.player == null || this.mc.world == null) {
          this.jumpHeld = false;
          this.routeSlot.invalidate();
@@ -746,7 +748,7 @@ public class ElytraBounce extends Module {
          return;
       }
       this.airTicks = this.mc.player.isOnGround() ? 0 : this.airTicks + 1;
-      this.watchDurability();
+      this.logGliderWear();
       this.watchSpeed();
       this.watchStats();
       this.tickFakeLag();
@@ -755,10 +757,10 @@ public class ElytraBounce extends Module {
          this.releaseHeldGlideState();
          return;
       }
-      this.updateAutoPitch();
+      this.refreshRoute();
       this.serviceGlideClear();
       this.serviceFakeFlyBurst();
-      this.updateJumpKey();
+      this.decideJump();
       this.probeTick();
       if (this.rubberBandCooldown > 0) {
          this.rubberBandCooldown--;
@@ -858,7 +860,7 @@ public class ElytraBounce extends Module {
                }
 
                if ((Boolean)this.lockPitch.get()) {
-                  this.mc.player.setPitch(this.effectivePitch());
+                  this.mc.player.setPitch(this.bouncePitch());
                }
             }
          }
@@ -879,7 +881,7 @@ public class ElytraBounce extends Module {
       return distToAxis > (Double)this.minDiagonalAngle.get();
    }
 
-   private void updateAutoPitch() {
+   private void refreshRoute() {
       if (SwapWindow.silent()) return;
       var player = this.mc.player;
       var world = this.mc.world;
@@ -892,7 +894,7 @@ public class ElytraBounce extends Module {
       }
       if (this.roomCheckDelay == 0 && player.isOnGround()) {
          this.roomCheckDelay = 10;
-         this.measuredRoom = HopPlanner.headroomAbove(player, world);
+         this.measuredRoom = HopPlanner.roomAbove(player, world);
          this.routeKey = new RouteKey(HopPlanner.Body.DEFAULT, this.measuredRoom, this.pitchPerTick.get());
       } else if (this.roomCheckDelay > 0) {
          this.roomCheckDelay--;
@@ -906,7 +908,7 @@ public class ElytraBounce extends Module {
       HopPlanner.Route current = this.activeRoute;
       if (stored != null) {
          this.activeRoute = stored;
-      } else if (current != null && current.headroom < 1.2) {
+      } else if (current != null && current.room < 1.2) {
          this.activeRoute = null;
       }
       if (this.activeRoute != null) this.expectedSpeed = this.activeRoute.speed;
@@ -937,9 +939,9 @@ public class ElytraBounce extends Module {
       return this.solvePitch.get() && this.activeRoute != null && !tightRoom;
    }
 
-   private float effectivePitch() {
+   private float bouncePitch() {
       HopPlanner.Route route = this.activeRoute;
-      if (route != null && this.routeUsable()) return route.pitchAt(this.airTicks);
+      if (route != null && this.routeUsable()) return route.angleAt(this.airTicks);
       return this.pitch.get().floatValue();
    }
 
@@ -993,9 +995,9 @@ public class ElytraBounce extends Module {
    private boolean handleGlideClearPacket(Receive event) {
       if (this.mc.player == null || !this.bounce.get() || !this.holdGlideClear.get()) return false;
       if (event.packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping) {
-         synchronized (this.heldPongs) {
+         synchronized (this.pendingPongs) {
             if (!this.heldClears.isEmpty()) {
-               this.heldPongs.addLast(ping.getParameter());
+               this.pendingPongs.addLast(ping.getParameter());
             } else {
                this.glideClearPingQueue.add(ping);
             }
@@ -1007,11 +1009,11 @@ public class ElytraBounce extends Module {
          && tracker.id() == this.mc.player.getId() && this.mc.player.isGliding()) {
          for (net.minecraft.entity.data.DataTracker.SerializedEntry<?> entry : tracker.trackedValues()) {
             if (entry.id() == 0 && entry.value() instanceof Byte flags && (flags & 0x80) == 0) {
-               synchronized (this.heldPongs) {
+               synchronized (this.pendingPongs) {
                   if (this.heldClears.isEmpty()) this.heldSince = this.mc.player.age;
                   this.heldClears.add(tracker);
                   net.minecraft.network.packet.s2c.common.CommonPingS2CPacket queued;
-                  while ((queued = this.glideClearPingQueue.poll()) != null) this.heldPongs.addLast(queued.getParameter());
+                  while ((queued = this.glideClearPingQueue.poll()) != null) this.pendingPongs.addLast(queued.getParameter());
                }
                this.clearsPlaced.incrementAndGet();
                event.cancel();
@@ -1024,9 +1026,9 @@ public class ElytraBounce extends Module {
 
    private void releaseHeldGlideState() {
       net.minecraft.client.network.ClientPlayNetworkHandler handler = this.mc.getNetworkHandler();
-      synchronized (this.heldPongs) {
+      synchronized (this.pendingPongs) {
          if (handler == null) {
-            this.heldPongs.clear();
+            this.pendingPongs.clear();
             this.heldClears.clear();
             this.glideClearPingQueue.clear();
             this.heldSince = 0L;
@@ -1035,8 +1037,8 @@ public class ElytraBounce extends Module {
          boolean wasFlushing = this.flushingPackets;
          this.flushingPackets = true;
          try {
-            while (!this.heldPongs.isEmpty()) {
-               int id = this.heldPongs.removeFirst();
+            while (!this.pendingPongs.isEmpty()) {
+               int id = this.pendingPongs.removeFirst();
                if (this.mc.isOnThread()) {
                   handler.sendPacket(new net.minecraft.network.packet.c2s.common.CommonPongC2SPacket(id));
                } else {
@@ -1128,7 +1130,7 @@ public class ElytraBounce extends Module {
 
       if (this.fakeFlyDesynced) {
          this.fakeFlyPairReady = false;
-         this.reportFakeFlyBlocked("the server refused the chest swap, open your inventory to resync");
+         this.reportFakeFlyBlocked("the server refused the chest swap, right-click the item in your hand to resync");
          return;
       }
 
@@ -1216,7 +1218,7 @@ public class ElytraBounce extends Module {
    }
 
    private void watchStats() {
-      if (!this.logDurability.get() || this.preTick % 400 != 0) return;
+      if (!this.logDurability.get() || this.tickCount % 400 != 0) return;
       HunterBuddyAddon.LOG.info(String.format(java.util.Locale.ROOT,
          "[ElytraBounce stats] teleports=%d grimSetbacks=%d clearsPlaced=%d clearsLetGo=%d",
          this.teleports.get(), this.grimSetbacks.get(),
@@ -1250,7 +1252,7 @@ public class ElytraBounce extends Module {
       return this.enabled() && (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && (Boolean)this.freePitch.get();
    }
 
-   private void updateJumpKey() {
+   private void decideJump() {
       if (SwapWindow.silent()) return;
       var player = this.mc.player;
       boolean onGround = player != null && player.isOnGround();
@@ -1258,7 +1260,7 @@ public class ElytraBounce extends Module {
       this.wasOnGroundLastTick = onGround;
       boolean flipped = !this.jumpHeld;
       boolean decision;
-      if (!this.enabled() || !this.shouldAutoJump()) {
+      if (!this.enabled() || !this.autoJumpAllowed()) {
          decision = false;
       } else if (onGround) {
          boolean fastEnough = this.motionYBoost.get()
@@ -1355,12 +1357,19 @@ public class ElytraBounce extends Module {
 
    public Boolean keyOverride(String keyId) {
       if ("key.forward".equals(keyId)) return Boolean.TRUE;
-      if ("key.jump".equals(keyId) && this.shouldAutoJump()) return this.jumpHeld;
+      if ("key.jump".equals(keyId) && this.autoJumpAllowed()) return this.jumpHeld;
       return null;
    }
 
-   public boolean shouldAutoJump() {
+   public boolean autoJumpAllowed() {
       return this.bounce.get() && (!this.fakeFly.get() || this.fakeFlyPairReady);
+   }
+
+   @EventHandler
+   private void onPlaySound(PlaySoundEvent event) {
+      if (this.fakeFly.get() && event.sound != null && GliderSwap.isSwapSound(event.sound.getId())) {
+         event.cancel();
+      }
    }
 
    @EventHandler

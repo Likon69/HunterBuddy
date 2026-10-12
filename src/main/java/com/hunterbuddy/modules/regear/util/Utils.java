@@ -8,12 +8,9 @@ import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
-import java.time.Instant;
 import java.util.Random;
 import javax.net.ssl.HttpsURLConnection;
 import meteordevelopment.meteorclient.MeteorClient;
-import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
@@ -26,9 +23,6 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.c2s.common.ClientOptionsC2SPacket;
-import net.minecraft.network.packet.c2s.common.SyncedClientOptions;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.network.packet.c2s.play.*;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode;
@@ -99,55 +93,6 @@ public class Utils {
             && PlayerUtils.getDimension().equals(Dimension.End)
             && MeteorClient.mc.player.getAbilities().flying
             && MeteorClient.mc.getNetworkHandler().getPlayerList().size() <= 1;
-    }
-
-    public static void illegalDisconnect(boolean disableAutoReconnect, IllegalDisconnectMethod method) {
-        if (!meteordevelopment.meteorclient.utils.Utils.canUpdate()) return;
-
-        if (disableAutoReconnect) {
-            disableAutoReconnect();
-        }
-
-        try {
-            Packet<?> illegalPacket = switch (method) {
-                case Slot -> new UpdateSelectedSlotC2SPacket(-69);
-                case Chat -> new ChatMessageC2SPacket("§", Instant.now(), 0L, null, null);
-                case Interact -> PlayerInteractEntityC2SPacket.attack(MeteorClient.mc.player, false);
-                case Movement -> new PlayerMoveC2SPacket.PositionAndOnGround(Double.NaN, Double.NaN, Double.NaN, false, false);
-                case SequenceBreak -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, -420, 13.37f, 69.69f);
-                case InvalidSettings -> {
-                    SyncedClientOptions defaults = SyncedClientOptions.createDefault();
-                    yield new ClientOptionsC2SPacket(new SyncedClientOptions(
-                        defaults.language(),
-                        -69,
-                        defaults.chatVisibility(),
-                        defaults.chatColorsEnabled(),
-                        defaults.playerModelParts(),
-                        defaults.mainArm(),
-                        defaults.filtersText(),
-                        defaults.allowsServerListing(),
-                        defaults.particleStatus()
-                    ));
-                }
-            };
-
-            if (illegalPacket != null && MeteorClient.mc.getNetworkHandler() != null) {
-                MeteorClient.mc.getNetworkHandler().sendPacket(illegalPacket);
-                MeteorClient.mc.getNetworkHandler().sendPacket(new ChatMessageC2SPacket("[Mlep] Illegal Disconnect", Instant.now(), 0L, null, null));
-            }
-        } catch (Exception e) {
-            if (MeteorClient.mc.getNetworkHandler() != null) {
-                MeteorClient.mc.getNetworkHandler().sendPacket(new ChatMessageC2SPacket("[Mlep] Disconnect", Instant.now(), 0L, null, null));
-            }
-        }
-    }
-
-    public static void disableAutoReconnect() {
-        Modules mods = Modules.get();
-        if (mods != null) {
-            AutoReconnect atrc = mods.get(AutoReconnect.class);
-            if (atrc != null && atrc.isActive()) atrc.toggle();
-        }
     }
 
     public static int firework(MinecraftClient mc, boolean elytraRequired) {
@@ -359,10 +304,6 @@ public class Utils {
         } catch (Exception e) {
             com.hunterbuddy.HunterBuddyAddon.LOG.error("[HB] webhook failed", e);
         }
-    }
-
-    public enum IllegalDisconnectMethod {
-        Slot, Chat, Interact, Movement, SequenceBreak, InvalidSettings
     }
 
     public enum TextColor {

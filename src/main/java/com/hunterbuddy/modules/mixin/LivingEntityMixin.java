@@ -3,6 +3,7 @@ package com.hunterbuddy.modules.mixin;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
+import com.hunterbuddy.modules.Fly300km;
 import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
@@ -18,6 +19,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.brain.Brain;
+import net.minecraft.util.math.Vec3d;
 
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityMixin {
@@ -25,6 +27,7 @@ public abstract class LivingEntityMixin {
    private int jumpingCooldown;
    private Module noJumpDelay;
    private ElytraBounce efly;
+   private Fly300km fly300km;
 
    @Shadow
    public abstract Brain<?> getBrain();
@@ -43,6 +46,14 @@ public abstract class LivingEntityMixin {
       }
 
       return this.efly;
+   }
+
+   private Fly300km getFly300km() {
+      if (this.fly300km == null) {
+         this.fly300km = Modules.get().get(Fly300km.class);
+      }
+
+      return this.fly300km;
    }
 
    @Inject(at = @At("HEAD"), method = "tickMovement")
@@ -93,5 +104,24 @@ public abstract class LivingEntityMixin {
 
       Float pitch = RotationUtils.getInstance().getMovementPitch();
       return pitch != null ? pitch : (Float)original.call(new Object[]{entity});
+   }
+
+   @WrapOperation(
+      method = "travelGliding",
+      at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/LivingEntity;calcGlidingVelocity(Lnet/minecraft/util/math/Vec3d;)Lnet/minecraft/util/math/Vec3d;")
+   )
+   private Vec3d hunterBuddy$windowGlide(LivingEntity entity, Vec3d oldVelocity, Operation<Vec3d> original) {
+      Vec3d vanilla = (Vec3d)original.call(new Object[]{entity, oldVelocity});
+      if (entity != MeteorClient.mc.player) {
+         return vanilla;
+      }
+
+      Fly300km fly = this.getFly300km();
+      if (fly == null || !fly.isActive()) {
+         return vanilla;
+      }
+
+      Vec3d ride = fly.windowVelocity(vanilla);
+      return ride != null ? ride : vanilla;
    }
 }
