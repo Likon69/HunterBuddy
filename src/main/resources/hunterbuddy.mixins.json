@@ -3,7 +3,6 @@
   "package": "com.hunterbuddy.modules.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "MlepScaffoldMixin",
     "ShulkerHotbarOverlayMixin",
     "InputMixin",
     "AuraMoveFixMixin",

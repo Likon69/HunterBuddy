@@ -584,8 +584,11 @@ public class MlepScaffold extends Module {
       }
    }
 
-   public boolean isSafeWalking() {
-      return this.isActive() && (Boolean) this.safeWalk.get();
+   @EventHandler
+   private void onClipAtLedge(meteordevelopment.meteorclient.events.entity.player.ClipAtLedgeEvent event) {
+      if ((Boolean) this.safeWalk.get()) {
+         event.setClip(true);
+      }
    }
 
    public enum ListMode {
