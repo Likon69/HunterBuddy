@@ -29,16 +29,16 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `chest-tracker` | Records the contents of containers you open, with a browser screen and JSON storage. |
 | `chunk-radar` | Follows the 1.12 trail from the blocks in each arriving chunk, fits a line through the hits, and calls out when it is acquired, lost, turning, or thick enough to be a stash. Remembers trails between sessions. Overworld only. |
 | `elytra-auto-fly` | Flight cycle driving `pitch40-classic`: climb, then manual-pitch descent, looped. |
-| `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer, and portal-trap avoidance. |
+| `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer, and portal-trap avoidance. `solve-pitch` picks the fastest bounce angle for the ceiling above you, and `chestplate-fakefly` bounces with a chest piece worn and the elytra in a hand, swapping the elytra in only for the take-off so it never loses durability. |
 | `ElytraRecast` | Flight recovery fallback: watches for lost flight or a low altitude and relaunches. |
 | `old-chunk-notifier` | Sends a webhook message, optionally pinging you, when an old chunk is detected. |
-| `Pitch40` | Pitch40 helper: syncs bounds with Meteor's ElytraFly and auto-enables on reconnect. |
+| `Pitch40` | Pitch40 helper: syncs bounds with Meteor's ElytraFly and auto-enables on reconnect. Its `chest-swap` glides with a chest piece worn and the elytra in a hand, swapping the elytra in for a moment at each burst so it never loses durability, and keeps it on while a rocket pushes. |
 | `pitch40-classic` | Standalone +40/-40 pitch oscillation with its own firework logic; does not use Meteor's ElytraFly. |
 | `RocketFly` | Maintains level flight with fireworks and smooth pitch control. |
 | `stash-finder` | Detects stashes; chunks identified as Woodland Mansions are ignored. |
-| `TrailFollower` | Follows detected trails in all dimensions, with a rate-limited heading and a choice of search patterns (spiral, sweep, straight) when the trail is lost. |
+| `TrailFollower` | Follows detected trails in all dimensions, with a turn-limited heading (`heading-turn-limit`), chunks far behind ignored (`ignore-behind`), and a lost-trail scan (`lost-trail-scan`: weave, spin or hold) when the trail stops coming. |
 | `visual-range-notifier` | Notifies when players enter visual range or selected items appear on the ground; optional Discord webhook alerts. |
-| `waypoint-follower` | Follows Xaero waypoints with multi-dimensional travel support. Once the last one is reached it stops where it is, in the air or on the ground, by switching itself off or by leaving the server. |
+| `waypoint-follower` | Follows the Xaero waypoints whose name starts with `waypoint-prefix` (`Hunt_` by default), in numeric order or closest first, with a flight mode per dimension; once the last one is reached it stops where it is, in the air or on the ground, by switching itself off or by leaving the server. It can also lay the waypoints for you: `seed-route` fills a hunt chain along an already-mapped trail between your `Route_1`, `Route_2`… control marks (dropped on Xaero's map with `add-route-key`), one every `seed-spacing` blocks or only at portal patches, and `nether-record-route` drops one every `seed-spacing` blocks along your own Nether flight. Keys add, skip or pause waypoints from the map, and `clear-waypoints` wipes every hunt waypoint and route mark for a fresh start. |
 | `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
 
 ### Visuals (9)

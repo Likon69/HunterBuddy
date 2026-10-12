@@ -7,10 +7,10 @@ import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.util.PlanSlot;
 import com.hunterbuddy.util.BounceProbe;
-import com.hunterbuddy.util.BounceSolver;
+import com.hunterbuddy.util.HopPlanner;
+import com.hunterbuddy.util.SwapWindow;
 import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicInteger;
-import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
@@ -143,11 +143,11 @@ public class ElytraBounce extends Module {
                .visible(this.bounce::get)
             .build()
       );
-   private final Setting<Boolean> autoPitch = this.sgGeneral
+   private final Setting<Boolean> solvePitch = this.sgGeneral
       .add(
-         new Builder().name("auto-pitch")
+         new Builder().name("solve-pitch")
                      .description(
-                        "Solves for the pitch that actually bounces fastest instead of using a fixed one. Speed comes from how often you land (each sprint-jump adds 0.2 while the elytra keeps 0.99 friction), so the best pitch depends on how much headroom is above you — worth up to +25% under a low ceiling."
+                        "Computes the pitch that gives the highest bounce speed rather than holding a fixed angle. The result depends on the room above your head, and gains are largest under a low ceiling."
                      ).defaultValue(true)
                .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get())
                .build()
@@ -159,20 +159,20 @@ public class ElytraBounce extends Module {
                   .description("The pitch to set when bounce is enabled.")
                .defaultValue(90.0)
                .sliderRange(-90.0, 90.0)
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && !(Boolean)this.autoPitch.get())
+               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.lockPitch.get() && !(Boolean)this.solvePitch.get())
                .build()
       );
-   private final Setting<Boolean> pitchSchedule = this.sgGeneral
-      .add(new Builder().name("pitch-schedule")
-         .description("Let auto-pitch vary the pitch within each hop instead of holding one angle.")
+   private final Setting<Boolean> pitchPerTick = this.sgGeneral
+      .add(new Builder().name("pitch-per-tick")
+         .description("Allow solve-pitch to use a different angle on each tick of a hop instead of one angle for the whole hop.")
          .defaultValue(true)
-         .visible(() -> this.autoPitch.get() && this.lockPitch.get())
+         .visible(() -> this.solvePitch.get() && this.lockPitch.get())
          .build());
-   private final Setting<Integer> setbackPause = this.sgGeneral
+   private final Setting<Integer> pauseAfterSetback = this.sgGeneral
       .add(
          new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("setback-pause")
-                  .description("Ticks to stop bouncing for after the server teleports you back. One is a one-tick hiccup: the teleport lands, the next tick is skipped, the jump and the re-deploy resume on the tick after. 0 disables the pause (the client-side gliding reset still happens either way).")
+                     .name("pause-after-setback")
+                  .description("How many ticks bouncing stays off once the server moves you back. With 1, a single tick is skipped and the jump and re-deploy come back on the following one. 0 turns the pause off; the client-side gliding reset happens regardless.")
                .defaultValue(1)
                .min(0)
                .sliderMax(40)
@@ -320,16 +320,16 @@ public class ElytraBounce extends Module {
    private boolean paused = false;
    private volatile int rubberBandCooldown = 0;
 
-   private int ticksSinceJump;
-   private volatile BounceSolver.Plan flyingPlan;
-   private final PlanSlot<AutoPitchKey, BounceSolver.Plan> pitchPlans = new PlanSlot<>();
-   private volatile AutoPitchKey pitchKey;
+   private int airTicks;
+   private volatile HopPlanner.Route activeRoute;
+   private final PlanSlot<RouteKey, HopPlanner.Route> routeSlot = new PlanSlot<>();
+   private volatile RouteKey routeKey;
 
-   private double solvedHeadroom = -1.0;
+   private double measuredRoom = -1.0;
 
-   private double predictedSpeed = 0.0;
+   private double expectedSpeed = 0.0;
 
-   private int solveCooldown = 0;
+   private int roomCheckDelay = 0;
 
    private final java.util.Queue<net.minecraft.network.packet.s2c.common.CommonPingS2CPacket> glideClearPingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
@@ -340,7 +340,7 @@ public class ElytraBounce extends Module {
    private int jumpTick = 0;
    private boolean wasOnGroundLastTick = true;
 
-   private boolean jumpKeyDownLastTick = false;
+   private boolean jumpHeldLastTick = false;
 
    private boolean forcePressThisTick = false;
 
@@ -357,13 +357,13 @@ public class ElytraBounce extends Module {
 
    private volatile int preTick;
    private final ArrayDeque<Integer> heldPongs = new ArrayDeque<>();
-   private Deferred deferred;
+   private SwapWindow pendingSwap;
    private final AtomicInteger teleports = new AtomicInteger();
    private final AtomicInteger grimSetbacks = new AtomicInteger();
    private final AtomicInteger clearsPlaced = new AtomicInteger();
    private final AtomicInteger clearsLetGo = new AtomicInteger();
 
-   private boolean jumpKeyDown = false;
+   private boolean jumpHeld = false;
 
    private volatile boolean realGliding = false;
 
@@ -408,15 +408,15 @@ public class ElytraBounce extends Module {
             this.grimSetbacks.incrementAndGet();
          }
          this.releaseHeldGlideState();
-         this.rubberBandCooldown = this.setbackPause.get();
+         this.rubberBandCooldown = this.pauseAfterSetback.get();
          this.realGliding = false;
          if (this.mc.player != null) this.mc.player.stopGliding();
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.play.PlayerRespawnS2CPacket
          || event.packet instanceof net.minecraft.network.packet.s2c.common.DisconnectS2CPacket) {
          this.releaseHeldGlideState();
-         this.pitchPlans.invalidate();
-         this.flyingPlan = null;
-         this.pitchKey = null;
+         this.routeSlot.invalidate();
+         this.activeRoute = null;
+         this.routeKey = null;
          this.realGliding = false;
       } else if (event.packet instanceof net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket velocity
          && this.mc.player != null && velocity.getEntityId() == this.mc.player.getId()) {
@@ -540,9 +540,9 @@ public class ElytraBounce extends Module {
                   "[ElytraBounce speed] peak=%.1f b/s (%.0f km/h) predicted=%.1f b/s headroom=%.2f pitch=%.1f",
                   this.peakSpeed,
                   this.peakSpeed * 3.6,
-                  this.autoPitch.get() && this.flyingPlan != null && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2)
-                     ? this.predictedSpeed : 0.0,
-                  this.solvedHeadroom,
+                  this.solvePitch.get() && this.activeRoute != null && !(this.measuredRoom >= 0.0 && this.measuredRoom < 1.2)
+                     ? this.expectedSpeed : 0.0,
+                  this.measuredRoom,
                   this.effectivePitch()
                )
             );
@@ -595,12 +595,12 @@ public class ElytraBounce extends Module {
       this.lastDurability = -1;
       this.peakSpeed = 0.0;
       this.speedWindowTicks = 0;
-      if (this.deferred != null) this.deferred.finish();
-      this.deferred = null;
-      this.pitchPlans.invalidate();
-      this.flyingPlan = null;
-      this.pitchKey = null;
-      this.ticksSinceJump = 0;
+      if (this.pendingSwap != null) this.pendingSwap.cancel();
+      this.pendingSwap = null;
+      this.routeSlot.invalidate();
+      this.activeRoute = null;
+      this.routeKey = null;
+      this.airTicks = 0;
       this.preTick = 0;
       synchronized (this.heldPongs) {
          this.heldPongs.clear();
@@ -615,15 +615,15 @@ public class ElytraBounce extends Module {
          this.portalTrap = null;
          this.paused = false;
          this.rubberBandCooldown = 0;
-         this.solvedHeadroom = -1.0;
-         this.predictedSpeed = 0.0;
-         this.solveCooldown = 0;
+         this.measuredRoom = -1.0;
+         this.expectedSpeed = 0.0;
+         this.roomCheckDelay = 0;
          this.heldClears.clear();
          this.glideClearPingQueue.clear();
          this.heldSince = 0L;
          this.jumpTick = this.mc.player.age;
          this.wasOnGroundLastTick = this.mc.player.isOnGround();
-         this.jumpKeyDownLastTick = false;
+         this.jumpHeldLastTick = false;
          this.forcePressThisTick = false;
          this.fakeFlyBurstHand = null;
          this.fakeFlyPendingSequence = -1;
@@ -707,14 +707,14 @@ public class ElytraBounce extends Module {
 
    public void onDeactivate() {
       BounceProbe.get().stop();
-      if (this.deferred != null) this.deferred.finish();
-      this.deferred = null;
-      this.pitchPlans.invalidate();
-      this.flyingPlan = null;
-      this.pitchKey = null;
+      if (this.pendingSwap != null) this.pendingSwap.cancel();
+      this.pendingSwap = null;
+      this.routeSlot.invalidate();
+      this.activeRoute = null;
+      this.routeKey = null;
       this.realGliding = false;
-      this.jumpKeyDown = false;
-      this.jumpKeyDownLastTick = false;
+      this.jumpHeld = false;
+      this.jumpHeldLastTick = false;
       this.fakeLagTicks = 0;
       this.releaseHeldGlideState();
       this.flushPackets();
@@ -737,20 +737,20 @@ public class ElytraBounce extends Module {
    private void onTick(Pre event) {
       this.preTick++;
       if (this.mc.player == null || this.mc.world == null) {
-         this.jumpKeyDown = false;
-         this.pitchPlans.invalidate();
-         this.flyingPlan = null;
-         this.pitchKey = null;
+         this.jumpHeld = false;
+         this.routeSlot.invalidate();
+         this.activeRoute = null;
+         this.routeKey = null;
          this.releaseHeldGlideState();
          this.flushPackets();
          return;
       }
-      this.ticksSinceJump = this.mc.player.isOnGround() ? 0 : this.ticksSinceJump + 1;
+      this.airTicks = this.mc.player.isOnGround() ? 0 : this.airTicks + 1;
       this.watchDurability();
       this.watchSpeed();
       this.watchStats();
       this.tickFakeLag();
-      if (Deferred.quiet) {
+      if (SwapWindow.silent()) {
          this.mc.player.setSprinting(false);
          this.releaseHeldGlideState();
          return;
@@ -880,63 +880,75 @@ public class ElytraBounce extends Module {
    }
 
    private void updateAutoPitch() {
-      if (Deferred.quiet) return;
-      if (!this.autoPitch.get() || !this.bounce.get() || !this.lockPitch.get() || this.mc.player == null || this.mc.world == null) {
-         this.pitchPlans.invalidate();
-         this.flyingPlan = null;
-         this.pitchKey = null;
-         return;
-      }
-      if (this.solveCooldown > 0) {
-         this.solveCooldown--;
-      } else if (this.mc.player.isOnGround()) {
-         this.solveCooldown = 10;
-         this.solvedHeadroom = BounceSolver.measureHeadroom(this.mc.player, this.mc.world);
-         this.pitchKey = new AutoPitchKey(BounceSolver.Physics.DEFAULT, this.solvedHeadroom, this.pitchSchedule.get());
-      }
-      if (this.pitchKey == null) return;
-      this.pitchKey = new AutoPitchKey(BounceSolver.Physics.DEFAULT, this.pitchKey.headroom(), this.pitchSchedule.get());
+      if (SwapWindow.silent()) return;
       var player = this.mc.player;
       var world = this.mc.world;
-      AutoPitchKey key = this.pitchKey;
-      this.pitchPlans.update(player, world, key);
-      BounceSolver.Plan cachedPlan = this.pitchPlans.plan(player, world, key);
-      if (cachedPlan != null) this.flyingPlan = cachedPlan;
-      else if (this.flyingPlan != null && !(this.flyingPlan.headroom >= 1.2)) this.flyingPlan = null;
-      if (this.flyingPlan != null) this.predictedSpeed = this.flyingPlan.speed;
-      PlanSlot.Ticket<AutoPitchKey> request = this.pitchPlans.request();
-      if (request == null) return;
+      boolean wanted = this.solvePitch.get() && this.bounce.get() && this.lockPitch.get();
+      if (!wanted || player == null || world == null) {
+         this.routeSlot.invalidate();
+         this.activeRoute = null;
+         this.routeKey = null;
+         return;
+      }
+      if (this.roomCheckDelay == 0 && player.isOnGround()) {
+         this.roomCheckDelay = 10;
+         this.measuredRoom = HopPlanner.headroomAbove(player, world);
+         this.routeKey = new RouteKey(HopPlanner.Body.DEFAULT, this.measuredRoom, this.pitchPerTick.get());
+      } else if (this.roomCheckDelay > 0) {
+         this.roomCheckDelay--;
+      }
+      RouteKey previousKey = this.routeKey;
+      if (previousKey == null) return;
+      RouteKey key = new RouteKey(previousKey.body(), previousKey.room(), this.pitchPerTick.get());
+      this.routeKey = key;
+      this.routeSlot.update(player, world, key);
+      HopPlanner.Route stored = this.routeSlot.plan(player, world, key);
+      HopPlanner.Route current = this.activeRoute;
+      if (stored != null) {
+         this.activeRoute = stored;
+      } else if (current != null && current.headroom < 1.2) {
+         this.activeRoute = null;
+      }
+      if (this.activeRoute != null) this.expectedSpeed = this.activeRoute.speed;
+      PlanSlot.Ticket<RouteKey> ticket = this.routeSlot.request();
+      if (ticket == null) return;
       MeteorExecutor.execute(() -> {
          try {
-            AutoPitchKey requested = request.key();
-            BounceSolver.Plan plan = BounceSolver.solve(requested.headroom(), requested.schedule(), requested.physics());
+            RouteKey wantedKey = ticket.key();
+            HopPlanner.Route solved = HopPlanner.plan(wantedKey.room(), wantedKey.perTick(), wantedKey.body());
             this.mc.execute(() -> {
-               if (this.pitchPlans.complete(request, plan) && this.isActive()
-                  && this.mc.player == player && this.mc.world == world && key.equals(this.pitchKey) && !Deferred.quiet) {
-                  this.flyingPlan = plan;
-                  this.predictedSpeed = plan.speed;
+               boolean accepted = this.routeSlot.complete(ticket, solved);
+               if (accepted && this.isActive() && this.mc.player == player && this.mc.world == world
+                  && key.equals(this.routeKey) && !SwapWindow.silent()) {
+                  this.activeRoute = solved;
+                  this.expectedSpeed = solved.speed;
                }
             });
          } catch (RuntimeException e) {
             this.mc.execute(() -> {
-               if (this.pitchPlans.fail(request) && this.isActive()) this.warning("Could not solve bounce pitch: %s", e.getMessage());
+               if (this.routeSlot.fail(ticket) && this.isActive()) this.warning("Could not solve bounce pitch: %s", e.getMessage());
             });
          }
       });
    }
 
+   private boolean routeUsable() {
+      boolean tightRoom = this.measuredRoom >= 0.0 && this.measuredRoom < 1.2;
+      return this.solvePitch.get() && this.activeRoute != null && !tightRoom;
+   }
+
    private float effectivePitch() {
-      BounceSolver.Plan plan = this.flyingPlan;
-      return this.autoPitch.get() && plan != null && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2)
-         ? plan.pitchAt(this.ticksSinceJump) : this.pitch.get().floatValue();
+      HopPlanner.Route route = this.activeRoute;
+      if (route != null && this.routeUsable()) return route.pitchAt(this.airTicks);
+      return this.pitch.get().floatValue();
    }
 
    @Override
    public String getInfoString() {
       if (!this.bounce.get() || !this.lockPitch.get()) return null;
-      BounceSolver.Plan plan = this.flyingPlan;
-      return this.autoPitch.get() && plan != null && !(this.solvedHeadroom >= 0.0 && this.solvedHeadroom < 1.2)
-         ? String.format(java.util.Locale.ROOT, "%.0f b/s @ %.0f-%.0f°", plan.speed, plan.minPitch(), plan.maxPitch())
+      HopPlanner.Route route = this.activeRoute;
+      return route != null && this.routeUsable()
+         ? String.format(java.util.Locale.ROOT, "%.0f b/s @ %.0f-%.0f°", route.speed, route.lowestPitch(), route.highestPitch())
          : String.format(java.util.Locale.ROOT, "%.0f° fixed", this.pitch.get());
    }
 
@@ -944,7 +956,7 @@ public class ElytraBounce extends Module {
       if (this.mc.player == null) return false;
       return !this.mc.player.isOnGround()
          && this.mc.player.age >= this.jumpTick + 1
-         && !this.jumpKeyDownLastTick;
+         && !this.jumpHeldLastTick;
    }
 
    private void serviceGlideClear() {
@@ -1191,13 +1203,14 @@ public class ElytraBounce extends Module {
    }
 
    private void deferSwap(Runnable action) {
-      if (this.mc.player == null || this.mc.world == null || this.deferred != null && !this.deferred.finished) return;
       var player = this.mc.player;
       var world = this.mc.world;
-      this.jumpKeyDown = false;
-      this.jumpKeyDownLastTick = false;
+      if (player == null || world == null) return;
+      if (this.pendingSwap != null && !this.pendingSwap.done()) return;
+      this.jumpHeld = false;
+      this.jumpHeldLastTick = false;
       this.forcePressThisTick = false;
-      this.deferred = new Deferred(2, true, () -> {
+      this.pendingSwap = SwapWindow.after(2, true, () -> {
          if (this.mc.player == player && this.mc.world == world) action.run();
       });
    }
@@ -1219,11 +1232,11 @@ public class ElytraBounce extends Module {
          this.swapFakeFlyHand(hand);
          BounceProbe.get().line("FAKEFLY-SWAP-OUT", "hand=" + hand);
       }
-      if (Deferred.quiet) this.mc.player.setSprinting(false);
+      if (SwapWindow.silent()) this.mc.player.setSprinting(false);
    }
 
    public boolean enabled() {
-      return this.isActive() && !this.paused && !Deferred.quiet && this.rubberBandCooldown <= 0
+      return this.isActive() && !this.paused && !SwapWindow.silent() && this.rubberBandCooldown <= 0
          && this.mc.player != null && this.mc.world != null
          && (this.fakeFly.get() || this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem().equals(Items.ELYTRA));
    }
@@ -1238,26 +1251,29 @@ public class ElytraBounce extends Module {
    }
 
    private void updateJumpKey() {
-      if (Deferred.quiet) return;
-      boolean previous = this.jumpKeyDown;
-      boolean ground = this.mc.player != null && this.mc.player.isOnGround();
-      boolean flying = this.mc.player != null && this.mc.player.isGliding();
-      if (this.mc.player != null && !ground && this.wasOnGroundLastTick) this.jumpTick = this.mc.player.age;
-      this.wasOnGroundLastTick = ground;
+      if (SwapWindow.silent()) return;
+      var player = this.mc.player;
+      boolean onGround = player != null && player.isOnGround();
+      if (player != null && this.wasOnGroundLastTick && !onGround) this.jumpTick = player.age;
+      this.wasOnGroundLastTick = onGround;
+      boolean flipped = !this.jumpHeld;
+      boolean decision;
       if (!this.enabled() || !this.shouldAutoJump()) {
-         this.jumpKeyDown = false;
-      } else if (ground) {
-         this.jumpKeyDown = !this.motionYBoost.get()
-            || meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() < this.speed.get();
+         decision = false;
+      } else if (onGround) {
+         boolean fastEnough = this.motionYBoost.get()
+            && meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() >= this.speed.get();
+         decision = !fastEnough;
       } else if (this.forcePressThisTick) {
-         this.jumpKeyDown = !previous;
-      } else if (flying) {
-         this.jumpKeyDown = false;
+         decision = flipped;
+      } else if (player.isGliding()) {
+         decision = false;
       } else {
-         this.jumpKeyDown = !previous;
+         decision = flipped;
       }
       this.forcePressThisTick = false;
-      this.jumpKeyDownLastTick = this.jumpKeyDown;
+      this.jumpHeld = decision;
+      this.jumpHeldLastTick = decision;
    }
 
    private void probeTick() {
@@ -1272,7 +1288,7 @@ public class ElytraBounce extends Module {
             "onGround=%b flag7=%b key=%b sprint=%b pos=%.2f,%.2f,%.2f vel=%.3f,%.3f,%.3f pitch=%.1f yaw=%.1f",
             this.mc.player.isOnGround(),
             this.mc.player.isGliding(),
-            this.jumpKeyDown,
+            this.jumpHeld,
             this.mc.player.isSprinting(),
             this.mc.player.getX(),
             this.mc.player.getY(),
@@ -1339,7 +1355,7 @@ public class ElytraBounce extends Module {
 
    public Boolean keyOverride(String keyId) {
       if ("key.forward".equals(keyId)) return Boolean.TRUE;
-      if ("key.jump".equals(keyId) && this.shouldAutoJump()) return this.jumpKeyDown;
+      if ("key.jump".equals(keyId) && this.shouldAutoJump()) return this.jumpHeld;
       return null;
    }
 
@@ -1408,48 +1424,6 @@ public class ElytraBounce extends Module {
 
       return list;
    }
-   private record AutoPitchKey(BounceSolver.Physics physics, double headroom, boolean schedule) {
-   }
-
-   private static final class Deferred {
-      static volatile boolean quiet;
-      private int ticks;
-      private final boolean quietWindow;
-      private final Runnable action;
-      private boolean finished;
-
-      Deferred(int ticks, boolean quietWindow, Runnable action) {
-         this.ticks = ticks;
-         this.quietWindow = quietWindow;
-         this.action = action;
-         if (quietWindow) {
-            quiet = true;
-            if (MeteorClient.mc.player != null) MeteorClient.mc.player.setSprinting(false);
-         }
-         MeteorClient.EVENT_BUS.subscribe(this);
-      }
-
-      @EventHandler
-      private void onTick(Pre event) {
-         if (MeteorClient.mc.player == null) {
-            this.finish();
-         } else {
-            if (this.quietWindow) MeteorClient.mc.player.setSprinting(false);
-            if (--this.ticks <= 0) {
-               try {
-                  this.action.run();
-               } finally {
-                  this.finish();
-               }
-            }
-         }
-      }
-
-      private void finish() {
-         if (this.finished) return;
-         this.finished = true;
-         MeteorClient.EVENT_BUS.unsubscribe(this);
-         if (this.quietWindow) quiet = false;
-      }
+   private record RouteKey(HopPlanner.Body body, double room, boolean perTick) {
    }
 }

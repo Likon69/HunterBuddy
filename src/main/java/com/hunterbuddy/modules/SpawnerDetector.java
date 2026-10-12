@@ -436,7 +436,7 @@ public class SpawnerDetector extends Module {
         .description("Exit through the dig shaft on rockets instead of walking back to the surface, when the shaft has no water and is not sky-blocked.")
         .defaultValue(true).build());
 
-    public enum FlightModule { AreaLoader, RocketFly, WaypointFollower, TrailFollower, None }
+    public enum FlightModule { AreaLoader, RocketFly, WaypointFollower, TrailFollower, Fly300km, None }
 
     private final Setting<FlightModule> flightModule = sgAuto.add(new EnumSetting.Builder<FlightModule>()
         .name("flight-module")
@@ -3146,8 +3146,13 @@ public class SpawnerDetector extends Module {
             case RocketFly -> Modules.get().get(RocketFly.class);
             case WaypointFollower -> Modules.get().get(WaypointFollower.class);
             case TrailFollower -> Modules.get().get(TrailFollower.class);
+            case Fly300km -> Modules.get().get(com.hunterbuddy.modules.Fly300km.class);
             case None -> null;
         };
+    }
+    private boolean fly300kmActiveButNotSelected() {
+        Module fly = Modules.get().get(com.hunterbuddy.modules.Fly300km.class);
+        return fly != null && fly.isActive() && flightModule.get() != FlightModule.Fly300km;
     }
     private Pitch40 pitch40Module() { return Modules.get().get(Pitch40.class); }
     private ElytraRecast elytraRecastModule() { return Modules.get().get(ElytraRecast.class); }
@@ -4391,6 +4396,7 @@ public class SpawnerDetector extends Module {
         if (wf != null && wf.isActive() && flightModule.get() != FlightModule.WaypointFollower) return QualResult.reject("WaypointFollower active");
         TrailFollower tf = Modules.get().get(TrailFollower.class);
         if (tf != null && tf.isActive() && flightModule.get() != FlightModule.TrailFollower) return QualResult.reject("TrailFollower active");
+        if (fly300kmActiveButNotSelected()) return QualResult.reject("300kmfly active");
         MlepMine mine = mlepMineModule();
         if (mine == null || !mine.isActive()) return QualResult.reject("MlepMine inactive");
         if (!BaritoneHelper.isAvailable()) return QualResult.reject("Baritone unavailable");
@@ -4991,6 +4997,9 @@ public class SpawnerDetector extends Module {
         if (tf != null && tf.isActive() && flightModule.get() != FlightModule.TrailFollower) {
             return QualResult.reject("TrailFollower active");
         }
+        if (fly300kmActiveButNotSelected()) {
+            return QualResult.reject("300kmfly active");
+        }
 
         MlepMine mine = mlepMineModule();
         if (mine == null || !mine.isActive()) return QualResult.reject("MlepMine inactive");
@@ -5033,6 +5042,7 @@ public class SpawnerDetector extends Module {
         if (regear != null && regear.wantsRegear()) return false;
         TrailFollower tf = Modules.get().get(TrailFollower.class);
         if (tf != null && tf.isActive() && flightModule.get() != FlightModule.TrailFollower) return false;
+        if (fly300kmActiveButNotSelected()) return false;
         if (!qualifiesForAuto(site)) return false;
         if (isVisited(site.center)) return false;
         if (autoSoloRejectedThisSession.contains(site.center)) return false;

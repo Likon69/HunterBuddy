@@ -802,7 +802,7 @@ public class RocketBoost extends Module {
       // and only for as long as the module keeps writing them.
       if (!this.baritoneSyncAnnounced && !this.baritoneUnavailable && !this.baritonePushed.isEmpty()) {
          this.baritoneSyncAnnounced = true;
-         info("baritone-sync: telling Baritone x%.2f and +%d boost ticks",
+         info("tell-baritone: telling Baritone x%.2f and +%d boost ticks",
             (double) (Double) this.baritonePushed.get("elytraFireworkBoostMultiplier"),
             (Integer) this.baritonePushed.get("elytraFireworkExtraBoostTicks"));
       }
