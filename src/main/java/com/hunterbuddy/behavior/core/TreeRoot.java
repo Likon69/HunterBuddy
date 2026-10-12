@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.trace.Kind;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class TreeRoot {
     private final TickContext ctx;
@@ -18,6 +19,7 @@ public final class TreeRoot {
     private boolean recovering;
     private long evidenceSequence;
     private long attemptBaselineMs;
+    private StopReport stopReport;
 
     public TreeRoot(TickContext ctx, TreeHooks hooks, Recovery recovery) {
         this.ctx = Objects.requireNonNull(ctx);
@@ -27,7 +29,7 @@ public final class TreeRoot {
         TreeValidator.validate(hooks.build(), recovery);
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
         recovery.taskOwner(hooks.taskOwner());
-        ctx.stopHandler(reason -> stop(ExitReason.STOPPED));
+        ctx.stopHandler(reason -> stop(ExitReason.STOPPED, reason));
     }
 
     public void start() {
@@ -37,16 +39,25 @@ public final class TreeRoot {
             recovery.reset();
             recovering = false;
             beginAttempt();
+            stopReport = null;
             state = RootState.RUNNING;
         });
     }
 
     public void stop(ExitReason reason) {
-        mutate(() -> stopNow(reason));
+        stop(reason, Objects.requireNonNull(reason).name());
     }
 
-    private void stopNow(ExitReason reason) {
+    public void stop(ExitReason reason, String detail) {
+        Objects.requireNonNull(reason);
+        Objects.requireNonNull(detail);
+        mutate(() -> stopNow(reason, detail));
+    }
+
+    private void stopNow(ExitReason reason, String detail) {
+        if (state == RootState.STOPPED && reason != ExitReason.FAULT) return;
         state = RootState.STOPPED;
+        stopReport = new StopReport(reason, detail, hooks.taskOwner(), ctx.tick(), ctx.nowMs());
         RuntimeException failure = null;
         try {
             hooks.haltAll(ctx, reason);
@@ -93,7 +104,7 @@ public final class TreeRoot {
         hooks.discardPendingChanges();
         ctx.event(hooks.build(), Kind.FAULT, FailureCode.FAULT, ex.getClass().getSimpleName(), Objects.toString(ex.getMessage(), ""));
         try {
-            stopNow(ExitReason.FAULT);
+            stopNow(ExitReason.FAULT, ex.getClass().getSimpleName() + ": " + Objects.toString(ex.getMessage(), ""));
         } catch (RuntimeException cleanup) {
             if (cleanup != ex) ex.addSuppressed(cleanup);
         } finally {
@@ -112,8 +123,7 @@ public final class TreeRoot {
         synchronizeTaskOwner();
         ctx.clock().countActive();
         ctx.monitor().sample(ctx.clock(), sensors);
-        if (!recovering && ctx.monitor().fired()
-            && ctx.monitor().inactiveMs() - attemptBaselineMs >= ctx.monitor().windowMs()) {
+        if (!recovering && ctx.monitor().fired() && noProgressRemainingMs() == 0) {
             ctx.event(hooks.build(), Kind.MONITOR, FailureCode.NO_PROGRESS, "fired", "inactiveMs=" + ctx.monitor().inactiveMs());
             enterRecovery();
         }
@@ -181,5 +191,15 @@ public final class TreeRoot {
 
     public int recoveryLevel() {
         return recovery.level();
+    }
+
+    public Optional<StopReport> stopReport() {
+        return Optional.ofNullable(stopReport);
+    }
+
+    public long noProgressRemainingMs() {
+        if (state != RootState.RUNNING || recovering) return 0;
+        long elapsed = Math.max(0, ctx.monitor().inactiveMs() - attemptBaselineMs);
+        return Math.max(0, ctx.monitor().windowMs() - elapsed);
     }
 }
