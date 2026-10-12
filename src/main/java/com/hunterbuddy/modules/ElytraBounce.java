@@ -1337,8 +1337,10 @@ public class ElytraBounce extends Module {
       }
    }
 
-   public boolean isJumpKeyForcedDown() {
-      return this.jumpKeyDown;
+   public Boolean keyOverride(String keyId) {
+      if ("key.forward".equals(keyId)) return Boolean.TRUE;
+      if ("key.jump".equals(keyId) && this.shouldAutoJump()) return this.jumpKeyDown;
+      return null;
    }
 
    public boolean shouldAutoJump() {

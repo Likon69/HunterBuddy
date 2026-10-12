@@ -17,19 +17,16 @@ public abstract class KeyBindingMixin {
     @Shadow
     private String id;
     @Unique
-    ElytraBounce efly = null;
+    private ElytraBounce hunterBuddy$bounce;
 
     @Inject(at = @At("RETURN"), method = "isPressed", cancellable = true)
     public void hunterBuddy$isPressed(CallbackInfoReturnable<Boolean> cir) {
-        if (Modules.get() != null) {
-            this.efly = this.efly == null ? (ElytraBounce) Modules.get().get(ElytraBounce.class) : this.efly;
-            if (this.efly != null && this.efly.isActive() && this.efly.enabled()) {
-                if (this.id.equals("key.forward")) {
-                    cir.setReturnValue(true);
-                } else if (this.id.equals("key.jump") && this.efly.shouldAutoJump()) {
-                    cir.setReturnValue(this.efly.isJumpKeyForcedDown());
-                }
-            }
-        }
+        Modules modules = Modules.get();
+        if (modules == null) return;
+        if (this.hunterBuddy$bounce == null) this.hunterBuddy$bounce = modules.get(ElytraBounce.class);
+        ElytraBounce bounce = this.hunterBuddy$bounce;
+        if (bounce == null || !bounce.isActive() || !bounce.enabled()) return;
+        Boolean held = bounce.keyOverride(this.id);
+        if (held != null) cir.setReturnValue(held);
     }
 }
