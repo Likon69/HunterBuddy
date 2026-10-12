@@ -14,6 +14,7 @@ import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
+import com.hunterbuddy.behavior.mc.LabSettings;
 import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.Timeout;
@@ -26,16 +27,23 @@ import com.hunterbuddy.behavior.routine.DeathPolicy;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import meteordevelopment.meteorclient.settings.SettingGroup;
 
 public final class LabBot implements Bot {
     private static final BotConfig CONFIG = new BotConfig(false, DeathPolicy.STOP, false, ProgressPolicy.DEFAULT, 1_200);
+    private final LabSettings settings;
     private final LabScenario scenario;
     private BotContext context;
     private int ticks;
     private long completed;
 
     public LabBot(LabScenario scenario) {
-        this.scenario = Objects.requireNonNull(scenario);
+        this(new LabSettings(scenario));
+    }
+
+    public LabBot(LabSettings settings) {
+        this.settings = Objects.requireNonNull(settings);
+        scenario = settings.scenario();
     }
 
     @Override
@@ -46,6 +54,11 @@ public final class LabBot implements Bot {
     @Override
     public String description() {
         return "Simulated behavior only: " + scenario;
+    }
+
+    @Override
+    public void onRegister(SettingGroup settings) {
+        this.settings.register(settings);
     }
 
     @Override

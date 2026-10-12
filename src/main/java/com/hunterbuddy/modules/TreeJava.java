@@ -10,20 +10,18 @@ import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.behavior.mc.BehaviorEvents;
 import com.hunterbuddy.behavior.mc.BehaviorMessages;
+import com.hunterbuddy.behavior.mc.LabSettings;
 import com.hunterbuddy.behavior.trace.LogSink;
 import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
-import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 
 public final class TreeJava extends Module {
     private final SettingGroup general = settings.getDefaultGroup();
-    private final Setting<LabScenario> scenario = general.add(new EnumSetting.Builder<LabScenario>()
-        .name("lab-scenario").description("Simulated LabBot scenario; never controls Minecraft actions.")
-        .defaultValue(LabScenario.WORK).onChanged(ignored -> scenarioChanged()).build());
+    private final LabSettings labSettings = new LabSettings(LabScenario.WORK, ignored -> scenarioChanged());
     private final Setting<Boolean> hud = general.add(new BoolSetting.Builder()
         .name("hud").description("Show the registered TreeJava behavior HUD.").defaultValue(true).build());
     private final Setting<Boolean> fullTraceLog = general.add(new BoolSetting.Builder()
@@ -38,7 +36,8 @@ public final class TreeJava extends Module {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TreeJava", "Central behavior tree: simulated LabBot in phase 1.");
         runInMainMenu = true;
         autoSubscribe = false;
-        engine.bots().register("lab", () -> new LabBot(scenario.get()));
+        engine.bots().register("lab", () -> new LabBot(labSettings));
+        for (String bot : engine.bots().names()) engine.bots().create(bot).onRegister(settings.createGroup("Bot: " + bot));
         for (var routine : engine.routines()) routine.onRegister(settings.createGroup("Routine: " + routine.name()));
         MeteorClient.EVENT_BUS.subscribe(new BehaviorEvents(this));
     }
@@ -72,7 +71,7 @@ public final class TreeJava extends Module {
     }
 
     public void selectScenario(LabScenario next) {
-        scenario.set(next);
+        labSettings.selectScenario(next);
         if (!isActive()) enable();
     }
 
