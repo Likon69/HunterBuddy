@@ -363,7 +363,10 @@ public class Pitch40 extends Module {
 
       if ((Boolean)this.chestSwap.get() && this.mc.player != null && this.mc.player.isGliding()) {
          if (!this.handBackGlide()) {
+            com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor offInv = (com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor) this.mc.player.getInventory();
+            int offSlot = offInv.getSelectedSlot();
             GliderSwap.wearGlider(this.mc.player);
+            offInv.setSelectedSlot(offSlot);
          }
       }
       GlideClearHold.release(this);
@@ -535,6 +538,10 @@ public class Pitch40 extends Module {
       long age = this.mc.player.age;
       int interval = (Integer)this.swapInterval.get();
       if (gliderWorn) {
+         if (!GlideClearHold.holding()) {
+            GlideClearHold.answerPings();
+         }
+
          if (age < this.rocketHoldUntil || GliderSwap.rocketAttached(this.mc.player)) {
             return;
          }
