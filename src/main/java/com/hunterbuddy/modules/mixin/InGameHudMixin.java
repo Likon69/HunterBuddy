@@ -1,6 +1,5 @@
 package com.hunterbuddy.modules.mixin;
 
-import com.hunterbuddy.modules.NoHurtCam;
 import com.hunterbuddy.modules.ShulkerOverviewModule;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.item.ItemStack;
@@ -17,7 +16,6 @@ import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.util.Arm;
-import net.minecraft.util.Identifier;
 
 @Mixin(InGameHud.class)
 public class InGameHudMixin {
@@ -52,20 +50,6 @@ public class InGameHudMixin {
                }
 
                module.renderShulkerOverlay(context, offX + 3, offY + 3, offhandStack);
-            }
-         }
-      }
-   }
-
-   @Inject(method = "renderOverlay", at = @At("HEAD"), cancellable = true)
-   private void onRenderOverlay(DrawContext context, Identifier texture, float opacity, CallbackInfo ci) {
-      Modules modules = Modules.get();
-      if (modules != null) {
-         NoHurtCam noHurtCam = (NoHurtCam)modules.get(NoHurtCam.class);
-         if (noHurtCam != null && noHurtCam.shouldDisableRedOverlay()) {
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.player != null && mc.player.hurtTime > 0) {
-               ci.cancel();
             }
          }
       }
