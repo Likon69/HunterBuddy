@@ -8,6 +8,7 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.ProgressPolicy;
 import com.hunterbuddy.behavior.core.Running;
+import com.hunterbuddy.behavior.core.StopReport;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.hooks.Contributor;
@@ -28,6 +29,7 @@ import java.util.Set;
 public final class LabBot implements Bot {
     private static final BotConfig CONFIG = new BotConfig(false, DeathPolicy.STOP, false, ProgressPolicy.DEFAULT, 1_200);
     private final LabScenario scenario;
+    private BotContext context;
     private int ticks;
     private long completed;
 
@@ -49,16 +51,34 @@ public final class LabBot implements Bot {
     public HookEntry taskEntry(BotContext context) {
         Objects.requireNonNull(context);
         if (!context.owner().equals("bot:" + name())) throw new IllegalArgumentException("wrong LabBot owner");
+        if (this.context != null) throw new IllegalStateException("LabBot already started");
         Node work = new Timeout(context.config().defaultActionLimitTicks(), new WithLease(Set.of(Resource.MOVEMENT), LeasePolicy.WAIT,
             new SimulatedAction("simulated-" + scenario, this::work)));
         Node task = new UtilitySelector("lab-task", new UtilityOption(work, ctx -> 1, ctx -> "simulated:" + scenario));
         return new HookEntry(Hook.BOT, context.owner(), Contributor.BOT, 0,
-            new Guard(new Condition("lab-ready", sensors -> true), task), true, task);
+            new Guard(new Condition("lab-ready", sensors -> this.context != null), task), true, task);
     }
 
     @Override
     public BotConfig config() {
         return CONFIG;
+    }
+
+    @Override
+    public void onStart(BotContext context) {
+        Objects.requireNonNull(context);
+        if (!context.owner().equals("bot:" + name())) throw new IllegalArgumentException("wrong LabBot owner");
+        if (this.context != null) throw new IllegalStateException("LabBot already started");
+        this.context = context;
+        ticks = 0;
+        completed = 0;
+    }
+
+    @Override
+    public void onStop(StopReport report) {
+        Objects.requireNonNull(report);
+        if (!report.owner().equals("bot:" + name())) throw new IllegalArgumentException("wrong LabBot stop owner");
+        context = null;
     }
 
     private NodeResult work(TickContext ctx) {

@@ -52,6 +52,8 @@ public final class BehaviorEngine {
     private final Deque<Runnable> pending = new ArrayDeque<>();
     private final Sensors sensors = SimulatedSensors.idle();
     private Bot bot;
+    private Bot lifecycleBot;
+    private Callback callback = Callback.NONE;
     private BotContext botContext;
     private BotStats stats;
     private String botOwner;
@@ -85,10 +87,12 @@ public final class BehaviorEngine {
     public void startBot(Bot next) {
         checkBot(next);
         if (running()) throw new IllegalStateException("TreeJava is already running; use switch");
-        if (ticking) throw new IllegalStateException("cannot start during an engine tick");
+        if (ticking || callback != Callback.NONE) throw new IllegalStateException("cannot start during an engine tick or bot callback");
         try {
             install(next, "started");
+            while (running() && !pending.isEmpty()) pending.removeFirst().run();
         } catch (RuntimeException ex) {
+            pending.clear();
             root.fault(ex);
             finishStop();
             throw ex;
@@ -100,6 +104,10 @@ public final class BehaviorEngine {
         if (!running()) throw new IllegalStateException("TreeJava is not running");
         pending.addLast(() -> {
             stopNow(ExitReason.STOPPED, "Switching to " + next.name());
+            if (root.stopReport().orElseThrow().reason() == ExitReason.FAULT) {
+                pending.clear();
+                return;
+            }
             install(next, "switched");
         });
     }
@@ -129,6 +137,8 @@ public final class BehaviorEngine {
         ctx.monitor().configure(context.config().progress());
         evidenceBaseline = ctx.evidenceSequence();
         routines.forEach(routine -> routine.onInstall(routineContext));
+        lifecycleBot = next;
+        callBot(Callback.START, () -> next.onStart(context));
         root.start();
         ctx.event(hooks.build(), Kind.BOT, null, reason, next.description());
         ctx.end();
@@ -137,8 +147,9 @@ public final class BehaviorEngine {
     public void stopBot(ExitReason reason, String detail) {
         Objects.requireNonNull(reason);
         Objects.requireNonNull(detail);
+        if (callback == Callback.STOP) return;
         pending.clear();
-        if (ticking) pending.addLast(() -> stopNow(reason, detail));
+        if (ticking || callback != Callback.NONE) pending.addLast(() -> stopNow(reason, detail));
         else stopNow(reason, detail);
     }
 
@@ -195,6 +206,17 @@ public final class BehaviorEngine {
     private void finishStop() {
         StopReport report = root.stopReport().orElseThrow();
         if (announced == report) return;
+        Bot ending = lifecycleBot;
+        lifecycleBot = null;
+        if (ending != null) {
+            StopReport callbackReport = report;
+            try {
+                callBot(Callback.STOP, () -> ending.onStop(callbackReport));
+            } catch (RuntimeException ex) {
+                root.fault(ex);
+                report = root.stopReport().orElseThrow();
+            }
+        }
         try {
             BotCleanup.remove(ctx, hooks, botOwner);
             plugins.applyPendingCleanup();
@@ -208,6 +230,22 @@ public final class BehaviorEngine {
         if (stats != null) stats.stopped(report.reason());
         announced = report;
         stopped.accept(report);
+    }
+
+    private void callBot(Callback call, Runnable work) {
+        if (callback != Callback.NONE) throw new IllegalStateException("reentrant bot callback");
+        callback = call;
+        ctx.stopReportHandler(this::stopBot);
+        try {
+            work.run();
+        } finally {
+            ctx.stopReportHandler((reason, detail) -> root.stop(reason, detail));
+            callback = Callback.NONE;
+        }
+    }
+
+    private enum Callback {
+        NONE, START, STOP
     }
 
     public EngineSnapshot snapshot() {
