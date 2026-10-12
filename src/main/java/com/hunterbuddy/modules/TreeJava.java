@@ -11,6 +11,7 @@ import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.behavior.mc.BehaviorEvents;
 import com.hunterbuddy.behavior.mc.BehaviorMessages;
 import com.hunterbuddy.behavior.trace.LogSink;
+import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
@@ -22,7 +23,7 @@ public final class TreeJava extends Module {
     private final SettingGroup general = settings.getDefaultGroup();
     private final Setting<LabScenario> scenario = general.add(new EnumSetting.Builder<LabScenario>()
         .name("lab-scenario").description("Simulated LabBot scenario; never controls Minecraft actions.")
-        .defaultValue(LabScenario.WORK).onChanged(this::scenarioChanged).build());
+        .defaultValue(LabScenario.WORK).onChanged(ignored -> scenarioChanged()).build());
     private final Setting<Boolean> hud = general.add(new BoolSetting.Builder()
         .name("hud").description("Show the registered TreeJava behavior HUD.").defaultValue(true).build());
     private final Setting<Boolean> fullTraceLog = general.add(new BoolSetting.Builder()
@@ -37,6 +38,7 @@ public final class TreeJava extends Module {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TreeJava", "Central behavior tree: simulated LabBot in phase 1.");
         runInMainMenu = true;
         autoSubscribe = false;
+        engine.bots().register("lab", () -> new LabBot(scenario.get()));
         for (var routine : engine.routines()) routine.onRegister(settings.createGroup("Routine: " + routine.name()));
         MeteorClient.EVENT_BUS.subscribe(new BehaviorEvents(this));
     }
@@ -44,7 +46,7 @@ public final class TreeJava extends Module {
     @Override
     public void onActivate() {
         try {
-            engine.startBot(new LabBot(scenario.get()));
+            engine.startBot(engine.bots().create("lab"));
         } catch (RuntimeException ex) {
             error("%s", ex.getMessage());
         }
@@ -66,7 +68,7 @@ public final class TreeJava extends Module {
 
     public void switchLab() {
         if (!isActive()) throw new IllegalStateException("TreeJava is not active");
-        engine.switchBot(new LabBot(scenario.get()));
+        engine.switchBot(engine.bots().create("lab"));
     }
 
     public void selectScenario(LabScenario next) {
@@ -74,8 +76,8 @@ public final class TreeJava extends Module {
         if (!isActive()) enable();
     }
 
-    private void scenarioChanged(LabScenario next) {
-        if (isActive()) engine.switchBot(new LabBot(next));
+    private void scenarioChanged() {
+        if (isActive()) switchLab();
     }
 
     public void stopEngine(ExitReason reason, String detail) {
@@ -95,6 +97,10 @@ public final class TreeJava extends Module {
 
     public EngineSnapshot snapshot() {
         return engine.snapshot();
+    }
+
+    public List<String> botNames() {
+        return engine.bots().names();
     }
 
     public boolean hudEnabled() {

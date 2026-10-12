@@ -20,6 +20,8 @@ public final class BehaviorCommand extends Command {
     @Override
     public void build(LiteralArgumentBuilder<CommandSource> builder) {
         builder.then(literal("selfcheck").executes(context -> selfcheck()));
+        builder.then(literal("bots").executes(context -> control(() ->
+            info("Bots: %s", String.join(", ", module().botNames())))));
         builder.then(literal("start").then(literal("lab").executes(context -> control(() -> {
             module().startLab();
             info("Started lab (simulated).");

@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.core;
 
 import com.hunterbuddy.behavior.bot.Bot;
 import com.hunterbuddy.behavior.bot.BotContext;
+import com.hunterbuddy.behavior.bot.BotRegistry;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
@@ -41,6 +42,7 @@ public final class BehaviorEngine {
     private final List<Routine> routines;
     private final RoutineContext routineContext;
     private final PluginRegistry plugins;
+    private final BotRegistry bots = new BotRegistry();
     private final RingSink ring = new RingSink();
     private final Consumer<StopReport> stopped;
     private final Deque<Runnable> pending = new ArrayDeque<>();
@@ -211,6 +213,10 @@ public final class BehaviorEngine {
 
     public PluginRegistry plugins() {
         return plugins;
+    }
+
+    public BotRegistry bots() {
+        return bots;
     }
 
     private boolean running() {
