@@ -20,6 +20,7 @@ import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.WithLease;
+import com.hunterbuddy.behavior.resource.Lease;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
@@ -75,16 +76,32 @@ public final class FlightKeeperChecks {
             "FlightKeeper never starts its child on the ground");
         require(sim.tick(entry.guard(), SimulatedSensors.flight(true, "bot:pilot")) instanceof Failure && action.starts() == 0,
             "FlightKeeper never starts while another owner holds movement");
+        require(sim.tick(entry.guard(), SimulatedSensors.flight(true, entry.owner())) instanceof Failure && action.starts() == 0,
+            "Inactive FlightKeeper still requires unclaimed movement to enter");
         require(sim.tick(entry.guard(), SimulatedSensors.flight(true, null)) instanceof Running
             && action.starts() == 1 && routine.status().state().equals("active"),
             "FlightKeeper admits an unclaimed glide and reports active status");
         require(sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow().owner().equals(entry.owner())
             && sim.ctx().evidenceSequence() == 0, "FlightKeeper preserves child lease ownership without inventing progress");
+        Lease movement = sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow();
+        boolean retained = true;
+        for (int i = 0; i < 3; i++) {
+            String holder = sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow().owner();
+            if (!(sim.tick(entry.guard(), SimulatedSensors.flight(true, holder)) instanceof Running)) {
+                retained = false;
+                break;
+            }
+        }
+        require(retained && action.starts() == 1 && action.ticks() == 4 && action.cleanups() == 0
+            && sim.ctx().leases().holder(Resource.MOVEMENT).orElse(null) == movement
+            && sim.ctx().evidenceSequence() == 0,
+            "FlightKeeper retains its activation and the same movement lease when sensors report its own holder");
         require(sim.tick(entry.guard(), SimulatedSensors.flight(true, "bot:pilot")) instanceof Failure failure
             && failure.code() == FailureCode.GUARD_LOST && action.stops().equals(List.of(ExitReason.GUARD_LOST))
             && sim.ctx().leases().snapshot().isEmpty(), "FlightKeeper guard loss halts descendants and releases leases");
         sim.tick(entry.guard(), SimulatedSensors.flight(true, null));
-        require(sim.tick(entry.guard(), SimulatedSensors.flight(false, null)) instanceof Failure failure
+        String landedHolder = sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow().owner();
+        require(sim.tick(entry.guard(), SimulatedSensors.flight(false, landedHolder)) instanceof Failure failure
             && failure.code() == FailureCode.GUARD_LOST && action.cleanups() == 2
             && sim.ctx().leases().snapshot().isEmpty(), "FlightKeeper landing removes eligibility and cleans the flight activation");
 
@@ -131,6 +148,11 @@ public final class FlightKeeperChecks {
         sim.tick(hooks.build(), SimulatedSensors.flight(true, null));
         require(flight.ticks() == 1 && combat.starts() == 0 && bot.starts() == 0,
             "FLIGHT outranks COMBAT and BOT regardless of insertion order");
+        String holder = sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow().owner();
+        sim.tick(hooks.build(), SimulatedSensors.flight(true, holder));
+        require(flight.ticks() == 2 && flight.starts() == 1 && flight.cleanups() == 0
+            && combat.starts() == 0 && bot.starts() == 0,
+            "ReactiveSelector keeps FlightKeeper selected while its child holds movement");
         sim.tick(hooks.build(), SimulatedSensors.flight(true, "bot:pilot"));
         require(flight.cleanups() == 1 && combat.starts() == 0 && bot.ticks() == 1
             && sim.ctx().leases().snapshot().isEmpty(), "Non-flight-aware COMBAT remains excluded during a claimed glide");
@@ -155,6 +177,11 @@ public final class FlightKeeperChecks {
         TreeRoot root = new TreeRoot(sim.ctx(), hooks, new Recovery(new Succeed(), new Succeed(), message -> { }));
         root.start();
         sim.tick(root, SimulatedSensors.flight(true, null));
+        String holder = sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow().owner();
+        sim.tick(root, SimulatedSensors.flight(true, holder));
+        require(root.state() == RootState.RUNNING && action.starts() == 1 && action.ticks() == 2
+            && action.cleanups() == 0 && flight.status().state().equals("active"),
+            "TreeRoot retains FlightKeeper when the next sensor snapshot reflects its own movement lease");
         sim.tick(root, SimulatedSensors.session(true, false, false, false));
         require(root.state() == RootState.PAUSED && action.stops().equals(List.of(ExitReason.PREEMPTED))
             && sim.ctx().leases().snapshot().isEmpty(), "SESSION preempts FlightKeeper and releases all flight leases");
