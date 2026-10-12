@@ -14,6 +14,7 @@ public final class TickContext {
     private final ResourceArbiter leases;
     private final Trace trace;
     private final ProgressMonitor monitor;
+    private final UtilityFailures utilityFailures;
     private final TransitionLedger transitions = new TransitionLedger();
     private final BudgetLedger budgets = new BudgetLedger();
     private Sensors sensors;
@@ -28,6 +29,7 @@ public final class TickContext {
         this.leases = Objects.requireNonNull(leases);
         this.trace = Objects.requireNonNull(trace);
         monitor = new ProgressMonitor(Objects.requireNonNull(policy));
+        utilityFailures = new UtilityFailures(blackboard);
     }
 
     public void begin(Sensors sensors) {
@@ -113,6 +115,10 @@ public final class TickContext {
 
     public ProgressMonitor monitor() {
         return monitor;
+    }
+
+    public UtilityFailures utilityFailures() {
+        return utilityFailures;
     }
 
     public TransitionLedger transitions() {

@@ -75,7 +75,9 @@ public final class SelfCheck {
         check.checks.addAll(RegressionChecks.run());
         check.checks.addAll(CatalogChecks.run());
         check.checks.addAll(ParallelChecks.run());
+        check.checks.addAll(UtilityChecks.run());
         check.checks.addAll(CooldownChecks.run());
+        check.checks.addAll(UtilityRetryChecks.run());
         return new SelfCheckReport(400, check.checks);
     }
 

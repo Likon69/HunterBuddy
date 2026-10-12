@@ -25,6 +25,10 @@ public final class Blackboard {
         values(owner, key.scope()).put(key, key.type().cast(Objects.requireNonNull(value)));
     }
 
+    public void remove(String owner, Key<?> key) {
+        values(owner, key.scope()).remove(key);
+    }
+
     public void openTask(String owner) {
         tasks.computeIfAbsent(owner, ignored -> new ArrayDeque<>()).push(new HashMap<>());
     }

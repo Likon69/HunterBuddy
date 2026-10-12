@@ -60,6 +60,7 @@ public final class TreeRoot {
             else if (failure != ex) failure.addSuppressed(ex);
         } finally {
             ctx.leases().releaseAll();
+            ctx.utilityFailures().clear();
             hooks.build().resetMemory();
             recovery.resetMemory();
         }
