@@ -12,6 +12,7 @@ import net.fabricmc.loader.api.FabricLoader;
 
 public final class BaritoneBridge {
     private final BaritoneEvents events = new BaritoneEvents();
+    private final BaritoneGatePause gatePause = new BaritoneGatePause();
     private IBaritone baritone;
     private boolean resolved;
 
@@ -21,7 +22,10 @@ public final class BaritoneBridge {
             FabricLoader loader = FabricLoader.getInstance();
             if (loader.isModLoaded("baritone-meteor") || loader.isModLoaded("baritone")) {
                 baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
-                if (baritone != null) baritone.getGameEventHandler().registerEventListener(events);
+                if (baritone != null) {
+                    baritone.getGameEventHandler().registerEventListener(events);
+                    baritone.getPathingControlManager().registerProcess(gatePause);
+                }
             }
         }
         return baritone;
@@ -65,6 +69,21 @@ public final class BaritoneBridge {
         IBaritone current = requireInstance();
         if (current.getElytraProcess().isActive()) current.getPathingBehavior().forceCancel();
         current.getCustomGoalProcess().setGoalAndPath(goal);
+    }
+
+    public boolean retains(Goal goal) {
+        IBaritone current = instance();
+        return current != null && (current.getCustomGoalProcess().isActive() && current.getCustomGoalProcess().getGoal() == goal
+            || current.getPathingBehavior().getGoal() == goal && (current.getPathingBehavior().hasPath() || current.getPathingBehavior().getInProgress().isPresent()));
+    }
+
+    public void pause(boolean pause) {
+        requireInstance();
+        gatePause.pause(pause);
+    }
+
+    public boolean pauseReady() {
+        return gatePause.ready() || !capture().pathing();
     }
 
     public boolean cancel() {

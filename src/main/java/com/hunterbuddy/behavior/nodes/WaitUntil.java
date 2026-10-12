@@ -38,6 +38,9 @@ public final class WaitUntil extends Decorator {
     }
 
     @Override
+    protected void onResume(TickContext ctx, long ticks, long ms) { startedMs += ms; }
+
+    @Override
     protected NodeResult onTick(TickContext ctx) {
         if (!ready) {
             ready = condition.test(ctx.sensors());

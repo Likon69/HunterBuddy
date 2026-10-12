@@ -11,7 +11,10 @@ public abstract class Node {
     private String owner = "core";
     private Hook hook = Hook.BOT;
     private ActivationScope scope;
-    private boolean active;
+    private Stage stage = Stage.INACTIVE;
+    private long suspendedTick;
+    private long suspendedMs;
+    private long suspendedFrozen;
 
     protected Node(String name) {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("empty node name");
@@ -23,11 +26,15 @@ public abstract class Node {
         ctx.executed(hook);
         Node previous = ctx.enter(this);
         try {
-            if (!active) {
-                active = true;
+            if (stage == Stage.INACTIVE) {
+                stage = Stage.ACTIVE;
                 scope = new ActivationScope();
                 ctx.event(this, Kind.START, null, "start", "");
                 onStart(ctx);
+            } else if (stage == Stage.SUSPENDED) {
+                stage = Stage.ACTIVE;
+                onResume(ctx, ctx.tick() - suspendedTick, ctx.nowMs() - suspendedMs - (ctx.clock().frozenMs() - suspendedFrozen));
+                ctx.event(this, Kind.GATE, null, "resumed", "activation retained");
             }
             NodeResult result = Objects.requireNonNull(onTick(ctx), "null node result: " + path);
             if (result instanceof Running) {
@@ -55,8 +62,8 @@ public abstract class Node {
     }
 
     public final void halt(TickContext ctx, ExitReason reason) {
-        if (!active) return;
-        active = false;
+        if (stage == Stage.INACTIVE) return;
+        stage = Stage.INACTIVE;
         Node previous = ctx.enter(this);
         RuntimeException failure = null;
         try {
@@ -93,6 +100,27 @@ public abstract class Node {
     protected void onStart(TickContext ctx) {
     }
 
+    public final void suspend(TickContext ctx) {
+        if (stage != Stage.ACTIVE) return;
+        children().forEach(child -> child.suspend(ctx));
+        stage = Stage.SUSPENDED;
+        suspendedTick = ctx.tick();
+        suspendedMs = ctx.nowMs();
+        suspendedFrozen = ctx.clock().frozenMs();
+        onSuspend(ctx);
+        ctx.event(this, Kind.GATE, null, "suspended", "activation retained");
+    }
+
+    protected void onSuspend(TickContext ctx) {
+    }
+
+    protected void onResume(TickContext ctx, long ticks, long ms) {
+    }
+
+    public final boolean suspended() {
+        return stage == Stage.SUSPENDED;
+    }
+
     protected abstract NodeResult onTick(TickContext ctx);
 
     protected void onStop(TickContext ctx, ExitReason reason) {
@@ -102,7 +130,7 @@ public abstract class Node {
     }
 
     public final void resetMemory() {
-        if (active) throw new IllegalStateException("cannot reset an active node");
+        if (stage != Stage.INACTIVE) throw new IllegalStateException("cannot reset a running or suspended node");
         children().forEach(Node::resetMemory);
         onReset();
     }
@@ -120,15 +148,15 @@ public abstract class Node {
     }
 
     public final void bind(String path, String owner, Hook hook) {
-        if (active && this.path.equals(path) && this.owner.equals(owner) && this.hook == hook) return;
-        if (active) throw new IllegalStateException("cannot bind an active node");
+        if (stage != Stage.INACTIVE && this.path.equals(path) && this.owner.equals(owner) && this.hook == hook) return;
+        if (stage != Stage.INACTIVE) throw new IllegalStateException("cannot bind a running or suspended node");
         this.path = Objects.requireNonNull(path);
         this.owner = Objects.requireNonNull(owner);
         this.hook = Objects.requireNonNull(hook);
     }
 
     public final boolean active() {
-        return active;
+        return stage == Stage.ACTIVE;
     }
 
     public final String name() {
@@ -145,5 +173,9 @@ public abstract class Node {
 
     public final Hook hook() {
         return hook;
+    }
+
+    private enum Stage {
+        INACTIVE, ACTIVE, SUSPENDED
     }
 }

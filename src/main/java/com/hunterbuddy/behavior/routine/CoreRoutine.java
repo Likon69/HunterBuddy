@@ -14,13 +14,19 @@ import java.util.Objects;
 public abstract class CoreRoutine implements Routine {
     private final String name;
     private final Hook slot;
+    private final Contributor contributor;
     private RoutineContext context;
     private List<HookEntry> entries = List.of();
     private StopReport stopped;
 
     protected CoreRoutine(String name, Hook slot) {
+        this(name, slot, Contributor.CORE);
+    }
+
+    protected CoreRoutine(String name, Hook slot, Contributor contributor) {
         this.name = Objects.requireNonNull(name);
         this.slot = Objects.requireNonNull(slot);
+        this.contributor = Objects.requireNonNull(contributor);
     }
 
     @Override
@@ -53,7 +59,7 @@ public abstract class CoreRoutine implements Routine {
     protected abstract String readyDetail();
 
     protected final HookEntry entry(Condition condition, Node node) {
-        return new HookEntry(slot, "core:" + name, Contributor.CORE, 0, new Guard(condition, node), true, node);
+        return new HookEntry(slot, "core:" + name, contributor, 0, new Guard(condition, node), true, node);
     }
 
     @Override

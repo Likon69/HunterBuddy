@@ -12,4 +12,13 @@ public interface Leases {
     void releaseAll();
     Optional<Lease> holder(Resource resource);
     List<Lease> snapshot();
+    default void park() {
+        throw new UnsupportedOperationException("lease parking is unavailable");
+    }
+    default boolean restore() {
+        throw new UnsupportedOperationException("lease restoration is unavailable");
+    }
+    default void gates(List<GateOwner> owners) {
+        throw new UnsupportedOperationException("legacy gates are unavailable");
+    }
 }

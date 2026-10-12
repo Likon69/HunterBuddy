@@ -30,6 +30,8 @@ public final class LogSink implements TraceSink {
         return switch (event.kind()) {
             case FAULT, MONITOR, RECOVERY, BOT -> true;
             case HOOK -> event.reason().equals("refused");
+            case GATE -> event.nodePath().equals("root") && (event.reason().equals("paused") || event.reason().equals("resumed"))
+                || event.reason().equals("overdue") || event.reason().equals("flee");
             case FAILURE -> event.code() == FailureCode.REFUSED;
             case STOP -> event.nodePath().equals("root") && switch (event.reason()) {
                 case "STOPPED", "DISCONNECTED", "DEAD", "WORLD_CHANGED", "FAULT" -> true;

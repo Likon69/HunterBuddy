@@ -1,14 +1,12 @@
 package com.hunterbuddy.behavior.mc;
 
+import baritone.api.pathing.goals.GoalXZ;
 import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.resource.Resource;
-import com.hunterbuddy.modules.AutoEatSync;
 import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
-import com.hunterbuddy.modules.HMine;
-import com.hunterbuddy.modules.KillAuraPlus;
 import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.Pitch40;
@@ -127,25 +125,29 @@ public final class WorldReader {
         return available() && slot >= 0 && slot < 9 && filter.test(client.player.getInventory().getStack(slot));
     }
 
-    public String refusal(Set<Resource> resources, BaritoneSnapshot baritone, boolean ownBaritone, boolean ownMining) {
+    public String refusal(Set<Resource> resources, BaritoneSnapshot baritone, boolean ownBaritone) {
         if (!available()) return "Minecraft world is unavailable";
         if (resources.contains(Resource.MOVEMENT) && !baritone.available()) return "Baritone is unavailable for movement";
-        if (!ownBaritone && (baritone.inControl() || baritone.pathing() || baritone.calcInProgress())) return "Baritone is already controlling the player";
+        if (!ownBaritone && !legacyRegear() && (baritone.inControl() || baritone.pathing() || baritone.calcInProgress())) return "Baritone is already controlling the player";
         Modules modules = Modules.get();
         for (Module module : modules.getActive()) {
             if (REFUSED.contains(module.getClass())) return "Active producer: " + module.name;
         }
-        AutoFlyingRegear regear = modules.get(AutoFlyingRegear.class);
-        if (regear != null && (regear.isRunning() || regear.wantsRegear())) return "AutoFlyingRegear owns the player";
-        KillAuraPlus combat = modules.get(KillAuraPlus.class);
-        if (resources.contains(Resource.LOOK) && combat != null && combat.hasActiveTarget()) return "KillAuraPlus owns LOOK";
-        AutoEatSync eat = modules.get(AutoEatSync.class);
-        if (resources.contains(Resource.SLOT) && eat != null && eat.isEating()) return "AutoEatSync owns SLOT";
-        HMine mine = modules.get(HMine.class);
-        if (!ownBaritone && !ownMining && (resources.contains(Resource.LOOK) || resources.contains(Resource.SLOT))
-            && mine != null && mine.isActive() && mine.isMining()) {
-            return "HMine owns LOOK and SLOT";
-        }
         return null;
+    }
+
+    public boolean legacyRegear() {
+        AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
+        return regear != null && (regear.isRunning() || regear.wantsRegear());
+    }
+
+    public GoalXZ awayFrom(com.hunterbuddy.behavior.core.Sensors sensors, int distance) {
+        var attacker = available() ? client.world.getEntityById(sensors.lastAttackerId()) : null;
+        double dx = attacker == null ? Math.sin(Math.toRadians(sensors.yaw())) : sensors.x() - attacker.getX();
+        double dz = attacker == null ? -Math.cos(Math.toRadians(sensors.yaw())) : sensors.z() - attacker.getZ();
+        double length = Math.hypot(dx, dz);
+        if (length < 0.01) { dx = 1; dz = 0; length = 1; }
+        return new GoalXZ((int) Math.floor(sensors.x() + dx / length * distance),
+            (int) Math.floor(sensors.z() + dz / length * distance));
     }
 }

@@ -9,7 +9,11 @@ public final class Trace {
     private final List<TraceEvent> pending = new ArrayList<>();
 
     public Trace(TraceSink... sinks) {
-        this.sinks = List.of(sinks);
+        this.sinks = new ArrayList<>(List.of(sinks));
+    }
+
+    public void add(TraceSink sink) {
+        sinks.add(Objects.requireNonNull(sink));
     }
 
     public void emit(TraceEvent event) {

@@ -88,6 +88,7 @@ public final class TreeHooks {
         next.stream().filter(entries::contains).map(HookEntry::guard).forEach(retained::add);
         root.detachForRebuild(retained);
         root.halt(ctx, ExitReason.STOPPED);
+        entries.stream().filter(entry -> !next.contains(entry)).map(HookEntry::guard).forEach(guard -> guard.halt(ctx, ExitReason.STOPPED));
         entries.stream().filter(entry -> !next.contains(entry)).map(HookEntry::guard).forEach(Node::resetMemory);
         for (String owner : entries.stream().map(HookEntry::owner).distinct().toList()) {
             if (next.stream().noneMatch(entry -> entry.owner().equals(owner))) {
@@ -117,7 +118,7 @@ public final class TreeHooks {
     }
 
     private void checkActive(Node node, Set<Node> attached) {
-        if (node.active() && !attached.contains(node)) throw new IllegalArgumentException("node active in another tree: " + node.name());
+        if ((node.active() || node.suspended()) && !attached.contains(node)) throw new IllegalArgumentException("node active in another tree: " + node.name());
         node.children().forEach(child -> checkActive(child, attached));
     }
 

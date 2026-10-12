@@ -85,6 +85,13 @@ public final class Guard extends Decorator {
         return tick >= cooldownUntil;
     }
 
+    public String diagnostic(TickContext ctx) {
+        boolean condition = (active() ? stay : enter).test(ctx.sensors());
+        return (active() ? stay : enter).name() + "=" + condition + " available=" + available.getAsBoolean()
+            + " flightAllowed=" + (flightAware || !ctx.sensors().gliding()) + " cooldown=" + Math.max(0, cooldownUntil - ctx.tick())
+            + " retry=" + Math.max(0, retryUntilTick - ctx.tick()) + " active=" + active() + " suspended=" + suspended();
+    }
+
     public void failedAt(long tick) {
         cooldownUntil = tick + failureCooldown;
     }
@@ -103,6 +110,9 @@ public final class Guard extends Decorator {
     protected void onReset() {
         resumeRetries();
     }
+
+    @Override
+    protected void onResume(TickContext ctx, long ticks, long ms) { started += ticks; }
 
     @Override
     protected void onStart(TickContext ctx) {

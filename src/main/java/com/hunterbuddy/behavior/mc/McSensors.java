@@ -11,9 +11,11 @@ import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.util.ServerSlot;
 import com.hunterbuddy.util.SessionStats;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -24,6 +26,7 @@ public final class McSensors {
     private final ServerFacts facts;
     private final BaritoneBridge baritone;
     private final Leases leases;
+    private BooleanSupplier screenOwner = () -> false;
 
     public McSensors(MinecraftClient client, WorldReader world, ServerFacts facts, BaritoneBridge baritone, Leases leases) {
         this.client = Objects.requireNonNull(client);
@@ -32,6 +35,8 @@ public final class McSensors {
         this.baritone = Objects.requireNonNull(baritone);
         this.leases = Objects.requireNonNull(leases);
     }
+
+    public void screenOwner(BooleanSupplier owner) { screenOwner = Objects.requireNonNull(owner); }
 
     public Sensors capture() {
         if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
@@ -53,7 +58,8 @@ public final class McSensors {
             client.player.isGliding(), client.player.isClimbing(), client.player.horizontalCollision,
             client.player.getHealth(), client.player.getHungerManager().getFoodLevel(), client.player.getAir(), client.player.isDead(), server.hurtThisTick(),
             server.lastAttackerId(), client.player.getInventory().getSelectedSlot(), ServerSlot.get().slot(),
-            client.currentScreen != null, false, client.currentScreen == null ? "none" : client.currentScreen.getClass().getSimpleName(), client.player.isUsingItem(),
+            client.currentScreen != null, screenOwner.getAsBoolean() || regear != null && regear.isRunning()
+                && client.currentScreen instanceof HandledScreen<?>, client.currentScreen == null ? "none" : client.currentScreen.getClass().getSimpleName(), client.player.isUsingItem(),
             client.interactionManager.isBreakingBlock(), identity.dimensionKey(), identity.worldId(), identity.playerId(),
             Utils.isIn2b2tQueue(), TickRate.INSTANCE.getTimeSinceLastTick() >= 1.0f, path.available(),
             path.pathing(), path.hasPath(), path.goalActive(), path.calcInProgress(), path.inControl(), path.lastPathEvent(),

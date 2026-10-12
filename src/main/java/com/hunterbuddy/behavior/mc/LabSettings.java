@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.mc;
 import com.hunterbuddy.behavior.lab.LabScenario;
 import java.util.Objects;
 import java.util.function.Consumer;
+import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -11,6 +12,7 @@ public final class LabSettings {
     private final LabScenario defaultScenario;
     private final Consumer<LabScenario> changed;
     private Setting<LabScenario> scenario;
+    private Setting<Boolean> pauseOnPlayer;
 
     public LabSettings(LabScenario defaultScenario) {
         this(defaultScenario, null);
@@ -29,7 +31,11 @@ public final class LabSettings {
             .defaultValue(defaultScenario);
         if (changed != null) builder.onChanged(changed);
         scenario = settings.add(builder.build());
+        pauseOnPlayer = settings.add(new BoolSetting.Builder().name("pause-on-player")
+            .description("Pause LabBot while another player is visible.").defaultValue(true).build());
     }
+
+    public boolean pauseOnPlayer() { return pauseOnPlayer == null || pauseOnPlayer.get(); }
 
     public LabScenario scenario() {
         return scenario == null ? defaultScenario : scenario.get();

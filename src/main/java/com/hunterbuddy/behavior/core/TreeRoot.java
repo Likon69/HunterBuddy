@@ -1,10 +1,16 @@
 package com.hunterbuddy.behavior.core;
 
 import com.hunterbuddy.behavior.hooks.Hook;
+import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
+import com.hunterbuddy.behavior.nodes.GateCombat;
+import com.hunterbuddy.behavior.nodes.GateWait;
+import com.hunterbuddy.behavior.resource.GateOwner;
+import com.hunterbuddy.behavior.resource.GatePolicy;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -20,6 +26,13 @@ public final class TreeRoot {
     private long evidenceSequence;
     private long attemptBaselineMs;
     private StopReport stopReport;
+    private HookEntry pauseEntry;
+    private List<GateOwner> heldGates = List.of();
+    private String pauseCause = "none";
+    private long pauseStarted;
+    private long pauseFrozen;
+    private boolean pauseLimited;
+    private boolean borrowed;
 
     public TreeRoot(TickContext ctx, TreeHooks hooks, Recovery recovery) {
         this.ctx = Objects.requireNonNull(ctx);
@@ -30,6 +43,8 @@ public final class TreeRoot {
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
         recovery.taskOwner(hooks.taskOwner());
         ctx.stopReportHandler((reason, detail) -> stop(reason, detail));
+        ctx.taskYieldHandler(() -> hooks.entries().stream().filter(entry -> entry.hook() == Hook.BOT)
+            .forEach(entry -> entry.guard().halt(ctx, ExitReason.PREEMPTED)));
     }
 
     public void start() {
@@ -53,6 +68,9 @@ public final class TreeRoot {
     private void stopNow(ExitReason reason, String detail) {
         if (state == RootState.STOPPED && reason != ExitReason.FAULT) return;
         state = RootState.STOPPED;
+        pauseEntry = null;
+        pauseCause = "none";
+        heldGates = List.of();
         stopReport = new StopReport(reason, detail, hooks.taskOwner(), ctx.tick(), ctx.nowMs());
         RuntimeException failure = null;
         try {
@@ -127,18 +145,20 @@ public final class TreeRoot {
 
     private void tickRunning(Sensors sensors) {
         synchronizeTaskOwner();
-        boolean session = hookReady(Hook.SESSION);
-        if (session) {
-            ctx.monitor().sample(ctx.clock(), sensors, false);
-            if (recovering && recovery.active()) recovery.halt(ctx, ExitReason.PAUSED);
-            state = RootState.PAUSED;
+        ctx.gates().poll(sensors);
+        HookEntry session = readyEntry(Hook.SESSION);
+        if (session == null && hookReady(Hook.DEATH)) {
+            if (pauseEntry != null) pauseEntry.guard().halt(ctx, ExitReason.DEAD);
             hooks.build().execute(ctx);
             return;
         }
-        if (state == RootState.PAUSED) {
-            state = RootState.RUNNING;
-            if (recovering) hooks.build().halt(ctx, ExitReason.GUARD_LOST);
+        HookEntry gate = session == null ? hooks.entries().stream().filter(entry -> entry.node() instanceof GateWait || entry.node() instanceof GateCombat)
+            .filter(entry -> entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null) : session;
+        if (gate != null || !ctx.gates().active().isEmpty()) {
+            pause(gate, sensors);
+            return;
         }
+        if (state == RootState.PAUSED && !resume()) return;
         ctx.clock().countActive();
         ctx.monitor().sample(ctx.clock(), sensors);
         if (!ctx.monitor().samplesValid(ctx.tick())) {
@@ -194,8 +214,74 @@ public final class TreeRoot {
     }
 
     private boolean hookReady(Hook hook) {
-        return hooks.entries().stream().anyMatch(entry -> entry.hook() == hook
-            && entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx));
+        return readyEntry(hook) != null;
+    }
+
+    private HookEntry readyEntry(Hook hook) {
+        return hooks.entries().stream().filter(entry -> entry.hook() == hook
+            && entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null);
+    }
+
+    private void pause(HookEntry entry, Sensors sensors) {
+        String cause = entry != null ? entry.owner() : ctx.gates().active().getFirst().name();
+        if (state != RootState.PAUSED) {
+            hooks.build().suspend(ctx);
+            recovery.suspend(ctx);
+            ctx.leases().park();
+            ctx.outputs().suspend(ctx.gates().borrowedBaritone());
+            pauseStarted = ctx.nowMs();
+            pauseFrozen = ctx.clock().frozenMs();
+            pauseLimited = false;
+        }
+        if (pauseEntry != entry && pauseEntry != null) pauseEntry.guard().halt(ctx, ExitReason.PREEMPTED);
+        if (!heldGates.equals(ctx.gates().active()) || borrowed != ctx.gates().borrowedBaritone()) {
+            ctx.leases().park();
+            heldGates = ctx.gates().active();
+            ctx.leases().gates(heldGates);
+            ctx.outputs().suspend(ctx.gates().borrowedBaritone());
+            borrowed = ctx.gates().borrowedBaritone();
+            for (GateOwner owner : heldGates) ctx.event(hooks.build(), Kind.LEASE, null, "blocked", "by=" + owner.name());
+        }
+        if (!cause.equals(pauseCause)) ctx.event(hooks.build(), Kind.GATE, null, "paused", "cause=" + cause);
+        pauseEntry = entry;
+        pauseCause = cause;
+        state = RootState.PAUSED;
+        ctx.monitor().sample(ctx.clock(), sensors, false);
+        if (entry != null && entry.guard().execute(ctx) instanceof Failure) entry.guard().failedAt(ctx.tick());
+        limitPause();
+    }
+
+    private void limitPause() {
+        if (!pauseLimited && ctx.nowMs() - pauseStarted - (ctx.clock().frozenMs() - pauseFrozen) >= GatePolicy.LEGACY.pauseLimitMs()) {
+            pauseLimited = true;
+            String detail = "Paused by " + pauseCause + " for " + GatePolicy.LEGACY.pauseLimitMs() / 60_000 + " min";
+            ctx.event(hooks.build(), Kind.GATE, null, "overdue", detail);
+            ctx.stopBot(ExitReason.STOPPED, detail);
+        }
+    }
+
+    private boolean resume() {
+        if (pauseEntry != null) pauseEntry.guard().halt(ctx, ExitReason.GUARD_LOST);
+        pauseEntry = null;
+        heldGates = List.of();
+        ctx.leases().gates(heldGates);
+        if (!ctx.leases().restore() || !ctx.outputs().resume()) {
+            pauseCause = "waiting for legacy resource handoff";
+            limitPause();
+            return false;
+        }
+        state = RootState.RUNNING;
+        ctx.event(hooks.build(), Kind.GATE, null, "resumed", "cause=" + pauseCause + " budgets retained");
+        pauseCause = "none";
+        return true;
+    }
+
+    public String pauseCause() {
+        return pauseCause;
+    }
+
+    public Node pausedNode() {
+        return pauseEntry == null ? null : pauseEntry.guard();
     }
 
     private void synchronizeTaskOwner() {

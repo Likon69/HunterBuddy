@@ -39,6 +39,11 @@ public final class ReactiveSelector extends Composite {
     protected NodeResult onTick(TickContext ctx) {
         successfulHook = null;
         int candidate = firstEligible(ctx, 0, selected < 0 ? children().size() : selected + 1);
+        if (selected < 0) {
+            for (int i = 0; i < children().size(); i++) {
+                if (i != candidate && children().get(i).suspended()) children().get(i).halt(ctx, ExitReason.PREEMPTED);
+            }
+        }
         if (selected >= 0 && candidate != selected) {
             children().get(selected).halt(ctx, candidate >= 0 ? ExitReason.PREEMPTED : ExitReason.GUARD_LOST);
             int after = selected + 1;
@@ -96,6 +101,11 @@ public final class ReactiveSelector extends Composite {
         for (Node child : children()) {
             if (child.hook() == Hook.IDLE && !child.active()) child.resetMemory();
         }
+    }
+
+    @Override
+    protected void onSuspend(TickContext ctx) {
+        selected = -1;
     }
 
     @Override

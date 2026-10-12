@@ -4,23 +4,56 @@ import com.hunterbuddy.behavior.core.EvidenceKind;
 import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.ProgressEvidence;
 import com.hunterbuddy.behavior.hooks.Hook;
+import com.hunterbuddy.behavior.trace.TraceEvent;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
 public final class BotStats {
     public static final Snapshot EMPTY = new BotStats().snapshot();
     private Counters session = new Counters();
-    private final Counters cumulative = new Counters();
+    private Counters cumulative = new Counters();
 
     public void startSession() {
         session = new Counters();
+    }
+
+    public void reset() {
+        session = new Counters();
+        cumulative = new Counters();
+    }
+
+    public void add(String metric, double value) {
+        if (!Double.isFinite(value) || value < 0) throw new IllegalArgumentException("invalid metric increment");
+        session.metrics.merge(metric, value, Double::sum);
+        cumulative.metrics.merge(metric, value, Double::sum);
+    }
+
+    public void observe(TraceEvent event) {
+        String metric = switch (event.kind()) {
+            case SUCCESS -> event.hook() == Hook.BOT && event.nodePath().matches("root/BOT/[^/]+/[^/]+") ? "targetsSucceeded" : null;
+            case FAILURE -> event.hook() == Hook.BOT && event.nodePath().matches("root/BOT/[^/]+/[^/]+") ? "targetsFailed" : null;
+            case PROGRESS -> event.reason().equals("TRANSACTION_CONFIRMED") ? "transactions" : null;
+            case RECOVERY -> event.reason().equals("safe idle") ? "safeIdle" : event.reason().equals("enter") ? "recovery." + event.detail() : null;
+            case BOT -> event.reason().equals("reconnected") ? "reconnects" : event.reason().equals("restart") ? "restarts" : null;
+            default -> null;
+        };
+        if (metric != null) add(metric, 1);
     }
 
     public void sampleTime(long activeMs, Hook hook) {
         if (activeMs < 0) throw new IllegalArgumentException("negative active time");
         session.sampleTime(activeMs, hook);
         cumulative.sampleTime(activeMs, hook);
+    }
+
+    public void samplePause(long elapsedMs, Hook hook) {
+        if (elapsedMs < 0) throw new IllegalArgumentException("negative pause time");
+        if (hook == null || elapsedMs == 0) return;
+        session.hookMs.merge(hook, elapsedMs, Long::sum);
+        cumulative.hookMs.merge(hook, elapsedMs, Long::sum);
+        add("pausedMs", elapsedMs);
     }
 
     public void evidence(ProgressEvidence evidence) {
@@ -47,11 +80,12 @@ public final class BotStats {
     }
 
     public record Values(long activeMs, Map<Hook, Long> hookMs, Map<EvidenceKind, Long> proofs,
-                         Map<EvidenceKind, Double> gains, long deaths, long faults) {
+                         Map<EvidenceKind, Double> gains, long deaths, long faults, Map<String, Double> metrics) {
         public Values {
             hookMs = Map.copyOf(hookMs);
             proofs = Map.copyOf(proofs);
             gains = Map.copyOf(gains);
+            metrics = Map.copyOf(metrics);
         }
 
         public long proofCount() {
@@ -66,6 +100,7 @@ public final class BotStats {
         private final Map<EvidenceKind, Double> gains = new EnumMap<>(EvidenceKind.class);
         private long deaths;
         private long faults;
+        private final Map<String, Double> metrics = new LinkedHashMap<>();
 
         private void sampleTime(long elapsedMs, Hook hook) {
             activeMs += elapsedMs;
@@ -83,7 +118,7 @@ public final class BotStats {
         }
 
         private Values snapshot() {
-            return new Values(activeMs, hookMs, proofs, gains, deaths, faults);
+            return new Values(activeMs, hookMs, proofs, gains, deaths, faults, metrics);
         }
     }
 }

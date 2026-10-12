@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.modules.TreeJava;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import java.util.Locale;
 import meteordevelopment.meteorclient.commands.Command;
@@ -34,10 +35,29 @@ public final class BehaviorCommand extends Command {
         builder.then(literal("status").executes(context -> control(() ->
             BehaviorStatus.lines(module().snapshot()).forEach(line -> info("%s", line)))));
         builder.then(literal("stats").executes(context -> control(() ->
-            BehaviorStatus.statsLines(module().snapshot()).forEach(line -> info("%s", line)))));
+            BehaviorStatus.statsLines(module().snapshot()).forEach(line -> info("%s", line))))
+            .then(literal("reset").executes(context -> control(() -> { module().resetStats(); info("Statistics reset."); }))));
+        builder.then(literal("why").executes(context -> control(() -> module().why().forEach(line -> info("%s", line)))));
+        builder.then(literal("routines").executes(context -> control(() -> module().routineStatus().forEach(line -> info("%s", line)))));
+        builder.then(literal("plugins").executes(context -> control(() -> module().pluginStatus().forEach(line -> info("%s", line)))));
+        builder.then(literal("routine").then(argument("slot", StringArgumentType.word())
+            .then(argument("name", StringArgumentType.word()).executes(context -> control(() -> {
+                module().selectRoutine(StringArgumentType.getString(context, "slot"), StringArgumentType.getString(context, "name"));
+                info("Routine change requested.");
+            })))));
+        builder.then(literal("plugin").then(argument("name", StringArgumentType.word())
+            .then(literal("on").executes(context -> control(() -> module().setPlugin(StringArgumentType.getString(context, "name"), true))))
+            .then(literal("off").executes(context -> control(() -> module().setPlugin(StringArgumentType.getString(context, "name"), false))))));
         builder.then(literal("outputs").executes(context -> control(() ->
             module().outputStatus().forEach(line -> info("%s", line)))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
+        lab.then(literal("open").then(argument("x", IntegerArgumentType.integer())
+            .then(argument("y", IntegerArgumentType.integer()).then(argument("z", IntegerArgumentType.integer())
+                .executes(context -> control(() -> {
+                    module().openAt(IntegerArgumentType.getInteger(context, "x"), IntegerArgumentType.getInteger(context, "y"),
+                        IntegerArgumentType.getInteger(context, "z"));
+                    info("Live lab open requested.");
+                }))))));
         lab.then(literal("walk").then(argument("x", DoubleArgumentType.doubleArg())
             .then(argument("y", DoubleArgumentType.doubleArg()).then(argument("z", DoubleArgumentType.doubleArg())
                 .executes(context -> control(() -> {

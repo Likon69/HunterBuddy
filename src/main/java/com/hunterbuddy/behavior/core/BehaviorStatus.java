@@ -15,6 +15,9 @@ public final class BehaviorStatus {
         lines.add("Hook: " + snapshot.hook() + " | " + snapshot.status().task() + " | target=" + snapshot.status().target()
             + " | steps=" + snapshot.status().completed());
         lines.add("Path: " + snapshot.path());
+        if (snapshot.state() == RootState.PAUSED) lines.add("Paused: " + snapshot.pauseCause());
+        lines.addAll(snapshot.gates());
+        snapshot.outputs().stream().filter(line -> line.contains("QUARANTINED") || line.contains("RETURNING") || line.contains("REVOKING")).forEach(lines::add);
         lines.add(String.format(Locale.ROOT, "No progress: %.1fs/%.1fs | action: %dt | recovery=%d | leases=%d",
             snapshot.noProgressRemainingMs() / 1_000.0, snapshot.noProgressWindowMs() / 1_000.0,
             snapshot.actionRemainingTicks(), snapshot.recoveryLevel(), snapshot.leases()));
@@ -33,12 +36,14 @@ public final class BehaviorStatus {
             "Session hooks (ms): " + session.hookMs(), "Session proofs: " + session.proofs(),
             "Session gains: " + session.gains(), statsLine("Cumulative", cumulative),
             "Cumulative hooks (ms): " + cumulative.hookMs(), "Cumulative proofs: " + cumulative.proofs(),
-            "Cumulative gains: " + cumulative.gains());
+            "Cumulative gains: " + cumulative.gains(), "Session metrics: " + session.metrics(), "Cumulative metrics: " + cumulative.metrics());
     }
 
     private static String statsLine(String label, BotStats.Values stats) {
-        return String.format(Locale.ROOT, "%s: active=%.1fs | proofs=%d | deaths=%d | faults=%d",
-            label, stats.activeMs() / 1_000.0, stats.proofCount(), stats.deaths(), stats.faults());
+        return String.format(Locale.ROOT, "%s: active=%.1fs | proofs=%d | blocks=%.0f | items=%.0f | tx=%.0f | distance=%.1f | deaths=%d | faults=%d",
+            label, stats.activeMs() / 1_000.0, stats.proofCount(), stats.metrics().getOrDefault("blocksMined", 0.0),
+            stats.metrics().getOrDefault("pickups", 0.0), stats.metrics().getOrDefault("transactions", 0.0),
+            stats.metrics().getOrDefault("distance", 0.0), stats.deaths(), stats.faults());
     }
 
     private static String mode(EngineSnapshot snapshot) {

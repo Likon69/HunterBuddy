@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.resource;
 
+import com.hunterbuddy.behavior.mc.InventoryBridge;
 import com.hunterbuddy.behavior.mc.MiningBridge;
 import com.hunterbuddy.behavior.mc.PlacementBridge;
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ public final class Outputs {
     private Consumer<BaritoneOutput.Signal> baritoneEvents;
     private MiningBridge mining;
     private PlacementBridge placement;
+    private InventoryBridge inventory;
     private LongSupplier nativeTicks;
     private MovementIntent movement;
     private LookIntent look;
@@ -57,7 +59,22 @@ public final class Outputs {
         if (baritoneOutput != null) throw new IllegalStateException("Baritone output already connected");
         baritoneOutput = Objects.requireNonNull(output);
         if (!(leases instanceof ResourceArbiter arbiter)) throw new IllegalStateException("Baritone needs the resource arbiter");
-        arbiter.releaseGuard(lease -> !lease.resources().contains(Resource.BARITONE) || baritoneOutput.stop(lease));
+        arbiter.releaseGuard(this::releaseReady);
+    }
+
+    public void connectInventory(InventoryBridge inventory) {
+        if (this.inventory != null) throw new IllegalStateException("inventory bridge already connected");
+        this.inventory = Objects.requireNonNull(inventory);
+    }
+
+    private boolean releaseReady(Lease lease) {
+        boolean pathReady = !lease.resources().contains(Resource.BARITONE) || baritoneOutput.stop(lease);
+        boolean inventoryReady = inventory == null || !lease.resources().contains(Resource.INVENTORY) || inventory.release(lease);
+        return pathReady && inventoryReady;
+    }
+
+    public InventoryBridge inventory() {
+        return Objects.requireNonNull(inventory, "Inventory bridge is not connected");
     }
 
     public void connectMinecraft(MiningBridge mining, PlacementBridge placement) {
@@ -96,6 +113,28 @@ public final class Outputs {
 
     public void advanceNative() {
         if (baritoneOutput != null) baritoneOutput.advance();
+        if (inventory != null) inventory.advance();
+        if (leases instanceof ResourceArbiter arbiter) arbiter.advanceClosing();
+    }
+
+    public void suspend(boolean borrowed) {
+        clear();
+        long tick = nativeTick();
+        if (movementOutput != null) movementOutput.release(tick);
+        if (slotOutput != null) slotOutput.discard();
+        if (mining != null) mining.releaseClick();
+        if (inventory != null) inventory.suspend();
+        if (baritoneOutput != null) baritoneOutput.suspend(borrowed);
+    }
+
+    public boolean resume() {
+        if (baritoneOutput != null && !baritoneOutput.resume()) return false;
+        if (inventory != null) inventory.resume();
+        return true;
+    }
+
+    public boolean borrowedBaritone() {
+        return baritoneOutput != null && baritoneOutput.borrowed();
     }
 
     public void movement(String owner, MovementIntent intent) {
@@ -150,7 +189,7 @@ public final class Outputs {
     }
 
     public boolean foreignMovement() {
-        return !ownBaritone() && movementOutput != null && movementOutput.foreignInput();
+        return !ownBaritone() && !borrowedBaritone() && movementOutput != null && movementOutput.foreignInput();
     }
 
     public void discardSlot() {
@@ -159,6 +198,7 @@ public final class Outputs {
 
     public List<String> status() {
         List<String> lines = new ArrayList<>();
+        if (inventory != null) lines.add(inventory.status());
         if (baritoneOutput != null && baritoneOutput.status() != null) lines.add(baritoneOutput.status());
         if (movement != null && valid(movementLease, Resource.MOVEMENT)) lines.add("MOVEMENT " + movementLease.owner() + " " + movement);
         if (look != null && valid(lookLease, Resource.LOOK)) lines.add("LOOK " + lookLease.owner() + " " + look);
@@ -172,6 +212,7 @@ public final class Outputs {
 
     public void release(long tick) {
         clear();
+        if (inventory != null) inventory.stop();
         if (nativeTicks != null) tick = nativeTicks.getAsLong();
         RuntimeException failure = null;
         try {

@@ -7,6 +7,8 @@ import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceEvent;
+import com.hunterbuddy.behavior.trace.TraceSink;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -19,7 +21,7 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 
-public final class PluginRegistry {
+public final class PluginRegistry implements TraceSink {
     private final TickContext ticks;
     private final TreeHooks hooks;
     private final Consumer<String> alert;
@@ -57,6 +59,24 @@ public final class PluginRegistry {
 
     public List<Plugin> registered() {
         return List.copyOf(registered.values());
+    }
+
+    public List<String> status() {
+        return registered.keySet().stream().map(name -> name + " " + (enabled.contains(name) ? "on" : "off")).toList();
+    }
+
+    @Override
+    public void accept(TraceEvent event) {
+        for (String name : List.copyOf(enabled)) {
+            try {
+                ticks.plugin(owner(name), () -> {
+                    requirePlugin(name).observe(event);
+                    return null;
+                });
+            } catch (RuntimeException ex) {
+                disableAndReport(name, "disabled", "trace callback failed: " + ex.getMessage());
+            }
+        }
     }
 
     public boolean enabled(String name) {

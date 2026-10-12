@@ -51,6 +51,12 @@ public final class BaritoneGoTo extends Action {
     }
 
     @Override
+    protected void onResume(TickContext ctx, long ticks, long ms) {
+        startedAt += ticks;
+        failures = bridge.failures();
+    }
+
+    @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (intent == null) return fail(FailureCode.NO_OPTION, "Baritone goal is missing");
         if (intent.goal().isInGoal((int) Math.floor(ctx.sensors().x()), (int) Math.floor(ctx.sensors().y()), (int) Math.floor(ctx.sensors().z()))) {

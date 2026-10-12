@@ -16,8 +16,10 @@ import com.hunterbuddy.behavior.nodes.Fail;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
+import com.hunterbuddy.behavior.nodes.UtilitySelector;
 import com.hunterbuddy.behavior.plugin.PluginRegistry;
 import com.hunterbuddy.behavior.resource.Leases;
+import com.hunterbuddy.behavior.resource.LegacyGates;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.routine.DeathPolicy;
@@ -26,6 +28,7 @@ import com.hunterbuddy.behavior.routine.FlightKeeperRoutine;
 import com.hunterbuddy.behavior.routine.IdleRoutine;
 import com.hunterbuddy.behavior.routine.Routine;
 import com.hunterbuddy.behavior.routine.RoutineContext;
+import com.hunterbuddy.behavior.routine.RoutineStatus;
 import com.hunterbuddy.behavior.routine.SessionRoutine;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.RingSink;
@@ -36,6 +39,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +59,7 @@ public final class BehaviorEngine {
     private final Consumer<String> alerts;
     private List<ReactiveSelector> recoveryGroups = List.of();
     private final List<Routine> routines;
+    private final Map<Hook, Routine> selectedRoutines = new EnumMap<>(Hook.class);
     private final RoutineContext routineContext;
     private final PluginRegistry plugins;
     private final BotRegistry bots = new BotRegistry();
@@ -81,12 +86,13 @@ public final class BehaviorEngine {
         routines = new ArrayList<>(List.of(new SessionRoutine(), new DeathRoutine(), new IdleRoutine(alerts, restarts)));
         List<TraceSink> allSinks = new ArrayList<>(List.of(sinks));
         allSinks.add(ring);
-        ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(),
-            new Trace(allSinks.toArray(TraceSink[]::new)), ProgressPolicy.DEFAULT);
+        Trace trace = new Trace(allSinks.toArray(TraceSink[]::new));
+        ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(), trace, ProgressPolicy.DEFAULT);
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
         plugins = new PluginRegistry(ctx, hooks, alerts);
+        trace.add(plugins);
         routineContext = new RoutineContext(ctx,
             () -> botContext == null ? DeathPolicy.STOP : botContext.config().deathPolicy());
         for (Routine routine : routines) routine.entries(routineContext).forEach(hooks::insert);
@@ -186,7 +192,7 @@ public final class BehaviorEngine {
     }
 
     private void checkInactive(Node node) {
-        if (node.active()) throw new IllegalArgumentException("bot entry node active in another tree: " + node.name());
+        if (node.active() || node.suspended()) throw new IllegalArgumentException("bot entry node active in another tree: " + node.name());
         node.children().forEach(this::checkInactive);
     }
 
@@ -255,12 +261,19 @@ public final class BehaviorEngine {
                 try {
                     root.tick(capturedSensors);
                 } finally {
-                    if (stats != null) stats.sampleTime(clock.activeMs() - activeBefore, ctx.executedHook());
+                    if (stats != null) {
+                        stats.sampleTime(clock.activeMs() - activeBefore, ctx.executedHook());
+                        if (root.state() == RootState.PAUSED) stats.samplePause(clock.activeGapMs(), ctx.executedHook() != null ? ctx.executedHook()
+                            : ctx.gates().active().isEmpty() ? Hook.BOT_PRE : ctx.gates().active().getFirst().hook());
+                    }
                 }
                 plugins.applyPendingCleanup();
                 if (running()) {
                     while (!pending.isEmpty()) pending.removeFirst().run();
                 }
+                hooks.applyPendingChanges(ctx);
+                plugins.applyPendingCleanup();
+                ctx.end();
                 ctx.outputs().flush(ctx.tick());
             } catch (RuntimeException ex) {
                 pending.clear();
@@ -325,7 +338,7 @@ public final class BehaviorEngine {
     }
 
     public EngineSnapshot snapshot() {
-        Node tree = recovery.active() ? recovery : hooks.build();
+        Node tree = root.pausedNode() != null ? root.pausedNode() : recovery.active() ? recovery : hooks.build();
         Node active = deepest(tree);
         int actionRemaining = remaining(tree);
         List<TraceEvent> events = ring.snapshot();
@@ -334,7 +347,84 @@ public final class BehaviorEngine {
             root.noProgressRemainingMs(), ctx.monitor().windowMs(), actionRemaining == Integer.MAX_VALUE ? 0 : actionRemaining, root.recoveryLevel(),
             ctx.leases().snapshot().size(), ctx.evidenceSequence() - evidenceBaseline, tickMs,
             events.subList(Math.max(0, events.size() - 5), events.size()), root.stopReport().orElse(null),
-            routines.stream().map(Routine::status).toList(), stats == null ? BotStats.EMPTY : stats.snapshot());
+            routines.stream().map(this::routineState).toList(), stats == null ? BotStats.EMPTY : stats.snapshot(), root.pauseCause(), ctx.gates().status(), ctx.outputs().status());
+    }
+
+    private RoutineStatus routineState(Routine routine) {
+        if ((routine.slot() == Hook.SURVIVAL || routine.slot() == Hook.COMBAT || routine.slot() == Hook.REGEAR)
+            && selectedRoutines.get(routine.slot()) != routine) return new RoutineStatus(routine.name(), routine.slot(), "off", "not selected");
+        return routine.status();
+    }
+
+    public LegacyGates gates() {
+        return ctx.gates();
+    }
+
+    public BotStats stats() {
+        return stats;
+    }
+
+    public void resetStats() {
+        statsByBot.values().forEach(BotStats::reset);
+    }
+
+    public void registerRoutine(Routine routine) {
+        if (bot != null) throw new IllegalStateException("register routines before starting");
+        if (routines.stream().anyMatch(other -> other.name().equals(routine.name()))) throw new IllegalArgumentException("duplicate routine");
+        routines.add(routine);
+        selectedRoutines.put(routine.slot(), routine);
+        routine.entries(routineContext).forEach(entry -> {
+            entry.guard().availableWhen(() -> selectedRoutines.get(routine.slot()) == routine);
+            hooks.insert(entry);
+        });
+        hooks.applyPendingChanges(ctx);
+    }
+
+    public void selectRoutine(Hook slot, String name) {
+        if (slot != Hook.SURVIVAL && slot != Hook.COMBAT && slot != Hook.REGEAR) throw new IllegalArgumentException("routine slot must be survival, combat or regear");
+        Routine next = name.equals("none") ? null : routines.stream().filter(routine -> routine.slot() == slot && routine.name().equals(name))
+            .findFirst().orElseThrow(() -> new IllegalArgumentException("unknown routine for " + slot + ": " + name));
+        pending.addLast(() -> {
+            Routine old = selectedRoutines.get(slot);
+            if (old == next) return;
+            if (old != null) old.entries(routineContext).forEach(entry -> hooks.remove(entry.owner()));
+            if (next == null) selectedRoutines.remove(slot);
+            else {
+                selectedRoutines.put(slot, next);
+                next.entries(routineContext).forEach(hooks::insert);
+            }
+        });
+        if (!running() && !ticking) {
+            while (!pending.isEmpty()) pending.removeFirst().run();
+            hooks.applyPendingChanges(ctx);
+            ctx.end();
+        }
+    }
+
+    public List<String> routineStatus() {
+        return routines.stream().map(routine -> routine.slot() + " " + routine.name() + " "
+            + ((routine.slot() == Hook.SURVIVAL || routine.slot() == Hook.COMBAT || routine.slot() == Hook.REGEAR)
+                && selectedRoutines.get(routine.slot()) != routine ? "off" : routine.status().state()) + " | " + routine.status().detail()).toList();
+    }
+
+    public List<String> why() {
+        List<String> lines = new ArrayList<>();
+        lines.add("Root=" + root.state() + " pause=" + root.pauseCause());
+        root.stopReport().ifPresent(report -> lines.add("Stopped " + report.reason() + ": " + report.detail()));
+        for (HookEntry entry : hooks.entries()) {
+            lines.add(entry.hook() + " " + entry.owner() + " " + entry.guard().diagnostic(ctx));
+            if (entry.guard().active()) break;
+        }
+        scores(hooks.build(), lines);
+        lines.addAll(ctx.gates().status());
+        ctx.leases().snapshot().forEach(lease -> lines.add("Lease " + lease.owner() + " " + lease.state() + " " + lease.resources()));
+        return List.copyOf(lines);
+    }
+
+    private void scores(Node node, List<String> lines) {
+        if (!(node.active() || node.suspended())) return;
+        if (node instanceof UtilitySelector utility) utility.scores().forEach(score -> lines.add("Score " + score));
+        node.children().forEach(child -> scores(child, lines));
     }
 
     public List<Routine> routines() {
