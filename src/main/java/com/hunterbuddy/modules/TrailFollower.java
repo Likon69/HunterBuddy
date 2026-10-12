@@ -3,6 +3,8 @@ package com.hunterbuddy.modules;
 import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.GoalXZ;
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.util.TrailHeading;
+import com.hunterbuddy.util.TrailScan;
 import com.hunterbuddy.util.TrailUtils;
 
 import com.github.benmanes.caffeine.cache.Cache;
@@ -37,19 +39,16 @@ public class TrailFollower extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     public final Setting<Integer> maxTrailLength = this.sgGeneral
         .add(
-            new Builder()
-                .name("max-trail-length")
+            new Builder().name("max-trail-length")
                 .description(
                     "The number of trail points to keep for the average. Adjust to change how quickly the average will change. More does not necessarily equal better because if the list is too long it will contain chunks behind you."
-                )
-                .defaultValue(20)
+                ).defaultValue(20)
                 .sliderRange(1, 100)
                 .build()
         );
     public final Setting<Integer> chunksBeforeStarting = this.sgGeneral
         .add(
-            new Builder()
-                .name("chunks-before-starting")
+            new Builder().name("chunks-before-starting")
                 .description("Useful for afking looking for a trail. The amount of chunks before it gets detected as a trail.")
                 .defaultValue(10)
                 .sliderRange(1, 50)
@@ -57,8 +56,7 @@ public class TrailFollower extends Module {
         );
     public final Setting<Integer> chunkConsiderationWindow = this.sgGeneral
         .add(
-            new Builder()
-                .name("chunk-timeframe")
+            new Builder().name("chunk-timeframe")
                 .description("The amount of time in seconds that the chunks must be found in before starting.")
                 .defaultValue(5)
                 .sliderRange(1, 20)
@@ -66,10 +64,10 @@ public class TrailFollower extends Module {
         );
     public final Setting<TrailFollower.TrailEndBehavior> trailEndBehavior = this.sgGeneral
         .add(
-            ((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)new meteordevelopment.meteorclient.settings.EnumSetting.Builder()
-                            .name("trail-end-behavior"))
-                        .description("What to do when the trail ends."))
-                    .defaultValue(TrailFollower.TrailEndBehavior.DISABLE))
+            new meteordevelopment.meteorclient.settings.EnumSetting.Builder<TrailFollower.TrailEndBehavior>()
+                .name("trail-end-behavior")
+                .description("What to do when the trail ends.")
+                .defaultValue(TrailFollower.TrailEndBehavior.DISABLE)
                 .build()
         );
     public final Setting<Double> trailEndYaw = this.sgGeneral
@@ -84,22 +82,20 @@ public class TrailFollower extends Module {
         );
     public final Setting<TrailFollower.OverworldFlightMode> overworldFlightMode = this.sgGeneral
         .add(
-            ((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)new meteordevelopment.meteorclient.settings.EnumSetting.Builder()
-                            .name("overworld-flight-mode"))
-                        .description(
-                            "Choose how TrailFollower flies in Overworld. If other is selected then nothing will be automatically enabled, instead just your yaw will be changed to point towards the trail."
-                        ))
-                    .defaultValue(TrailFollower.OverworldFlightMode.PITCH40))
+            new meteordevelopment.meteorclient.settings.EnumSetting.Builder<TrailFollower.OverworldFlightMode>()
+                .name("overworld-flight-mode")
+                .description(
+                    "Choose how TrailFollower flies in Overworld. If other is selected then nothing will be automatically enabled, instead just your yaw will be changed to point towards the trail."
+                ).defaultValue(TrailFollower.OverworldFlightMode.PITCH40)
                 .build()
         );
     public final Setting<TrailFollower.NetherPathMode> netherPathMode = this.sgGeneral
         .add(
-            ((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)new meteordevelopment.meteorclient.settings.EnumSetting.Builder()
-                            .name("nether-path-mode"))
-                        .description(
-                            "Choose how TrailFollower does baritone pathing in Nether. If other is selected then nothing will be automatically enabled, instead just your yaw will be changed to point towards the trail."
-                        ))
-                    .defaultValue(TrailFollower.NetherPathMode.AVERAGE))
+            new meteordevelopment.meteorclient.settings.EnumSetting.Builder<TrailFollower.NetherPathMode>()
+                .name("nether-path-mode")
+                .description(
+                    "Choose how TrailFollower does baritone pathing in Nether. If other is selected then nothing will be automatically enabled, instead just your yaw will be changed to point towards the trail."
+                ).defaultValue(TrailFollower.NetherPathMode.AVERAGE)
                 .build()
         );
     public final Setting<Boolean> pitch40Firework = this.sgGeneral
@@ -152,24 +148,21 @@ public class TrailFollower extends Module {
                 .description("The distance to add trail positions in the direction the player is facing. (Ignored when following overworld from nether)")
                 .defaultValue(500.0)
                 .sliderRange(100.0, 2000.0)
-                .onChanged(value -> this.pathDistanceActual = value)
-                .build()
+                .onChanged(value -> this.pathDistanceActual = value).build()
         );
     public final Setting<TrailFollower.FollowMode> flightMethod = this.sgAdvanced
         .add(
-            ((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)new meteordevelopment.meteorclient.settings.EnumSetting.Builder()
-                            .name("flight-method"))
-                        .description("Decided how the goals will be used. Leave this on AUTO unless you want to use yaw lock in the nether for example."))
-                    .defaultValue(TrailFollower.FollowMode.AUTO))
+            new meteordevelopment.meteorclient.settings.EnumSetting.Builder<TrailFollower.FollowMode>()
+                .name("flight-method")
+                .description("Decided how the goals will be used. Leave this on AUTO unless you want to use yaw lock in the nether for example.")
+                .defaultValue(TrailFollower.FollowMode.AUTO)
                 .build()
         );
     public final Setting<Double> startDirectionWeighting = this.sgAdvanced
         .add(
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
                 .name("start-direction-weight")
-                .description(
-                    "Initial bias toward the direction you're facing when enabling. Decays as trail becomes established. 0 = no bias, 1 = strong bias."
-                )
+                .description("Initial bias toward the direction you're facing when enabling. Decays as trail becomes established. 0 = no bias, 1 = strong bias.")
                 .defaultValue(0.7)
                 .min(0.0)
                 .sliderMax(1.0)
@@ -181,8 +174,7 @@ public class TrailFollower extends Module {
                 .name("forward-cone-angle")
                 .description(
                     "During initial detection, only consider chunks within this angle of your facing direction. 90 = hemisphere ahead, 180 = all around."
-                )
-                .defaultValue(120.0)
+                ).defaultValue(120.0)
                 .min(45.0)
                 .sliderMax(180.0)
                 .build()
@@ -199,22 +191,19 @@ public class TrailFollower extends Module {
         );
     public final Setting<TrailFollower.DirectionWeighting> directionWeighting = this.sgAdvanced
         .add(
-            ((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)new meteordevelopment.meteorclient.settings.EnumSetting.Builder()
-                            .name("direction-weighting"))
-                        .description(
-                            "How the chunks found should be weighted. Useful for path splits. Left will weight chunks to the left of the player higher, right will weigh chunks to the right higher, and none will be in the middle/random. "
-                        ))
-                    .defaultValue(TrailFollower.DirectionWeighting.NONE))
+            new meteordevelopment.meteorclient.settings.EnumSetting.Builder<TrailFollower.DirectionWeighting>()
+                .name("direction-weighting")
+                .description(
+                    "How the chunks found should be weighted. Useful for path splits. Left will weight chunks to the left of the player higher, right will weigh chunks to the right higher, and none will be in the middle/random. "
+                ).defaultValue(TrailFollower.DirectionWeighting.NONE)
                 .build()
         );
     public final Setting<Integer> directionWeightingMultiplier = this.sgAdvanced
         .add(
-            new Builder()
-                .name("direction-weighting-multiplier")
+            new Builder().name("direction-weighting-multiplier")
                 .description(
                     "The multiplier for how much weight should be given to chunks in the direction specified. Values are capped to be in the range [2, maxTrailLength]."
-                )
-                .defaultValue(2)
+                ).defaultValue(2)
                 .min(2)
                 .sliderMax(10)
                 .visible(() -> this.directionWeighting.get() != TrailFollower.DirectionWeighting.NONE)
@@ -233,41 +222,38 @@ public class TrailFollower extends Module {
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
                 .name("chunk-found-timeout")
                 .description(
-                    "The amount of MS without a trail chunk ahead of you before weaving side to side to let the world load. Raise on laggy servers so normal chunk droughts don't trigger searching."
-                )
-                .defaultValue(8000.0)
+                    "The amount of MS without a trail chunk ahead of you before scanning for the trail. Raise on laggy servers so normal chunk droughts don't trigger the scan."
+                ).defaultValue(8000.0)
                 .min(1000.0)
                 .sliderMax(20000.0)
                 .build()
         );
-    public final Setting<TrailFollower.SearchBehavior> searchBehavior = this.sgAdvanced
+    public final Setting<TrailScan.Mode> lostTrailScan = this.sgAdvanced
         .add(
-            ((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)((meteordevelopment.meteorclient.settings.EnumSetting.Builder)new meteordevelopment.meteorclient.settings.EnumSetting.Builder()
-                            .name("search-behavior"))
-                        .description(
-                            "What to do when chunks stop arriving. SWEEP weaves around the trail direction keeping forward progress, CIRCLE spins in place (legacy), STRAIGHT holds the trail direction. Baritone mode treats CIRCLE as STRAIGHT."
-                        ))
-                    .defaultValue(TrailFollower.SearchBehavior.SWEEP))
+            new meteordevelopment.meteorclient.settings.EnumSetting.Builder<TrailScan.Mode>()
+                .name("lost-trail-scan")
+                .description(
+                    "How to look for the trail once chunks stop arriving. WEAVE swings left and right of the trail direction while moving on, SPIN turns in place, HOLD keeps the trail direction. Baritone mode treats SPIN as HOLD."
+                ).defaultValue(TrailScan.Mode.WEAVE)
                 .build()
         );
-    public final Setting<Double> sweepAngle = this.sgAdvanced
+    public final Setting<Double> weaveWidth = this.sgAdvanced
         .add(
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                .name("sweep-angle")
+                .name("weave-width")
                 .description(
-                    "Starting sweep amplitude off the trail direction. Widens up to 90 degrees the longer no forward chunks arrive, slowing forward progress so slow-loading chunks can catch up."
-                )
-                .defaultValue(35.0)
+                    "Initial swing width in degrees on each side of the trail direction. It grows to 90 the longer no chunk arrives ahead of you."
+                ).defaultValue(35.0)
                 .min(10.0)
                 .sliderMax(90.0)
-                .visible(() -> this.searchBehavior.get() == TrailFollower.SearchBehavior.SWEEP)
+                .visible(() -> this.lostTrailScan.get() == TrailScan.Mode.WEAVE)
                 .build()
         );
     public final Setting<Double> circlingDegPerTick = this.sgAdvanced
         .add(
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
                 .name("Circling-degrees-per-tick")
-                .description("The amount of degrees to change per tick while searching (circle spin rate / sweep speed).")
+                .description("How fast the lost-trail scan moves, in degrees per tick: the turning speed in SPIN, the weaving speed in WEAVE.")
                 .defaultValue(2.0)
                 .min(1.0)
                 .sliderMax(20.0)
@@ -287,40 +273,36 @@ public class TrailFollower extends Module {
         .add(
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
                 .name("max-trail-deviation")
-                .description("Maximum allowed angle (in degrees) from the committed trail direction. Helps avoid switching to intersecting trails.")
+                .description("Chunks farther than this many degrees from the trail heading are not counted as this trail, so a crossing trail cannot take over.")
                 .defaultValue(180.0)
                 .min(1.0)
                 .sliderMax(270.0)
                 .build()
         );
-    public final Setting<Boolean> reverseLock = this.sgAdvanced
+    public final Setting<Boolean> ignoreBehind = this.sgAdvanced
         .add(
             new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                .name("reverse-lock")
-                .description(
-                    "Ignores chunks too far off the committed trail direction, so chunks loading late behind you (server lag) can't turn you back the way you came."
-                )
+                .name("ignore-behind")
+                .description("Skips chunks that load behind you (server lag), so they cannot turn you back the way you came.")
                 .defaultValue(true)
                 .build()
         );
-    public final Setting<Double> reverseLockAngle = this.sgAdvanced
+    public final Setting<Double> behindAngle = this.sgAdvanced
         .add(
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                .name("reverse-lock-angle")
-                .description("Chunks more than this many degrees off the committed trail direction are ignored.")
+                .name("behind-angle")
+                .description("A chunk further than this many degrees from the trail direction counts as behind you.")
                 .defaultValue(110.0)
                 .min(60.0)
                 .sliderMax(180.0)
-                .visible(this.reverseLock::get)
+                .visible(this.ignoreBehind::get)
                 .build()
         );
-    public final Setting<Double> maxTurnRate = this.sgAdvanced
+    public final Setting<Double> headingTurnLimit = this.sgAdvanced
         .add(
             new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                .name("max-turn-rate")
-                .description(
-                    "Maximum degrees per second the committed trail direction can change. Stops lag bursts of sideways chunks from whipping the heading around."
-                )
+                .name("heading-turn-limit")
+                .description("Most degrees per second the trail direction may turn. Keeps a burst of sideways chunks from whipping it around.")
                 .defaultValue(45.0)
                 .min(5.0)
                 .sliderMax(180.0)
@@ -328,8 +310,7 @@ public class TrailFollower extends Module {
         );
     public final Setting<Integer> chunkCacheLength = this.sgAdvanced
         .add(
-            new Builder()
-                .name("chunk-cache-length")
+            new Builder().name("chunk-cache-length")
                 .description("The amount of chunks to keep in the cache. (Won't be applied until deactivating)")
                 .defaultValue(100000)
                 .sliderRange(0, 10000000)
@@ -345,15 +326,20 @@ public class TrailFollower extends Module {
         );
     public final Setting<Integer> baritoneUpdateTicks = this.sgAdvanced
         .add(
-            new Builder()
-                .name("baritone-path-update-ticks")
+            new Builder().name("baritone-path-update-ticks")
                 .description("The amount of ticks between updates to the baritone goal. Low values may cause high instability.")
                 .defaultValue(100)
                 .sliderRange(20, 600)
                 .build()
         );
     public final Setting<Boolean> debug = this.sgAdvanced
-        .add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder().name("debug").description("Debug mode.").defaultValue(false).build());
+        .add(
+            new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
+                .name("debug")
+                .description("Debug mode.")
+                .defaultValue(false)
+                .build()
+        );
     private boolean oldAutoFireworkValue;
     private boolean oldAutoBoundAdjustValue;
     private boolean pitch40ToggledByUs;
@@ -364,7 +350,7 @@ public class TrailFollower extends Module {
     private ArrayDeque<Vec3d> trail = new ArrayDeque<>();
     private ArrayDeque<Vec3d> possibleTrail = new ArrayDeque<>();
     private long lastFoundTrailTime;
-    private long lastSteerChunkTime;
+    private long lastAheadChunkTime;
     private long lastFoundPossibleTrailTime;
     private double pathDistanceActual = this.pathDistance.get();
     private boolean started = false;
@@ -376,10 +362,8 @@ public class TrailFollower extends Module {
         .expireAfterWrite(Duration.ofMinutes(5L))
         .build();
     private double targetYaw;
-    private double desiredYaw;
-    private double committedYaw;
-    private double searchPhase;
-    private boolean wasSearching;
+    private final TrailHeading heading = new TrailHeading();
+    private final TrailScan scan = new TrailScan();
     private double resumeYaw;
     private double resumeDesiredYaw;
     private int resumeChunks;
@@ -396,7 +380,7 @@ public class TrailFollower extends Module {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TrailFollower", "Automatically follows trails in all dimensions.");
     }
 
-    public float headingYaw() { return (float) (followingTrail ? committedYaw : targetYaw); }
+    public float headingYaw() { return (float) (followingTrail ? heading.steady() : targetYaw); }
 
     void resetTrail() {
         this.posDebug = null;
@@ -407,8 +391,7 @@ public class TrailFollower extends Module {
         this.possibleTrail = new ArrayDeque<>();
         this.hasInitialDirection = false;
         this.chunksFoundSinceStart = 0;
-        this.wasSearching = false;
-        this.searchPhase = 0.0;
+        this.scan.reset();
     }
 
     @Override
@@ -459,10 +442,10 @@ public class TrailFollower extends Module {
                             pitch40UtilModule.toggle();
                             this.pitch40ToggledByUs = true;
                             if (this.pitch40Firework.get()) {
-                                Setting<Boolean> setting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-firework");
+                                Setting<Boolean> setting = (Setting<Boolean>) pitch40UtilModule.settings.get("auto-firework");
                                 if (setting != null) {
                                     this.info(
-                                        "Auto Firework enabled, if you want to change the velocity threshold or the firework cooldown check the settings under Pitch40."
+                                        "Pitch40 auto firework is on. Its speed threshold and firework delay are in the Pitch40 settings."
                                     );
                                     this.oldAutoFireworkValue = setting.get();
                                     setting.set(true);
@@ -470,14 +453,14 @@ public class TrailFollower extends Module {
                                 }
                             }
 
-                            Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-bound-adjust");
+                            Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>) pitch40UtilModule.settings.get("auto-bound-adjust");
                             if (autoBoundAdjustSetting != null) {
                                 this.oldAutoBoundAdjustValue = autoBoundAdjustSetting.get();
                                 autoBoundAdjustSetting.set(false);
                             }
                         }
                     } else if (this.overworldFlightMode.get() == TrailFollower.OverworldFlightMode.ROCKETS) {
-                        RocketFly rocketFly = Modules.get().get(RocketFly.class);
+                        RocketFly rocketFly = (RocketFly) Modules.get().get(RocketFly.class);
                         if (!rocketFly.isActive()) {
                             rocketFly.toggle();
                             this.rocketFlyToggledByUs = true;
@@ -511,12 +494,12 @@ public class TrailFollower extends Module {
 
                 this.targetYaw = this.initialYaw;
                 if (resuming) {
-                    this.committedYaw = this.resumeYaw;
-                    this.desiredYaw = this.resumeDesiredYaw;
+                    this.heading.reset(this.resumeYaw);
+                    this.heading.setWanted(this.resumeDesiredYaw);
                     this.followingTrail = true;
                     this.chunksFoundSinceStart = this.resumeChunks;
-                    this.lastFoundTrailTime = this.lastSteerChunkTime = now;
-                    this.wasSearching = false;
+                    this.lastFoundTrailTime = this.lastAheadChunkTime = now;
+                    this.scan.stop();
                     this.resumeAwaitingChunk = true;
                     this.log("trail heading resumed " + this.resumeYaw);
                 }
@@ -543,8 +526,8 @@ public class TrailFollower extends Module {
     @Override
     public void onDeactivate() {
         if (this.followingTrail && this.mc.player != null && this.mc.world != null) {
-            this.resumeYaw = this.committedYaw;
-            this.resumeDesiredYaw = this.desiredYaw;
+            this.resumeYaw = this.heading.steady();
+            this.resumeDesiredYaw = this.heading.wanted();
             this.resumeChunks = this.chunksFoundSinceStart;
             this.resumeDimension = this.mc.world.getRegistryKey();
             this.resumePos = this.mc.player.getEntityPos();
@@ -556,7 +539,7 @@ public class TrailFollower extends Module {
         XaeroPlus.EVENT_BUS.unregister(this);
         this.trail.clear();
         if (this.rocketFlyToggledByUs) {
-            RocketFly rocketFly = Modules.get().get(RocketFly.class);
+            RocketFly rocketFly = (RocketFly) Modules.get().get(RocketFly.class);
             if (rocketFly != null) {
                 rocketFly.resetYLock();
                 if (rocketFly.isActive()) {
@@ -565,16 +548,19 @@ public class TrailFollower extends Module {
             }
         }
         if (this.pitch40ToggledByUs) {
-            Module pitch40UtilModule = Modules.get().get(Pitch40.class);
+            Class<? extends Module> pitch40Util = Pitch40.class;
+            Module pitch40UtilModule = Modules.get().get(pitch40Util);
             if (pitch40UtilModule != null) {
                 if (pitch40UtilModule.isActive()) {
                     pitch40UtilModule.toggle();
                 }
-                Setting<Boolean> autoFireworkSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-firework");
+
+                Setting<Boolean> autoFireworkSetting = (Setting<Boolean>) pitch40UtilModule.settings.get("auto-firework");
                 if (this.autoFireworkChangedByUs && autoFireworkSetting != null) {
                     autoFireworkSetting.set(this.oldAutoFireworkValue);
                 }
-                Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>)pitch40UtilModule.settings.get("auto-bound-adjust");
+
+                Setting<Boolean> autoBoundAdjustSetting = (Setting<Boolean>) pitch40UtilModule.settings.get("auto-bound-adjust");
                 if (autoBoundAdjustSetting != null) {
                     autoBoundAdjustSetting.set(this.oldAutoBoundAdjustValue);
                 }
@@ -589,36 +575,22 @@ public class TrailFollower extends Module {
     }
 
     private void searchForTrail() {
-        if (!this.wasSearching) {
-            this.wasSearching = true;
-            this.searchPhase = 0.0;
-            this.targetYaw = this.committedYaw;
-        }
-
-        TrailFollower.SearchBehavior behavior = this.searchBehavior.get();
-        if (this.followMode == TrailFollower.FollowMode.BARITONE && behavior == TrailFollower.SearchBehavior.CIRCLE) {
-            behavior = TrailFollower.SearchBehavior.STRAIGHT;
-        }
-
-        switch (behavior) {
-            case SWEEP:
-                this.searchPhase = this.searchPhase + this.circlingDegPerTick.get();
-                double starvedMs = Math.max(0.0, System.currentTimeMillis() - this.lastSteerChunkTime - this.chunkFoundTimeout.get());
-                double growWindowMs = Math.max(1000.0, this.trailTimeout.get() - this.chunkFoundTimeout.get());
-                double amplitude = this.sweepAngle.get() + (90.0 - this.sweepAngle.get()) * Math.min(1.0, starvedMs / growWindowMs);
-                this.targetYaw = this.wrapYaw(this.committedYaw + amplitude * Math.sin(Math.toRadians(this.searchPhase)));
-                break;
-            case CIRCLE:
-                this.targetYaw = this.wrapYaw(this.targetYaw + this.circlingDegPerTick.get());
-                break;
-            case STRAIGHT:
-                this.targetYaw = this.committedYaw;
-        }
+        long now = System.currentTimeMillis();
+        this.targetYaw = this.scan.next(
+            this.lostTrailScan.get(),
+            this.followMode == TrailFollower.FollowMode.BARITONE,
+            this.heading.steady(),
+            this.circlingDegPerTick.get(),
+            this.weaveWidth.get(),
+            now - this.lastAheadChunkTime,
+            this.chunkFoundTimeout.get(),
+            this.trailTimeout.get()
+        );
 
         if (this.mc.player.age % 100 == 0) {
             this.log(
-                "Searching for trail chunks, abandoning trail in "
-                    + (this.trailTimeout.get() - (System.currentTimeMillis() - this.lastFoundTrailTime)) / 1000.0
+                "Trail lost, scanning for it. Giving up in "
+                    + (this.trailTimeout.get() - (now - this.lastFoundTrailTime)) / 1000.0
                     + " seconds."
             );
         }
@@ -644,7 +616,7 @@ public class TrailFollower extends Module {
             }
 
             long now = System.currentTimeMillis();
-            if (this.resumeAwaitingChunk) this.lastFoundTrailTime = this.lastSteerChunkTime = now;
+            if (this.resumeAwaitingChunk) this.lastFoundTrailTime = this.lastAheadChunkTime = now;
             long sinceLastChunk = now - this.lastFoundTrailTime;
             if (!this.resumeAwaitingChunk && this.followingTrail && sinceLastChunk > this.trailTimeout.get()) {
                 this.resumeValid = false;
@@ -666,13 +638,13 @@ public class TrailFollower extends Module {
                 }
             }
 
-            if (!this.resumeAwaitingChunk && this.followingTrail && now - this.lastSteerChunkTime > this.chunkFoundTimeout.get()) {
+            if (!this.resumeAwaitingChunk && this.followingTrail && now - this.lastAheadChunkTime > this.chunkFoundTimeout.get()) {
                 this.searchForTrail();
             } else {
-                this.wasSearching = false;
+                this.scan.stop();
                 if (this.followingTrail) {
-                    this.committedYaw = this.approachYaw(this.committedYaw, this.desiredYaw, this.maxTurnRate.get() / 20.0);
-                    this.targetYaw = this.committedYaw;
+                    this.heading.turn(this.headingTurnLimit.get() / 20.0);
+                    this.targetYaw = this.heading.steady();
                 }
             }
 
@@ -801,41 +773,44 @@ public class TrailFollower extends Module {
                                 this.log("Trail found, starting to follow.");
                                 this.followingTrail = true;
                                 this.lastFoundTrailTime = System.currentTimeMillis();
-                                this.lastSteerChunkTime = this.lastFoundTrailTime;
+                                this.lastAheadChunkTime = this.lastFoundTrailTime;
                                 this.chunksFoundSinceStart = this.possibleTrail.size();
                                 if (!this.hasInitialDirection) {
                                     this.initialYaw = this.targetYaw;
                                     this.hasInitialDirection = true;
                                 }
 
-                                this.committedYaw = this.wrapYaw(this.targetYaw);
-                                this.desiredYaw = this.committedYaw;
-                                this.wasSearching = false;
+                                this.heading.reset(this.targetYaw);
+                                this.scan.stop();
                                 this.trail.addAll(this.possibleTrail);
                                 this.possibleTrail.clear();
                             }
                         } else {
                             double chunkAngle = Rotations.getYaw(pos);
-                            double angleDiff = TrailUtils.angleDifference(this.committedYaw, chunkAngle);
-                            if (!(Math.abs(angleDiff) > this.maxTrailDeviation.get())) {
-                                this.lastFoundTrailTime = System.currentTimeMillis();
-                                if (!this.reverseLock.get() || !(Math.abs(angleDiff) > this.reverseLockAngle.get())) {
-                                    if (Math.abs(angleDiff) <= 90.0) {
-                                        this.lastSteerChunkTime = System.currentTimeMillis();
+                            double offset = this.heading.offset(chunkAngle);
+                            TrailHeading.Verdict verdict = this.heading.judge(
+                                chunkAngle, this.maxTrailDeviation.get(), this.ignoreBehind.get(), this.behindAngle.get()
+                            );
+                            if (verdict != TrailHeading.Verdict.OUTSIDE) {
+                                long now = System.currentTimeMillis();
+                                this.lastFoundTrailTime = now;
+                                if (verdict != TrailHeading.Verdict.BEHIND) {
+                                    if (verdict == TrailHeading.Verdict.AHEAD) {
+                                        this.lastAheadChunkTime = now;
                                     }
 
                                     while (this.trail.size() >= this.maxTrailLength.get()) {
                                         this.trail.pollFirst();
                                     }
 
-                                    if (angleDiff > 0.0 && angleDiff < 90.0 && this.directionWeighting.get() == TrailFollower.DirectionWeighting.LEFT) {
+                                    if (offset > 0.0 && offset < 90.0 && this.directionWeighting.get() == TrailFollower.DirectionWeighting.LEFT) {
                                         for (int i = 0; i < this.directionWeightingMultiplier.get() - 1; i++) {
                                             this.trail.pollFirst();
                                             this.trail.add(pos);
                                         }
 
                                         this.trail.add(pos);
-                                    } else if (angleDiff < 0.0 && angleDiff > -90.0 && this.directionWeighting.get() == TrailFollower.DirectionWeighting.RIGHT) {
+                                    } else if (offset < 0.0 && offset > -90.0 && this.directionWeighting.get() == TrailFollower.DirectionWeighting.RIGHT) {
                                         for (int i = 0; i < this.directionWeightingMultiplier.get() - 1; i++) {
                                             this.trail.pollFirst();
                                             this.trail.add(pos);
@@ -856,9 +831,9 @@ public class TrailFollower extends Module {
                                             double calculatedYaw = Rotations.getYaw(targetPos);
                                             double decayedWeight = this.getDecayedInitialWeight();
                                             if (decayedWeight > 0.01) {
-                                                this.desiredYaw = this.blendYaw(calculatedYaw, this.initialYaw, decayedWeight);
+                                                this.heading.setWanted(this.blendYaw(calculatedYaw, this.initialYaw, decayedWeight));
                                             } else {
-                                                this.desiredYaw = this.wrapYaw(calculatedYaw);
+                                                this.heading.setWanted(calculatedYaw);
                                             }
                                         }
                                     }
@@ -890,24 +865,14 @@ public class TrailFollower extends Module {
         Vec3d playerPos = this.mc.player.getEntityPos();
 
         for (Vec3d pos : positions) {
-            double chunkYaw = Rotations.getYaw(pos);
-            double angleDiff = Math.abs(TrailUtils.angleDifference(this.committedYaw, chunkYaw));
-            if (!(angleDiff > 90.0)) {
-                double finalWeight;
-                if (this.forwardWeightStrength.get() <= 0.01) {
-                    finalWeight = 1.0;
-                } else {
-                    double alignmentFactor = 1.0 - angleDiff / 180.0;
-                    double weight = 1.0 - this.forwardWeightStrength.get() + this.forwardWeightStrength.get() * alignmentFactor;
-                    double dist = playerPos.distanceTo(pos);
-                    double distWeight = 1.0 / (1.0 + dist / 256.0);
-                    finalWeight = weight * (0.5 + 0.5 * distWeight);
-                }
+            double w = TrailHeading.weight(
+                Math.abs(this.heading.offset(Rotations.getYaw(pos))), this.forwardWeightStrength.get(), playerPos.distanceTo(pos)
+            );
+            if (w <= 0) continue;
 
-                sumX += pos.x * finalWeight;
-                sumZ += pos.z * finalWeight;
-                totalWeight += finalWeight;
-            }
+            sumX += pos.x * w;
+            sumZ += pos.z * w;
+            totalWeight += w;
         }
 
         return totalWeight <= 0.0 ? null : new Vec3d(sumX / totalWeight, 0.0, sumZ / totalWeight);
@@ -925,15 +890,6 @@ public class TrailFollower extends Module {
 
     private float getActualYaw(float yaw) {
         return (yaw % 360.0F + 360.0F) % 360.0F;
-    }
-
-    private double wrapYaw(double yaw) {
-        return (yaw % 360.0 + 360.0) % 360.0;
-    }
-
-    private double approachYaw(double current, double target, double maxStep) {
-        double diff = TrailUtils.angleDifference(target, current);
-        return Math.abs(diff) <= maxStep ? this.wrapYaw(target) : this.wrapYaw(current + Math.copySign(maxStep, diff));
     }
 
     private double blendYaw(double yaw1, double yaw2, double weight) {
@@ -980,12 +936,6 @@ public class TrailFollower extends Module {
         ROCKETS,
         PITCH40,
         OTHER;
-    }
-
-    public enum SearchBehavior {
-        SWEEP,
-        CIRCLE,
-        STRAIGHT;
     }
 
     public enum TrailEndBehavior {
