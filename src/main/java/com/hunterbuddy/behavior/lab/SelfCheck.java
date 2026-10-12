@@ -87,6 +87,7 @@ public final class SelfCheck {
         check.checks.addAll(ObservabilityChecks.run());
         check.checks.addAll(DeathChecks.run());
         check.checks.addAll(SessionChecks.run());
+        check.checks.addAll(LandingChecks.run());
         return new SelfCheckReport(400, check.checks);
     }
 

@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.nodes.Guard;
+import com.hunterbuddy.behavior.nodes.Landing;
 import com.hunterbuddy.behavior.nodes.ProgressGuard;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Timeout;
@@ -18,7 +19,7 @@ public final class TreeValidator {
     }
 
     public static void validate(Node root) {
-        visit(root, false, Collections.newSetFromMap(new IdentityHashMap<>()));
+        visit(root, false, false, Collections.newSetFromMap(new IdentityHashMap<>()));
     }
 
     public static void validate(List<HookEntry> entries) {
@@ -33,7 +34,7 @@ public final class TreeValidator {
             if (entry.contributor() == Contributor.PLUGIN && containsLease(entry.node())) {
                 throw new IllegalArgumentException("PLUGIN cannot request a resource: " + entry.owner());
             }
-            visit(entry.guard(), false, visited);
+            visit(entry.guard(), false, false, visited);
             if (entry.contributor() == Contributor.ROUTINE && entries.stream()
                 .filter(other -> other.hook() == entry.hook() && other.owner().equals(entry.owner())).count() > 1
                 && entry.hook() != Hook.BOT_PRE && entry.hook() != Hook.BOT_POST) {
@@ -42,15 +43,17 @@ public final class TreeValidator {
         }
     }
 
-    private static void visit(Node node, boolean bounded, Set<Node> visited) {
+    private static void visit(Node node, boolean bounded, boolean landing, Set<Node> visited) {
         if (!visited.add(node)) throw new IllegalArgumentException("double parent or cycle: " + node.name());
+        if (landing && node instanceof RocketAction) throw new IllegalArgumentException("rocket emission under Landing: " + node.name());
         if (node instanceof Action && !bounded) throw new IllegalArgumentException("Action without Timeout/ProgressGuard: " + node.name());
         if (node instanceof WithLease lease && lease.resources().isEmpty()) throw new IllegalArgumentException("empty WithLease");
         if (node instanceof ReactiveSelector && node.children().stream().anyMatch(child -> !(child instanceof Guard))) {
             throw new IllegalArgumentException("ReactiveSelector child without Guard");
         }
         boolean nextBounded = bounded || node instanceof Timeout || node instanceof ProgressGuard;
-        for (Node child : node.children()) visit(child, nextBounded, visited);
+        boolean nextLanding = landing || node instanceof Landing;
+        for (Node child : node.children()) visit(child, nextBounded, nextLanding, visited);
     }
 
     private static boolean containsLease(Node node) {
@@ -87,7 +90,7 @@ public final class TreeValidator {
 
     public static void validate(Node root, Node recovery) {
         Set<Node> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        visit(root, false, visited);
-        visit(recovery, false, visited);
+        visit(root, false, false, visited);
+        visit(recovery, false, false, visited);
     }
 }
