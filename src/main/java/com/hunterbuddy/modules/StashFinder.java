@@ -35,6 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.entity.EntityAddedEvent;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Post;
@@ -776,6 +777,17 @@ public class StashFinder extends Module {
    /** Said once a session, not once a chunk. */
    private boolean warnedOldChunksUnavailable;
 
+   private static final int FRAME_WAIT_TICKS = 100;
+   private static final int PEARL_WAIT_TICKS = 40;
+   private static final double PEARL_MAX_MOVE_SQ = 0.25;
+
+   private record PendingEntity(int id, int spawnTick, double x, double y, double z, boolean pearl) {
+   }
+
+   private final List<PendingEntity> pendingEntities = new ArrayList<>();
+   private final Set<Integer> settledPearls = new HashSet<>();
+   private int pendingTick;
+
    public StashFinder() {
       super(HunterBuddyAddon.HUNT_CATEGORY, "stash-finder", "Enhanced stash detection with privacy-focused coordinate management.");
    }
@@ -787,10 +799,20 @@ public class StashFinder extends Module {
       this.clusterWaypoints.clear();
       this.pendingOldChunkScan.clear();
       this.warnedOldChunksUnavailable = false;
+      this.pendingEntities.clear();
+      this.settledPearls.clear();
+   }
+
+   @EventHandler
+   private void onGameLeft(GameLeftEvent event) {
+      this.pendingEntities.clear();
+      this.settledPearls.clear();
    }
 
    @EventHandler
    private void onTick(Post event) {
+      this.pendingTick++;
+      this.processPendingEntities();
       if (((Keybind)this.clearTracesBind.get()).isPressed()) {
          this.tracerPositions.clear();
       }
@@ -1182,58 +1204,146 @@ public class StashFinder extends Module {
    private void onEntityAdded(EntityAddedEvent event) {
       if (this.mc.player != null && this.mc.world != null) {
          Entity entity = event.entity;
-         boolean detected = false;
-         String detectionType = null;
-         int minecartPileDepth = 0;
-         ChunkPos chunkPos;
          if ((Boolean)this.detectEnderPearls.get() && entity instanceof EnderPearlEntity) {
-            chunkPos = new ChunkPos(entity.getBlockPos());
-            detectionType = "enderPearl";
-            detected = true;
+            if (!this.settledPearls.contains(entity.getId()) && !this.isPending(entity.getId())) {
+               this.pendingEntities.add(new PendingEntity(entity.getId(), this.pendingTick, entity.getX(), entity.getY(), entity.getZ(), true));
+            }
          } else if ((Boolean)this.detectStackedMinecarts.get() && entity instanceof StorageMinecartEntity) {
             // Counted at the moment one arrives: the others already sit in the
             // world by then, so a single sweep of that block gives the real depth
             // of the pile. Below the threshold nothing is recorded at all, which
             // is what keeps ordinary rail stations out of the results.
-            minecartPileDepth = this.countStorageMinecartsAt(entity.getBlockPos());
+            int minecartPileDepth = this.countStorageMinecartsAt(entity.getBlockPos());
             if (minecartPileDepth < (Integer)this.minStackedMinecarts.get()) {
                return;
             }
 
-            chunkPos = new ChunkPos(entity.getBlockPos());
-            detectionType = "stackedMinecart";
-            detected = true;
+            this.recordEntityDetection(new ChunkPos(entity.getBlockPos()), "stackedMinecart", minecartPileDepth);
          } else if ((Boolean)this.detectNamedEntities.get() && entity instanceof LivingEntity living) {
             if (!living.hasCustomName()) {
                return;
             }
 
-            chunkPos = new ChunkPos(entity.getBlockPos());
-            detectionType = "namedEntity";
-            detected = true;
-         } else {
-            if (!(entity instanceof ItemFrameEntity itemFrame)) {
-               return;
+            ChunkPos chunkPos = new ChunkPos(entity.getBlockPos());
+            this.recordEntityDetection(chunkPos, "namedEntity", this.countEntitiesInChunk(chunkPos, "namedEntity"));
+         } else if (entity instanceof ItemFrameEntity) {
+            if (((Boolean)this.detectMapItemFrames.get() || (Boolean)this.detectItemFrames.get()) && !this.isPending(entity.getId())) {
+               this.pendingEntities.add(new PendingEntity(entity.getId(), this.pendingTick, entity.getX(), entity.getY(), entity.getZ(), false));
             }
-
-            chunkPos = new ChunkPos(itemFrame.getBlockPos());
-            if ((Boolean)this.detectMapItemFrames.get() && itemFrame.getHeldItemStack().contains(DataComponentTypes.MAP_ID)) {
-               detectionType = "mapItemFrame";
-               detected = true;
-            } else {
-               if (!(Boolean)this.detectItemFrames.get() || itemFrame.getHeldItemStack().isEmpty()) {
-                  return;
-               }
-
-               detectionType = "itemFrame";
-               detected = true;
-            }
-         }
-
-         if (detected) {
-            this.recordEntityDetection(chunkPos, detectionType, minecartPileDepth);
          }
       }
+   }
+
+   private boolean isPending(int id) {
+      for (PendingEntity pending : this.pendingEntities) {
+         if (pending.id() == id) {
+            return true;
+         }
+      }
+
+      return false;
+   }
+
+   private void processPendingEntities() {
+      if (this.pendingEntities.isEmpty() || this.mc.player == null || this.mc.world == null) {
+         return;
+      }
+
+      Iterator<PendingEntity> it = this.pendingEntities.iterator();
+      List<ChunkPos> readyChunks = new ArrayList<>();
+      List<String> readyTypes = new ArrayList<>();
+
+      while (it.hasNext()) {
+         PendingEntity pending = it.next();
+         Entity entity = this.mc.world.getEntityById(pending.id());
+         int age = this.pendingTick - pending.spawnTick();
+         if (entity == null || entity.isRemoved()) {
+            it.remove();
+         } else if (pending.pearl()) {
+            if (age >= PEARL_WAIT_TICKS) {
+               it.remove();
+               double dx = entity.getX() - pending.x();
+               double dy = entity.getY() - pending.y();
+               double dz = entity.getZ() - pending.z();
+               if (entity instanceof EnderPearlEntity
+                  && dx * dx + dy * dy + dz * dz < PEARL_MAX_MOVE_SQ) {
+                  this.settledPearls.add(pending.id());
+                  readyChunks.add(new ChunkPos(entity.getBlockPos()));
+                  readyTypes.add("enderPearl");
+               }
+            }
+         } else if (entity instanceof ItemFrameEntity itemFrame) {
+            if (!itemFrame.getHeldItemStack().isEmpty()) {
+               it.remove();
+               String type = this.frameType(itemFrame);
+               if (type != null) {
+                  readyChunks.add(new ChunkPos(itemFrame.getBlockPos()));
+                  readyTypes.add(type);
+               }
+            } else if (age > FRAME_WAIT_TICKS) {
+               it.remove();
+            }
+         } else {
+            it.remove();
+         }
+      }
+
+      for (int i = 0; i < readyChunks.size(); i++) {
+         this.recordEntityDetection(readyChunks.get(i), readyTypes.get(i), this.countEntitiesInChunk(readyChunks.get(i), readyTypes.get(i)));
+      }
+   }
+
+   private String frameType(ItemFrameEntity itemFrame) {
+      if (itemFrame.getHeldItemStack().isEmpty()) {
+         return null;
+      }
+
+      if ((Boolean)this.detectMapItemFrames.get() && itemFrame.getHeldItemStack().contains(DataComponentTypes.MAP_ID)) {
+         return "mapItemFrame";
+      }
+
+      return (Boolean)this.detectItemFrames.get() ? "itemFrame" : null;
+   }
+
+   private int countEntitiesInChunk(ChunkPos chunkPos, String type) {
+      if (this.mc.world == null) {
+         return 0;
+      }
+
+      if (type.equals("enderPearl")) {
+         this.settledPearls.removeIf(id -> {
+            Entity e = this.mc.world.getEntityById(id);
+            return !(e instanceof EnderPearlEntity) || e.isRemoved();
+         });
+      }
+
+      int count = 0;
+
+      for (Entity other : this.mc.world.getEntities()) {
+         if (other.isRemoved() || !new ChunkPos(other.getBlockPos()).equals(chunkPos)) {
+            continue;
+         }
+
+         switch (type) {
+            case "enderPearl":
+               if (other instanceof EnderPearlEntity && this.settledPearls.contains(other.getId())) {
+                  count++;
+               }
+               break;
+            case "namedEntity":
+               if (other instanceof LivingEntity living && living.hasCustomName()) {
+                  count++;
+               }
+               break;
+            case "mapItemFrame":
+            case "itemFrame":
+               if (other instanceof ItemFrameEntity itemFrame && type.equals(this.frameType(itemFrame))) {
+                  count++;
+               }
+         }
+      }
+
+      return count;
    }
 
    /**
@@ -1244,7 +1354,7 @@ public class StashFinder extends Module {
     * that was already loaded when the module came on never produces a spawn, and
     * would otherwise stay invisible for as long as you stay in the area.
     */
-   private void recordEntityDetection(ChunkPos chunkPos, String detectionType, int minecartPileDepth) {
+   private void recordEntityDetection(ChunkPos chunkPos, String detectionType, int detectedCount) {
       {
          {
             double chunkXAbs = Math.abs(chunkPos.x * 16);
@@ -1296,21 +1406,21 @@ public class StashFinder extends Module {
 
                switch (detectionType) {
                   case "enderPearl":
-                     chunk.enderPearls++;
+                     chunk.enderPearls = Math.max(chunk.enderPearls, detectedCount);
                      break;
                   case "namedEntity":
-                     chunk.namedEntities++;
+                     chunk.namedEntities = Math.max(chunk.namedEntities, detectedCount);
                      break;
                   case "mapItemFrame":
-                     chunk.mapItemFrames++;
+                     chunk.mapItemFrames = Math.max(chunk.mapItemFrames, detectedCount);
                      break;
                   case "stackedMinecart":
                      // The depth of the pile, not a running total: every cart in it
                      // fires this handler, so incrementing would count it N times.
-                     chunk.stackedMinecarts = Math.max(chunk.stackedMinecarts, minecartPileDepth);
+                     chunk.stackedMinecarts = Math.max(chunk.stackedMinecarts, detectedCount);
                      break;
                   case "itemFrame":
-                     chunk.itemFrames++;
+                     chunk.itemFrames = Math.max(chunk.itemFrames, detectedCount);
                }
 
                if (chunk.getTotal() >= (Integer)this.minimumStorageCount.get() || this.meetsThresholds(chunk)) {
