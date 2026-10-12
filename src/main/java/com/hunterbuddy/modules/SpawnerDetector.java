@@ -827,6 +827,8 @@ public class SpawnerDetector extends Module {
     private int autoBreachCount;
     private BlockPos autoBreachPos;
     private String autoBreachLabel;
+    private BlockPos autoShipwreckWalkStart;
+    private boolean autoShipwreckWalkRisen;
 
     private int autoShaftFlyAttempts;
     private boolean autoShaftFlyReroute;
@@ -4683,7 +4685,11 @@ public class SpawnerDetector extends Module {
 
     private void tickShipwreckWalk() {
         stateTicks++;
-        if (stateTicks == 1) resetBreach();
+        if (stateTicks == 1) {
+            resetBreach();
+            autoShipwreckWalkStart = mc.player.getBlockPos();
+            autoShipwreckWalkRisen = false;
+        }
         saveShipwreckSettings();
         if (mc.player.isInLava()) { abort("lava"); return; }
         boolean returningToEntry = autoShipwreckRun.departing() && !autoShipwreckDeferred && autoShipwreckEntryColumn != null;
@@ -4711,6 +4717,16 @@ public class SpawnerDetector extends Module {
             if (bt != null && (bt.getPathingBehavior().isPathing() || bt.getPathingBehavior().getInProgress().isPresent())) BaritoneHelper.stopAllPathing();
             releaseAllAutoKeys();
             double y = mc.player.getY();
+            if (y >= goalY - 0.5) autoShipwreckWalkRisen = true;
+            boolean rising = !autoShipwreckWalkRisen;
+            BlockPos start = autoShipwreckWalkStart != null ? autoShipwreckWalkStart : mc.player.getBlockPos();
+            if (rising) {
+                recenterDig(start.getX(), start.getZ(), 0.12);
+                mc.player.setPitch(0.0f);
+                Utils.setPressed(mc.options.jumpKey, true);
+                Utils.setPressed(mc.options.sprintKey, false);
+                return;
+            }
             recenterDig(x, z, 0.12);
             mc.player.setPitch(0.0f);
             Utils.setPressed(mc.options.jumpKey, y < goalY - 0.15 || mc.player.horizontalCollision);
@@ -12495,10 +12511,10 @@ public class SpawnerDetector extends Module {
     }
 
     private int ensureRocketInHotbar() {
-        FindItemResult hotbar = InvUtils.findInHotbar(Items.FIREWORK_ROCKET);
+        FindItemResult hotbar = InvUtils.findInHotbar(com.hunterbuddy.util.Rockets::isPlain);
         if (hotbar.found() && !hotbar.isOffhand()) return hotbar.slot();
 
-        FindItemResult inv = InvUtils.find(Items.FIREWORK_ROCKET);
+        FindItemResult inv = InvUtils.find(com.hunterbuddy.util.Rockets::isPlain);
         if (!inv.found()) return -1;
 
         int target = -1;
