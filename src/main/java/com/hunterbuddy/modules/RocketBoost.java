@@ -155,37 +155,37 @@ public class RocketBoost extends Module {
       .build()
    );
 
-   private final SettingGroup sgSafety = settings.createGroup("Safety");
+   private final SettingGroup sgBrake = settings.createGroup("Brake");
 
-   public final Setting<Boolean> wallCheck = sgSafety.add(new BoolSetting.Builder()
-      .name("wall-check")
-      .description("Stop adding speed when there is something solid in front of you. This module makes a rocket push harder than vanilla, which is exactly what turns a survivable approach to a wall into a crash: it raycasts along your look as far as you would travel in lookahead ticks, and drops the boost back to vanilla 1.5 when that line is blocked. It never cancels the boost, only the extra.")
+   public final Setting<Boolean> brakeTerrain = sgBrake.add(new BoolSetting.Builder()
+      .name("brake-near-terrain")
+      .description("Stop adding speed when there is something solid in front of you. This module makes a rocket push harder than vanilla, which is exactly what turns a survivable approach to a wall into a crash: it raycasts along your look as far as you would travel in brake-lookahead ticks, and drops the boost back to vanilla 1.5 when that line is blocked. It never cancels the boost, only the extra.")
       .defaultValue(true)
       .build()
    );
 
-   public final Setting<Boolean> chunkCheck = sgSafety.add(new BoolSetting.Builder()
-      .name("chunk-check")
-      .description("Stop adding speed when the chunks ahead have not loaded yet. Terrain you cannot see is terrain nothing can check, and outrunning the loader at 2x is how you end up inside it. Same effect as wall-check: back to vanilla 1.5, boost kept.")
+   public final Setting<Boolean> brakeChunks = sgBrake.add(new BoolSetting.Builder()
+      .name("brake-near-unloaded")
+      .description("Stop adding speed when the chunks ahead have not loaded yet. Terrain you cannot see is terrain nothing can check, and outrunning the loader at 2x is how you end up inside it. Same effect as brake-near-terrain: back to vanilla 1.5, boost kept.")
       .defaultValue(true)
       .build()
    );
 
-   public final Setting<Integer> lookahead = sgSafety.add(new IntSetting.Builder()
-      .name("lookahead")
-      .description("How many ticks ahead wall-check and chunk-check look. The distance is that many ticks at the speed the boost is taking you to - where the rocket's push settles, or your current speed when that is higher - so a slow moment after a turn or a server correction does not shorten it.")
+   public final Setting<Integer> brakeLookahead = sgBrake.add(new IntSetting.Builder()
+      .name("brake-lookahead")
+      .description("How many ticks ahead brake-near-terrain and brake-near-unloaded look. The distance is that many ticks at the speed the boost is taking you to - where the rocket's push settles, or your current speed when that is higher - so a slow moment after a turn or a server correction does not shorten it.")
       .defaultValue(20)
       .min(4)
       .max(80)
       .sliderRange(8, 60)
-      .visible(() -> wallCheck.get() || chunkCheck.get())
+      .visible(() -> brakeTerrain.get() || brakeChunks.get())
       .build()
    );
 
    private final SettingGroup sgBaritone = settings.createGroup("Baritone");
 
-   public final Setting<Boolean> baritoneSync = sgBaritone.add(new BoolSetting.Builder()
-      .name("baritone-sync")
+   public final Setting<Boolean> tellBaritone = sgBaritone.add(new BoolSetting.Builder()
+      .name("tell-baritone")
       .description("Tell Baritone how hard and how long this module really boosts, while it is flying you. Baritone picks its pitch by simulating the boosted trajectory forward and raytracing it against terrain, and it assumes vanilla on both counts: 1.5 per boosted tick, and a boost that ends when the rocket's lifetime does. This module changes both — the multiplier, and cancelling the rocket's removal to hold it open for boost-duration. Left unsaid, the path Baritone cleared is not the path being flown, and it flies into blocks it never checked (its own \"hbonk\"). Turn this off to fly with Baritone the way it was before, which is also how you A/B the difference.")
       .defaultValue(true)
       .build()
@@ -276,66 +276,41 @@ public class RocketBoost extends Module {
       return auto;
    }
 
-   /** Which safety check, if any, is currently holding the multiplier down. Shown on the debug line. */
-   private String limiter = "speed";
+   private String brakeReason = "none";
 
-   /**
-    * Gives back vanilla's 1.5 instead of {@code asked} when there is something in front of us.
-    *
-    * <p>Unlike a module that sets velocity, this one only scales the firework's acceleration, so there
-    * is nothing here to cap to a distance - the meaningful choice is between boosting harder than
-    * vanilla and not. Ahead of a wall, or ahead of chunks that have not arrived, the extra speed is
-    * the whole problem: it is what turns an approach the game would have survived into a crash, and
-    * what outruns the chunk loader. The boost itself is left alone, so a Baritone flight keeps its
-    * rocket and simply stops being faster than the trajectory it planned.
-    */
    private double throttle(double asked) {
-      this.limiter = "speed";
+      this.brakeReason = "none";
       if (asked <= VANILLA_SPEED) return asked;
       if (mc.player == null || mc.world == null || !mc.player.isGliding()) return asked;
-      if (!wallCheck.get() && !chunkCheck.get()) return asked;
+      if (!brakeTerrain.get() && !brakeChunks.get()) return asked;
 
+      double reach = Math.max(8.0, Math.max(mc.player.getVelocity().length(), asked + 0.2) * brakeLookahead.get());
       Vec3d eye = mc.player.getEyePos();
-      Vec3d look = mc.player.getRotationVec(1.0F);
-      // How far the boost carries us in that many ticks: at the speed the rocket's push settles at under this
-      // multiplier, or at our own speed when that is higher, floored so it always looks a little way ahead. The
-      // firework tick leaves velocity at v + 0.1 look + 0.5 (m look - v), m being the constant the mixin replaces,
-      // which settles at (m + 0.2) look. Our own speed alone is what this used to go by, and right after a turn or
-      // a server correction it is low: the lookahead shrank to its floor of 8 blocks and the whole extra went
-      // through towards a wall a second away.
-      double speed = Math.max(mc.player.getVelocity().length(), asked + 0.2);
-      double reach = Math.max(8.0, speed * lookahead.get());
+      Vec3d look = mc.player.getRotationVector();
 
-      double capped = asked;
+      double terrain = brakeTerrain.get() ? terrainDistance(eye, look, reach) : Double.POSITIVE_INFINITY;
+      double chunks = brakeChunks.get() ? unloadedDistance(eye, look, reach) : Double.POSITIVE_INFINITY;
+      double nearest = Math.min(terrain, chunks);
+      if (nearest == Double.POSITIVE_INFINITY) return asked;
 
-      if (wallCheck.get()) {
-         Vec3d end = eye.add(look.multiply(reach));
-         HitResult hit = mc.world.raycast(new RaycastContext(
-            eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
-         if (hit.getType() != HitResult.Type.MISS) {
-            double limit = scaleToDistance(asked, hit.getPos().distanceTo(eye), reach);
-            if (limit < capped) {
-               capped = limit;
-               this.limiter = "wall ahead";
-            }
-         }
+      this.brakeReason = terrain <= chunks ? "terrain close" : "chunks missing";
+      return Math.max(VANILLA_SPEED, scaleToDistance(asked, nearest, reach));
+   }
+
+   private double terrainDistance(Vec3d eye, Vec3d look, double reach) {
+      Vec3d end = eye.add(look.multiply(reach));
+      HitResult hit = mc.world.raycast(new RaycastContext(
+         eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+      if (hit.getType() == HitResult.Type.MISS) return Double.POSITIVE_INFINITY;
+      return hit.getPos().distanceTo(eye);
+   }
+
+   private double unloadedDistance(Vec3d eye, Vec3d look, double reach) {
+      for (double d = 8.0; d <= reach; d += 8.0) {
+         BlockPos at = BlockPos.ofFloored(eye.add(look.multiply(d)));
+         if (!mc.world.getChunkManager().isChunkLoaded(at.getX() >> 4, at.getZ() >> 4)) return d;
       }
-
-      if (chunkCheck.get()) {
-         for (double d = 16.0; d <= reach; d += 16.0) {
-            BlockPos at = BlockPos.ofFloored(eye.add(look.multiply(d)));
-            if (!mc.world.getChunkManager().isChunkLoaded(at.getX() >> 4, at.getZ() >> 4)) {
-               double limit = scaleToDistance(asked, d, reach);
-               if (limit < capped) {
-                  capped = limit;
-                  this.limiter = "unloaded chunks";
-               }
-               break;
-            }
-         }
-      }
-
-      return capped;
+      return Double.POSITIVE_INFINITY;
    }
 
    /**
@@ -810,13 +785,13 @@ public class RocketBoost extends Module {
     * have died, so it is {@code boost-duration} in ticks.
     */
    private void tellBaritoneOurBoost() {
-      if (!baritoneSync.get()) {
+      if (!tellBaritone.get()) {
          restoreBaritoneBoost();
          return;
       }
       // What the mixin last handed the rocket, on every path through getSpeed - the throttle included.
       // Reading the slider instead would be wrong in both modes and for two different reasons: under
-      // auto-speed it is not what the solver decided, and in manual mode it is not what wall-check let
+      // auto-speed it is not what the solver decided, and in manual mode it is not what brake-near-terrain let
       // through. Before the first rocket of a flight there is nothing to report yet, and the slider is
       // the right stand-in, being what getSpeed itself falls back to.
       final double inForce = Double.isNaN(lastAppliedSpeed) ? speedMultiplier.get() : lastAppliedSpeed;
@@ -839,7 +814,7 @@ public class RocketBoost extends Module {
     * while it matters, and it distinguishes "off" from "the loaded Baritone has no such setting".
     */
    private String baritoneSyncStatus() {
-      if (!baritoneSync.get()) return " §8| sync §7off";
+      if (!tellBaritone.get()) return " §8| sync §7off";
       if (baritoneUnavailable) return " §8| sync §cno fork";
       Object mult = baritonePushed.get("elytraFireworkBoostMultiplier");
       Object extra = baritonePushed.get("elytraFireworkExtraBoostTicks");
@@ -1157,8 +1132,8 @@ public class RocketBoost extends Module {
             : String.format(" §8| auto §bx%.2f", lastAutoSpeed);
       }
 
-      if (!"speed".equals(this.limiter)) {
-         msg += " §8| §c" + this.limiter;
+      if (!"none".equals(this.brakeReason)) {
+         msg += " §8| §c" + this.brakeReason;
       }
       msg += baritoneSyncStatus();
 
