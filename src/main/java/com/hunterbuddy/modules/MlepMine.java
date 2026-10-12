@@ -2,7 +2,7 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
-import com.hunterbuddy.modules.regear.util.InventoryManager;
+import com.hunterbuddy.util.ServerSlot;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.util.GrimBreakBalance;
 import java.awt.Color;
@@ -524,7 +524,7 @@ public class MlepMine extends Module {
     * break the server never grants gives the hand back rather than wedging it.
     */
    private static final long TOOL_HOLD_TIMEOUT_MS = 5000L;
-   private InventoryManager inventoryManager;
+   private ServerSlot serverSlot;
 
    public MlepMine() {
       super(HunterBuddyAddon.UTILITY_CATEGORY, "h-mine", "Mines blocks faster");
@@ -563,7 +563,7 @@ public class MlepMine extends Module {
       }
 
       if (this.swapConfig.get() == MlepMine.Swap.SILENT) {
-         this.inventoryManager = InventoryManager.getInstance();
+         this.serverSlot = ServerSlot.get();
       }
 
       this.swappedToSlot = -1;
@@ -593,8 +593,8 @@ public class MlepMine extends Module {
          // module that was just turned off never comes.
          if (this.swappedToSlot != -1 && this.originalSlot != -1) {
             this.swapBack(this.originalSlot);
-         } else if (this.swapConfig.get() == MlepMine.Swap.SILENT && this.inventoryManager != null) {
-            this.inventoryManager.syncToClient();
+         } else if (this.swapConfig.get() == MlepMine.Swap.SILENT && this.serverSlot != null) {
+            this.serverSlot.resync();
          }
 
          this.swappedToSlot = -1;
@@ -1729,11 +1729,11 @@ public class MlepMine extends Module {
                this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
                break;
             case SILENT:
-               if (this.inventoryManager == null) {
-                  this.inventoryManager = InventoryManager.getInstance();
+               if (this.serverSlot == null) {
+                  this.serverSlot = ServerSlot.get();
                }
 
-               this.inventoryManager.setSlot(slot);
+               this.serverSlot.select(slot);
          }
       } finally {
          this.ownSlotChange = false;
@@ -1750,11 +1750,11 @@ public class MlepMine extends Module {
                this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(originalSlot));
                break;
             case SILENT:
-               if (this.inventoryManager == null) {
-                  this.inventoryManager = InventoryManager.getInstance();
+               if (this.serverSlot == null) {
+                  this.serverSlot = ServerSlot.get();
                }
 
-               this.inventoryManager.syncToClient();
+               this.serverSlot.resync();
          }
       } finally {
          this.ownSlotChange = false;

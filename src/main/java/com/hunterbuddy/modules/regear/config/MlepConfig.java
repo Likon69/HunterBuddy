@@ -1,6 +1,5 @@
 package com.hunterbuddy.modules.regear.config;
 
-import com.hunterbuddy.modules.regear.util.EnemyColorManager;
 import com.hunterbuddy.modules.regear.util.Utils;
 import java.util.List;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -65,7 +64,6 @@ public class MlepConfig {
                .description("Color for enemy players in nametags and tablist.")
             .defaultValue(new SettingColor(255, 0, 0, 255)).build()
       );
-      EnemyColorManager.setEnemyColorSetting(enemyColorSetting);
       rotationTurnSpeedMode = sgMlep.add(
          new Builder<MlepConfig.TurnSpeedMode>().name("rotation-turn-speed")
                   .description("How fast smooth rotations turn each tick (degrees). Lower = more human-like, higher = snappier.")
