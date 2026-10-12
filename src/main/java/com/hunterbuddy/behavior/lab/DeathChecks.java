@@ -25,6 +25,8 @@ import com.hunterbuddy.behavior.nodes.WithLease;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
+import com.hunterbuddy.behavior.routine.RoutineContext;
+import com.hunterbuddy.behavior.routine.SessionRoutine;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,6 +43,7 @@ public final class DeathChecks {
         check.preemption();
         check.monitorPriority();
         check.recoveryPriority();
+        check.screenDeath();
         check.engineLifecycle();
         return List.copyOf(check.checks);
     }
@@ -59,7 +62,8 @@ public final class DeathChecks {
         Node task = new Timeout(2_000, new WithLease(Set.of(Resource.LOOK), LeasePolicy.WAIT, action));
         hooks.insert(new HookEntry(Hook.BOT, "bot:lab", Contributor.BOT, 0,
             new Guard(new Condition("work", sensors -> true), task), true, task));
-        hooks.insert(new DeathRoutine().entry());
+        new DeathRoutine().entries(new RoutineContext(sim.ctx())).forEach(hooks::insert);
+        new SessionRoutine().entries(new RoutineContext(sim.ctx())).forEach(hooks::insert);
         hooks.applyPendingChanges(sim.ctx());
         return new TreeRoot(sim.ctx(), hooks, recovery);
     }
@@ -100,9 +104,9 @@ public final class DeathChecks {
         root.start();
         sim.tick(root, SimulatedSensors.idle());
         sim.tick(root, SimulatedSensors.idle());
-        sim.tick(root, SimulatedSensors.capture(true, false, false, false, 0, 0));
+        sim.tick(root, SimulatedSensors.session(false, true, false, true, "DeathScreen"));
         require(root.stopReport().orElseThrow().reason() == ExitReason.DEAD && root.recoveryLevel() == 0,
-            "death wins when no-progress deadline expires on the same tick");
+            "death with open screen wins when no-progress deadline expires on the same tick");
         require(sim.ring().snapshot().stream().noneMatch(event -> event.tick() == sim.ctx().tick()
             && (event.kind() == Kind.MONITOR || event.kind() == Kind.RECOVERY)),
             "death tick starts no redundant recovery attempt");
@@ -117,12 +121,48 @@ public final class DeathChecks {
         for (int i = 0; i < 20 && !(recovery.active() && recovery.level() == 4); i++) sim.tick(root, SimulatedSensors.idle());
         require(recovery.active() && recovery.level() == 4, "death recovery fixture reaches active SafeIdle");
         int ticks = action.ticks();
-        sim.tick(root, SimulatedSensors.capture(true, false, false, false, 0, 0));
+        sim.tick(root, SimulatedSensors.session(false, true, false, true, "DeathScreen"));
         require(root.state() == RootState.STOPPED && root.stopReport().orElseThrow().reason() == ExitReason.DEAD
             && !recovery.active() && recovery.children().stream().noneMatch(Node::active),
-            "DEATH hook interrupts SafeIdle and stops every recovery descendant");
+            "DEATH with open screen interrupts SafeIdle and stops every recovery descendant");
         require(action.ticks() == ticks && sim.ctx().leases().snapshot().isEmpty() && sim.ctx().evidenceSequence() == 0,
             "death during recovery neither resumes work nor retains leases or creates proof");
+    }
+
+    private void screenDeath() {
+        long[] time = {0};
+        List<String> chat = new ArrayList<>();
+        List<String> logs = new ArrayList<>();
+        List<StopReport> reports = new ArrayList<>();
+        BehaviorMessages messages = new BehaviorMessages(chat::add, logs::add, () -> true);
+        BehaviorEngine engine = new BehaviorEngine(new Clock(() -> time[0]), report -> {
+            reports.add(report);
+            messages.stopped(report);
+        }, messages::alert);
+        engine.startBot(new LabBot(LabScenario.WORK));
+        time[0] += 50;
+        engine.tick();
+        time[0] += 50;
+        engine.tick(SimulatedSensors.session(false, true, false, false, "InventoryScreen"));
+        require(engine.snapshot().state() == RootState.PAUSED && reports.isEmpty(),
+            "live foreign screen still pauses without a false death report");
+        time[0] += 50;
+        engine.tick(SimulatedSensors.session(false, true, false, true, "DeathScreen"));
+        require(engine.snapshot().state() == RootState.STOPPED && reports.size() == 1
+            && reports.getFirst().reason() == ExitReason.DEAD && reports.getFirst().nowMs() == time[0],
+            "death screen interrupts existing SESSION pause and reports DEAD on the same tick");
+        require(chat.equals(List.of("Stopped [DEAD]: Player died")) && engine.snapshot().leases() == 0,
+            "death with foreign screen announces exactly once and leaves no lease");
+        time[0] += 50;
+        engine.tick();
+        require(reports.size() == 1 && engine.snapshot().state() == RootState.STOPPED && engine.snapshot().status().completed() == 0,
+            "fast respawn after death screen cannot resume task or erase death report");
+        engine.startBot(new LabBot(LabScenario.WORK));
+        time[0] += 50;
+        engine.tick(SimulatedSensors.session(true, true, false, true, "DeathScreen"));
+        require(reports.size() == 2 && reports.getLast().reason() == ExitReason.DEAD
+            && engine.snapshot().state() == RootState.STOPPED && engine.snapshot().leases() == 0,
+            "simultaneous queue and death screen cannot mask immediate DEAD stop");
     }
 
     private void engineLifecycle() {

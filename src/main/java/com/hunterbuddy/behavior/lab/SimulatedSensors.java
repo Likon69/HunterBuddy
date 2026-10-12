@@ -14,6 +14,14 @@ public final class SimulatedSensors {
         return capture(dead, eating, combat, gliding, blocks, setbacks, 0);
     }
 
+    public static Sensors session(boolean inQueue, boolean screenOpen, boolean screenOurs, boolean dead) {
+        return session(inQueue, screenOpen, screenOurs, dead, "simulated screen");
+    }
+
+    public static Sensors session(boolean inQueue, boolean screenOpen, boolean screenOurs, boolean dead, String screenType) {
+        return capture(dead, false, false, false, 0, 0, 0, inQueue, screenOpen, screenOurs, screenType);
+    }
+
     public static Sensors position(double x) {
         return capture(false, false, false, false, 0, 0, x);
     }
@@ -23,6 +31,11 @@ public final class SimulatedSensors {
     }
 
     private static Sensors capture(boolean dead, boolean eating, boolean combat, boolean gliding, long blocks, long setbacks, double x) {
+        return capture(dead, eating, combat, gliding, blocks, setbacks, x, false, false, false, "none");
+    }
+
+    private static Sensors capture(boolean dead, boolean eating, boolean combat, boolean gliding, long blocks, long setbacks,
+                                   double x, boolean inQueue, boolean screenOpen, boolean screenOurs, String screenType) {
         return new Sensors(
             x, 64, 0, (int) Math.floor(x), 64, 0,
             0, 0, 0, 0, 0,
@@ -30,9 +43,9 @@ public final class SimulatedSensors {
             gliding, false, false,
             dead ? 0 : 20, 20, 300, dead, false,
             -1, 0, 0,
-            false, false, "none", eating,
+            screenOpen, screenOurs, screenOpen ? screenType : "none", eating,
             false, "simulated:world", 1, 1,
-            false, false, true,
+            inQueue, false, true,
             false, false, false,
             false, false, "none",
             false, false, blocks,

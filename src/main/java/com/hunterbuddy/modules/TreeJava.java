@@ -37,6 +37,7 @@ public final class TreeJava extends Module {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TreeJava", "Central behavior tree: simulated LabBot in phase 1.");
         runInMainMenu = true;
         autoSubscribe = false;
+        for (var routine : engine.routines()) routine.onRegister(settings.createGroup("Routine: " + routine.name()));
         MeteorClient.EVENT_BUS.subscribe(new BehaviorEvents(this));
     }
 

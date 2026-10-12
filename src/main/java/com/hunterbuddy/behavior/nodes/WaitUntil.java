@@ -13,6 +13,7 @@ public final class WaitUntil extends Decorator {
     private final int limit;
     private int waiting;
     private boolean ready;
+    private long startedMs;
 
     public WaitUntil(Condition condition, int timeoutTicks) {
         this(condition, timeoutTicks, new Succeed());
@@ -29,6 +30,11 @@ public final class WaitUntil extends Decorator {
     protected void onStart(TickContext ctx) {
         waiting = 0;
         ready = false;
+        startedMs = ctx.nowMs();
+    }
+
+    public long elapsedMs(TickContext ctx) {
+        return Math.max(0, ctx.nowMs() - startedMs);
     }
 
     @Override

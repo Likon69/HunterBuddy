@@ -13,9 +13,13 @@ public final class ProgressMonitor {
     }
 
     public void sample(Clock clock, Sensors sensors) {
+        sample(clock, sensors, true);
+    }
+
+    public void sample(Clock clock, Sensors sensors, boolean countInactivity) {
         if (sensors.setbacks() > setbacks) invalidUntilTick = clock.tick() + 20;
         setbacks = sensors.setbacks();
-        inactiveMs += clock.activeGapMs();
+        if (countInactivity) inactiveMs += clock.activeGapMs();
         activeMs = clock.activeMs();
         if (inactiveMs >= policy.noProgressMs()) firstProgressAt = -1;
     }

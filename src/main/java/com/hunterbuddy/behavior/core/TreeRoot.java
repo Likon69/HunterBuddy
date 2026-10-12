@@ -33,9 +33,9 @@ public final class TreeRoot {
     }
 
     public void start() {
-        if (state == RootState.RUNNING) return;
+        if (state == RootState.RUNNING || state == RootState.PAUSED) return;
         mutate(() -> {
-            if (state == RootState.RUNNING) return;
+            if (state == RootState.RUNNING || state == RootState.PAUSED) return;
             recovery.reset();
             recovering = false;
             beginAttempt();
@@ -88,7 +88,7 @@ public final class TreeRoot {
         ticking = true;
         try {
             ctx.begin(sensors);
-            if (state == RootState.RUNNING) tickRunning(sensors);
+            if (state == RootState.RUNNING || state == RootState.PAUSED) tickRunning(sensors);
             while (!pending.isEmpty()) pending.removeFirst().run();
             hooks.applyPendingChanges(ctx);
             ctx.end();
@@ -121,9 +121,21 @@ public final class TreeRoot {
 
     private void tickRunning(Sensors sensors) {
         synchronizeTaskOwner();
+        boolean session = hookReady(Hook.SESSION);
+        if (session) {
+            ctx.monitor().sample(ctx.clock(), sensors, false);
+            if (recovering && recovery.active()) recovery.halt(ctx, ExitReason.PAUSED);
+            state = RootState.PAUSED;
+            hooks.build().execute(ctx);
+            return;
+        }
+        if (state == RootState.PAUSED) {
+            state = RootState.RUNNING;
+            if (recovering) hooks.build().halt(ctx, ExitReason.GUARD_LOST);
+        }
         ctx.clock().countActive();
         ctx.monitor().sample(ctx.clock(), sensors);
-        if (deathReady()) {
+        if (hookReady(Hook.DEATH)) {
             if (recovering) {
                 recovery.halt(ctx, ExitReason.DEAD);
                 recovering = false;
@@ -157,8 +169,9 @@ public final class TreeRoot {
         }
     }
 
-    private boolean deathReady() {
-        return hooks.entries().stream().anyMatch(entry -> entry.hook() == Hook.DEATH && entry.guard().eligible(ctx));
+    private boolean hookReady(Hook hook) {
+        return hooks.entries().stream().anyMatch(entry -> entry.hook() == hook
+            && entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx));
     }
 
     private void synchronizeTaskOwner() {

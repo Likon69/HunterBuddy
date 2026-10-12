@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.nodes;
 
+import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
@@ -13,6 +14,7 @@ public final class SafeIdle extends Node {
     private final Consumer<String> alert;
     private long started;
     private long frozenAtStart;
+    private long elapsedMs;
 
     public SafeIdle(Consumer<String> alert) {
         super("safe-idle");
@@ -30,7 +32,19 @@ public final class SafeIdle extends Node {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        if (ctx.nowMs() - started - (ctx.clock().frozenMs() - frozenAtStart) >= 30_000) return Success.INSTANCE;
+        if (elapsedMs + ctx.nowMs() - started - (ctx.clock().frozenMs() - frozenAtStart) >= 30_000) return Success.INSTANCE;
         return new Running("safe idle");
+    }
+
+    @Override
+    protected void onStop(TickContext ctx, ExitReason reason) {
+        if (reason == ExitReason.PAUSED || reason == ExitReason.PREEMPTED) {
+            elapsedMs += ctx.nowMs() - started - (ctx.clock().frozenMs() - frozenAtStart);
+        } else elapsedMs = 0;
+    }
+
+    @Override
+    protected void onReset() {
+        elapsedMs = 0;
     }
 }

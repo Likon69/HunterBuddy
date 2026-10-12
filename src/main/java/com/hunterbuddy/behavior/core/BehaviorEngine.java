@@ -13,6 +13,9 @@ import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
+import com.hunterbuddy.behavior.routine.Routine;
+import com.hunterbuddy.behavior.routine.RoutineContext;
+import com.hunterbuddy.behavior.routine.SessionRoutine;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.RingSink;
 import com.hunterbuddy.behavior.trace.Trace;
@@ -31,6 +34,8 @@ public final class BehaviorEngine {
     private final TreeHooks hooks;
     private final Recovery recovery;
     private final TreeRoot root;
+    private final List<Routine> routines = List.of(new SessionRoutine(), new DeathRoutine());
+    private final RoutineContext routineContext;
     private final RingSink ring = new RingSink();
     private final Consumer<StopReport> stopped;
     private final Deque<Runnable> pending = new ArrayDeque<>();
@@ -53,7 +58,8 @@ public final class BehaviorEngine {
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
-        hooks.insert(new DeathRoutine().entry());
+        routineContext = new RoutineContext(ctx);
+        for (Routine routine : routines) routine.entries(routineContext).forEach(hooks::insert);
         hooks.applyPendingChanges(ctx);
         recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "no simulated alternative"), new Succeed(), alerts);
         root = new TreeRoot(ctx, hooks, recovery);
@@ -61,7 +67,7 @@ public final class BehaviorEngine {
 
     public void startBot(Bot next) {
         checkBot(next);
-        if (root.state() == RootState.RUNNING) throw new IllegalStateException("TreeJava is already running; use switch");
+        if (running()) throw new IllegalStateException("TreeJava is already running; use switch");
         if (ticking) throw new IllegalStateException("cannot start during an engine tick");
         try {
             install(next, "started");
@@ -74,7 +80,7 @@ public final class BehaviorEngine {
 
     public void switchBot(Bot next) {
         checkBot(next);
-        if (root.state() != RootState.RUNNING) throw new IllegalStateException("TreeJava is not running");
+        if (!running()) throw new IllegalStateException("TreeJava is not running");
         pending.addLast(() -> {
             stopNow(ExitReason.STOPPED, "Switching to " + next.name());
             install(next, "switched");
@@ -96,6 +102,7 @@ public final class BehaviorEngine {
         hooks.applyPendingChanges(ctx);
         bot = next;
         evidenceBaseline = ctx.evidenceSequence();
+        routines.forEach(routine -> routine.onInstall(routineContext));
         root.start();
         ctx.event(hooks.build(), Kind.BOT, null, reason, next.description());
         ctx.end();
@@ -126,7 +133,7 @@ public final class BehaviorEngine {
 
     public void tick(Sensors simulatedSensors) {
         Objects.requireNonNull(simulatedSensors);
-        if (root.state() != RootState.RUNNING) return;
+        if (!running()) return;
         if (ticking) throw new IllegalStateException("reentrant engine tick");
         ticking = true;
         long started = System.nanoTime();
@@ -134,7 +141,7 @@ public final class BehaviorEngine {
             try {
                 clock.advance();
                 root.tick(simulatedSensors);
-                if (root.state() == RootState.RUNNING) {
+                if (running()) {
                     while (!pending.isEmpty()) pending.removeFirst().run();
                 }
             } catch (RuntimeException ex) {
@@ -162,6 +169,7 @@ public final class BehaviorEngine {
             root.fault(ex);
             report = root.stopReport().orElseThrow();
         }
+        for (Routine routine : routines) routine.onUninstall(report);
         announced = report;
         stopped.accept(report);
     }
@@ -175,7 +183,16 @@ public final class BehaviorEngine {
             active == null ? "none" : active.path(), bot == null ? new BotStatus("none", "none", 0) : bot.status(),
             root.noProgressRemainingMs(), ctx.monitor().windowMs(), actionRemaining == Integer.MAX_VALUE ? 0 : actionRemaining, root.recoveryLevel(),
             ctx.leases().snapshot().size(), ctx.evidenceSequence() - evidenceBaseline, tickMs,
-            events.subList(Math.max(0, events.size() - 5), events.size()), root.stopReport().orElse(null));
+            events.subList(Math.max(0, events.size() - 5), events.size()), root.stopReport().orElse(null),
+            routines.stream().map(Routine::status).toList());
+    }
+
+    public List<Routine> routines() {
+        return routines;
+    }
+
+    private boolean running() {
+        return root.state() == RootState.RUNNING || root.state() == RootState.PAUSED;
     }
 
     private Node deepest(Node node) {

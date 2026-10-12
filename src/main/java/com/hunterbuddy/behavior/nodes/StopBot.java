@@ -7,25 +7,40 @@ import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.Objects;
+import java.util.function.Function;
 
 public final class StopBot extends Node {
     private final ExitReason exitReason;
-    private final String reason;
+    private final Function<TickContext, String> reason;
 
     public StopBot(String reason) {
         this(ExitReason.STOPPED, reason);
     }
 
     public StopBot(ExitReason exitReason, String reason) {
+        this(exitReason, fixedReason(reason));
+    }
+
+    private StopBot(ExitReason exitReason, Function<TickContext, String> reason) {
         super("stop-bot");
         this.exitReason = Objects.requireNonNull(exitReason);
         this.reason = Objects.requireNonNull(reason);
     }
 
+    public static StopBot withReason(Function<TickContext, String> reason) {
+        return new StopBot(ExitReason.STOPPED, reason);
+    }
+
+    private static Function<TickContext, String> fixedReason(String reason) {
+        Objects.requireNonNull(reason);
+        return ctx -> reason;
+    }
+
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        ctx.event(this, Kind.BOT, null, "stop", reason);
-        ctx.stopBot(exitReason, reason);
+        String detail = Objects.requireNonNull(reason.apply(ctx));
+        ctx.event(this, Kind.BOT, null, "stop", detail);
+        ctx.stopBot(exitReason, detail);
         return Success.INSTANCE;
     }
 }
