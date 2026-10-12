@@ -29,7 +29,7 @@ public final class TreeRoot {
         TreeValidator.validate(hooks.build(), recovery);
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
         recovery.taskOwner(hooks.taskOwner());
-        ctx.stopHandler(reason -> stop(ExitReason.STOPPED, reason));
+        ctx.stopReportHandler((reason, detail) -> stop(reason, detail));
     }
 
     public void start() {
@@ -123,6 +123,14 @@ public final class TreeRoot {
         synchronizeTaskOwner();
         ctx.clock().countActive();
         ctx.monitor().sample(ctx.clock(), sensors);
+        if (deathReady()) {
+            if (recovering) {
+                recovery.halt(ctx, ExitReason.DEAD);
+                recovering = false;
+            }
+            hooks.build().execute(ctx);
+            return;
+        }
         if (!recovering && ctx.monitor().fired() && noProgressRemainingMs() == 0) {
             ctx.event(hooks.build(), Kind.MONITOR, FailureCode.NO_PROGRESS, "fired", "inactiveMs=" + ctx.monitor().inactiveMs());
             enterRecovery();
@@ -147,6 +155,10 @@ public final class TreeRoot {
             ctx.event(active, Kind.MONITOR, FailureCode.LOOP, "root loop", "completions=20");
             enterRecovery();
         }
+    }
+
+    private boolean deathReady() {
+        return hooks.entries().stream().anyMatch(entry -> entry.hook() == Hook.DEATH && entry.guard().eligible(ctx));
     }
 
     private void synchronizeTaskOwner() {

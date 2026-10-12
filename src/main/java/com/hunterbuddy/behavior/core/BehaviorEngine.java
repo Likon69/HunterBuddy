@@ -12,6 +12,7 @@ import com.hunterbuddy.behavior.nodes.Fail;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
+import com.hunterbuddy.behavior.routine.DeathRoutine;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.RingSink;
 import com.hunterbuddy.behavior.trace.Trace;
@@ -52,6 +53,8 @@ public final class BehaviorEngine {
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
+        hooks.insert(new DeathRoutine().entry());
+        hooks.applyPendingChanges(ctx);
         recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "no simulated alternative"), new Succeed(), alerts);
         root = new TreeRoot(ctx, hooks, recovery);
     }
@@ -118,6 +121,11 @@ public final class BehaviorEngine {
     }
 
     public void tick() {
+        tick(sensors);
+    }
+
+    public void tick(Sensors simulatedSensors) {
+        Objects.requireNonNull(simulatedSensors);
         if (root.state() != RootState.RUNNING) return;
         if (ticking) throw new IllegalStateException("reentrant engine tick");
         ticking = true;
@@ -125,7 +133,7 @@ public final class BehaviorEngine {
         try {
             try {
                 clock.advance();
-                root.tick(sensors);
+                root.tick(simulatedSensors);
                 if (root.state() == RootState.RUNNING) {
                     while (!pending.isEmpty()) pending.removeFirst().run();
                 }

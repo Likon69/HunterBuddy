@@ -5,6 +5,7 @@ import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.Trace;
 import com.hunterbuddy.behavior.trace.TraceEvent;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public final class TickContext {
@@ -20,7 +21,7 @@ public final class TickContext {
     private Sensors sensors;
     private Node current;
     private long evidenceSequence;
-    private Consumer<String> stopHandler;
+    private BiConsumer<ExitReason, String> stopHandler;
     private int monitorDepth;
 
     public TickContext(Clock clock, Blackboard blackboard, ResourceArbiter leases, Trace trace, ProgressPolicy policy) {
@@ -134,11 +135,20 @@ public final class TickContext {
     }
 
     public void stopHandler(Consumer<String> handler) {
+        Objects.requireNonNull(handler);
+        stopReportHandler((reason, detail) -> handler.accept(detail));
+    }
+
+    public void stopReportHandler(BiConsumer<ExitReason, String> handler) {
         stopHandler = Objects.requireNonNull(handler);
     }
 
     public void stopBot(String reason) {
+        stopBot(ExitReason.STOPPED, reason);
+    }
+
+    public void stopBot(ExitReason reason, String detail) {
         if (stopHandler == null) throw new IllegalStateException("no bot stop handler installed");
-        stopHandler.accept(Objects.requireNonNull(reason));
+        stopHandler.accept(Objects.requireNonNull(reason), Objects.requireNonNull(detail));
     }
 }
