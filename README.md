@@ -1,6 +1,6 @@
 # HunterBuddy
 
-> **HunterBuddy is built on open-source addons, credited at the bottom of this page with their licenses. If you think something in this repository is yours, open an issue and it will be looked at.**
+> **Every line in this repository was written by us, or comes from open-source projects whose licenses we actually read. If you came here looking for your code: it isn't here. Take your time though, reading it is free. That's how open source works.**
 
 A Meteor Client addon for hunting, flight, visuals, inventory logistics, and utility tools.
 

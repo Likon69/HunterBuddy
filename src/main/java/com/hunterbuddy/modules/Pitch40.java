@@ -362,7 +362,9 @@ public class Pitch40 extends Module {
       this.rocketBoostEnabledByUs = false;
 
       if ((Boolean)this.chestSwap.get() && this.mc.player != null && this.mc.player.isGliding()) {
-         this.handBackGlide();
+         if (!this.handBackGlide()) {
+            GliderSwap.wearGlider(this.mc.player);
+         }
       }
       GlideClearHold.release(this);
       this.releaseChestSwapJump();
@@ -829,7 +831,8 @@ public class Pitch40 extends Module {
          return;
       }
 
-      if ((Boolean)this.chestSwap.get()) {
+      if ((Boolean)this.chestSwap.get()
+         && !(GliderSwap.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) && GliderSwap.chestPieceHand(this.mc.player) == null)) {
          this.rocketPending = true;
          return;
       }

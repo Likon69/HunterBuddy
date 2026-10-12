@@ -1,7 +1,5 @@
 accessWidener	v1	named
 
-accessible	method	net/minecraft/client/texture/NativeImage setColor (III)V
-
 # HunterBuddy-specific (not in mlep)
 accessible	method	net/minecraft/client/gui/screen/ingame/HandledScreen onMouseClick (Lnet/minecraft/screen/slot/Slot;IILnet/minecraft/screen/slot/SlotActionType;)V
 accessible	field	net/minecraft/client/gui/screen/ingame/MerchantScreen selectedIndex I

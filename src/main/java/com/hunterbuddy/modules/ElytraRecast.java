@@ -315,7 +315,10 @@ public class ElytraRecast extends Module {
       this.tickCounter = 0;
       this.rocketTickCounter = (Integer)this.rocketDelay.get();
       this.usedActivationRocket = false;
+      com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor recastInv = (com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor) this.mc.player.getInventory();
+      int recastSlot = recastInv.getSelectedSlot();
       com.hunterbuddy.util.GliderSwap.wearGlider(this.mc.player);
+      recastInv.setSelectedSlot(recastSlot);
       if (this.mc.player.isGliding()) {
          this.enterAscending();
       } else {
