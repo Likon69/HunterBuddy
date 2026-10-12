@@ -83,6 +83,7 @@ public final class SelfCheck {
         check.checks.addAll(TargetStabilityChecks.run());
         check.checks.addAll(RootReportChecks.run());
         check.checks.addAll(EngineChecks.run());
+        check.checks.addAll(ObservabilityChecks.run());
         return new SelfCheckReport(400, check.checks);
     }
 

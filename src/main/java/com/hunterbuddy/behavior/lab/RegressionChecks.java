@@ -317,7 +317,9 @@ public final class RegressionChecks {
             "SafeIdle restarts three times then StopBot ends root: state=" + root.state() + " restarts=" + recovery.restartCount());
         require(task.starts() <= 5, "automatic recovery preserves Action loop budget");
         require(resumedTicks == 3 && !awaitingResume, "all three automatic restarts actually resume BOT");
-        require(sim.ctx().leases().snapshot().isEmpty() && alerts.contains("automatic restart limit reached"), "restart exhaustion releases resources and alerts");
+        require(sim.ctx().leases().snapshot().isEmpty() && alerts.size() == 4
+            && root.stopReport().orElseThrow().detail().equals("automatic restart limit reached"),
+            "restart exhaustion releases resources and reports stop separately from SafeIdle alerts");
         require(sim.ctx().evidenceSequence() == 0 && sim.ctx().monitor().inactiveMs() > 120_000, "recovery restarts never manufacture progress or erase inactivity");
         require(sim.ctx().monitor().fired() && sim.ctx().monitor().remainingMs() == 0, "recovery preserves expired monitor evidence state");
     }

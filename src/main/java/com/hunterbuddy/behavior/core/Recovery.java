@@ -32,7 +32,7 @@ public final class Recovery extends Composite {
             new Timeout(12_000, new Sequence("alternative", new MarkFailed(TickContext.CURRENT_TARGET, ctx -> target.taskOwner()),
                 new ResetBudget("all", ctx -> target.taskOwner()), levelThree, new Succeed())),
             new SafeIdle(alert),
-            new StopBot("automatic restart limit reached", alert));
+            new StopBot("automatic restart limit reached"));
         this.target = target;
         this.levelTwo = levelTwo;
         this.levelThree = levelThree;

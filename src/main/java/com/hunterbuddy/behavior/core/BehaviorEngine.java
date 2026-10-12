@@ -35,6 +35,7 @@ public final class BehaviorEngine {
     private final Deque<Runnable> pending = new ArrayDeque<>();
     private final Sensors sensors = SimulatedSensors.idle();
     private Bot bot;
+    private String botOwner;
     private StopReport announced;
     private boolean ticking;
     private long evidenceBaseline;
@@ -87,6 +88,7 @@ public final class BehaviorEngine {
         if (entry.hook() != Hook.BOT || entry.contributor() != Contributor.BOT
             || !entry.owner().equals("bot:" + next.name())) throw new IllegalArgumentException("invalid bot entry");
         TreeValidator.validate(List.of(entry));
+        botOwner = entry.owner();
         hooks.insert(entry);
         hooks.applyPendingChanges(ctx);
         bot = next;
@@ -145,10 +147,8 @@ public final class BehaviorEngine {
         StopReport report = root.stopReport().orElseThrow();
         if (announced == report) return;
         try {
-            hooks.remove(report.owner());
-            hooks.applyPendingChanges(ctx);
-            ctx.bb().removeOwner(report.owner());
-            ctx.budgets().removeOwner(report.owner());
+            BotCleanup.remove(ctx, hooks, botOwner);
+            botOwner = null;
             ctx.end();
         } catch (RuntimeException ex) {
             root.fault(ex);
