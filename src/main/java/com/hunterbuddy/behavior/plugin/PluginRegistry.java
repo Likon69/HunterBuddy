@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
+import com.hunterbuddy.behavior.trace.Kind;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -27,6 +28,7 @@ public final class PluginRegistry {
     private final Map<String, List<HookEntry>> entries = new LinkedHashMap<>();
     private final Set<String> enabled = new LinkedHashSet<>();
     private final Set<String> slowWarned = new LinkedHashSet<>();
+    private final Map<String, SlowPulse> slowPulses = new LinkedHashMap<>();
     private final Set<String> pendingCleanup = new LinkedHashSet<>();
 
     public PluginRegistry(TickContext ticks, TreeHooks hooks, Consumer<String> alert) {
@@ -71,10 +73,14 @@ public final class PluginRegistry {
             built = ticks.plugin(context.owner(), () -> List.copyOf(plugin.entries(context)));
         }
         validate(name, built);
+        if (!entries.containsKey(name)) {
+            built.forEach(entry -> entry.guard().availableWhen(() -> enabled.contains(name)));
+        }
         built.forEach(hooks::insert);
         entries.put(name, built);
         enabled.add(name);
         slowWarned.remove(name);
+        slowPulses.remove(name);
         pendingCleanup.remove(name);
     }
 
@@ -104,6 +110,7 @@ public final class PluginRegistry {
         hooks.remove(owner(name));
         pendingCleanup.add(name);
         slowWarned.remove(name);
+        slowPulses.remove(name);
     }
 
     public void applyPendingCleanup() {
@@ -126,14 +133,39 @@ public final class PluginRegistry {
                     return null;
                 });
             } catch (RuntimeException ex) {
-                throw new IllegalStateException("Plugin " + name + " pulse: " + ex.getClass().getSimpleName()
-                    + ": " + Objects.toString(ex.getMessage(), ""), ex);
+                disableAndReport(name, "disabled", "pulse failed: " + ex.getClass().getSimpleName()
+                    + ": " + Objects.toString(ex.getMessage(), ""));
+                continue;
             }
             long elapsed = nanos.getAsLong() - started;
-            if (elapsed > 200_000 && slowWarned.add(name)) {
+            if (!enabled.contains(name)) continue;
+            if (elapsed <= 200_000) {
+                slowPulses.remove(name);
+                continue;
+            }
+            SlowPulse previous = slowPulses.get(name);
+            int count = previous == null ? 1 : previous.tick() == ticks.tick() ? previous.count()
+                : previous.tick() == ticks.tick() - 1 ? previous.count() + 1 : 1;
+            slowPulses.put(name, new SlowPulse(ticks.tick(), count));
+            if (count >= 3) {
+                disableAndReport(name, "suspended", String.format(Locale.ROOT,
+                    "pulse exceeded 0.2 ms for three consecutive ticks (%.3f ms)", elapsed / 1_000_000.0));
+                continue;
+            }
+            if (slowWarned.add(name)) {
                 alert.accept(String.format(Locale.ROOT, "Plugin %s pulse took %.3f ms (0.2 ms limit)", name, elapsed / 1_000_000.0));
             }
         }
+    }
+
+    private void disableAndReport(String name, String reason, String detail) {
+        disable(name);
+        String message = "Plugin " + name + " " + reason + ": " + detail;
+        ticks.event(hooks.build(), Kind.HOOK, null, "plugin " + reason, message);
+        alert.accept(message);
+    }
+
+    private record SlowPulse(long tick, int count) {
     }
 
     private Plugin requirePlugin(String name) {

@@ -7,10 +7,12 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.TickContext;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 public final class Guard extends Decorator {
     private Condition enter;
     private Condition stay;
+    private BooleanSupplier available = () -> true;
     private int minTicks;
     private long started;
     private int failureCooldown;
@@ -44,6 +46,12 @@ public final class Guard extends Decorator {
         return this;
     }
 
+    public Guard availableWhen(BooleanSupplier condition) {
+        requireInactive();
+        available = Objects.requireNonNull(condition);
+        return this;
+    }
+
     public Guard onFailureCooldown(int ticks) {
         requireInactive();
         if (ticks < 0) throw new IllegalArgumentException("negative failure cooldown");
@@ -61,6 +69,7 @@ public final class Guard extends Decorator {
     }
 
     public boolean eligible(TickContext ctx) {
+        if (!available.getAsBoolean()) return false;
         if (!flightAware && ctx.sensors().gliding()) return false;
         if (!active()) {
             boolean eligible = enter.test(ctx.sensors());
@@ -97,7 +106,8 @@ public final class Guard extends Decorator {
 
     @Override
     protected void onStart(TickContext ctx) {
-        entered = ctx.tick() >= retryUntilTick && enter.test(ctx.sensors()) && (flightAware || !ctx.sensors().gliding());
+        entered = available.getAsBoolean() && ctx.tick() >= retryUntilTick
+            && enter.test(ctx.sensors()) && (flightAware || !ctx.sensors().gliding());
         started = ctx.tick();
     }
 
