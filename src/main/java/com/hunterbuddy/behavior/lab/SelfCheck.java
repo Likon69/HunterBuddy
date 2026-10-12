@@ -435,7 +435,7 @@ public final class SelfCheck {
         hooks.applyPendingChanges(sim.ctx());
         TreeRoot root = new TreeRoot(sim.ctx(), hooks, recovery());
         root.start();
-        for (int i = 0; i < 8; i++) sim.tick(root, SimulatedSensors.idle());
+        for (int i = 0; i < 20 && root.recoveryLevel() != 4; i++) sim.tick(root, SimulatedSensors.idle());
         require(root.recoveryLevel() == 4 && sim.ctx().leases().snapshot().isEmpty(), "no progress reaches SafeIdle within four recovery levels");
         List<TraceEvent> events = sim.ring().snapshot();
         require(events.stream().anyMatch(event -> event.kind() == Kind.MONITOR)

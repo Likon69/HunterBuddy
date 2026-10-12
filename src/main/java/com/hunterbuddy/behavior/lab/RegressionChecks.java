@@ -57,6 +57,7 @@ public final class RegressionChecks {
         check.faults();
         check.recoveryOwner();
         check.restarts();
+        check.recoveryAttempts();
         check.recoveryProgress();
         return List.copyOf(check.checks);
     }
@@ -295,13 +296,61 @@ public final class RegressionChecks {
         Recovery recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "none"), new Succeed(), alerts::add);
         TreeRoot root = new TreeRoot(sim.ctx(), hooks, recovery);
         root.start();
-        for (int i = 0; i < 3_000 && root.state() != RootState.STOPPED; i++) sim.tick(root, SimulatedSensors.idle());
+        int observedRestarts = 0;
+        int resumedTicks = 0;
+        boolean awaitingResume = false;
+        for (int i = 0; i < 3_000 && root.state() != RootState.STOPPED; i++) {
+            sim.tick(root, SimulatedSensors.idle());
+            if (awaitingResume) {
+                require(hooks.build().successfulHook() == null && sim.ring().snapshot().stream()
+                    .anyMatch(event -> event.tick() == sim.ctx().tick() && event.hook() == Hook.BOT && event.kind() == Kind.START),
+                    "automatic restart " + observedRestarts + " executes BOT on next tick");
+                resumedTicks++;
+                awaitingResume = false;
+            }
+            if (recovery.restartCount() > observedRestarts) {
+                observedRestarts = recovery.restartCount();
+                awaitingResume = true;
+            }
+        }
         require(root.state() == RootState.STOPPED && recovery.restartCount() == 3,
             "SafeIdle restarts three times then StopBot ends root: state=" + root.state() + " restarts=" + recovery.restartCount());
         require(task.starts() <= 5, "automatic recovery preserves Action loop budget");
+        require(resumedTicks == 3 && !awaitingResume, "all three automatic restarts actually resume BOT");
         require(sim.ctx().leases().snapshot().isEmpty() && alerts.contains("automatic restart limit reached"), "restart exhaustion releases resources and alerts");
         require(sim.ctx().evidenceSequence() == 0 && sim.ctx().monitor().inactiveMs() > 120_000, "recovery restarts never manufacture progress or erase inactivity");
-        require(sim.ctx().monitor().fired() && sim.ctx().monitor().remainingMs() == 0, "recovery never extends expired inactivity window without evidence");
+        require(sim.ctx().monitor().fired() && sim.ctx().monitor().remainingMs() == 0, "recovery preserves expired monitor evidence state");
+    }
+
+    private void recoveryAttempts() {
+        Simulation sim = new Simulation(new ProgressPolicy(Set.of(EvidenceKind.MILESTONE), 100));
+        TreeHooks hooks = new TreeHooks(message -> { });
+        SimulatedAction task = new SimulatedAction("resuming-task");
+        hooks.insert(entry(Hook.BOT, "bot:lab", Contributor.BOT, always(leased(task))));
+        hooks.applyPendingChanges(sim.ctx());
+        Recovery recovery = new Recovery(new Succeed(), new Succeed(), message -> { });
+        TreeRoot root = new TreeRoot(sim.ctx(), hooks, recovery);
+        root.start();
+        for (int i = 0; i < 3; i++) sim.tick(root, SimulatedSensors.idle());
+        require(root.recoveryLevel() == 1 && task.starts() == 1, "first recovery follows expired window");
+        sim.tick(root, SimulatedSensors.idle());
+        require(task.starts() == 2 && root.recoveryLevel() == 1, "successful level one really resumes task");
+        require(sim.ctx().monitor().fired() && sim.ctx().monitor().inactiveMs() == 150
+            && sim.ctx().evidenceSequence() == 0, "resuming task preserves inactivity without fabricated evidence");
+        sim.tick(root, SimulatedSensors.idle());
+        require(root.recoveryLevel() == 2 && task.starts() == 2, "retry window remains bounded without progress");
+        sim.tick(root, SimulatedSensors.idle());
+        require(task.starts() == 3, "successful level two really resumes task");
+        sim.tick(root, SimulatedSensors.idle());
+        sim.tick(root, SimulatedSensors.idle());
+        require(root.recoveryLevel() == 3 && task.starts() == 4, "successful level three really resumes task");
+        root.stop(ExitReason.STOPPED);
+        root.start();
+        sim.tick(root, SimulatedSensors.idle());
+        require(task.starts() == 5 && root.recoveryLevel() == 0, "manual start allows bounded attempt despite expired monitor");
+        require(sim.ctx().evidenceSequence() == 0 && sim.ctx().monitor().inactiveMs() == 400,
+            "manual start never erases inactivity or manufactures proof");
+        root.stop(ExitReason.STOPPED);
     }
 
     private void recoveryProgress() {
@@ -319,7 +368,7 @@ public final class RegressionChecks {
         successRoot.start();
         for (int i = 0; i < 3; i++) success.tick(successRoot, SimulatedSensors.idle());
         require(successRoot.recoveryLevel() == 1, "recovery level retained before task success");
-        success.tick(successRoot, SimulatedSensors.idle());
+        for (int i = 0; i < 2; i++) success.tick(successRoot, SimulatedSensors.idle());
         require(successRoot.recoveryLevel() == 2 && success.ctx().evidenceSequence() == 1,
             "confirmed recovery progress permits task to resume without clearing level");
         completed[0] = true;
@@ -340,7 +389,7 @@ public final class RegressionChecks {
         Recovery sustainedRecovery = new Recovery(task, new Succeed(), message -> { });
         TreeRoot progressRoot = new TreeRoot(progress.ctx(), progressHooks, sustainedRecovery);
         progressRoot.start();
-        for (int i = 0; i < 3; i++) progress.tick(progressRoot, SimulatedSensors.idle());
+        for (int i = 0; i < 5; i++) progress.tick(progressRoot, SimulatedSensors.idle());
         prove[0] = true;
         for (int i = 0; i < 1_200; i++) progress.tick(progressRoot, SimulatedSensors.idle());
         require(progressRoot.recoveryLevel() == 2, "recovery level waits 60 seconds of accepted progress");

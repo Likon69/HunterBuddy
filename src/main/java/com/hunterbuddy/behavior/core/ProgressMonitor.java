@@ -43,6 +43,10 @@ public final class ProgressMonitor {
         return Math.max(0, policy.noProgressMs() - inactiveMs);
     }
 
+    public long windowMs() {
+        return policy.noProgressMs();
+    }
+
     public boolean sustainedFor(long ms) {
         return firstProgressAt >= 0 && activeMs - firstProgressAt >= ms && inactiveMs < policy.noProgressMs();
     }

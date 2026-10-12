@@ -17,6 +17,7 @@ public final class TreeRoot {
     private boolean ticking;
     private boolean recovering;
     private long evidenceSequence;
+    private long attemptBaselineMs;
 
     public TreeRoot(TickContext ctx, TreeHooks hooks, Recovery recovery) {
         this.ctx = Objects.requireNonNull(ctx);
@@ -35,7 +36,7 @@ public final class TreeRoot {
             if (state == RootState.RUNNING) return;
             recovery.reset();
             recovering = false;
-            completions.clear();
+            beginAttempt();
             state = RootState.RUNNING;
         });
     }
@@ -110,7 +111,8 @@ public final class TreeRoot {
         synchronizeTaskOwner();
         ctx.clock().countActive();
         ctx.monitor().sample(ctx.clock(), sensors);
-        if (!recovering && ctx.monitor().fired()) {
+        if (!recovering && ctx.monitor().fired()
+            && ctx.monitor().inactiveMs() - attemptBaselineMs >= ctx.monitor().windowMs()) {
             ctx.event(hooks.build(), Kind.MONITOR, FailureCode.NO_PROGRESS, "fired", "inactiveMs=" + ctx.monitor().inactiveMs());
             enterRecovery();
         }
@@ -118,6 +120,7 @@ public final class TreeRoot {
         NodeResult result = active.execute(ctx);
         if (ctx.evidenceSequence() != evidenceSequence) {
             evidenceSequence = ctx.evidenceSequence();
+            attemptBaselineMs = 0;
             completions.clear();
             if (ctx.monitor().sustainedFor(60_000)) recovery.provenProgress();
         }
@@ -142,6 +145,7 @@ public final class TreeRoot {
         recovery.reset();
         recovering = false;
         recovery.taskOwner(owner);
+        beginAttempt();
     }
 
     private void completeRecovery(NodeResult result) {
@@ -149,11 +153,19 @@ public final class TreeRoot {
             recovery.next(ctx);
             return;
         }
+        if (recovery.level() == 4 && !recovery.restartReady()) return;
         recovering = false;
+        beginAttempt();
+        ctx.event(hooks.build(), Kind.RECOVERY, null, "task resume",
+            "windowMs=" + ctx.monitor().windowMs() + " inactiveMs=" + ctx.monitor().inactiveMs());
         if (recovery.restartReady()) {
             recovery.reset();
-            completions.clear();
         }
+    }
+
+    private void beginAttempt() {
+        attemptBaselineMs = ctx.monitor().inactiveMs();
+        completions.clear();
     }
 
     private void enterRecovery() {
