@@ -69,7 +69,7 @@ public final class UtilityRetryChecks {
         List<String> stops = new ArrayList<>();
         sim.ctx().stopHandler(stops::add);
         SimulatedAction action = failing("deposit");
-        UtilitySelector selector = prepare(new UtilitySelector("deposit", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("deposit",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> "chest")));
         require(sim.tick(selector) instanceof Running && action.starts() == 1,
             "first utility failure waits without stopping bot");
@@ -99,7 +99,7 @@ public final class UtilityRetryChecks {
         boolean[] succeeds = {false};
         SimulatedAction action = new SimulatedAction("work", ctx -> succeeds[0]
             ? Success.INSTANCE : new Failure(FailureCode.NOT_CONFIRMED, "missing"));
-        UtilitySelector selector = prepare(new UtilitySelector("task", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("task",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> "a")));
         sim.tick(selector);
         advance(sim, 30_000);
@@ -120,7 +120,7 @@ public final class UtilityRetryChecks {
         sim.ctx().stopHandler(stops::add);
         String[] target = {"a"};
         SimulatedAction action = failing("work");
-        UtilitySelector selector = prepare(new UtilitySelector("task", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("task",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> target[0])));
         sim.tick(selector);
         advance(sim, 30_000);
@@ -137,7 +137,7 @@ public final class UtilityRetryChecks {
         sim = new Simulation();
         SimulatedAction abandoned = failing("abandoned");
         SimulatedAction fallback = new SimulatedAction("fallback");
-        selector = prepare(new UtilitySelector("alternatives", 0.5,
+        selector = prepare(new UtilitySelector("alternatives",
             new UtilityOption(bounded(abandoned), ctx -> 2, ctx -> "chest"),
             new UtilityOption(bounded(fallback), ctx -> 0.1, ctx -> "other")));
         sim.tick(selector);
@@ -154,7 +154,7 @@ public final class UtilityRetryChecks {
     private void stop() {
         Simulation sim = new Simulation();
         SimulatedAction action = failing("deposit");
-        UtilitySelector selector = new UtilitySelector("delivery", 0.5,
+        UtilitySelector selector = new UtilitySelector("delivery",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> "chest"));
         TreeHooks hooks = new TreeHooks(message -> { throw new IllegalStateException(message); });
         Guard guard = new Guard(new Condition("always", sensors -> true), selector);

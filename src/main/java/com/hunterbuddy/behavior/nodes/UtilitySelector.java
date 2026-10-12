@@ -18,7 +18,6 @@ import java.util.Objects;
 
 public final class UtilitySelector extends Composite {
     private final List<UtilityOption> options;
-    private final double failurePenalty;
     private final String[] previousTargets;
     private List<UtilityScore> scores = List.of();
     private int selected = -1;
@@ -26,10 +25,8 @@ public final class UtilitySelector extends Composite {
     private int heldTicks;
     private long lastHeldTick;
 
-    public UtilitySelector(String name, double failurePenalty, UtilityOption... options) {
+    public UtilitySelector(String name, UtilityOption... options) {
         super(name, nodes(options));
-        if (!Double.isFinite(failurePenalty) || failurePenalty <= 0) throw new IllegalArgumentException("invalid failure penalty");
-        this.failurePenalty = failurePenalty;
         this.options = List.of(options);
         previousTargets = new String[options.length];
     }
@@ -85,8 +82,7 @@ public final class UtilitySelector extends Composite {
             double raw = option.score().applyAsDouble(ctx);
             UtilityFailure failure = ctx.utilityFailures().get(ctx.owner(), option.node().path(), target);
             boolean waiting = failure.waiting(ctx.nowMs());
-            double effective = Double.isFinite(raw)
-                ? raw - (waiting ? failure.consecutive() * failurePenalty : 0) : Double.NEGATIVE_INFINITY;
+            double effective = Double.isFinite(raw) && !waiting && !failure.abandoned() ? raw : Double.NEGATIVE_INFINITY;
             next.add(new UtilityScore(option.node().path(), target, raw, failure.consecutive(), effective,
                 failure.retryAtMs(), waiting, failure.abandoned()));
         }

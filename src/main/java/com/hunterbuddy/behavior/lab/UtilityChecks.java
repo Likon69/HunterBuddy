@@ -54,7 +54,7 @@ public final class UtilityChecks {
         Simulation sim = new Simulation();
         SimulatedAction first = new SimulatedAction("first");
         SimulatedAction second = new SimulatedAction("second");
-        UtilitySelector selector = prepare(new UtilitySelector("tasks", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("tasks",
             new UtilityOption(bounded(first), ctx -> 0.5, ctx -> "a"),
             new UtilityOption(bounded(second), ctx -> 0.5, ctx -> "b")));
         require(sim.tick(selector) instanceof Running && first.starts() == 1 && second.starts() == 0,
@@ -63,12 +63,12 @@ public final class UtilityChecks {
             "utility exposes immutable scores and selected path");
         selector.halt(sim.ctx(), ExitReason.STOPPED);
 
-        selector = prepare(new UtilitySelector("empty", 0.5));
+        selector = prepare(new UtilitySelector("empty"));
         require(sim.tick(selector) instanceof Failure failure && failure.code() == FailureCode.NO_OPTION,
             "empty utility fails NO_OPTION");
         SimulatedAction invalid = new SimulatedAction("invalid");
         SimulatedAction eligible = new SimulatedAction("eligible", ctx -> Success.INSTANCE);
-        selector = prepare(new UtilitySelector("nonfinite", 0.5,
+        selector = prepare(new UtilitySelector("nonfinite",
             new UtilityOption(bounded(invalid), ctx -> Double.POSITIVE_INFINITY, ctx -> "invalid"),
             new UtilityOption(bounded(new SimulatedAction("nan")), ctx -> Double.NaN, ctx -> "nan"),
             new UtilityOption(bounded(eligible), ctx -> 0.1, ctx -> "eligible")));
@@ -81,7 +81,7 @@ public final class UtilityChecks {
         double[] score = {0.2};
         SimulatedAction current = new SimulatedAction("current");
         SimulatedAction challenger = new SimulatedAction("challenger");
-        UtilitySelector selector = prepare(new UtilitySelector("tasks", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("tasks",
             new UtilityOption(bounded(current), ctx -> 0.5, ctx -> "current"),
             new UtilityOption(bounded(challenger), ctx -> score[0], ctx -> "challenger")));
         sim.tick(selector);
@@ -105,7 +105,7 @@ public final class UtilityChecks {
         double[] enabled = {1};
         current = new SimulatedAction("no-longer-eligible");
         challenger = new SimulatedAction("fallback");
-        selector = prepare(new UtilitySelector("eligibility", 0.5,
+        selector = prepare(new UtilitySelector("eligibility",
             new UtilityOption(bounded(current), ctx -> enabled[0], ctx -> "current"),
             new UtilityOption(bounded(challenger), ctx -> 0.1, ctx -> "fallback")));
         sim.tick(selector);
@@ -121,7 +121,7 @@ public final class UtilityChecks {
         SimulatedAction refused = new SimulatedAction("refused", ctx -> new Failure(FailureCode.REFUSED, "refused"));
         SimulatedAction fallback = new SimulatedAction("fallback");
         String[] target = {"a"};
-        UtilitySelector selector = prepare(new UtilitySelector("tasks", 1,
+        UtilitySelector selector = prepare(new UtilitySelector("tasks",
             new UtilityOption(bounded(refused), ctx -> 1, ctx -> target[0]),
             new UtilityOption(bounded(fallback), ctx -> 0.1, ctx -> "fallback")));
         require(sim.tick(selector) instanceof Running && refused.starts() == 1 && fallback.starts() == 1,
@@ -152,7 +152,7 @@ public final class UtilityChecks {
 
         sim = new Simulation();
         refused = new SimulatedAction("still-positive", ctx -> new Failure(FailureCode.NOT_CONFIRMED, "missing"));
-        selector = prepare(new UtilitySelector("bounded-rescore", 0.1,
+        selector = prepare(new UtilitySelector("bounded-rescore",
             new UtilityOption(bounded(refused), ctx -> 1, ctx -> "a")));
         require(sim.tick(selector) instanceof Running && refused.starts() == 1,
             "utility tries each option at most once per tick despite positive score");
@@ -163,7 +163,7 @@ public final class UtilityChecks {
         Simulation sim = new Simulation();
         String[] target = {"a"};
         SimulatedAction action = new SimulatedAction("target-work");
-        UtilitySelector selector = prepare(new UtilitySelector("tasks", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("tasks",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> target[0])));
         sim.tick(selector);
         target[0] = "b";
@@ -174,7 +174,7 @@ public final class UtilityChecks {
 
         int[] visits = {0};
         target[0] = "first";
-        selector = prepare(new UtilitySelector("resumable-target", 0.5,
+        selector = prepare(new UtilitySelector("resumable-target",
             new UtilityOption(new Sequence("mission",
                 bounded(new SimulatedAction("arrive", ctx -> {
                     visits[0]++;
@@ -198,7 +198,7 @@ public final class UtilityChecks {
             return new Failure(FailureCode.NOT_CONFIRMED, "missing");
         });
         target[0] = "original";
-        selector = prepare(new UtilitySelector("failure-target", 1,
+        selector = prepare(new UtilitySelector("failure-target",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> target[0])));
         sim.tick(selector);
         require(selector.scores().getFirst().target().equals("next") && selector.scores().getFirst().failures() == 0,
@@ -214,7 +214,7 @@ public final class UtilityChecks {
         double[] currentScore = {1};
         SimulatedAction first = new SimulatedAction("first");
         SimulatedAction second = new SimulatedAction("second");
-        UtilitySelector selector = prepare(new UtilitySelector("resources", 0.5,
+        UtilitySelector selector = prepare(new UtilitySelector("resources",
             new UtilityOption(new WithLease(Set.of(Resource.SLOT), LeasePolicy.FAIL_FAST, bounded(first)),
                 ctx -> currentScore[0], ctx -> "a"),
             new UtilityOption(new WithLease(Set.of(Resource.SLOT), LeasePolicy.FAIL_FAST, bounded(second)),
@@ -228,7 +228,7 @@ public final class UtilityChecks {
 
         boolean[] faulty = {false};
         first = new SimulatedAction("faulted-work");
-        selector = prepare(new UtilitySelector("score-fault", 0.5,
+        selector = prepare(new UtilitySelector("score-fault",
             new UtilityOption(new WithLease(Set.of(Resource.SLOT), LeasePolicy.WAIT, bounded(first)), ctx -> {
                 if (faulty[0]) throw new IllegalStateException("score fault");
                 return 1;
@@ -249,7 +249,7 @@ public final class UtilityChecks {
             throw new IllegalStateException("cleanup fault");
         });
         second = new SimulatedAction("replacement");
-        selector = prepare(new UtilitySelector("cleanup-fault", 0.5,
+        selector = prepare(new UtilitySelector("cleanup-fault",
             new UtilityOption(new WithLease(Set.of(Resource.SLOT), LeasePolicy.FAIL_FAST, bounded(first)),
                 ctx -> currentScore[0], ctx -> "a"),
             new UtilityOption(bounded(second), ctx -> 0.5, ctx -> "b")));
