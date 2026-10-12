@@ -43,4 +43,8 @@ public final class Timeout extends Decorator {
         ticks = 0;
         resume = false;
     }
+
+    public int remainingTicks() {
+        return active() ? Math.max(0, limit - ticks) : 0;
+    }
 }

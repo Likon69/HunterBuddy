@@ -126,6 +126,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(com.hunterbuddy.hud.PerformanceHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.SpawnerFarmHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.SpawnerRunHud.INFO);
+        Hud.get().register(com.hunterbuddy.behavior.hud.BehaviorHud.INFO);
 
 
 
@@ -176,6 +177,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new com.hunterbuddy.modules.chesttracker.ChestTrackerModule());
         Modules.get().add(new DisconnectSound());
         Modules.get().add(new VisualRangeNotifier());
+        Modules.get().add(new com.hunterbuddy.modules.TreeJava());
         Commands.add(new com.hunterbuddy.commands.logistics.SorterCommand());
         Commands.add(new com.hunterbuddy.behavior.command.BehaviorCommand());
         Commands.add(new com.hunterbuddy.commands.AreaLoaderReset());

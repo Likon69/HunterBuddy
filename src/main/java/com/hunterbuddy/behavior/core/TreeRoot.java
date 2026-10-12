@@ -99,7 +99,7 @@ public final class TreeRoot {
         }
     }
 
-    private void fault(RuntimeException ex) {
+    void fault(RuntimeException ex) {
         pending.clear();
         hooks.discardPendingChanges();
         ctx.event(hooks.build(), Kind.FAULT, FailureCode.FAULT, ex.getClass().getSimpleName(), Objects.toString(ex.getMessage(), ""));
