@@ -201,11 +201,12 @@ public final class UtilityChecks {
         selector = prepare(new UtilitySelector("failure-target",
             new UtilityOption(bounded(action), ctx -> 1, ctx -> target[0])));
         sim.tick(selector);
-        require(selector.scores().getFirst().target().equals("next") && selector.scores().getFirst().failures() == 0,
-            "utility penalizes executed target rather than newly proposed target");
+        require(sim.ctx().utilityFailures().get("bot:lab", selector.children().getFirst().path(), "original").consecutive() == 1
+            && sim.ctx().utilityFailures().get("bot:lab", selector.children().getFirst().path(), "next").consecutive() == 1,
+            "utility penalizes each executed target separately during same tick fallback");
         target[0] = "original";
         sim.tick(selector);
-        require(action.starts() == 1 && selector.scores().getFirst().failures() == 1,
+        require(action.starts() == 2 && selector.scores().getFirst().failures() == 1,
             "utility original failed target remains excluded");
     }
 

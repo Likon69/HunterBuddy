@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.nodes;
 
+import com.hunterbuddy.behavior.core.CandidateSelection;
 import com.hunterbuddy.behavior.core.Composite;
 import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.Failure;
@@ -13,8 +14,11 @@ import com.hunterbuddy.behavior.core.UtilityFailure;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
+import java.util.Set;
 
 public final class UtilitySelector extends Composite {
     private final List<UtilityOption> options;
@@ -42,7 +46,7 @@ public final class UtilitySelector extends Composite {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        boolean[] attempted = new boolean[options.size()];
+        Map<Integer, Set<String>> attempted = new HashMap<>();
         updateHold(ctx);
         for (int attempt = 0; attempt <= options.size(); attempt++) {
             score(ctx);
@@ -54,17 +58,21 @@ public final class UtilitySelector extends Composite {
                 children().get(executing).resetMemory();
             }
             previousTargets[executing] = selectedTarget;
+            ctx.bb().set(ctx.owner(), TickContext.CURRENT_TARGET, selectedTarget);
             NodeResult result = children().get(executing).execute(ctx);
             if (result instanceof Success) {
                 ctx.utilityFailures().succeeded(ctx.owner(), children().get(executing).path(), selectedTarget);
+                previousTargets[executing] = null;
                 return result;
             }
             if (!(result instanceof Failure)) return result;
             ctx.utilityFailures().failed(ctx.owner(), children().get(executing).path(), selectedTarget, ctx.nowMs());
-            attempted[executing] = true;
+            previousTargets[executing] = null;
+            attempted.computeIfAbsent(executing, ignored -> new HashSet<>()).add(selectedTarget);
             clearSelection();
         }
-        return fail(FailureCode.NO_OPTION, name());
+        score(ctx);
+        return unavailable(ctx);
     }
 
     private void updateHold(TickContext ctx) {
@@ -78,22 +86,29 @@ public final class UtilitySelector extends Composite {
         List<UtilityScore> next = new ArrayList<>(options.size());
         for (int i = 0; i < options.size(); i++) {
             UtilityOption option = options.get(i);
-            String target = Objects.requireNonNull(option.target().apply(ctx), "null utility target");
             double raw = option.score().applyAsDouble(ctx);
-            UtilityFailure failure = ctx.utilityFailures().get(ctx.owner(), option.node().path(), target);
-            boolean waiting = failure.waiting(ctx.nowMs());
-            double effective = Double.isFinite(raw) && !waiting && !failure.abandoned() ? raw : Double.NEGATIVE_INFINITY;
+            if (!Double.isFinite(raw) || raw <= 0) {
+                next.add(new UtilityScore(option.node().path(), "", raw, 0, Double.NEGATIVE_INFINITY, 0, false, false, false));
+                continue;
+            }
+            CandidateSelection<String> selection = option.select(ctx, previousTargets[i]);
+            String target = selection.candidate().orElse("");
+            boolean hasTarget = selection.candidate().isPresent();
+            UtilityFailure failure = hasTarget ? ctx.utilityFailures().get(ctx.owner(), option.node().path(), target) : UtilityFailure.NONE;
+            boolean waiting = hasTarget ? failure.waiting(ctx.nowMs()) : selection.retryAtMs() > 0;
+            double effective = Double.isFinite(raw) && hasTarget && !waiting && !failure.abandoned() ? raw : Double.NEGATIVE_INFINITY;
             next.add(new UtilityScore(option.node().path(), target, raw, failure.consecutive(), effective,
-                failure.retryAtMs(), waiting, failure.abandoned()));
+                hasTarget ? failure.retryAtMs() : selection.retryAtMs(), waiting, failure.abandoned(), selection.exhausted()));
         }
         scores = List.copyOf(next);
     }
 
-    private int best(boolean[] attempted) {
+    private int best(Map<Integer, Set<String>> attempted) {
         int best = -1;
         for (int i = 0; i < scores.size(); i++) {
             UtilityScore score = scores.get(i);
-            if (!attempted[i] && score.eligible() && (best < 0 || score.effective() > scores.get(best).effective())) best = i;
+            if (!attempted.getOrDefault(i, Set.of()).contains(score.target()) && score.eligible()
+                && (best < 0 || score.effective() > scores.get(best).effective())) best = i;
         }
         return best;
     }
@@ -101,7 +116,7 @@ public final class UtilitySelector extends Composite {
     private void select(TickContext ctx, int best) {
         if (selected >= 0) {
             UtilityScore current = scores.get(selected);
-            boolean targetChanged = !current.target().equals(selectedTarget);
+            boolean targetChanged = current.wanted() && !current.target().equals(selectedTarget);
             if (!current.eligible() || targetChanged) {
                 children().get(selected).halt(ctx, targetChanged ? ExitReason.ABORTED : ExitReason.GUARD_LOST);
                 clearSelection();
@@ -123,13 +138,14 @@ public final class UtilitySelector extends Composite {
         long retryAt = Long.MAX_VALUE;
         boolean abandoned = false;
         for (UtilityScore score : scores) {
-            if (!Double.isFinite(score.raw()) || score.raw() <= 0) continue;
+            if (!score.wanted()) continue;
+            if (score.eligible()) return new Running("utility selection deferred");
             if (score.waiting()) retryAt = Math.min(retryAt, score.retryAtMs());
-            abandoned |= score.abandoned();
+            abandoned |= score.abandoned() || score.exhausted();
         }
-        if (retryAt != Long.MAX_VALUE) return new Running("utility retry remainingMs=" + (retryAt - ctx.nowMs()));
+        if (retryAt != Long.MAX_VALUE) return new Running("utility retry remainingMs=" + Math.max(0, retryAt - ctx.nowMs()));
         if (abandoned) {
-            String reason = name() + ": no remaining target after three consecutive failures";
+            String reason = name() + ": no remaining target";
             ctx.event(this, Kind.BOT, FailureCode.NO_OPTION, "stop", reason);
             ctx.stopBot(reason);
         }

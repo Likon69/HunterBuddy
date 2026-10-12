@@ -36,7 +36,7 @@ public abstract class Action extends Node {
     }
 
     protected String target(TickContext ctx) {
-        return "default";
+        return ctx.bb().get(ctx.owner(), TickContext.CURRENT_TARGET).orElse("default");
     }
 
     protected void onActionStart(TickContext ctx) {

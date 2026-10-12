@@ -78,6 +78,9 @@ public final class SelfCheck {
         check.checks.addAll(UtilityChecks.run());
         check.checks.addAll(CooldownChecks.run());
         check.checks.addAll(UtilityRetryChecks.run());
+        check.checks.addAll(CandidateChecks.run());
+        check.checks.addAll(PickerIntegrationChecks.run());
+        check.checks.addAll(TargetStabilityChecks.run());
         return new SelfCheckReport(400, check.checks);
     }
 
