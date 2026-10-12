@@ -5,6 +5,7 @@
 
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -279,6 +280,7 @@ public class AutoEXPPlus extends Module {
             if (exp.found()) {
                 if (!exp.isHotbar() && !exp.isOffhand()) {
                     if (!replenish.get()) return;
+                    if (!QuietClicks.readyOrSettle()) return;
                     InvUtils.move().from(exp.slot()).toHotbar(slot.get() - 1);
                 }
 
@@ -337,6 +339,8 @@ public class AutoEXPPlus extends Module {
 
         // Pickup on the source, pickup on the armor slot, pickup back on the source: the broken
         // elytra ends up worn and the repaired one lands in the slot it came from.
+        if (!QuietClicks.readyOrSettle()) return false;
+
         InvUtils.move().from(candidate).toArmor(EquipmentSlot.CHEST.getEntitySlotId());
 
         repairingI = -1;

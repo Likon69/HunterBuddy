@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalXZ;
@@ -1268,7 +1270,7 @@ public class WaypointFollower extends Module {
 
         // Hotbar (slots 0-8)
         for (int i = 0; i < 9; i++) {
-            if (inv.getStack(i).isOf(Items.FIREWORK_ROCKET)) {
+            if (Rockets.isPlain(inv.getStack(i))) {
                 InvUtils.swap(i, true);
                 mc.interactionManager.interactItem(player, Hand.MAIN_HAND);
                 InvUtils.swapBack();
@@ -1279,7 +1281,9 @@ public class WaypointFollower extends Module {
 
         // Main Inventory (slots 9-35)
         for (int i = 9; i < inv.getMainStacks().size(); i++) {
-            if (inv.getStack(i).isOf(Items.FIREWORK_ROCKET)) {
+            if (Rockets.isPlain(inv.getStack(i))) {
+                if (!QuietClicks.readyOrSettle()) return;
+
                 int selected = inv.getSelectedSlot();
                 InvUtils.move().from(i).to(selected);
                 mc.interactionManager.interactItem(player, Hand.MAIN_HAND);

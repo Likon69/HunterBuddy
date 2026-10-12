@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
 import baritone.api.pathing.goals.GoalBlock;
@@ -1210,6 +1212,10 @@ public class AutoFlyingRegear extends Module {
             }
          );
          if (chestplate.found()) {
+            if (!QuietClicks.readyOrSettle()) {
+               return;
+            }
+
             if ((Boolean)this.debugMessages.get()) {
                this.info("Chestplate from slot " + chestplate.slot() + " to the chest, the elytra goes to slot " + chestplate.slot(), new Object[0]);
             }
@@ -2491,6 +2497,10 @@ public class AutoFlyingRegear extends Module {
 
                this.stopOutOfSupplies();
             } else {
+               if (!QuietClicks.readyOrSettle()) {
+                  return;
+               }
+
                this.moveStack(eChestSlot, targetHotbarSlot);
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Moving ender chest to hotbar slot " + targetHotbarSlot, new Object[0]);
@@ -2786,6 +2796,10 @@ public class AutoFlyingRegear extends Module {
             // slot is meant to be empty, but the block and rocket moves before this shuffle
             // things around: on 2026-09-07 a stack of rockets landed there and went into the
             // chest in place of the shulker. Park it in the inventory first, and swap next pass.
+            if (!QuietClicks.readyOrSettle()) {
+               return;
+            }
+
             if (this.clearShulkerSlot(var16, syncId)) {
                this.processedShulkers.remove(targetType + "_slot_" + this.shulkerEnderSlot);
                this.timer = (Integer)this.clickDelay.get();
@@ -3178,6 +3192,10 @@ public class AutoFlyingRegear extends Module {
          int var13 = this.mc.player.currentScreenHandler.syncId;
          String itemType = this.restockLabel() + "s";
 
+         if (!QuietClicks.readyOrSettle()) {
+            return;
+         }
+
          // REPAIR takes bottles where REPLACE takes elytras. The swap-in-place machinery
          // below is left completely alone: it is still what REPLACE runs, and mending has no
          // use for it since nothing is being exchanged.
@@ -3541,6 +3559,10 @@ public class AutoFlyingRegear extends Module {
          for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
             ItemStack stack = this.mc.player.getInventory().getStack(i);
             if (this.isShulkerBox(stack.getItem())) {
+               if (!QuietClicks.readyOrSettle()) {
+                  return;
+               }
+
                if ((Boolean)this.debugMessages.get()) {
                   this.info("Shulker found in slot " + i + ", moving to hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
                }
@@ -3588,6 +3610,10 @@ public class AutoFlyingRegear extends Module {
                for (int i = 0; i < 36; i++) {
                   ItemStack stack = this.mc.player.getInventory().getStack(i);
                   if (stack.getItem() == Items.FIREWORK_ROCKET && stack.getCount() >= 32) {
+                     if (!QuietClicks.readyOrSettle()) {
+                        return;
+                     }
+
                      InvUtils.drop().slot(i);
                      if ((Boolean)this.debugMessages.get()) {
                         this.info("Dropped rockets from slot " + i + " to make room for shulker", new Object[0]);
@@ -3605,6 +3631,10 @@ public class AutoFlyingRegear extends Module {
                      && stack.getItem() != Items.ELYTRA
                      && stack.getItem() != Items.ENDER_CHEST
                      && stack.getItem() != Items.OBSIDIAN) {
+                     if (!QuietClicks.readyOrSettle()) {
+                        return;
+                     }
+
                      InvUtils.drop().slot(i);
                      if ((Boolean)this.debugMessages.get()) {
                         this.info("Dropped " + stack.getItem() + " to make room for shulker", new Object[0]);
@@ -3695,6 +3725,10 @@ public class AutoFlyingRegear extends Module {
                for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
                   ItemStack stack = this.mc.player.getInventory().getStack(i);
                   if (this.isShulkerBox(stack.getItem())) {
+                     if (!QuietClicks.readyOrSettle()) {
+                        return;
+                     }
+
                      if ((Boolean)this.debugMessages.get()) {
                         this.info("Shulker found in slot " + i + ", moving to hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
                      }
@@ -3712,6 +3746,10 @@ public class AutoFlyingRegear extends Module {
                this.mc.player.closeHandledScreen();
                this.state = AutoFlyingRegear.FlyingRegearState.CHECK_NEXT_SHULKER;
                this.timer = 0;
+               return;
+            }
+
+            if (!QuietClicks.readyOrSettle()) {
                return;
             }
 
@@ -3918,6 +3956,10 @@ public class AutoFlyingRegear extends Module {
       // Bring it to the hand AutoEXPPlus looks at. It swaps to a bottle to throw and swaps
       // straight back, so the elytra stays in this slot between throws.
       if (this.repairHotbarSlot == -1) {
+         if (!QuietClicks.readyOrSettle()) {
+            return;
+         }
+
          this.repairHotbarSlot = this.holdForRepair(target);
          if (this.repairHotbarSlot == -1) {
             this.finishRepairing("no free hotbar slot to hold an elytra");
@@ -4143,6 +4185,10 @@ public class AutoFlyingRegear extends Module {
          }
       }
 
+      if (!QuietClicks.readyOrSettle()) {
+         return;
+      }
+
       this.totemToOffhand();
       if ((Boolean)this.swapToChestplate.get() && !this.savedChestplate.isEmpty()) {
          this.restoreChestplate();
@@ -4247,6 +4293,8 @@ public class AutoFlyingRegear extends Module {
                   this.finishTopUp("no ender chest left to break");
                   return;
                }
+
+               if (!QuietClicks.readyOrSettle()) return;
 
                this.moveStack(from, slot);
                this.timer = (Integer)this.clickDelay.get();
@@ -4608,6 +4656,10 @@ public class AutoFlyingRegear extends Module {
 
    private void handleTakingOff() {
       if (!this.takeoffInitialized) {
+         if (!QuietClicks.readyOrSettle()) {
+            return;
+         }
+
          this.takeoffInitialized = true;
          this.initTakeoff();
          if (this.baritoneTakesOff()) {
@@ -4773,6 +4825,10 @@ public class AutoFlyingRegear extends Module {
 
    private void handleComplete() {
       if (!this.completeHandled) {
+         if (!QuietClicks.readyOrSettle()) {
+            return;
+         }
+
          this.completeHandled = true;
          this.endRun(this.pendingOutcome != null ? this.pendingOutcome : "complete");
          if ((Boolean)this.debugMessages.get()) {
@@ -5090,7 +5146,7 @@ public class AutoFlyingRegear extends Module {
 
       for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
          ItemStack stack = this.mc.player.getInventory().getStack(i);
-         if (stack.getItem() == Items.FIREWORK_ROCKET) {
+         if (Rockets.isPlain(stack)) {
             count += stack.getCount();
          }
       }
@@ -5124,7 +5180,7 @@ public class AutoFlyingRegear extends Module {
       if (this.mc.player != null) {
          int targetSlot = (Integer)this.rocketHotbarSlot.get();
          ItemStack hotbarStack = this.mc.player.getInventory().getStack(targetSlot);
-         if (hotbarStack.getItem() == Items.FIREWORK_ROCKET) {
+         if (Rockets.isPlain(hotbarStack)) {
             if ((Boolean)this.debugMessages.get()) {
                this.info("Rockets already in hotbar slot " + targetSlot, new Object[0]);
             }
@@ -5135,7 +5191,7 @@ public class AutoFlyingRegear extends Module {
             for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
                if (i != targetSlot && i < 36) {
                   ItemStack stack = this.mc.player.getInventory().getStack(i);
-                  if (stack.getItem() == Items.FIREWORK_ROCKET && stack.getCount() > bestRocketCount) {
+                  if (Rockets.isPlain(stack) && stack.getCount() > bestRocketCount) {
                      bestRocketSlot = i;
                      bestRocketCount = stack.getCount();
                   }
@@ -5279,6 +5335,10 @@ public class AutoFlyingRegear extends Module {
       }
 
       if (blocks.slot() != targetHotbarSlot) {
+         if (!QuietClicks.readyOrSettle()) {
+            return false;
+         }
+
          this.moveStack(blocks.slot(), targetHotbarSlot);
          this.timer = (Integer)this.clickDelay.get();
          return false;

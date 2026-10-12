@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules.regear.util;
 
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
@@ -111,7 +113,7 @@ public class Utils {
             mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, Mode.START_FALL_FLYING));
         }
 
-        FindItemResult firework = InvUtils.findInHotbar(Items.FIREWORK_ROCKET);
+        FindItemResult firework = InvUtils.findInHotbar(Rockets::isPlain);
         if (firework.found()) {
             if (firework.isOffhand()) {
                 mc.interactionManager.interactItem(mc.player, Hand.OFF_HAND);
@@ -128,7 +130,9 @@ public class Utils {
         // Try moving from main inventory
         PlayerInventoryAccessor inv = (PlayerInventoryAccessor) mc.player.getInventory();
         for (int i = 9; i < inv.getMain().size(); i++) {
-            if (mc.player.getInventory().getStack(i).isOf(Items.FIREWORK_ROCKET)) {
+            if (Rockets.isPlain(mc.player.getInventory().getStack(i))) {
+                if (!QuietClicks.readyOrSettle()) return -1;
+
                 int selected = inv.getSelectedSlot();
                 InvUtils.move().from(i).to(selected);
                 mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
@@ -278,6 +282,8 @@ public class Utils {
             con.setRequestProperty("Content-Type", "application/json");
             con.setRequestProperty("User-Agent", "Mozilla/5.0");
             con.setDoOutput(true);
+            con.setConnectTimeout(5000);
+            con.setReadTimeout(5000);
             con.setRequestMethod("POST");
 
             try (OutputStream os = con.getOutputStream()) {

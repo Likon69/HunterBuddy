@@ -210,8 +210,9 @@ public class ElytraAutoFly extends Module {
             if (descendFireworkCooldown > 0) {
                 descendFireworkCooldown--;
             } else {
-                Utils.firework(mc, false);
-                descendFireworkCooldown = descendFireworkCooldownTicks.get();
+                if (Utils.firework(mc, false) != -1) {
+                    descendFireworkCooldown = descendFireworkCooldownTicks.get();
+                }
             }
         }
 

@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
 import com.hunterbuddy.modules.regear.util.Utils;
@@ -442,12 +444,12 @@ public class RocketFly extends Module {
 
    /** Brings a firework stack into the hotbar if there is none there yet. */
    private boolean ensureRocketsInHotbar() {
-      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
       if (hotbar.found()) {
          return true;
       }
 
-      FindItemResult inv = InvUtils.find(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult inv = InvUtils.find(Rockets::isPlain);
       if (!inv.found()) {
          this.info("No fireworks found in hotbar or inventory.", new Object[0]);
          return false;
@@ -456,6 +458,10 @@ public class RocketFly extends Module {
       int hotbarSlot = this.findEmptyHotbarSlot();
       if (hotbarSlot == -1) {
          this.info("No empty hotbar slot available to move fireworks.", new Object[0]);
+         return false;
+      }
+
+      if (!QuietClicks.readyOrSettle()) {
          return false;
       }
 

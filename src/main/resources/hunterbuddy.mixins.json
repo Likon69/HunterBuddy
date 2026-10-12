@@ -5,6 +5,8 @@
   "client": [
     "ShulkerHotbarOverlayMixin",
     "InputMixin",
+    "QuietClicksMixin",
+    "accessors.InputMovementAccessor",
     "AuraMoveFixMixin",
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",

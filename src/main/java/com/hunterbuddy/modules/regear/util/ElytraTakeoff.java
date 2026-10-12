@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.regear.util;
 
+import com.hunterbuddy.util.Rockets;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
@@ -378,7 +379,7 @@ public class ElytraTakeoff {
          ((PlayerInventoryAccessor)mc.player.getInventory()).setSelectedSlot(this.rocketSlot);
       }
 
-      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
       if (!hotbar.found()) {
          return false;
       }

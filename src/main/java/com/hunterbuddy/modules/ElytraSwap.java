@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -327,6 +328,7 @@ public class ElytraSwap extends Module {
                 resetAll();
                 return;
             }
+            if (!QuietClicks.readyOrSettle()) return;
             InvUtils.move().from(wearSlot).toArmor(2);
             wearStage = 2;
             wearTimer = 0;
@@ -440,6 +442,7 @@ public class ElytraSwap extends Module {
                     failChestSwap("Chestplate swap failed: no free hotbar slot (attempt %d)");
                     return;
                 }
+                if (!QuietClicks.readyOrSettle()) return;
                 InvUtils.move().from(chestSlot).toHotbar(hotbar);
                 chestSlot = hotbar;
             }

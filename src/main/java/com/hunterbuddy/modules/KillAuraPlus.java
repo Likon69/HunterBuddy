@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -1004,6 +1005,8 @@ public class KillAuraPlus extends Module {
                 break;
             }
         }
+        if (!QuietClicks.readyOrSettle()) return;
+
         InvUtils.move().from(bestInv).toHotbar(dest);
         nextFetchMs = now + 2000;
         info("Weapon brought back from inventory slot %d to hotbar slot %d.", bestInv, dest);

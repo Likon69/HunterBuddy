@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -141,12 +142,14 @@ public class FutureTotem extends Module {
                 return;
             }
 
+            if (!QuietClicks.readyOrSettle()) return;
             fromSlot = source;
             click(source);
             cursor = handler.getCursorStack();
         }
 
         if (cursor.getItem() == Items.TOTEM_OF_UNDYING && !armed() && since >= step * 2) {
+            if (!QuietClicks.readyOrSettle()) return;
             click(OFFHAND_SLOT);
             cursor = handler.getCursorStack();
 
@@ -170,6 +173,7 @@ public class FutureTotem extends Module {
             }
 
             warnedFull = false;
+            if (!QuietClicks.readyOrSettle()) return;
             click(back);
             reset();
         }

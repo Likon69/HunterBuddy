@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.tradingsystem.stages;
 
+import com.hunterbuddy.util.QuietClicks;
 import net.minecraft.client.gui.screen.ingame.MerchantScreen;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -56,6 +57,8 @@ public class BuyingStage extends Stage {
                 Item sellItemType = tradeScreen.getScreenHandler().getSlot(2).getStack().getItem();
 
                 if (sellItemType.equals(Items.EXPERIENCE_BOTTLE)) {
+                    if (!QuietClicks.readyOrSettle()) return false;
+
                     buyProcess(tradeScreen);
                     resetPhase();
                 } else if (!sellItemType.equals(Items.AIR)) {

@@ -76,6 +76,7 @@ public class HunterBuddyAddon extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing HunterBuddy Addon");
         MeteorClient.EVENT_BUS.subscribe(HbGlowShader.class);
+        com.hunterbuddy.util.QuietClicks.init();
         com.hunterbuddy.util.SessionStats.init();
         com.hunterbuddy.util.HuntFeed.init();
         com.hunterbuddy.util.ActivityTracker.init();

@@ -5,6 +5,7 @@ import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.util.GlideClearHold;
 import com.hunterbuddy.util.GliderSwap;
+import com.hunterbuddy.util.QuietClicks;
 import java.util.Locale;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
@@ -599,6 +600,13 @@ public class Pitch40 extends Module {
          return this.holdBurst("wait-ground");
       }
 
+      if (gliderHand == null
+         && !GliderSwap.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))
+         && GliderSwap.gliderSlot(this.mc.player) >= 9
+         && !QuietClicks.readyOrSettle()) {
+         return this.holdBurst("wait-quiet");
+      }
+
       this.chestSwapWaitReason = null;
       long waited = age - GlideClearHold.heldSince();
       GlideClearHold.flush();
@@ -689,11 +697,14 @@ public class Pitch40 extends Module {
             return this.holdBurst("wait-screen");
          }
 
-         GliderSwap.wearGlider(this.mc.player);
+         if (!GliderSwap.wearGlider(this.mc.player) && GliderSwap.hasGlider(this.mc.player)) {
+            return false;
+         }
+
          return true;
       }
 
-      if (gliderHand == null && GliderSwap.gliderSlot(this.mc.player) == -1) {
+      if (gliderHand == null &&GliderSwap.gliderSlot(this.mc.player) == -1) {
          return true;
       }
 

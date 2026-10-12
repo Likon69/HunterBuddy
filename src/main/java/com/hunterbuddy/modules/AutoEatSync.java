@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -247,6 +248,7 @@ public class AutoEatSync extends Module {
                     stopEating("disabled");
                     return;
                 }
+                if (waitingForQuiet(newSlot)) return;
                 if (!changeSlot(newSlot)) {
                     stopEating("disabled");
                     return;
@@ -452,7 +454,13 @@ public class AutoEatSync extends Module {
         return true;
     }
 
+    private boolean waitingForQuiet(int slot) {
+        return slot != SlotUtils.OFFHAND && !SlotUtils.isHotbar(slot) && !QuietClicks.readyOrSettle();
+    }
+
     private void beginEating(int slot) {
+        if (waitingForQuiet(slot)) return;
+
         if (prevSlot == -1) prevSlot = mc.player.getInventory().getSelectedSlot();
         if (!changeSlot(slot)) return;
 

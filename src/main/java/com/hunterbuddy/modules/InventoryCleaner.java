@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.HunterBuddyAddon;
 import java.util.List;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -109,6 +110,7 @@ public class InventoryCleaner extends Module {
 
         int slot = findSlotToThrow();
         if (slot == -1) return;
+        if (!QuietClicks.readyOrSettle()) return;
 
         InvUtils.drop().slot(slot);
         ticksLeft = delay.get();

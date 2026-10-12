@@ -1,4 +1,6 @@
 package com.hunterbuddy.modules;
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import com.hunterbuddy.modules.Pitch40;
 
 import com.hunterbuddy.HunterBuddyAddon;
@@ -121,6 +123,8 @@ public class ElytraRecast extends Module {
    private boolean usedActivationRocket;
    private int notGlidingTicks;
    private boolean netherRocketUsed;
+   private boolean rocketWaiting;
+   private boolean wearPending;
    private Pitch40 pitch40Util;
    private final ElytraTakeoff takeoff = new ElytraTakeoff();
    private int monitoringRecoveryCooldown = 0;
@@ -141,6 +145,7 @@ public class ElytraRecast extends Module {
    }
 
    public void onActivate() {
+      this.wearPending = false;
       if (this.mc.player != null) {
          if (!this.hasElytraEquipped()) {
             this.error("No elytra equipped!", new Object[0]);
@@ -164,6 +169,7 @@ public class ElytraRecast extends Module {
    }
 
    public void onDeactivate() {
+      this.wearPending = false;
       this.takeoff.cancel();
       Utils.setPressed(this.mc.options.jumpKey, false);
       this.state = null;
@@ -178,6 +184,17 @@ public class ElytraRecast extends Module {
 
    @EventHandler
    private void onTick(Pre event) {
+      if (this.wearPending && this.mc.player != null) {
+         if (com.hunterbuddy.util.GliderSwap.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) || !com.hunterbuddy.util.GliderSwap.hasGlider(this.mc.player)) {
+            this.wearPending = false;
+         } else {
+            com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor wearInv = (com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor) this.mc.player.getInventory();
+            int wearSlot = wearInv.getSelectedSlot();
+            com.hunterbuddy.util.GliderSwap.wearGlider(this.mc.player);
+            wearInv.setSelectedSlot(wearSlot);
+         }
+      }
+
       if (this.mc.player != null && this.mc.world != null && this.state != null && this.hasElytraEquipped()) {
          if (this.lastTickAge == this.mc.player.age) return;
          this.lastTickAge = this.mc.player.age;
@@ -319,6 +336,10 @@ public class ElytraRecast extends Module {
       int recastSlot = recastInv.getSelectedSlot();
       com.hunterbuddy.util.GliderSwap.wearGlider(this.mc.player);
       recastInv.setSelectedSlot(recastSlot);
+      if (!com.hunterbuddy.util.GliderSwap.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) && com.hunterbuddy.util.GliderSwap.hasGlider(this.mc.player)) {
+         this.wearPending = true;
+      }
+
       if (this.mc.player.isGliding()) {
          this.enterAscending();
       } else {
@@ -359,7 +380,7 @@ public class ElytraRecast extends Module {
       this.state = ElytraRecast.State.ASCENDING;
       this.rocketTickCounter = (Integer)this.rocketDelay.get();
       this.tickCounter = 0;
-      if (!this.useRocketWhileGliding() && (Boolean)this.disableIfNoRockets.get()) {
+      if (!this.useRocketWhileGliding() && !this.rocketWaiting && (Boolean)this.disableIfNoRockets.get()) {
          this.error("No rockets for ascent! Disabling.", new Object[0]);
          this.toggle();
       }
@@ -383,7 +404,7 @@ public class ElytraRecast extends Module {
             if (!this.netherRocketUsed) {
                if (this.useRocket()) {
                   this.netherRocketUsed = true;
-               } else if ((Boolean)this.disableIfNoRockets.get()) {
+               } else if (!this.rocketWaiting && (Boolean)this.disableIfNoRockets.get()) {
                   this.error("No rockets for Nether recovery! Disabling.", new Object[0]);
                   this.toggle();
                   return;
@@ -419,7 +440,7 @@ public class ElytraRecast extends Module {
             if (this.rocketTickCounter >= (Integer)this.rocketDelay.get()) {
                if (this.useRocket()) {
                   this.rocketTickCounter = 0;
-               } else if ((Boolean)this.disableIfNoRockets.get()) {
+               } else if (!this.rocketWaiting && (Boolean)this.disableIfNoRockets.get()) {
                   this.error("Out of rockets during ascent! Disabling.", new Object[0]);
                   this.toggle();
                   return;
@@ -449,12 +470,12 @@ public class ElytraRecast extends Module {
    }
 
    private boolean hasRockets() {
-      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
       if (hotbar.found()) {
          return true;
       }
 
-      FindItemResult inv = InvUtils.find(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult inv = InvUtils.find(Rockets::isPlain);
       return inv.found();
    }
 
@@ -463,6 +484,7 @@ public class ElytraRecast extends Module {
    }
 
    private boolean useRocketWhileGliding() {
+      this.rocketWaiting = false;
       if (this.mc.player == null || this.mc.interactionManager == null) {
          return false;
       }
@@ -471,17 +493,22 @@ public class ElytraRecast extends Module {
          return false;
       }
 
-      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
       if (!hotbar.found()) {
-         FindItemResult inv = InvUtils.find(new Item[]{Items.FIREWORK_ROCKET});
+         FindItemResult inv = InvUtils.find(Rockets::isPlain);
          if (!inv.found()) {
             return false;
          }
 
          int hotbarSlot = this.findEmptyHotbarSlot();
          if (hotbarSlot != -1) {
+            if (!QuietClicks.readyOrSettle()) {
+               this.rocketWaiting = true;
+               return false;
+            }
+
             InvUtils.move().from(inv.slot()).to(hotbarSlot);
-            hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+            hotbar = InvUtils.findInHotbar(Rockets::isPlain);
          }
       }
 
@@ -496,7 +523,7 @@ public class ElytraRecast extends Module {
       }
 
       ItemStack selected = this.mc.player.getMainHandStack();
-      if (selected.getItem() == Items.FIREWORK_ROCKET) {
+      if (Rockets.isPlain(selected)) {
          this.mc.interactionManager.interactItem(this.mc.player, Hand.MAIN_HAND);
          this.mc.player.swingHand(Hand.MAIN_HAND);
          return true;

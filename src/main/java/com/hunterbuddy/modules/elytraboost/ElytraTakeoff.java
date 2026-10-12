@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.elytraboost;
 
+import com.hunterbuddy.util.Rockets;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import net.minecraft.client.MinecraftClient;
@@ -302,7 +303,7 @@ public class ElytraTakeoff {
             InvUtils.swap(rocketSlot, false);
         }
 
-        FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+        FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
         if (!hotbar.found()) return false;
 
         if (hotbar.isOffhand()) {

@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
 import com.hunterbuddy.modules.regear.util.Utils;
@@ -119,7 +121,11 @@ public class Fly300km extends Module {
       .name("window-climb-pitch").description("Degrees upwards during the climb in WINDOW mode.")
       .defaultValue(66.0).min(0.0).max(80.0).sliderRange(0.0, 80.0).visible(() -> this.boostMode.get() == BoostMode.WINDOW).build());
 
-   private final Setting<Boolean> useRocketBoost = this.sgBoost.add(new BoolSetting.Builder()
+   private final Setting<Boolean> logTicks = this.sgSpeed.add(new BoolSetting.Builder()
+      .name("log-ticks").description("One log line per gliding tick with the window, the brake limits and the result, for diagnosis.")
+      .defaultValue(false).visible(() -> this.boostMode.get() == BoostMode.WINDOW).build());
+
+   private final Setting<Boolean> useRocketBoost =this.sgBoost.add(new BoolSetting.Builder()
       .name("use-rocket-boost").description("Enable RocketBoost on activation if it is off.")
       .defaultValue(true).visible(() -> this.boostMode.get() == BoostMode.ROCKET_BOOST).build());
    private final Setting<Boolean> autoSpeed = this.sgBoost.add(new BoolSetting.Builder()
@@ -441,15 +447,55 @@ public class Fly300km extends Module {
 
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
          this.windowResync = true;
+         this.logEvent("PlayerPositionLookS2CPacket");
       } else if (event.packet instanceof EntityVelocityUpdateS2CPacket velocity) {
          if (velocity.getEntityId() == this.mc.player.getId()) {
             this.windowResync = true;
+            this.logEvent("EntityVelocityUpdateS2CPacket");
          }
       } else if (event.packet instanceof ExplosionS2CPacket explosion) {
          if (explosion.playerKnockback().isPresent()) {
             this.windowResync = true;
+            this.logEvent("ExplosionS2CPacket");
          }
       }
+   }
+
+   private void logEvent(String name) {
+      if (this.logTicks.get()) {
+         HunterBuddyAddon.LOG.info(String.format(Locale.ROOT, "[300kmfly-tick] event=%s t=%d x=%s z=%s", name, this.tickCount,
+            this.mc.player == null ? "-" : num(this.mc.player.getX()), this.mc.player == null ? "-" : num(this.mc.player.getZ())));
+      }
+   }
+
+   private static String num(double value) {
+      return String.format(Locale.ROOT, "%.3f", value);
+   }
+
+   private static String num(Double value) {
+      return value == null ? "-" : num(value.doubleValue());
+   }
+
+   private static String bounds(double[] values) {
+      return values == null ? "-" : num(values[0]) + "," + num(values[1]) + "," + num(values[2]);
+   }
+
+   private void logTick(Vec3d vanilla, Vec3d look, Vec3d previous, double[] lo, double[] hi, Vec3d ridden, Double terrain, Double unloaded, Double limit, Vec3d result, Boolean rocket) {
+      if (!this.logTicks.get()) {
+         return;
+      }
+
+      HunterBuddyAddon.LOG.info(String.format(Locale.ROOT,
+         "[300kmfly-tick] t=%d y=%s x=%s z=%s pitch=%s yaw=%s van=%s vanLook=%s prev=%s prevLook=%s lo=%s hi=%s ride=%s rideLook=%s terrain=%s unloaded=%s limit=%s final=%s finalLook=%s reason=%s rocket=%s",
+         this.windowGlideTicks,
+         num(this.mc.player.getY()), num(this.mc.player.getX()), num(this.mc.player.getZ()), num(this.mc.player.getPitch()), num(this.mc.player.getYaw()),
+         num(vanilla.length()), num(vanilla.dotProduct(look)),
+         previous == null ? "-" : num(previous.length()), previous == null ? "-" : num(previous.dotProduct(look)),
+         bounds(lo), bounds(hi),
+         ridden == null ? "-" : num(ridden.length()), ridden == null ? "-" : num(ridden.dotProduct(look)),
+         num(terrain), num(unloaded), num(limit),
+         result == null ? "-" : num(result.length()), result == null ? "-" : num(result.dotProduct(look)),
+         this.windowReason, rocket == null ? "-" : rocket.toString()));
    }
 
    public Vec3d windowVelocity(Vec3d vanilla) {
@@ -475,36 +521,44 @@ public class Fly300km extends Module {
 
       if (calibrate) {
          this.windowReason = "calibrating";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
       if (resync) {
          this.windowReason = "resync";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
       if (this.takeoff.isActive()) {
          this.windowReason = "takeoff";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
       if (!this.mc.player.isGliding()) {
          this.windowReason = "not gliding";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
       if (this.mc.player.isTouchingWater() || this.mc.player.isInLava()) {
          this.windowReason = "fluid";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
       if (this.mc.player.hasStatusEffect(StatusEffects.LEVITATION)) {
          this.windowReason = "levitation";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
 
       RocketBoost boost = Modules.get().get(RocketBoost.class);
       if (boost != null && boost.isActive()) {
          this.windowReason = "rocket-boost on";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, null);
          return null;
       }
       if (!GliderSwap.rocketAttached(this.mc.player)) {
          this.windowReason = "no rocket";
+         this.logTick(vanilla, look, previous, null, null, null, null, null, null, null, false);
          return null;
       }
 
@@ -526,6 +580,7 @@ public class Fly300km extends Module {
          hi[axis] = Math.min(hi[axis], hi2[axis]);
          if (lo[axis] > hi[axis]) {
             this.windowReason = "no room";
+            this.logTick(vanilla, look, previous, lo, hi, null, null, null, null, null, true);
             return null;
          }
       }
@@ -535,9 +590,13 @@ public class Fly300km extends Module {
       Vec3d v = GlideWindow.ride(lo, hi, look, pitch, tolerance, cap);
       if (v == null) {
          this.windowReason = "no room";
+         this.logTick(vanilla, look, previous, lo, hi, null, null, null, null, null, true);
          return null;
       }
 
+      Vec3d ridden = v;
+      Double terrainDistance = null;
+      Double unloadedDistance = null;
       int lookahead = this.brakeLookahead.get();
       Vec3d dir = v.normalize();
       double reach = Math.max(4.0, cap * lookahead);
@@ -545,6 +604,7 @@ public class Fly300km extends Module {
       Vec3d eye = this.mc.player.getEyePos();
       HitResult hit = this.mc.world.raycast(new RaycastContext(eye, eye.add(dir.multiply(reach)), RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, this.mc.player));
       if (hit.getType() != HitResult.Type.MISS) {
+         terrainDistance = hit.getPos().distanceTo(eye);
          limit = Math.min(limit, hit.getPos().distanceTo(eye) / lookahead);
       }
 
@@ -553,6 +613,7 @@ public class Fly300km extends Module {
          int x = (int)Math.floor(point.x);
          int z = (int)Math.floor(point.z);
          if (!this.mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) {
+            unloadedDistance = d;
             limit = Math.min(limit, d / lookahead);
             break;
          }
@@ -562,17 +623,20 @@ public class Fly300km extends Module {
          v = GlideWindow.ride(lo, hi, look, pitch, tolerance, limit);
          if (v == null) {
             this.windowReason = "brake";
+            this.logTick(vanilla, look, previous, lo, hi, ridden, terrainDistance, unloadedDistance, limit, null, true);
             return null;
          }
       }
 
       if (v.dotProduct(look) <= vanilla.dotProduct(look)) {
          this.windowReason = "vanilla faster";
+         this.logTick(vanilla, look, previous, lo, hi, ridden, terrainDistance, unloadedDistance, limit, null, true);
          return null;
       }
 
       this.windowRidden++;
       this.windowReason = "riding";
+      this.logTick(vanilla, look, previous, lo, hi, ridden, terrainDistance, unloadedDistance, limit, v, true);
       return v;
    }
 
@@ -648,7 +712,7 @@ public class Fly300km extends Module {
 
    private int minimumLife() {
       int duration = 1;
-      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
       if (hotbar.found()) {
          ItemStack stack = hotbar.isOffhand() ? this.mc.player.getOffHandStack() : this.mc.player.getInventory().getStack(hotbar.slot());
          FireworksComponent component = stack.get(DataComponentTypes.FIREWORKS);
@@ -661,22 +725,26 @@ public class Fly300km extends Module {
    }
 
    private int totalRockets() {
-      return InvUtils.find(new Item[]{Items.FIREWORK_ROCKET}).count();
+      return InvUtils.find(Rockets::isPlain).count();
    }
 
    private boolean ensureRocketsInHotbar() {
-      FindItemResult hotbar = InvUtils.findInHotbar(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
       if (hotbar.found()) {
          return true;
       }
 
-      FindItemResult inv = InvUtils.find(new Item[]{Items.FIREWORK_ROCKET});
+      FindItemResult inv = InvUtils.find(Rockets::isPlain);
       if (!inv.found()) {
          return false;
       }
 
       for (int i = 0; i < 9; i++) {
          if (this.mc.player.getInventory().getStack(i).isEmpty()) {
+            if (!QuietClicks.readyOrSettle()) {
+               return false;
+            }
+
             InvUtils.move().from(inv.slot()).to(i);
             return true;
          }

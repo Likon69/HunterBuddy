@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.tradingsystem.stages;
 
+import com.hunterbuddy.util.QuietClicks;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
@@ -36,6 +37,8 @@ public class CraftStage extends Stage {
 
         if (client.currentScreen instanceof InventoryScreen screen) {
             if (!this.isFilled) {
+                if (!QuietClicks.readyOrSettle()) return false;
+
                 if (processFillCraftInput(screen)) {
                     super.mainModule.setTimeToClear(false);
                     screen.close();
@@ -46,6 +49,8 @@ public class CraftStage extends Stage {
             }
             else {
                 if (screen.getScreenHandler().getSlot(0).getStack().getItem().equals(Items.EMERALD)) {
+                    if (!QuietClicks.readyOrSettle()) return false;
+
                     processGettingResult(screen);
                     reset();
                     return false;

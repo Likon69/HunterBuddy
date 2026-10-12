@@ -103,6 +103,10 @@ public final class GliderSwap {
          return true;
       }
 
+      if (!QuietClicks.readyOrSettle()) {
+         return false;
+      }
+
       com.hunterbuddy.HunterBuddyAddon.LOG.info("[GliderSwap] inventory-wear slot=" + slot);
       meteordevelopment.meteorclient.utils.player.InvUtils.move().from(slot).toArmor(2);
       return true;

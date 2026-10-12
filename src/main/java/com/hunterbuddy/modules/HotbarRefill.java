@@ -1,5 +1,7 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.util.Rockets;
 import com.hunterbuddy.HunterBuddyAddon;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -248,6 +250,7 @@ public class HotbarRefill extends Module {
 
     private void processQueue() {
         if (!inPlayerMenu()) return;
+        if (!QuietClicks.readyOrSettle()) return;
 
         int done = 0;
         while (done < perTickLimit.get() && !pendingMoves.isEmpty()) {
@@ -272,7 +275,10 @@ public class HotbarRefill extends Module {
 
             if (!isConcerned(stack)) continue;
 
-            if (wantsRefill(h, stack) && tryRefill(h, stack)) refills++;
+            if (wantsRefill(h, stack)) {
+                if (tryRefill(h, stack)) refills++;
+                else if (lastItemTrigger.get()) lastCounts[h] = stack.getCount() + 1;
+            }
         }
 
         if (refills > 0) waitTicks = pauseTicks.get();
@@ -342,14 +348,20 @@ public class HotbarRefill extends Module {
 
     private boolean moveToHotbar(int source, int h) {
         if (!shiftMove.get()) {
+            if (!QuietClicks.readyOrSettle()) return false;
             InvUtils.move().from(source).to(h);
             return true;
         }
 
         if (!inPlayerMenu()) return false;
 
-        if (instantMove.get()) quickMove(source);
-        else pendingMoves.add(source);
+        if (instantMove.get()) {
+            if (!QuietClicks.readyOrSettle()) return false;
+            quickMove(source);
+        } else {
+            pendingMoves.add(source);
+        }
+
         return true;
     }
 
@@ -396,6 +408,7 @@ public class HotbarRefill extends Module {
 
     private boolean isCandidate(ItemStack target, ItemStack candidate) {
         if (candidate.isEmpty() || candidate.getItem() != target.getItem()) return false;
+        if (target.isOf(Items.FIREWORK_ROCKET) && Rockets.isPlain(target) && !Rockets.isPlain(candidate)) return false;
         if (target.getMaxCount() <= 1) return true;
         return !keepNames.get() || ItemStack.areItemsAndComponentsEqual(target, candidate);
     }

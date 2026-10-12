@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.tradingsystem.stages;
 
+import com.hunterbuddy.util.QuietClicks;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.SlotUtils;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
@@ -42,6 +43,8 @@ public class StealOrDumpStage extends Stage {
                 continue;
             }
             if (System.currentTimeMillis() - this.lastMovingTime < super.mainModule.stealAndDumpDelay.get()) return false;
+            if (!QuietClicks.readyOrSettle()) return false;
+
             InvUtils.shiftClick().slotId(this.nextSlot++);
             this.lastMovingTime = System.currentTimeMillis();
             if (type == Type.STEAL && ++this.stoleCount >= type.stacksCount()) return finish();
