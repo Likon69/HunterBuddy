@@ -5,6 +5,7 @@ import com.hunterbuddy.behavior.hooks.HookEntry;
 public interface Bot {
     String name();
     String description();
-    HookEntry taskEntry();
+    HookEntry taskEntry(BotContext context);
+    BotConfig config();
     BotStatus status();
 }

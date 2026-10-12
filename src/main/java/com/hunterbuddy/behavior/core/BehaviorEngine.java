@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.core;
 
 import com.hunterbuddy.behavior.bot.Bot;
+import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
@@ -99,7 +100,8 @@ public final class BehaviorEngine {
     }
 
     private void install(Bot next, String reason) {
-        HookEntry entry = next.taskEntry();
+        BotContext context = new BotContext(ctx, "bot:" + next.name(), next.config());
+        HookEntry entry = next.taskEntry(context);
         if (entry.hook() != Hook.BOT || entry.contributor() != Contributor.BOT
             || !entry.owner().equals("bot:" + next.name())) throw new IllegalArgumentException("invalid bot entry");
         TreeValidator.validate(List.of(entry));
@@ -108,6 +110,7 @@ public final class BehaviorEngine {
         hooks.applyPendingChanges(ctx);
         plugins.applyPendingCleanup();
         bot = next;
+        ctx.monitor().configure(context.config().progress());
         evidenceBaseline = ctx.evidenceSequence();
         routines.forEach(routine -> routine.onInstall(routineContext));
         root.start();

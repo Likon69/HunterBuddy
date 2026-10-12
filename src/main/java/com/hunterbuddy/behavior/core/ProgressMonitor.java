@@ -1,7 +1,9 @@
 package com.hunterbuddy.behavior.core;
 
+import java.util.Objects;
+
 public final class ProgressMonitor {
-    private final ProgressPolicy policy;
+    private ProgressPolicy policy;
     private long inactiveMs;
     private long setbacks;
     private long invalidUntilTick;
@@ -9,7 +11,13 @@ public final class ProgressMonitor {
     private long firstProgressAt = -1;
 
     public ProgressMonitor(ProgressPolicy policy) {
-        this.policy = policy;
+        this.policy = Objects.requireNonNull(policy);
+    }
+
+    public void configure(ProgressPolicy policy) {
+        this.policy = Objects.requireNonNull(policy);
+        inactiveMs = 0;
+        firstProgressAt = -1;
     }
 
     public void sample(Clock clock, Sensors sensors) {

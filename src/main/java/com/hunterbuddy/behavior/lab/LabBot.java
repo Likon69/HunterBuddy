@@ -1,9 +1,12 @@
 package com.hunterbuddy.behavior.lab;
 
 import com.hunterbuddy.behavior.bot.Bot;
+import com.hunterbuddy.behavior.bot.BotConfig;
+import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.ProgressPolicy;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
@@ -18,10 +21,12 @@ import com.hunterbuddy.behavior.nodes.UtilitySelector;
 import com.hunterbuddy.behavior.nodes.WithLease;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Resource;
+import com.hunterbuddy.behavior.routine.DeathPolicy;
 import java.util.Objects;
 import java.util.Set;
 
 public final class LabBot implements Bot {
+    private static final BotConfig CONFIG = new BotConfig(false, DeathPolicy.STOP, false, ProgressPolicy.DEFAULT, 1_200);
     private final LabScenario scenario;
     private int ticks;
     private long completed;
@@ -41,12 +46,19 @@ public final class LabBot implements Bot {
     }
 
     @Override
-    public HookEntry taskEntry() {
-        Node work = new Timeout(1_200, new WithLease(Set.of(Resource.MOVEMENT), LeasePolicy.WAIT,
+    public HookEntry taskEntry(BotContext context) {
+        Objects.requireNonNull(context);
+        if (!context.owner().equals("bot:" + name())) throw new IllegalArgumentException("wrong LabBot owner");
+        Node work = new Timeout(context.config().defaultActionLimitTicks(), new WithLease(Set.of(Resource.MOVEMENT), LeasePolicy.WAIT,
             new SimulatedAction("simulated-" + scenario, this::work)));
         Node task = new UtilitySelector("lab-task", new UtilityOption(work, ctx -> 1, ctx -> "simulated:" + scenario));
-        return new HookEntry(Hook.BOT, "bot:lab", Contributor.BOT, 0,
+        return new HookEntry(Hook.BOT, context.owner(), Contributor.BOT, 0,
             new Guard(new Condition("lab-ready", sensors -> true), task), true, task);
+    }
+
+    @Override
+    public BotConfig config() {
+        return CONFIG;
     }
 
     private NodeResult work(TickContext ctx) {
