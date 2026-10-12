@@ -1,5 +1,7 @@
 package com.hunterbuddy.behavior.core;
 
+import com.hunterbuddy.behavior.bot.BotStats;
+import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.resource.Leases;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.Trace;
@@ -26,6 +28,8 @@ public final class TickContext {
     private int monitorDepth;
     private boolean idleAnnounced;
     private String pluginOwner;
+    private BotStats botStats;
+    private Hook executedHook;
 
     public TickContext(Clock clock, Blackboard blackboard, Leases leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
@@ -39,6 +43,7 @@ public final class TickContext {
     public void begin(Sensors sensors) {
         this.sensors = Objects.requireNonNull(sensors);
         current = null;
+        executedHook = null;
     }
 
     public void end() {
@@ -54,6 +59,18 @@ public final class TickContext {
 
     void leave(Node previous) {
         current = previous;
+    }
+
+    void executed(Hook hook) {
+        executedHook = hook;
+    }
+
+    public Hook executedHook() {
+        return executedHook;
+    }
+
+    void botStats(BotStats stats) {
+        botStats = stats;
     }
 
     public NodeResult executeMonitor(Node node) {
@@ -96,6 +113,7 @@ public final class TickContext {
         if (accepted) {
             transitions.progress();
             evidenceSequence++;
+            if (botStats != null) botStats.evidence(evidence);
         }
         return accepted;
     }

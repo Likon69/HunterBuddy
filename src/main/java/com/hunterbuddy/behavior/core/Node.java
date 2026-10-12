@@ -20,6 +20,7 @@ public abstract class Node {
     }
 
     public final NodeResult execute(TickContext ctx) {
+        ctx.executed(hook);
         Node previous = ctx.enter(this);
         try {
             if (!active) {

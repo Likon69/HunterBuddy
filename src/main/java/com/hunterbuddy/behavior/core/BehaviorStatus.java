@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.core;
 
+import com.hunterbuddy.behavior.bot.BotStats;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -18,9 +19,25 @@ public final class BehaviorStatus {
             snapshot.noProgressRemainingMs() / 1_000.0, snapshot.noProgressWindowMs() / 1_000.0,
             snapshot.actionRemainingTicks(), snapshot.recoveryLevel(), snapshot.leases()));
         lines.add(String.format(Locale.ROOT, "Tick: %.3fms | simulated proofs=%d", snapshot.tickMs(), snapshot.evidence()));
+        lines.add(statsLine("Session", snapshot.stats().session()));
         if (snapshot.stop() != null) lines.add("Stopped [" + snapshot.stop().reason() + "]: " + snapshot.stop().detail());
         for (var routine : snapshot.routines()) lines.add("Routine " + routine.name() + ": " + routine.state() + " | " + routine.detail());
         for (var event : snapshot.recent()) lines.add(event.kind() + " " + event.reason());
         return List.copyOf(lines);
+    }
+
+    public static List<String> statsLines(EngineSnapshot snapshot) {
+        BotStats.Values session = snapshot.stats().session();
+        BotStats.Values cumulative = snapshot.stats().cumulative();
+        return List.of("Stats: " + snapshot.bot() + " (simulated)", statsLine("Session", session),
+            "Session hooks (ms): " + session.hookMs(), "Session proofs: " + session.proofs(),
+            "Session gains: " + session.gains(), statsLine("Cumulative", cumulative),
+            "Cumulative hooks (ms): " + cumulative.hookMs(), "Cumulative proofs: " + cumulative.proofs(),
+            "Cumulative gains: " + cumulative.gains());
+    }
+
+    private static String statsLine(String label, BotStats.Values stats) {
+        return String.format(Locale.ROOT, "%s: active=%.1fs | proofs=%d | deaths=%d | faults=%d",
+            label, stats.activeMs() / 1_000.0, stats.proofCount(), stats.deaths(), stats.faults());
     }
 }

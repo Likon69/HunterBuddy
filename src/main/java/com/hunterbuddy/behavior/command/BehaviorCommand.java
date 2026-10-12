@@ -34,6 +34,8 @@ public final class BehaviorCommand extends Command {
             module().stopEngine(ExitReason.STOPPED, "Stopped by .bt stop"))));
         builder.then(literal("status").executes(context -> control(() ->
             BehaviorStatus.lines(module().snapshot()).forEach(line -> info("%s", line)))));
+        builder.then(literal("stats").executes(context -> control(() ->
+            BehaviorStatus.statsLines(module().snapshot()).forEach(line -> info("%s", line)))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
         for (LabScenario scenario : LabScenario.values()) {
             lab.then(literal(scenario.name().toLowerCase(Locale.ROOT)).executes(context -> control(() -> {

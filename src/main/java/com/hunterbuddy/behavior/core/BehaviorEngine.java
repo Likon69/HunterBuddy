@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.core;
 import com.hunterbuddy.behavior.bot.Bot;
 import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotRegistry;
+import com.hunterbuddy.behavior.bot.BotStats;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
@@ -29,7 +30,9 @@ import com.hunterbuddy.behavior.trace.TraceSink;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -43,12 +46,14 @@ public final class BehaviorEngine {
     private final RoutineContext routineContext;
     private final PluginRegistry plugins;
     private final BotRegistry bots = new BotRegistry();
+    private final Map<String, BotStats> statsByBot = new LinkedHashMap<>();
     private final RingSink ring = new RingSink();
     private final Consumer<StopReport> stopped;
     private final Deque<Runnable> pending = new ArrayDeque<>();
     private final Sensors sensors = SimulatedSensors.idle();
     private Bot bot;
     private BotContext botContext;
+    private BotStats stats;
     private String botOwner;
     private StopReport announced;
     private boolean ticking;
@@ -105,6 +110,8 @@ public final class BehaviorEngine {
     }
 
     private void install(Bot next, String reason) {
+        stats = null;
+        ctx.botStats(null);
         BotContext context = new BotContext(ctx, "bot:" + next.name(), next.config());
         HookEntry entry = next.taskEntry(context);
         if (entry.hook() != Hook.BOT || entry.contributor() != Contributor.BOT
@@ -116,6 +123,9 @@ public final class BehaviorEngine {
         plugins.applyPendingCleanup();
         bot = next;
         botContext = context;
+        stats = statsByBot.computeIfAbsent(next.name(), name -> new BotStats());
+        stats.startSession();
+        ctx.botStats(stats);
         ctx.monitor().configure(context.config().progress());
         evidenceBaseline = ctx.evidenceSequence();
         routines.forEach(routine -> routine.onInstall(routineContext));
@@ -158,7 +168,12 @@ public final class BehaviorEngine {
                 clock.advance();
                 ctx.begin(simulatedSensors);
                 plugins.pulse();
-                root.tick(simulatedSensors);
+                long activeBefore = clock.activeMs();
+                try {
+                    root.tick(simulatedSensors);
+                } finally {
+                    if (stats != null) stats.sampleTime(clock.activeMs() - activeBefore, ctx.executedHook());
+                }
                 plugins.applyPendingCleanup();
                 if (running()) {
                     while (!pending.isEmpty()) pending.removeFirst().run();
@@ -190,6 +205,7 @@ public final class BehaviorEngine {
             report = root.stopReport().orElseThrow();
         }
         for (Routine routine : routines) routine.onUninstall(report);
+        if (stats != null) stats.stopped(report.reason());
         announced = report;
         stopped.accept(report);
     }
@@ -204,7 +220,7 @@ public final class BehaviorEngine {
             root.noProgressRemainingMs(), ctx.monitor().windowMs(), actionRemaining == Integer.MAX_VALUE ? 0 : actionRemaining, root.recoveryLevel(),
             ctx.leases().snapshot().size(), ctx.evidenceSequence() - evidenceBaseline, tickMs,
             events.subList(Math.max(0, events.size() - 5), events.size()), root.stopReport().orElse(null),
-            routines.stream().map(Routine::status).toList());
+            routines.stream().map(Routine::status).toList(), stats == null ? BotStats.EMPTY : stats.snapshot());
     }
 
     public List<Routine> routines() {
