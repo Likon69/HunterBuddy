@@ -95,12 +95,12 @@ public final class IdleFailureChecks {
         TreeRoot root = root(sim, hooks(), restarts, alerts, ready(), task);
         root.start();
         tick(sim, root, 100);
-        require(alerts.size() == 1 && task.starts() == 1 && task.cleanups() == 1 && restarts.count() == 0,
-            "One hundred immediate-failure ticks produce one wait alert and one BOT attempt");
+        require(alerts.size() == 1 && task.starts() == 5 && task.cleanups() == 5 && restarts.count() == 0,
+            "One hundred immediate-failure ticks produce one wait alert and five spaced BOT attempts");
         tick(sim, root, 2_304);
-        require(root.state() == RootState.STOPPED && restarts.count() == 3 && task.starts() == 4 && alerts.size() == 1
+        require(root.state() == RootState.STOPPED && restarts.count() == 3 && task.starts() == 5 && alerts.size() == 1
             && root.stopReport().orElseThrow().detail().equals("automatic restart limit reached"),
-            "Persistent immediate BOT failure gets three timed retries then one precise stop without repeated wait alerts");
+            "Persistent BOT failure preserves the Action start budget and gets three restarts then one precise stop without repeated wait alerts");
         require(sim.ctx().evidenceSequence() == 0 && sim.ctx().leases().snapshot().isEmpty(),
             "Deferring failed BOT retries neither invents progress nor leaves resources behind");
     }
@@ -113,8 +113,8 @@ public final class IdleFailureChecks {
         tick(sim, root, 100);
         long starts = sim.ring().snapshot().stream().filter(event -> event.kind() == Kind.START
             && event.nodePath().endsWith(":empty-tasks")).count();
-        require(starts == 1 && alerts.size() == 1 && root.state() == RootState.RUNNING,
-            "UtilitySelector NO_OPTION keeps one uninterrupted idle wait instead of retrying every tick");
+        require(starts == 5 && alerts.size() == 1 && root.state() == RootState.RUNNING,
+            "UtilitySelector NO_OPTION polls once per second within a single signaled idle period");
         root.stop(ExitReason.STOPPED);
     }
 
@@ -127,13 +127,13 @@ public final class IdleFailureChecks {
             new WithLease(Set.of(Resource.MOVEMENT), LeasePolicy.FAIL_FAST, work));
         sim.ctx().leases().request("other", Set.of(Resource.MOVEMENT));
         root.start();
-        tick(sim, root, 100);
+        tick(sim, root, 20);
         require(work.starts() == 0 && alerts.size() == 1 && restarts.count() == 0 && sim.ctx().leases().snapshot().isEmpty(),
             "FAIL_FAST refusal waits without oscillating and SafeIdle releases the blocking lease");
-        tick(sim, root, 502);
-        require(work.starts() == 1 && work.ticks() == 1 && restarts.count() == 1 && alerts.size() == 1
+        tick(sim, root, 1);
+        require(work.starts() == 1 && work.ticks() == 1 && restarts.count() == 0 && alerts.size() == 1
             && sim.ctx().leases().holder(Resource.MOVEMENT).orElseThrow().owner().equals("bot:lab"),
-            "Timed retry after lease refusal reacquires movement and resumes work");
+            "One-second retry after lease refusal reacquires movement without consuming an automatic restart");
         root.stop(ExitReason.STOPPED);
     }
 
@@ -150,19 +150,20 @@ public final class IdleFailureChecks {
         hooks.insert(new HookEntry(Hook.BOT_PRE, "plugin:inactive", Contributor.PLUGIN, 0,
             new Guard(new Condition("inactive", sensors -> false), plugin), true, plugin));
         tick(sim, root, 50);
-        require(task.starts() == 1 && alerts.size() == 1, "Hook rebuild retains the failed BOT retry deferral and idle activation");
+        require(task.starts() == 5 && alerts.size() == 1, "Hook rebuild retains bounded BOT attempts and the idle notification");
         for (int i = 0; i < 20; i++) sim.tick(root, SimulatedSensors.session(true, false, false, false));
         require(root.state() == RootState.PAUSED && restarts.count() == 0, "SESSION remains immediately eligible during a deferred BOT retry");
         tick(sim, root, 50);
-        require(task.starts() == 1 && alerts.size() == 1 && root.state() == RootState.RUNNING,
-            "SESSION resume retains the same inactivity notification and deferred BOT retry");
+        require(task.starts() == 5 && alerts.size() == 1 && root.state() == RootState.RUNNING,
+            "SESSION resume retains the inactivity notification and does not refund the Action start budget");
         sim.tick(root, SimulatedSensors.session(false, false, false, true));
         require(root.state() == RootState.STOPPED && root.stopReport().orElseThrow().reason() == ExitReason.DEAD,
             "DEATH still stops immediately during the protected idle wait");
         root.start();
         tick(sim, root, 1);
-        require(task.starts() == 2 && alerts.size() == 2,
-            "Explicit stop and start open a new idle period and clear the old BOT deferral");
+        require(task.starts() == 5 && alerts.size() == 2 && sim.ring().snapshot().stream().anyMatch(event -> event.tick() == sim.ctx().tick()
+            && event.hook() == Hook.BOT && event.kind() == Kind.START),
+            "Explicit stop and start clear retry deferral and signal a new idle period without refunding the Action budget");
         root.stop(ExitReason.STOPPED);
     }
 

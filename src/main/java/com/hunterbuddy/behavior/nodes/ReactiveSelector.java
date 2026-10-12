@@ -54,12 +54,11 @@ public final class ReactiveSelector extends Composite {
             selected = -1;
             if (!(result instanceof Failure)) {
                 successfulHook = guard.hook();
-                if (successfulHook == Hook.IDLE) resumeBotRetries();
                 return result;
             }
             guard.failedAt(ctx.tick());
             if (hookRoot && guard.hook() == Hook.BOT && children().stream().anyMatch(child -> child.hook() == Hook.IDLE)) {
-                guard.deferRetry();
+                guard.deferRetry(ctx.tick() + 20);
             }
             candidate = firstEligible(ctx, candidate + 1, children().size());
         }
