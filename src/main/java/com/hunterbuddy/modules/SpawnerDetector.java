@@ -4439,9 +4439,10 @@ public class SpawnerDetector extends Module {
         int x = chest.getX(), z = chest.getZ();
         if (!mc.world.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) return null;
         if (!mc.world.getBlockState(chest).isOf(Blocks.CHEST)) return null;
-        int top = Math.max(chest.getY() + 1, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z));
-        int blocks = 0, water = 0, gap = 0, maxGap = 0;
         BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int top = Math.max(chest.getY() + 1, descendPastFloatingBlocks(chest, x, z,
+            mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z) - 1, chest.getY(), false, cursor) + 1);
+        int blocks = 0, water = 0, gap = 0, maxGap = 0;
         for (int y = chest.getY() + 1; y < top; y++) {
             cursor.set(x, y, z);
             BlockState state = mc.world.getBlockState(cursor);
