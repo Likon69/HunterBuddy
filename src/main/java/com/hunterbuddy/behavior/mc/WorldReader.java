@@ -27,9 +27,12 @@ import java.util.Set;
 import java.util.function.Predicate;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
 public final class WorldReader {
@@ -49,6 +52,46 @@ public final class WorldReader {
 
     public WorldIdentity identity() {
         return WorldIdentity.capture(client);
+    }
+
+    MinecraftClient client() {
+        return client;
+    }
+
+    public BlockPos feet() {
+        if (!available()) throw new IllegalStateException("Minecraft world is unavailable");
+        return client.player.getBlockPos();
+    }
+
+    public boolean loaded(BlockPos pos) {
+        return available() && client.world.getChunkManager().isChunkLoaded(pos.getX() >> 4, pos.getZ() >> 4);
+    }
+
+    public boolean inBounds(BlockPos pos) {
+        return available() && pos.getY() >= client.world.getBottomY() && pos.getY() <= client.world.getTopYInclusive()
+            && client.world.getWorldBorder().contains(pos);
+    }
+
+    public BlockState state(BlockPos pos) {
+        if (!loaded(pos)) throw new IllegalStateException("Block chunk is not loaded: " + pos);
+        return client.world.getBlockState(pos);
+    }
+
+    public boolean cleared(BlockPos pos) {
+        BlockState state = state(pos);
+        return state.isAir() || state.getBlock() instanceof FluidBlock;
+    }
+
+    public float hardness(BlockPos pos) {
+        return state(pos).getHardness(client.world, pos);
+    }
+
+    public boolean openDryNeighbor(BlockPos column) {
+        for (var direction : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+            BlockPos neighbor = column.offset(direction);
+            if (loaded(neighbor) && state(neighbor).isAir() && state(neighbor.up()).isAir()) return true;
+        }
+        return false;
     }
 
     public boolean loaded(TargetPoint point) {
@@ -84,11 +127,10 @@ public final class WorldReader {
         return available() && slot >= 0 && slot < 9 && filter.test(client.player.getInventory().getStack(slot));
     }
 
-    public String refusal(Set<Resource> resources, BaritoneSnapshot baritone) {
+    public String refusal(Set<Resource> resources, BaritoneSnapshot baritone, boolean ownBaritone, boolean ownMining) {
         if (!available()) return "Minecraft world is unavailable";
-        if (client.player.isGliding()) return "Land before starting a ground laboratory scenario";
         if (resources.contains(Resource.MOVEMENT) && !baritone.available()) return "Baritone is unavailable for movement";
-        if (baritone.inControl() || baritone.pathing() || baritone.calcInProgress()) return "Baritone is already controlling the player";
+        if (!ownBaritone && (baritone.inControl() || baritone.pathing() || baritone.calcInProgress())) return "Baritone is already controlling the player";
         Modules modules = Modules.get();
         for (Module module : modules.getActive()) {
             if (REFUSED.contains(module.getClass())) return "Active producer: " + module.name;
@@ -100,7 +142,8 @@ public final class WorldReader {
         AutoEatSync eat = modules.get(AutoEatSync.class);
         if (resources.contains(Resource.SLOT) && eat != null && eat.isEating()) return "AutoEatSync owns SLOT";
         HMine mine = modules.get(HMine.class);
-        if ((resources.contains(Resource.LOOK) || resources.contains(Resource.SLOT)) && mine != null && mine.isActive() && mine.isMining()) {
+        if (!ownBaritone && !ownMining && (resources.contains(Resource.LOOK) || resources.contains(Resource.SLOT))
+            && mine != null && mine.isActive() && mine.isMining()) {
             return "HMine owns LOOK and SLOT";
         }
         return null;

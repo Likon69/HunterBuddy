@@ -1,8 +1,11 @@
 package com.hunterbuddy.behavior.resource;
 
+import com.hunterbuddy.behavior.mc.MiningBridge;
+import com.hunterbuddy.behavior.mc.PlacementBridge;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -12,6 +15,12 @@ public final class Outputs {
     private MovementOutput movementOutput;
     private LookOutput lookOutput;
     private SlotOutput slotOutput;
+    private BaritoneOutput baritoneOutput;
+    private BaritoneIntent baritone;
+    private Lease baritoneLease;
+    private Consumer<BaritoneOutput.Signal> baritoneEvents;
+    private MiningBridge mining;
+    private PlacementBridge placement;
     private LongSupplier nativeTicks;
     private MovementIntent movement;
     private LookIntent look;
@@ -42,6 +51,51 @@ public final class Outputs {
         if (begunAt == tick) return;
         clear();
         begunAt = tick;
+    }
+
+    public void connectBaritone(BaritoneOutput output) {
+        if (baritoneOutput != null) throw new IllegalStateException("Baritone output already connected");
+        baritoneOutput = Objects.requireNonNull(output);
+        if (!(leases instanceof ResourceArbiter arbiter)) throw new IllegalStateException("Baritone needs the resource arbiter");
+        arbiter.releaseGuard(lease -> !lease.resources().contains(Resource.BARITONE) || baritoneOutput.stop(lease));
+    }
+
+    public void connectMinecraft(MiningBridge mining, PlacementBridge placement) {
+        if (this.mining != null) throw new IllegalStateException("Minecraft bridges already connected");
+        this.mining = Objects.requireNonNull(mining);
+        this.placement = Objects.requireNonNull(placement);
+    }
+
+    public MiningBridge mining() {
+        return Objects.requireNonNull(mining, "Mining bridge is not connected");
+    }
+
+    public PlacementBridge placement() {
+        return Objects.requireNonNull(placement, "Placement bridge is not connected");
+    }
+
+    public long nativeTick() {
+        return nativeTicks == null ? begunAt : nativeTicks.getAsLong();
+    }
+
+    public void baritone(String owner, BaritoneIntent intent, Consumer<BaritoneOutput.Signal> events) {
+        baritoneLease = requireLease(owner, Resource.BARITONE);
+        if (intent.allowBreak()) requireLease(owner, Resource.MINING);
+        baritone = Objects.requireNonNull(intent);
+        baritoneEvents = Objects.requireNonNull(events);
+    }
+
+    public boolean baritoneStarted(String owner, BaritoneIntent intent) {
+        return baritoneOutput != null && leases.holder(Resource.BARITONE)
+            .filter(lease -> lease.owner().equals(owner) && baritoneOutput.owns(lease, intent)).isPresent();
+    }
+
+    public boolean ownBaritone() {
+        return baritoneOutput != null && baritoneOutput.ownsControl();
+    }
+
+    public void advanceNative() {
+        if (baritoneOutput != null) baritoneOutput.advance();
     }
 
     public void movement(String owner, MovementIntent intent) {
@@ -75,10 +129,12 @@ public final class Outputs {
         if (!valid(movementLease, Resource.MOVEMENT)) movement = null;
         if (!valid(lookLease, Resource.LOOK)) look = null;
         if (!valid(slotLease, Resource.SLOT)) slot = null;
+        if (!valid(baritoneLease, Resource.BARITONE)) baritone = null;
         try {
             movementOutput.apply(movement, tick);
             lookOutput.apply(look);
             slotOutput.apply(slot, slotLease, tick);
+            if (baritoneOutput != null) baritoneOutput.apply(baritone, baritoneLease, baritoneEvents);
         } catch (RuntimeException ex) {
             try {
                 release(tick);
@@ -94,7 +150,7 @@ public final class Outputs {
     }
 
     public boolean foreignMovement() {
-        return movementOutput != null && movementOutput.foreignInput();
+        return !ownBaritone() && movementOutput != null && movementOutput.foreignInput();
     }
 
     public void discardSlot() {
@@ -103,6 +159,7 @@ public final class Outputs {
 
     public List<String> status() {
         List<String> lines = new ArrayList<>();
+        if (baritoneOutput != null && baritoneOutput.status() != null) lines.add(baritoneOutput.status());
         if (movement != null && valid(movementLease, Resource.MOVEMENT)) lines.add("MOVEMENT " + movementLease.owner() + " " + movement);
         if (look != null && valid(lookLease, Resource.LOOK)) lines.add("LOOK " + lookLease.owner() + " " + look);
         if (slot != null && valid(slotLease, Resource.SLOT)) lines.add("SLOT " + slotLease.owner() + " " + slot);
@@ -118,9 +175,21 @@ public final class Outputs {
         if (nativeTicks != null) tick = nativeTicks.getAsLong();
         RuntimeException failure = null;
         try {
-            if (movementOutput != null) movementOutput.release(tick);
+            if (baritoneOutput != null) baritoneOutput.release();
         } catch (RuntimeException ex) {
             failure = ex;
+        }
+        try {
+            if (mining != null) mining.releaseClick();
+        } catch (RuntimeException ex) {
+            if (failure == null) failure = ex;
+            else if (failure != ex) failure.addSuppressed(ex);
+        }
+        try {
+            if (movementOutput != null) movementOutput.release(tick);
+        } catch (RuntimeException ex) {
+            if (failure == null) failure = ex;
+            else if (failure != ex) failure.addSuppressed(ex);
         }
         try {
             if (slotOutput != null) slotOutput.release(tick);
@@ -138,5 +207,8 @@ public final class Outputs {
         movementLease = null;
         lookLease = null;
         slotLease = null;
+        baritone = null;
+        baritoneLease = null;
+        baritoneEvents = null;
     }
 }

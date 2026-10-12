@@ -39,7 +39,7 @@ public final class SessionRoutine extends CoreRoutine {
             "Player-owned screen '%s': waiting for %.1f seconds (60-second limit)",
             ctx.sensors().screenType(), screenWait.elapsedMs(ctx) / 1_000.0)));
         return List.of(entry(new Condition("in queue", sensors -> !sensors.dead() && sensors.inQueue()), queue),
-            entry(new Condition("foreign screen", sensors -> !sensors.dead() && pauseOnForeignScreen()
+            entry(new Condition("foreign screen", sensors -> !sensors.dead() && !sensors.gliding() && sensors.onGround() && pauseOnForeignScreen()
                 && sensors.screenOpen() && !sensors.screenOurs()), screen));
     }
 

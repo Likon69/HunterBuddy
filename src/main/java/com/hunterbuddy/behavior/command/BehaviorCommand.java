@@ -5,6 +5,7 @@ import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.modules.TreeJava;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import java.util.Locale;
 import meteordevelopment.meteorclient.commands.Command;
@@ -13,7 +14,7 @@ import net.minecraft.command.CommandSource;
 
 public final class BehaviorCommand extends Command {
     public BehaviorCommand() {
-        super("bt", "Control TreeJava, live walk/look and simulated laboratory scenarios.");
+        super("bt", "Control TreeJava and its live or simulated laboratory scenarios.");
     }
 
     @Override
@@ -49,6 +50,30 @@ public final class BehaviorCommand extends Command {
                 module().lookAt(DoubleArgumentType.getDouble(context, "yaw"), DoubleArgumentType.getDouble(context, "pitch"));
                 info("Live lab look requested.");
             })))));
+        lab.then(literal("goto").then(argument("x", DoubleArgumentType.doubleArg())
+            .then(argument("y", DoubleArgumentType.doubleArg()).then(argument("z", DoubleArgumentType.doubleArg())
+                .executes(context -> control(() -> {
+                    module().goTo(DoubleArgumentType.getDouble(context, "x"), DoubleArgumentType.getDouble(context, "y"),
+                        DoubleArgumentType.getDouble(context, "z"));
+                    info("Live lab goto requested.");
+                }))))));
+        lab.then(literal("breakcolumn").then(argument("height", IntegerArgumentType.integer(1, 24))
+            .executes(context -> control(() -> {
+                module().breakColumn(IntegerArgumentType.getInteger(context, "height"));
+                info("Live lab breakcolumn requested.");
+            }))));
+        lab.then(literal("place").then(argument("x", DoubleArgumentType.doubleArg())
+            .then(argument("y", DoubleArgumentType.doubleArg()).then(argument("z", DoubleArgumentType.doubleArg())
+                .executes(context -> control(() -> {
+                    module().placeAt(DoubleArgumentType.getDouble(context, "x"), DoubleArgumentType.getDouble(context, "y"),
+                        DoubleArgumentType.getDouble(context, "z"));
+                    info("Live lab place requested.");
+                }))))));
+        lab.then(literal("pillar").then(argument("height", IntegerArgumentType.integer(1, 24))
+            .executes(context -> control(() -> {
+                module().pillar(IntegerArgumentType.getInteger(context, "height"));
+                info("Live lab pillar requested.");
+            }))));
         lab.then(literal("stop").executes(context -> control(() ->
             module().stopEngine(ExitReason.STOPPED, "Stopped by .bt lab stop"))));
         for (LabScenario scenario : LabScenario.values()) {

@@ -152,10 +152,16 @@ public final class TreeRoot {
             hooks.build().execute(ctx);
             return;
         }
+        if (hookReady(Hook.FLIGHT)) {
+            if (recovering) recovery.halt(ctx, ExitReason.PAUSED);
+            hooks.build().execute(ctx);
+            return;
+        }
         if (!recovering && ctx.monitor().fired() && noProgressRemainingMs() == 0) {
             ctx.event(hooks.build(), Kind.MONITOR, FailureCode.NO_PROGRESS, "fired", "inactiveMs=" + ctx.monitor().inactiveMs());
             enterRecovery();
         }
+        if (recovering) hooks.build().halt(ctx, ExitReason.GUARD_LOST);
         Node active = recovering ? recovery : hooks.build();
         NodeResult result = active.execute(ctx);
         if (ctx.evidenceSequence() != evidenceSequence) {
@@ -167,6 +173,10 @@ public final class TreeRoot {
         if (result instanceof Running) return;
         if (recovering) {
             completeRecovery(result);
+            return;
+        }
+        if (result instanceof Failure failure && failure.code() == FailureCode.UNREACHABLE) {
+            enterRecovery();
             return;
         }
         if (result instanceof Success && hooks.build().successfulHook() == Hook.IDLE) {

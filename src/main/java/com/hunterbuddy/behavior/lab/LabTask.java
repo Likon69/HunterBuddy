@@ -7,10 +7,14 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
 
-public sealed interface LabTask permits WalkTask, LookTask {
+public sealed interface LabTask permits WalkTask, LookTask, GoToTask, BreakColumnTask, PlaceTask, PillarTask {
     String name();
     String target();
     Set<Resource> resources();
     void initialize(BotContext context);
     Node build(BotContext context, WorldReader world, Outputs outputs);
+
+    default boolean recoverFailure() {
+        return false;
+    }
 }

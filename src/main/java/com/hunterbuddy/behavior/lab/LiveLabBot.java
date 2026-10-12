@@ -70,7 +70,7 @@ public final class LiveLabBot implements Bot {
         Node work = new LabTaskNode(task.build(context, world, outputs), () -> {
             completed++;
             stage = Stage.COMPLETE;
-        });
+        }, task.recoverFailure() ? () -> stage = Stage.UNREACHABLE : null);
         return new HookEntry(Hook.BOT, context.owner(), Contributor.BOT, 0,
             new Guard(new Condition("live-lab-ready", sensors -> stage == Stage.RUNNING), work), false, work);
     }
@@ -106,7 +106,7 @@ public final class LiveLabBot implements Bot {
 
     @Override
     public BotStatus status() {
-        return new BotStatus(task.name(), task.target(), completed);
+        return new BotStatus(stage == Stage.UNREACHABLE ? task.name() + " unreachable" : task.name(), task.target(), completed);
     }
 
     public WorldIdentity identity() {
@@ -118,6 +118,6 @@ public final class LiveLabBot implements Bot {
     }
 
     private enum Stage {
-        READY, RUNNING, COMPLETE, STOPPED
+        READY, RUNNING, COMPLETE, UNREACHABLE, STOPPED
     }
 }

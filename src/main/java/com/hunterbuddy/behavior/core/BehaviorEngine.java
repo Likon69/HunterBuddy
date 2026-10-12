@@ -22,6 +22,7 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.routine.DeathPolicy;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
+import com.hunterbuddy.behavior.routine.FlightKeeperRoutine;
 import com.hunterbuddy.behavior.routine.IdleRoutine;
 import com.hunterbuddy.behavior.routine.Routine;
 import com.hunterbuddy.behavior.routine.RoutineContext;
@@ -77,7 +78,7 @@ public final class BehaviorEngine {
         this.clock = Objects.requireNonNull(clock);
         this.stopped = Objects.requireNonNull(stopped);
         this.alerts = Objects.requireNonNull(alerts);
-        routines = List.of(new SessionRoutine(), new DeathRoutine(), new IdleRoutine(alerts, restarts));
+        routines = new ArrayList<>(List.of(new SessionRoutine(), new DeathRoutine(), new IdleRoutine(alerts, restarts)));
         List<TraceSink> allSinks = new ArrayList<>(List.of(sinks));
         allSinks.add(ring);
         ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(),
@@ -337,7 +338,22 @@ public final class BehaviorEngine {
     }
 
     public List<Routine> routines() {
-        return routines;
+        return List.copyOf(routines);
+    }
+
+    public void flightKeeper(Node keepFlying) {
+        if (bot != null || routines.stream().anyMatch(routine -> routine instanceof FlightKeeperRoutine)) {
+            throw new IllegalStateException("FlightKeeper must be connected once before starting");
+        }
+        Routine routine = new FlightKeeperRoutine(keepFlying);
+        routine.entries(routineContext).forEach(hooks::insert);
+        hooks.applyPendingChanges(ctx);
+        routines.add(routine);
+    }
+
+    public void advanceNativeOutputs() {
+        ctx.outputs().advanceNative();
+        ctx.end();
     }
 
     public PluginRegistry plugins() {

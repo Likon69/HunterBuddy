@@ -57,6 +57,9 @@ public final class ReactiveSelector extends Composite {
                 return result;
             }
             guard.failedAt(ctx.tick());
+            if (hookRoot && guard.hook() == Hook.BOT && result instanceof Failure failure && failure.code() == FailureCode.UNREACHABLE) {
+                return failure;
+            }
             if (hookRoot && guard.hook() == Hook.BOT && children().stream().anyMatch(child -> child.hook() == Hook.IDLE)) {
                 guard.deferRetry(ctx.tick() + 20);
             }
