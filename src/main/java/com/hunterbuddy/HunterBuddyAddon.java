@@ -41,7 +41,7 @@ import com.hunterbuddy.modules.Replenish;
 import com.hunterbuddy.modules.RocketBoost;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.RotationDetector;
-import com.hunterbuddy.modules.ShulkerOverviewModule;
+import com.hunterbuddy.modules.ShulkerOverview;
 import com.hunterbuddy.modules.SignRender;
 import com.hunterbuddy.modules.SpawnerDetector;
 import com.hunterbuddy.modules.StashFinder;
@@ -119,7 +119,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new AutoLogPlus());
         Modules.get().add(new AutoEXPPlus());
         Modules.get().add(new ClientSideTime());
-        Modules.get().add(new ShulkerOverviewModule());
+        Modules.get().add(new ShulkerOverview());
         Modules.get().add(new ElytraSwap());
         Modules.get().add(new InventoryCleaner());
         Modules.get().add(new NoJumpDelay());

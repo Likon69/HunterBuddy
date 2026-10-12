@@ -4,12 +4,12 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "MlepScaffoldMixin",
-    "InGameHudMixin",
+    "ShulkerHotbarOverlayMixin",
     "InputMixin",
     "AuraMoveFixMixin",
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",
-    "HandledScreenMixin",
+    "ShulkerSlotOverlayMixin",
     "EntityGlowMixin",
     "EntityTeamColorMixin",
     "render.WorldRendererGlowMixin",
@@ -25,7 +25,6 @@
     "accessors.EntityVelocityUpdateS2CPacketAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
     "fireworkboost.FireworkRocketEntityMixin",
-    "DisconnectedScreenMixin",
     "PlayerDeathMixin",
     "ServerDisconnectMixin",
     "KeyBindingMixin",
@@ -33,12 +32,14 @@
     "ElytraBounceCameraMixin",
     "CatchUpPacingMixin",
     "EntityScaleMixin",
-    "MeteorNametagsHeightMixin"
+    "MeteorNametagsHeightMixin",
+    "LegacyModuleNameMixin",
+    "LegacyHudNameMixin"
   ],
   "injectors": {
     "defaultRequire": 1
   },
   "mixins": [
-    "TimerMixin"
+    "TimerPaceMixin"
   ]
 }

@@ -30,6 +30,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `elytra-auto-fly` | Flight cycle driving `pitch40-classic`: climb, then manual-pitch descent, looped. |
 | `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer, and portal-trap avoidance. `solve-pitch` picks the fastest bounce angle for the ceiling above you, and `chestplate-fakefly` bounces with a chest piece worn and the elytra in a hand, swapping the elytra in only for the take-off so it never loses durability. |
 | `ElytraRecast` | Flight recovery fallback: watches for lost flight or a low altitude and relaunches. |
+| `heading-lock` | Holds your yaw on the nearest multiple of 45 degrees, optionally with a tiny random wobble. |
 | `old-chunk-notifier` | Sends a webhook message, optionally pinging you, when an old chunk is detected. |
 | `Pitch40` | Pitch40 helper: syncs bounds with Meteor's ElytraFly and auto-enables on reconnect. Its `chest-swap` glides with a chest piece worn and the elytra in a hand, swapping the elytra in for a moment at each burst so it never loses durability, and keeps it on while a rocket pushes. |
 | `pitch40-classic` | Standalone +40/-40 pitch oscillation with its own firework logic; does not use Meteor's ElytraFly. |
@@ -38,7 +39,6 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `TrailFollower` | Follows detected trails in all dimensions, with a turn-limited heading (`heading-turn-limit`), chunks far behind ignored (`ignore-behind`), and a lost-trail scan (`lost-trail-scan`: weave, spin or hold) when the trail stops coming. |
 | `visual-range-notifier` | Notifies when players enter visual range or selected items appear on the ground; optional Discord webhook alerts. |
 | `waypoint-follower` | Follows the Xaero waypoints whose name starts with `waypoint-prefix` (`Hunt_` by default), in numeric order or closest first, with a flight mode per dimension; once the last one is reached it stops where it is, in the air or on the ground, by switching itself off or by leaving the server. It can also lay the waypoints for you: `seed-route` fills a hunt chain along an already-mapped trail between your `Route_1`, `Route_2`… control marks (dropped on Xaero's map with `add-route-key`), one every `seed-spacing` blocks or only at portal patches, and `nether-record-route` drops one every `seed-spacing` blocks along your own Nether flight. Keys add, skip or pause waypoints from the map, and `clear-waypoints` wipes every hunt waypoint and route mark for a fresh start. |
-| `yaw-lock` | Locks yaw to the nearest 45-degree increment. |
 
 ### Visuals (9)
 
@@ -52,7 +52,7 @@ ESP, overlays, and render helpers.
 | `flow-esp` | Detects chunk activity from fluid-spread analysis. |
 | `rotation-detector` | Finds horizontally placed blocks that only generate vertically in nature. |
 | `shader` | Entity glow/outline shader. |
-| `sign-render` | Renders sign text through walls, clustered to stay readable. |
+| `sign-reader` | Shows the text of nearby signs on screen, through walls, grouping the ones that overlap. |
 | `SpawnerDetector` | Finds classic monster-room dungeons, with or without their spawner, along with activated trial spawners and shipwrecks. It scores the player traces around each room: placed lights, ender chests, player blocks, a broken spawner, mobs, tunnels and filled shafts. Colored boxes and labels show which rooms are traced and which still hold chests. With `auto-farm` it flies to a traced room on its own, or to any room with a chest with `auto-farm-all`. It digs down, mines the spawner, loots the chests, climbs back out and hands flight back to your flight module. With `detect-shipwrecks` it also loots shipwreck chests in old chunks. It will not leave below a health or rocket minimum, nor while a non-friend player is loaded. |
 | `VanityESP` | Unified ESP for decorative items and selected special blocks. |
 
@@ -63,10 +63,10 @@ Restocking and inventory handling tools.
 | Meteor name | Description |
 |---|---|
 | `AutoFlyingRegear` | Lands on solid ground, never over lava, builds a walled box and restocks rockets, elytras and the other supplies it watches from an ender chest when one runs short. When the chest can no longer supply what is missing it never takes off again: it stays in the closed box and switches the modules off, or leaves the server. |
-| `ElytraSwap` | Swaps out an elytra when it reaches low durability. |
-| `PearlLoader` | Anti-AFK loop with pearl-loading support. |
-| `replenish` | Replenishes hotbar items using shift-click packets. |
-| `shulker-overview` | Overlays the most common contained item's icon on shulker boxes in inventory screens. |
+| `elytra-keeper` | Keeps a working elytra on: swaps in a fresh one when it wears out, puts one on a bare chest, and can wear a chestplate while you are hit or when another module asks for it. |
+| `hotbar-refill` | Tops up hotbar stacks from your inventory before they run out, by shift-click or by pick-up and place. |
+| `pearl-butler` | Walks back and forth to stay online, and loads an ender pearl stasis, by trapdoor or by walking to a spot, when a chat keyword arrives. |
+| `shulker-peek` | Draws the main item of each shulker box over its icon, in inventories and on the hotbar, with a mark when the box holds several kinds of items. |
 | `shulker-sorter` | Sorts the shulkers and loose items in your input chests into category chests, walking between them with Baritone. At a station it keeps only the dominant category in mixed shulkers and tops up partial pure shulkers with loose items. It fills an empty shulker once a category has at least 27 loose stacks; an optional `shulkerColor` in the JSON prefers its dye color. Withdrawals take only 100% pure shulkers, or empty ones for `shulkers`. It pauses while another player is in sight (friends allowed with `ignore-friends`), while SpawnerDetector is on and while the regear runs, and it can resume after a reconnect. Register chests with `tag-key` and set their roles with the buttons in its settings; `dry-run` reports where inputs would go without moving them. |
 
 ### Utility (15)
@@ -77,11 +77,11 @@ Restocking and inventory handling tools.
 | `auto-exp-plus` | Repairs armor and tools with experience bottles, restocking bottles into a chosen hotbar slot. |
 | `auto-log-plus` | Additional logout triggers. |
 | `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
-| `disconnect-sound` | Plays a sound when the disconnect screen appears (e.g. when kicked). |
 | `Experience Trader Starter` | Switches Villager Trading on once per in-game day, at the in-game time you choose (13:00 by default), with a fresh list of clerics to visit. |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
 | `h-mine` | Fast block mining, with a configurable swing animation. |
 | `inventory-cleaner` | Throws out every item that is not on its list, or in blacklist mode only the listed ones, one stack every `delay` ticks; the hotbar is optional. Works with no screen or the inventory open, and optionally in a crafting table or a container. |
+| `kick-alarm` | Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed. |
 | `kill-aura-plus` | Attacks what you choose, with the weapon that hurts it most, on the beat that does full damage. |
 | `mlep-air-place` | Places a block in air where your crosshair is pointing. |
 | `mlep-scaffold` | Places blocks beneath you as you move. |
@@ -125,7 +125,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `SpiralCoverage` | AreaLoader coverage for any mode: flown legs, current leg, planned turns. |
 | `SystemStats` | RAM and CPU usage with line graphs. |
 | `ThreatBoard` | Players in range: distance, approach vector, gear summary. |
-| `TimerSpeed` | Meteor Timer's current multiplier. |
+| `TimerGauge` | Meteor Timer's current multiplier. |
 | `TpsCardiogram` | Server TPS as a scrolling cardiogram, flatlining on lag. |
 | `Travel` | Distance, ETA, and speed toward a named waypoint, checked against elytra range. |
 
@@ -163,4 +163,16 @@ Several modules started as ports from other addons rather than being written fro
 - **[Jeff mod](https://github.com/miles352/meteor-stashhunting-addon)** (miles352) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
 - **riths** — Hunting Utilities ([Tim](https://github.com/rithsgit/Tim)).
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
-- **0xTas** — [Stardust](https://github.com/0xTas/stardust): the firework hooks of `rocket-boost` (stronger push, rocket kept alive) are ported from its `RocketMan`; the speed control built on them is our own.
+- **0xTas** — [Stardust](https://github.com/0xTas/stardust): the firework hooks of `rocket-boost` (stronger push, rocket kept alive) are ported from its `RocketMan` (GPL-3.0); the speed control built on them is our own.
+
+## License
+
+HunterBuddy is licensed under the [GNU General Public License v3.0](LICENSE).
+
+Copyright (C) 2026 Likon69 — https://github.com/Likon69/HunterBuddy
+
+You may use, study and change this code. If you distribute it, or a client or addon that contains it, you must keep this notice and the license and publish your complete source code under the GPL-3.0 as well. Closed-source clients may not include it.
+
+Additional term under section 7(b) of the GPL-3.0: any work that contains code from HunterBuddy, modified or not, must keep the author attribution "HunterBuddy by Likon69 - https://github.com/Likon69/HunterBuddy" in its source code and in the credits or about information it shows to its users.
+
+Versions published before 12 October 2026 were dedicated to the public domain under CC0 1.0; that dedication still applies to those versions.

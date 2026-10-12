@@ -2,10 +2,10 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -13,783 +13,555 @@ import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.renderer.Renderer2D;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.renderer.text.VanillaTextRenderer;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.ColorSetting;
+import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.DoubleSetting.Builder;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.util.math.Vec3d;
-import org.joml.Vector3d;
 import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.HangingSignBlockEntity;
 import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.block.entity.SignText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import org.joml.Vector3d;
 
 public class SignRender extends Module {
-   private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
-   private final SettingGroup sgRender = this.settings.createGroup("Render");
-   private final SettingGroup sgClustering = this.settings.createGroup("Clustering");
-   private final SettingGroup sgOptimization = this.settings.createGroup("Optimization");
-   private final Setting<Double> maxDistance = this.sgGeneral
-      .add(
-         new Builder().name("max-distance").description("Maximum distance to render signs (blocks).")
-            .defaultValue(1024.0)
-            .min(16.0)
-            .max(1024.0)
-            .sliderRange(16.0, 1024.0)
-            .build()
-      );
-   private final Setting<Integer> maxSigns = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("max-signs")
-                  .description("Maximum number of signs to render.")
-               .defaultValue(500)
-            .min(5)
-            .max(500)
-            .sliderRange(5, 1000)
-            .build()
-      );
-   private final Setting<Boolean> filterEmpty = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("filter-empty")
-                  .description("Hide empty signs.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> multilineDisplay = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("multiline-display")
-                  .description("Display sign text as multiple lines as they appear on the sign.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<SettingColor> textColor = this.sgRender
-      .add(
-         new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
-                  .name("text-color")
-               .description("Text color.")
-            .defaultValue(new SettingColor(255, 255, 255, 255)).build()
-      );
-   private final Setting<SettingColor> backgroundColor = this.sgRender
-      .add(
-         new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
-                  .name("background-color")
-               .description("Background color.")
-            .defaultValue(new SettingColor(0, 0, 0, 120)).build()
-      );
-   private final Setting<Boolean> showBackground = this.sgRender
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("show-background")
-                  .description("Show background behind text.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> forceDefaultFont = this.sgRender
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("force-default-font")
-                  .description("Force sign text to render using the default font, even if a custom GUI font is selected in your Meteor config.")
-               .defaultValue(false)
-            .build()
-      );
-   private final Setting<Boolean> enableClustering = this.sgClustering
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("enable-clustering")
-                  .description("Group nearby signs to prevent overlap.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Double> clusterRadius = this.sgClustering
-      .add(
-         new Builder().name("cluster-radius").description("Screen distance in pixels to group signs.")
-               .defaultValue(100.0)
-               .min(20.0)
-               .max(500.0)
-               .sliderRange(20.0, 200.0)
-               .visible(this.enableClustering::get)
-            .build()
-      );
-   private final Setting<SignRender.ClusterMode> clusterMode = this.sgClustering
-      .add(
-         new meteordevelopment.meteorclient.settings.EnumSetting.Builder<SignRender.ClusterMode>()
-                        .name("cluster-mode")
-                     .description("How to display clustered signs.")
-                  .defaultValue(SignRender.ClusterMode.Count)
-               .visible(this.enableClustering::get)
-            .build()
-      );
-   private final Setting<Integer> cycleTime = this.sgClustering
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("cycle-time")
-                     .description("Time in milliseconds between cycling signs.")
-                  .defaultValue(2000)
-               .min(500)
-               .max(10000)
-               .sliderRange(500, 5000)
-               .visible(() -> (Boolean)this.enableClustering.get() && this.clusterMode.get() == SignRender.ClusterMode.Cycle)
-            .build()
-      );
-   private final Setting<Integer> maxClusterDisplay = this.sgClustering
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("max-cluster-display")
-                     .description("Maximum signs to show in a cluster.")
-                  .defaultValue(5)
-               .min(1)
-               .max(10)
-               .sliderRange(1, 10)
-               .visible(() -> (Boolean)this.enableClustering.get() && this.clusterMode.get() != SignRender.ClusterMode.Count)
-            .build()
-      );
-   private final Setting<Boolean> showClusterCount = this.sgClustering
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("show-cluster-count")
-                     .description("Show number of signs in cluster.")
-                  .defaultValue(true)
-               .visible(this.enableClustering::get)
-            .build()
-      );
-   private final Setting<SettingColor> clusterCountColor = this.sgClustering
-      .add(
-         new meteordevelopment.meteorclient.settings.ColorSetting.Builder()
-                     .name("cluster-count-color")
-                  .description("Color for cluster count indicator.")
-               .defaultValue(new SettingColor(255, 200, 100, 255)).visible(() -> (Boolean)this.enableClustering.get() && (Boolean)this.showClusterCount.get())
-               .build()
-      );
-   private final Setting<Double> stackSpacing = this.sgClustering
-      .add(
-         new Builder().name("stack-spacing").description("Vertical spacing between stacked signs.")
-               .defaultValue(5.0)
-               .min(0.0)
-               .max(20.0)
-               .sliderRange(0.0, 20.0)
-               .visible(() -> (Boolean)this.enableClustering.get() && this.clusterMode.get() == SignRender.ClusterMode.Stack)
-            .build()
-      );
-   private final Setting<Boolean> cullOffScreen = this.sgOptimization
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("cull-off-screen")
-                  .description("Don't process signs that are off-screen.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> prioritizeClosest = this.sgOptimization
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("prioritize-closest")
-                  .description("Always show closest signs first.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> cacheSignText = this.sgOptimization
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("cache-sign-text")
-                  .description("Cache sign text for better performance.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Integer> updateInterval = this.sgOptimization
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("update-interval")
-                     .description("Ticks between full sign updates.")
-                  .defaultValue(20)
-               .min(1)
-               .max(100)
-               .sliderRange(1, 100)
-               .visible(this.cacheSignText::get)
-            .build()
-      );
-   private final Vector3d tempVec = new Vector3d();
-   private final List<SignRender.SignRenderData> allSigns = new ArrayList<>();
-   private final List<SignRender.SignCluster> clusters = new ArrayList<>();
-   private final Map<BlockPos, SignRender.SignRenderData> signCache = new HashMap<>();
-   private int updateTicker = 0;
-   private int globalCycleIndex = 0;
-   private long lastGlobalCycleTime = 0L;
+    private static final int PAD = 4;
+    private static final int MAX_LINE_CHARS = 100;
 
-   public SignRender() {
-      super(HunterBuddyAddon.VISUALS_CATEGORY, "sign-render", "Renders sign text through walls with advanced clustering.");
-   }
+    public enum ClusterMode {
+        Stack,
+        Cycle,
+        Count,
+        Smart;
 
-   @EventHandler
-   private void onRender2D(Render2DEvent event) {
-      if (this.mc.world != null && this.mc.player != null) {
-         this.updateTicker++;
-         boolean fullUpdate = !(Boolean)this.cacheSignText.get() || this.updateTicker >= (Integer)this.updateInterval.get();
-         if (fullUpdate) {
-            this.updateTicker = 0;
-            this.collectSigns();
-         } else {
-            this.updateSignPositions();
-         }
+        @Override
+        public String toString() {
+            return switch (this) {
+                case Stack -> "Stack vertically";
+                case Cycle -> "Cycle through signs";
+                case Count -> "Show count only";
+                case Smart -> "Smart layout";
+            };
+        }
+    }
 
-         if ((Boolean)this.enableClustering.get() && !this.allSigns.isEmpty()) {
-            this.createClusters();
-         }
+    private static final class SignInfo {
+        final BlockPos block;
+        final Vec3d center;
+        final List<String> rows;
+        final String flat;
+        double dist;
+        double sx;
+        double sy;
+        boolean onScreen;
 
-         this.renderSigns();
-      }
-   }
+        SignInfo(BlockPos block, List<String> rows) {
+            this.block = block;
+            this.center = Vec3d.ofCenter(block);
+            this.rows = rows;
+            this.flat = String.join(" ", rows).trim();
+        }
+    }
 
-   private void collectSigns() {
-      this.allSigns.clear();
-      this.signCache.clear();
-      Vec3d playerPos = this.mc.player.getEntityPos();
-      double maxDist = (Double)this.maxDistance.get();
-      List<SignRender.SignRenderData> tempSignList = new ArrayList<>();
+    private static final class Bunch {
+        final List<SignInfo> members;
+        final SignInfo lead;
 
-      for (BlockEntity blockEntity : Utils.blockEntities()) {
-         try {
-            if (blockEntity instanceof SignBlockEntity || blockEntity instanceof HangingSignBlockEntity) {
-               BlockPos signPos = blockEntity.getPos();
-               Vec3d signVec = Vec3d.ofCenter(signPos);
-               double distance = playerPos.distanceTo(signVec);
-               if (!(distance > maxDist)) {
-                  List<String> lines = this.extractSignLines(blockEntity);
-                  if (!lines.isEmpty() || !(Boolean)this.filterEmpty.get()) {
-                     SignRender.SignRenderData signData = new SignRender.SignRenderData(signPos, lines, signVec);
-                     signData.distance = distance;
-                     signData.updateScreenPosition(this.tempVec);
-                     if (signData.onScreen || !(Boolean)this.cullOffScreen.get()) {
-                        signData.scale = 1.0;
-                        signData.color = new Color((Color)this.textColor.get());
-                        tempSignList.add(signData);
-                        this.signCache.put(signPos, signData);
-                     }
-                  }
-               }
+        Bunch(List<SignInfo> members) {
+            members.sort(Comparator.comparingDouble(s -> s.dist));
+            this.members = members;
+            this.lead = members.get(0);
+        }
+
+        double cx() {
+            return lead.sx;
+        }
+
+        double cy() {
+            return lead.sy;
+        }
+    }
+
+    private static final class Rotor {
+        int index;
+        long stamp;
+    }
+
+    private final SettingGroup sgMain = settings.getDefaultGroup();
+    private final SettingGroup sgLook = settings.createGroup("Render");
+    private final SettingGroup sgGroup = settings.createGroup("Clustering");
+    private final SettingGroup sgPerf = settings.createGroup("Optimization");
+
+    private final Setting<Double> rangeLimit = sgMain.add(new DoubleSetting.Builder()
+        .name("max-distance")
+        .description("Farthest sign shown, in blocks.")
+        .defaultValue(1024)
+        .min(16)
+        .max(1024)
+        .sliderRange(16, 1024)
+        .build()
+    );
+
+    private final Setting<Integer> signCap = sgMain.add(new IntSetting.Builder()
+        .name("max-signs")
+        .description("Most signs shown at once.")
+        .defaultValue(500)
+        .min(5)
+        .max(500)
+        .sliderRange(5, 1000)
+        .build()
+    );
+
+    private final Setting<Boolean> skipBlank = sgMain.add(new BoolSetting.Builder()
+        .name("filter-empty")
+        .description("Skip signs with no text.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> stackLines = sgMain.add(new BoolSetting.Builder()
+        .name("multiline-display")
+        .description("Keep the sign's lines one under the other instead of joining them on one line.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<SettingColor> textTint = sgLook.add(new ColorSetting.Builder()
+        .name("text-color")
+        .description("Colour of the sign text.")
+        .defaultValue(new SettingColor(255, 255, 255, 255))
+        .build()
+    );
+
+    private final Setting<SettingColor> panelTint = sgLook.add(new ColorSetting.Builder()
+        .name("background-color")
+        .description("Colour of the box behind the text.")
+        .defaultValue(new SettingColor(0, 0, 0, 120))
+        .build()
+    );
+
+    private final Setting<Boolean> panelOn = sgLook.add(new BoolSetting.Builder()
+        .name("show-background")
+        .description("Draw a box behind the text.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> vanillaFont = sgLook.add(new BoolSetting.Builder()
+        .name("force-default-font")
+        .description("Use Minecraft's font even when Meteor is set to a custom one.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> bunchOn = sgGroup.add(new BoolSetting.Builder()
+        .name("enable-clustering")
+        .description("Group signs that land close together on screen.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> bunchReach = sgGroup.add(new DoubleSetting.Builder()
+        .name("cluster-radius")
+        .description("Screen distance in pixels under which signs are grouped.")
+        .defaultValue(100)
+        .min(20)
+        .max(500)
+        .sliderRange(20, 200)
+        .visible(bunchOn::get)
+        .build()
+    );
+
+    private final Setting<ClusterMode> bunchStyle = sgGroup.add(new EnumSetting.Builder<ClusterMode>()
+        .name("cluster-mode")
+        .description("How a group of signs is shown.")
+        .defaultValue(ClusterMode.Count)
+        .visible(bunchOn::get)
+        .build()
+    );
+
+    private final Setting<Integer> rotateMs = sgGroup.add(new IntSetting.Builder()
+        .name("cycle-time")
+        .description("Milliseconds each sign stays up when cycling.")
+        .defaultValue(2000)
+        .min(500)
+        .max(10000)
+        .sliderRange(500, 5000)
+        .visible(() -> bunchOn.get() && bunchStyle.get() == ClusterMode.Cycle)
+        .build()
+    );
+
+    private final Setting<Integer> bunchShown = sgGroup.add(new IntSetting.Builder()
+        .name("max-cluster-display")
+        .description("Most signs of a group shown together.")
+        .defaultValue(5)
+        .min(1)
+        .max(10)
+        .sliderRange(1, 10)
+        .visible(() -> bunchOn.get() && bunchStyle.get() != ClusterMode.Count)
+        .build()
+    );
+
+    private final Setting<Boolean> tallyOn = sgGroup.add(new BoolSetting.Builder()
+        .name("show-cluster-count")
+        .description("Show how many signs a group holds.")
+        .defaultValue(true)
+        .visible(bunchOn::get)
+        .build()
+    );
+
+    private final Setting<SettingColor> tallyTint = sgGroup.add(new ColorSetting.Builder()
+        .name("cluster-count-color")
+        .description("Colour of that count.")
+        .defaultValue(new SettingColor(255, 200, 100, 255))
+        .visible(() -> bunchOn.get() && tallyOn.get())
+        .build()
+    );
+
+    private final Setting<Double> stackGap = sgGroup.add(new DoubleSetting.Builder()
+        .name("stack-spacing")
+        .description("Gap in pixels between stacked signs.")
+        .defaultValue(5)
+        .min(0)
+        .max(20)
+        .sliderRange(0, 20)
+        .visible(() -> bunchOn.get() && bunchStyle.get() == ClusterMode.Stack)
+        .build()
+    );
+
+    private final Setting<Boolean> offscreenCull = sgPerf.add(new BoolSetting.Builder()
+        .name("cull-off-screen")
+        .description("Ignore signs that are off screen.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> nearestFirst = sgPerf.add(new BoolSetting.Builder()
+        .name("prioritize-closest")
+        .description("When there are too many signs, keep the closest.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> reuseReads = sgPerf.add(new BoolSetting.Builder()
+        .name("cache-sign-text")
+        .description("Only re-read the signs every few frames, and just move them in between.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> rereadEvery = sgPerf.add(new IntSetting.Builder()
+        .name("update-interval")
+        .description("Frames between two full re-reads of the signs.")
+        .defaultValue(20)
+        .min(1)
+        .max(100)
+        .sliderRange(1, 100)
+        .visible(reuseReads::get)
+        .build()
+    );
+
+    private final List<SignInfo> signs = new ArrayList<>();
+    private final List<Bunch> bunches = new ArrayList<>();
+    private final Map<BlockPos, Rotor> rotors = new HashMap<>();
+    private final Rotor globalRotor = new Rotor();
+    private int frameCount;
+    private TextRenderer font;
+
+    public SignRender() {
+        super(HunterBuddyAddon.VISUALS_CATEGORY, "sign-reader", "Shows the text of nearby signs on screen, through walls, grouping the ones that overlap.", "sign-render");
+    }
+
+    @EventHandler
+    private void onRender2D(Render2DEvent event) {
+        if (mc.world == null || mc.player == null) return;
+
+        frameCount++;
+        boolean full = !reuseReads.get() || frameCount >= rereadEvery.get();
+        if (full) frameCount = 0;
+
+        if (full) rescan();
+        else refresh();
+
+        bunches.clear();
+        if (bunchOn.get() && !signs.isEmpty()) buildBunches();
+
+        font = vanillaFont.get() ? VanillaTextRenderer.INSTANCE : TextRenderer.get();
+
+        if (!bunches.isEmpty()) {
+            Set<SignInfo> done = new HashSet<>();
+            Set<BlockPos> liveKeys = new HashSet<>();
+            for (Bunch b : bunches) drawBunch(b, done, liveKeys);
+            rotors.keySet().retainAll(liveKeys);
+            for (SignInfo s : signs) {
+                if (s.onScreen && !done.contains(s)) drawSign(s, s.sx, s.sy);
             }
-         } catch (Exception var13) {
-         }
-      }
-
-      if ((Boolean)this.prioritizeClosest.get()) {
-         tempSignList.sort(Comparator.comparingDouble(s -> s.distance));
-      }
-
-      int limit = Math.min(tempSignList.size(), (Integer)this.maxSigns.get());
-
-      for (int i = 0; i < limit; i++) {
-         this.allSigns.add(tempSignList.get(i));
-      }
-
-      if (this.globalCycleIndex >= this.allSigns.size() && !this.allSigns.isEmpty()) {
-         this.globalCycleIndex = 0;
-      }
-   }
-
-   private void updateSignPositions() {
-      if (this.mc.player != null) {
-         Vec3d playerPos = this.mc.player.getEntityPos();
-         Iterator<SignRender.SignRenderData> iterator = this.allSigns.iterator();
-
-         while (iterator.hasNext()) {
-            SignRender.SignRenderData sign = iterator.next();
-            sign.distance = playerPos.distanceTo(sign.worldPos);
-            sign.updateScreenPosition(this.tempVec);
-            sign.scale = 1.0;
-            sign.color = new Color((Color)this.textColor.get());
-            if (!sign.onScreen && (Boolean)this.cullOffScreen.get()) {
-               iterator.remove();
+        } else if (bunchOn.get() && bunchStyle.get() == ClusterMode.Cycle && !signs.isEmpty()) {
+            drawGlobalRotation();
+        } else {
+            for (SignInfo s : signs) {
+                if (s.onScreen) drawSign(s, s.sx, s.sy);
             }
-         }
-      }
-   }
+        }
+    }
 
-   private void createClusters() {
-      this.clusters.clear();
+    private void rescan() {
+        signs.clear();
+        double limit = rangeLimit.get();
+        for (BlockEntity be : Utils.blockEntities()) {
+            if (!(be instanceof SignBlockEntity sign)) continue;
+            BlockPos at = be.getPos();
+            if (distanceTo(Vec3d.ofCenter(at)) > limit) continue;
+            List<String> rows = readRows(sign);
+            if (rows == null) continue;
+            if (rows.isEmpty() && skipBlank.get()) continue;
+            SignInfo info = new SignInfo(at, rows);
+            locate(info);
+            if (info.onScreen || !offscreenCull.get()) signs.add(info);
+        }
+        if (nearestFirst.get()) signs.sort(Comparator.comparingDouble(s -> s.dist));
+        int cap = signCap.get();
+        if (signs.size() > cap) signs.subList(cap, signs.size()).clear();
+        if (globalRotor.index >= signs.size()) globalRotor.index = 0;
+    }
 
-      for (SignRender.SignRenderData clustered : this.allSigns) {
-         ;
-      }
+    private void refresh() {
+        for (SignInfo s : signs) locate(s);
+        if (offscreenCull.get()) signs.removeIf(s -> !s.onScreen);
+    }
 
-      List<SignRender.SignRenderData> toCluster = new ArrayList<>(this.allSigns);
-      Set<SignRender.SignRenderData> clustered = new HashSet<>();
-      double radiusSq = (Double)this.clusterRadius.get() * (Double)this.clusterRadius.get();
+    private void locate(SignInfo s) {
+        s.dist = distanceTo(s.center);
+        Vector3d v = new Vector3d(s.center.x, s.center.y + 0.5, s.center.z);
+        if (NametagUtils.to2D(v, 1.0)) {
+            s.sx = v.x;
+            s.sy = v.y;
+            s.onScreen = true;
+        } else {
+            s.onScreen = false;
+        }
+    }
 
-      while (!toCluster.isEmpty()) {
-         SignRender.SignRenderData seed = toCluster.remove(0);
-         if (!clustered.contains(seed) && seed.onScreen) {
-            SignRender.SignCluster cluster = new SignRender.SignCluster();
-            cluster.addSign(seed);
-            clustered.add(seed);
+    private double distanceTo(Vec3d p) {
+        double dx = p.x - mc.player.getX();
+        double dy = p.y - mc.player.getY();
+        double dz = p.z - mc.player.getZ();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
 
-            for (SignRender.SignRenderData other : toCluster) {
-               if (other.onScreen && !clustered.contains(other)) {
-                  double dx = seed.screenX - other.screenX;
-                  double dy = seed.screenY - other.screenY;
-                  double distSq = dx * dx + dy * dy;
-                  if (distSq <= radiusSq) {
-                     cluster.addSign(other);
-                     clustered.add(other);
-                  }
-               }
-            }
-
-            cluster.calculateCenter();
-            if (cluster.signs.size() > 1) {
-               this.clusters.add(cluster);
-            }
-         }
-      }
-   }
-
-   private void renderSigns() {
-      if (!this.allSigns.isEmpty()) {
-         TextRenderer textRenderer = (TextRenderer)(this.forceDefaultFont.get() ? VanillaTextRenderer.INSTANCE : TextRenderer.get());
-         if ((Boolean)this.enableClustering.get() && !this.clusters.isEmpty()) {
-            this.renderWithClusters(textRenderer);
-         } else {
-            this.renderAllSigns(textRenderer);
-         }
-      }
-   }
-
-   private void renderWithClusters(TextRenderer textRenderer) {
-      long currentTime = System.currentTimeMillis();
-      Set<SignRender.SignRenderData> rendered = new HashSet<>();
-
-      for (SignRender.SignCluster cluster : this.clusters) {
-         switch ((SignRender.ClusterMode)this.clusterMode.get()) {
-            case Stack:
-               this.renderStackedCluster(cluster, textRenderer, rendered);
-               break;
-            case Cycle:
-               this.renderCyclingCluster(cluster, textRenderer, currentTime, rendered);
-               break;
-            case Count:
-               this.renderCountCluster(cluster, textRenderer, rendered);
-               break;
-            case Smart:
-               this.renderSmartCluster(cluster, textRenderer, rendered);
-         }
-      }
-
-      for (SignRender.SignRenderData sign : this.allSigns) {
-         if (!rendered.contains(sign) && sign.onScreen) {
-            this.renderSignAtPosition(sign, textRenderer, sign.screenX, sign.screenY);
-         }
-      }
-   }
-
-   private void renderAllSigns(TextRenderer textRenderer) {
-      if ((Boolean)this.enableClustering.get() && this.clusterMode.get() == SignRender.ClusterMode.Cycle && !this.allSigns.isEmpty()) {
-         long currentTime = System.currentTimeMillis();
-         if (this.lastGlobalCycleTime == 0L) {
-            this.lastGlobalCycleTime = currentTime;
-         }
-
-         if (currentTime - this.lastGlobalCycleTime >= ((Integer)this.cycleTime.get()).intValue()) {
-            this.globalCycleIndex = (this.globalCycleIndex + 1) % this.allSigns.size();
-            this.lastGlobalCycleTime = currentTime;
-         }
-
-         if (this.globalCycleIndex >= this.allSigns.size()) {
-            this.globalCycleIndex = 0;
-         }
-
-         SignRender.SignRenderData currentSign = this.allSigns.get(this.globalCycleIndex);
-         if (currentSign.onScreen) {
-            this.renderSignAtPosition(currentSign, textRenderer, currentSign.screenX, currentSign.screenY);
-            if ((Boolean)this.showClusterCount.get() && this.allSigns.size() > 1) {
-               textRenderer.begin(currentSign.scale, false, true);
-               double lineHeight = textRenderer.getHeight();
-               textRenderer.end();
-               double signHeight = this.multilineDisplay.get() && !currentSign.lines.isEmpty() ? currentSign.lines.size() * lineHeight + 8.0 : lineHeight + 8.0;
-               String indicator = String.format("[%d/%d]", this.globalCycleIndex + 1, this.allSigns.size());
-               this.renderTextAtScreenPos(
-                  indicator, currentSign.screenX, currentSign.screenY + signHeight / 2.0 + 15.0, 0.7, (Color)this.clusterCountColor.get(), textRenderer
-               );
-            }
-         }
-      } else {
-         for (SignRender.SignRenderData sign : this.allSigns) {
-            if (sign.onScreen) {
-               this.renderSignAtPosition(sign, textRenderer, sign.screenX, sign.screenY);
-            }
-         }
-      }
-   }
-
-   private void renderStackedCluster(SignRender.SignCluster cluster, TextRenderer textRenderer, Set<SignRender.SignRenderData> rendered) {
-      double baseX = cluster.centerX;
-      double baseY = cluster.centerY;
-      double offsetY = 0.0;
-      int count = 0;
-
-      for (SignRender.SignRenderData sign : cluster.signs) {
-         if (count >= (Integer)this.maxClusterDisplay.get()) {
-            break;
-         }
-
-         this.renderSignAtPosition(sign, textRenderer, baseX, baseY + offsetY);
-         rendered.add(sign);
-         textRenderer.begin(sign.scale, false, true);
-         double lineHeight = textRenderer.getHeight();
-         textRenderer.end();
-         double signHeight = this.multilineDisplay.get() && !sign.lines.isEmpty() ? sign.lines.size() * lineHeight + 8.0 : lineHeight + 8.0;
-         offsetY += signHeight + this.stackSpacing.get();
-         count++;
-      }
-
-      if ((Boolean)this.showClusterCount.get() && cluster.signs.size() > (Integer)this.maxClusterDisplay.get()) {
-         String countText = "+" + (cluster.signs.size() - (Integer)this.maxClusterDisplay.get()) + " more";
-         this.renderTextAtScreenPos(countText, baseX, baseY + offsetY, 0.8, (Color)this.clusterCountColor.get(), textRenderer);
-      }
-   }
-
-   private void renderCyclingCluster(SignRender.SignCluster cluster, TextRenderer textRenderer, long currentTime, Set<SignRender.SignRenderData> rendered) {
-      SignRender.SignRenderData currentSign = cluster.getCurrentSign(currentTime, (Integer)this.cycleTime.get());
-      if (currentSign != null) {
-         this.renderSignAtPosition(currentSign, textRenderer, cluster.centerX, cluster.centerY);
-         rendered.addAll(cluster.signs);
-         if ((Boolean)this.showClusterCount.get() && cluster.signs.size() > 1) {
-            textRenderer.begin(currentSign.scale, false, true);
-            double lineHeight = textRenderer.getHeight();
-            textRenderer.end();
-            double signHeight = this.multilineDisplay.get() && !currentSign.lines.isEmpty() ? currentSign.lines.size() * lineHeight + 8.0 : lineHeight + 8.0;
-            String indicator = String.format("[%d/%d]", cluster.cycleIndex + 1, cluster.signs.size());
-            this.renderTextAtScreenPos(
-               indicator, cluster.centerX, cluster.centerY + signHeight / 2.0 + 15.0, 0.7, (Color)this.clusterCountColor.get(), textRenderer
-            );
-         }
-      }
-   }
-
-   private void renderCountCluster(SignRender.SignCluster cluster, TextRenderer textRenderer, Set<SignRender.SignRenderData> rendered) {
-      SignRender.SignRenderData primary = cluster.primarySign;
-      this.renderSignAtPosition(primary, textRenderer, cluster.centerX, cluster.centerY);
-      rendered.addAll(cluster.signs);
-      if (cluster.signs.size() > 1) {
-         textRenderer.begin(primary.scale, false, true);
-         double lineHeight = textRenderer.getHeight();
-         textRenderer.end();
-         double signHeight = this.multilineDisplay.get() && !primary.lines.isEmpty() ? primary.lines.size() * lineHeight + 8.0 : lineHeight + 8.0;
-         String countText = "(" + cluster.signs.size() + " signs)";
-         this.renderTextAtScreenPos(
-            countText, cluster.centerX, cluster.centerY + signHeight / 2.0 + 10.0, 0.8, (Color)this.clusterCountColor.get(), textRenderer
-         );
-      }
-   }
-
-   private void renderSmartCluster(SignRender.SignCluster cluster, TextRenderer textRenderer, Set<SignRender.SignRenderData> rendered) {
-      int displayCount = Math.min(cluster.signs.size(), (Integer)this.maxClusterDisplay.get());
-      if (displayCount == 1) {
-         this.renderSignAtPosition(cluster.signs.get(0), textRenderer, cluster.centerX, cluster.centerY);
-         rendered.add(cluster.signs.get(0));
-      } else {
-         double radius = 30.0 + displayCount * 5.0;
-         double angleStep = (Math.PI * 2) / displayCount;
-
-         for (int i = 0; i < displayCount; i++) {
-            SignRender.SignRenderData sign = cluster.signs.get(i);
-            double angle = i * angleStep - (Math.PI / 2);
-            double offsetX = Math.cos(angle) * radius;
-            double offsetY = Math.sin(angle) * radius;
-            this.renderSignAtPosition(sign, textRenderer, cluster.centerX + offsetX, cluster.centerY + offsetY);
-            rendered.add(sign);
-         }
-
-         if ((Boolean)this.showClusterCount.get() && cluster.signs.size() > displayCount) {
-            String countText = "+" + (cluster.signs.size() - displayCount);
-            this.renderTextAtScreenPos(countText, cluster.centerX, cluster.centerY, 0.9, (Color)this.clusterCountColor.get(), textRenderer);
-         }
-      }
-   }
-
-   private void renderSignAtPosition(SignRender.SignRenderData sign, TextRenderer textRenderer, double centerX, double centerY) {
-      if ((Boolean)this.multilineDisplay.get() && !sign.lines.isEmpty()) {
-         this.renderMultilineSign(sign, textRenderer, centerX, centerY);
-      } else if (!sign.fullText.isEmpty()) {
-         this.renderSingleLineSign(sign, textRenderer, centerX, centerY);
-      }
-   }
-
-   private void renderMultilineSign(SignRender.SignRenderData sign, TextRenderer textRenderer, double centerX, double centerY) {
-      textRenderer.begin(sign.scale, false, true);
-      double lineHeight = textRenderer.getHeight();
-      List<Double> lineWidths = new ArrayList<>();
-      double maxWidth = 0.0;
-
-      for (String line : sign.lines) {
-         double width = line.isEmpty() ? 0.0 : textRenderer.getWidth(line);
-         lineWidths.add(width);
-         maxWidth = Math.max(maxWidth, width);
-      }
-
-      double totalHeight = sign.lines.size() * lineHeight;
-      double bgPadding = 4.0;
-      double bgWidth = maxWidth + bgPadding * 2.0;
-      double bgHeight = totalHeight + bgPadding * 2.0;
-      double bgLeft = centerX - bgWidth / 2.0;
-      double bgTop = centerY - bgHeight / 2.0;
-      textRenderer.end();
-      if ((Boolean)this.showBackground.get()) {
-         Color bgColor = new Color(
-            ((SettingColor)this.backgroundColor.get()).r,
-            ((SettingColor)this.backgroundColor.get()).g,
-            ((SettingColor)this.backgroundColor.get()).b,
-            (int)(((SettingColor)this.backgroundColor.get()).a * (sign.color.a / 255.0))
-         );
-         Renderer2D.COLOR.begin();
-         Renderer2D.COLOR.quad(bgLeft, bgTop, bgWidth, bgHeight, bgColor);
-         Renderer2D.COLOR.render();
-      }
-
-      textRenderer.begin(sign.scale, false, true);
-
-      for (int i = 0; i < sign.lines.size(); i++) {
-         String line = sign.lines.get(i);
-         if (!line.isEmpty()) {
-            double lineWidth = lineWidths.get(i);
-            double textX = centerX - lineWidth / 2.0;
-            double textY = bgTop + bgPadding + i * lineHeight;
-            textRenderer.render(line, textX, textY, sign.color);
-         }
-      }
-
-      textRenderer.end();
-   }
-
-   private void renderSingleLineSign(SignRender.SignRenderData sign, TextRenderer textRenderer, double centerX, double centerY) {
-      this.renderTextAtScreenPos(sign.fullText, centerX, centerY, sign.scale, sign.color, textRenderer);
-   }
-
-   private void renderTextAtScreenPos(String text, double screenX, double screenY, double scale, Color color, TextRenderer textRenderer) {
-      textRenderer.begin(scale, false, true);
-      double textWidth = textRenderer.getWidth(text);
-      double textHeight = textRenderer.getHeight();
-      double bgPadding = 4.0;
-      double elementWidth = textWidth + bgPadding * 2.0;
-      double elementHeight = textHeight + bgPadding * 2.0;
-      double elementLeft = screenX - elementWidth / 2.0;
-      double elementTop = screenY - elementHeight / 2.0;
-      textRenderer.end();
-      if ((Boolean)this.showBackground.get()) {
-         Color bgColor = new Color(
-            ((SettingColor)this.backgroundColor.get()).r,
-            ((SettingColor)this.backgroundColor.get()).g,
-            ((SettingColor)this.backgroundColor.get()).b,
-            (int)(((SettingColor)this.backgroundColor.get()).a * (color.a / 255.0))
-         );
-         Renderer2D.COLOR.begin();
-         Renderer2D.COLOR.quad(elementLeft, elementTop, elementWidth, elementHeight, bgColor);
-         Renderer2D.COLOR.render();
-      }
-
-      textRenderer.begin(scale, false, true);
-      textRenderer.render(text, elementLeft + bgPadding, elementTop + bgPadding, color);
-      textRenderer.end();
-   }
-
-   private List<String> extractSignLines(BlockEntity blockEntity) {
-      List<String> lines = new ArrayList<>();
-
-      try {
-         SignText frontText = null;
-         SignText backText = null;
-         if (blockEntity instanceof SignBlockEntity sign) {
-            frontText = sign.getFrontText();
-            backText = sign.getBackText();
-         } else if (blockEntity instanceof HangingSignBlockEntity sign) {
-            frontText = sign.getFrontText();
-            backText = sign.getBackText();
-         }
-
-         if (frontText != null) {
-            List<String> frontLines = this.extractTextLines(frontText);
-            if (!frontLines.isEmpty()) {
-               lines.addAll(frontLines);
-            }
-         }
-
-         if (backText != null && lines.isEmpty()) {
-            List<String> backLines = this.extractTextLines(backText);
-            if (!backLines.isEmpty()) {
-               lines.addAll(backLines);
-            }
-         }
-      } catch (Exception var7) {
-      }
-
-      return lines;
-   }
-
-   private List<String> extractTextLines(SignText signText) {
-      List<String> lines = new ArrayList<>();
-
-      try {
-         Text[] messages = signText.getMessages(false);
-         if (messages != null) {
-            for (Text message : messages) {
-               if (message != null) {
-                  String line = this.safeExtractString(message);
-                  if (!line.isEmpty()) {
-                     lines.add(line);
-                  }
-               }
-            }
-         }
-      } catch (Exception var9) {
-      }
-
-      return lines;
-   }
-
-   private String safeExtractString(Text text) {
-      if (text == null) {
-         return "";
-      }
-
-      try {
-         String result = text.getString();
-         return result == null ? "" : this.cleanSignText(result);
-      } catch (Exception e) {
-         try {
-            String literal = text.getLiteralString();
-            if (literal != null) {
-               return this.cleanSignText(literal);
-            }
-         } catch (Exception var4) {
-         }
-
-         return "";
-      }
-   }
-
-   private String cleanSignText(String text) {
-      if (text != null && !text.isEmpty()) {
-         text = text.replaceAll("\u00a7.", "");
-         text = text.replaceAll("&[0-9a-fklmnor]", "");
-         if (text.contains("{\"") || text.contains("[\"")) {
-            text = text.replaceAll("\\{\".*?\":\"(.*?)\".*?\\}", "$1");
-            text = text.replaceAll("\\[\"(.*?)\"\\]", "$1");
-         }
-
-         text = text.replaceAll("\\{[^\\s].*?\\}", "");
-         text = text.replaceAll("[\\p{C}&&[^\\s]]", "");
-         text = text.replaceAll("[\\u0000-\\u001F\\u007F-\\u009F]", "");
-         text = text.replaceAll("[\\[\\]{}\"']", "");
-         text = text.replaceAll("\\s+", " ").trim();
-         if (text.length() > 100) {
-            text = text.substring(0, 97) + "...";
-         }
-
-         return text;
-      } else {
-         return "";
-      }
-   }
-
-   public enum ClusterMode {
-      Stack("Stack vertically"),
-      Cycle("Cycle through signs"),
-      Count("Show count only"),
-      Smart("Smart layout");
-
-      private final String description;
-
-      ClusterMode(String description) {
-         this.description = description;
-      }
-
-      @Override
-      public String toString() {
-         return this.description;
-      }
-   }
-
-   private static class SignCluster {
-      final List<SignRender.SignRenderData> signs = new ArrayList<>();
-      double centerX;
-      double centerY;
-      SignRender.SignRenderData primarySign;
-      int cycleIndex = 0;
-      long lastCycleTime = 0L;
-
-      void addSign(SignRender.SignRenderData sign) {
-         this.signs.add(sign);
-         sign.onScreen = true;
-      }
-
-      void calculateCenter() {
-         if (!this.signs.isEmpty()) {
-            this.signs.sort(Comparator.comparingDouble(s -> s.distance));
-            this.primarySign = this.signs.get(0);
-            this.centerX = this.primarySign.screenX;
-            this.centerY = this.primarySign.screenY;
-         }
-      }
-
-      SignRender.SignRenderData getCurrentSign(long currentTime, int cycleTimeMs) {
-         if (this.signs.isEmpty()) {
+    private List<String> readRows(SignBlockEntity sign) {
+        try {
+            List<String> rows = collect(sign.getFrontText());
+            if (rows.isEmpty()) rows = collect(sign.getBackText());
+            return rows;
+        } catch (Exception e) {
             return null;
-         }
+        }
+    }
 
-         if (this.signs.size() == 1) {
-            return this.signs.get(0);
-         }
+    private List<String> collect(SignText face) {
+        List<String> out = new ArrayList<>();
+        for (Text t : face.getMessages(false)) {
+            if (t == null) continue;
+            String line = tidy(t.getString());
+            if (!line.isEmpty()) out.add(line);
+        }
+        return out;
+    }
 
-         if (this.lastCycleTime == 0L) {
-            this.lastCycleTime = currentTime;
-         }
+    private static String tidy(String raw) {
+        String s = raw.replaceAll("\\u00a7.", "");
+        s = s.replaceAll("&[0-9a-fk-or]", "");
+        if (s.contains("{\"") || s.contains("[\"")) {
+            s = s.replaceAll("\\{\"[^\"]*\"\\s*:\\s*\"([^\"]*)\"[^}]*\\}", "$1");
+            s = s.replaceAll("\\[\"([^\"]*)\"\\]", "$1");
+        }
+        s = s.replaceAll("\\{(?! )[^}]*\\}", "");
+        s = s.replaceAll("[\\p{C}&&[^ ]]", "");
+        s = s.replaceAll("[\\u0000-\\u001F\\u007F-\\u009F]", "");
+        s = s.replaceAll("[\\[\\]{}\"']", "");
+        s = s.replaceAll("\\s+", " ").trim();
+        if (s.length() > MAX_LINE_CHARS) s = s.substring(0, MAX_LINE_CHARS - 3) + "...";
+        return s;
+    }
 
-         if (currentTime - this.lastCycleTime >= cycleTimeMs) {
-            this.cycleIndex = (this.cycleIndex + 1) % this.signs.size();
-            this.lastCycleTime = currentTime;
-         }
+    private void buildBunches() {
+        Set<SignInfo> taken = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        double reach = bunchReach.get();
+        for (int i = 0; i < signs.size(); i++) {
+            SignInfo seed = signs.get(i);
+            if (!seed.onScreen || taken.contains(seed)) continue;
+            taken.add(seed);
+            List<SignInfo> found = new ArrayList<>();
+            found.add(seed);
+            for (int j = i + 1; j < signs.size(); j++) {
+                SignInfo other = signs.get(j);
+                if (!other.onScreen || taken.contains(other)) continue;
+                if (Math.hypot(other.sx - seed.sx, other.sy - seed.sy) <= reach) {
+                    taken.add(other);
+                    found.add(other);
+                }
+            }
+            if (found.size() >= 2) bunches.add(new Bunch(found));
+        }
+    }
 
-         return this.signs.get(this.cycleIndex);
-      }
-   }
+    private void drawBunch(Bunch b, Set<SignInfo> done, Set<BlockPos> liveKeys) {
+        double cx = b.cx();
+        double cy = b.cy();
+        int total = b.members.size();
+        Color tally = tallyTint.get();
+        switch (bunchStyle.get()) {
+            case Stack -> {
+                int shown = Math.min(total, bunchShown.get());
+                double y = cy;
+                for (int i = 0; i < shown; i++) {
+                    SignInfo s = b.members.get(i);
+                    drawSign(s, cx, y);
+                    done.add(s);
+                    y += heightOf(s) + stackGap.get();
+                }
+                if (total > shown && tallyOn.get()) drawLabel("+" + (total - shown) + " more", cx, y, 0.8, tally);
+            }
+            case Cycle -> {
+                liveKeys.add(b.lead.block);
+                Rotor r = rotors.computeIfAbsent(b.lead.block, k -> {
+                    Rotor fresh = new Rotor();
+                    fresh.stamp = System.currentTimeMillis();
+                    return fresh;
+                });
+                advance(r, total);
+                SignInfo cur = b.members.get(r.index);
+                drawSign(cur, cx, cy);
+                done.addAll(b.members);
+                if (tallyOn.get()) drawLabel("[" + (r.index + 1) + "/" + total + "]", cx, cy + heightOf(cur) / 2 + 15, 0.7, tally);
+            }
+            case Count -> {
+                drawSign(b.lead, cx, cy);
+                done.addAll(b.members);
+                drawLabel("(" + total + " signs)", cx, cy + heightOf(b.lead) / 2 + 10, 0.8, tally);
+            }
+            case Smart -> {
+                int n = Math.min(total, bunchShown.get());
+                if (n == 1) {
+                    drawSign(b.members.get(0), cx, cy);
+                    done.add(b.members.get(0));
+                } else {
+                    double radius = 30 + 5 * n;
+                    for (int i = 0; i < n; i++) {
+                        double angle = i * 2 * Math.PI / n - Math.PI / 2;
+                        SignInfo s = b.members.get(i);
+                        drawSign(s, cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+                        done.add(s);
+                    }
+                    if (tallyOn.get() && total > n) drawLabel("+" + (total - n), cx, cy, 0.9, tally);
+                }
+            }
+        }
+    }
 
-   private static class SignRenderData {
-      final BlockPos pos;
-      final List<String> lines;
-      final String fullText;
-      final Vec3d worldPos;
-      double distance;
-      double screenX;
-      double screenY;
-      boolean onScreen = false;
-      double renderWidth;
-      double renderHeight;
-      double scale;
-      Color color;
+    private void advance(Rotor r, int size) {
+        long now = System.currentTimeMillis();
+        if (r.index >= size) r.index = 0;
+        if (now - r.stamp >= rotateMs.get()) {
+            r.index = (r.index + 1) % size;
+            r.stamp = now;
+        }
+    }
 
-      SignRenderData(BlockPos pos, List<String> lines, Vec3d worldPos) {
-         this.pos = pos;
-         this.lines = new ArrayList<>(lines);
-         this.fullText = String.join(" ", lines).trim();
-         this.worldPos = worldPos;
-      }
+    private void drawGlobalRotation() {
+        long now = System.currentTimeMillis();
+        int size = signs.size();
+        if (globalRotor.stamp == 0) {
+            globalRotor.stamp = now;
+        } else if (now - globalRotor.stamp >= rotateMs.get()) {
+            globalRotor.index = (globalRotor.index + 1) % size;
+            globalRotor.stamp = now;
+        }
+        if (globalRotor.index >= size) globalRotor.index = 0;
+        SignInfo cur = signs.get(globalRotor.index);
+        if (!cur.onScreen) return;
+        drawSign(cur, cur.sx, cur.sy);
+        if (tallyOn.get() && size > 1) {
+            drawLabel("[" + (globalRotor.index + 1) + "/" + size + "]", cur.sx, cur.sy + heightOf(cur) / 2 + 15, 0.7, tallyTint.get());
+        }
+    }
 
-      void updateScreenPosition(Vector3d tempVec) {
-         tempVec.set(this.worldPos.x, this.worldPos.y + 0.5, this.worldPos.z);
-         if (NametagUtils.to2D(tempVec, 1.0)) {
-            this.screenX = tempVec.x;
-            this.screenY = tempVec.y;
-            this.onScreen = true;
-         } else {
-            this.onScreen = false;
-         }
-      }
-   }
+    private boolean multiline(SignInfo s) {
+        return stackLines.get() && !s.rows.isEmpty();
+    }
+
+    private double lineHeight(double scale) {
+        font.begin(scale, false, true);
+        double h = font.getHeight();
+        font.end();
+        return h;
+    }
+
+    private double textWidth(String text, double scale) {
+        font.begin(scale, false, true);
+        double w = font.getWidth(text);
+        font.end();
+        return w;
+    }
+
+    private double heightOf(SignInfo s) {
+        double lh = lineHeight(1);
+        if (multiline(s)) return s.rows.size() * lh + 2 * PAD;
+        return lh + 2 * PAD;
+    }
+
+    private void drawSign(SignInfo s, double x, double y) {
+        Color tint = textTint.get();
+        if (multiline(s)) {
+            double lh = lineHeight(1);
+            double widest = 0;
+            for (String row : s.rows) widest = Math.max(widest, textWidth(row, 1));
+            double boxW = widest + 2 * PAD;
+            double boxH = s.rows.size() * lh + 2 * PAD;
+            double left = x - boxW / 2;
+            double top = y - boxH / 2;
+            fillBox(left, top, boxW, boxH, tint);
+            font.begin(1, false, true);
+            double ty = top + PAD;
+            for (String row : s.rows) {
+                if (row.isEmpty()) continue;
+                font.render(row, left + (boxW - font.getWidth(row)) / 2, ty, tint);
+                ty += lh;
+            }
+            font.end();
+        } else if (!s.flat.isEmpty()) {
+            drawLabel(s.flat, x, y, 1, tint);
+        }
+    }
+
+    private void drawLabel(String text, double x, double y, double scale, Color color) {
+        double w = textWidth(text, scale) + 2 * PAD;
+        double h = lineHeight(scale) + 2 * PAD;
+        double left = x - w / 2;
+        double top = y - h / 2;
+        fillBox(left, top, w, h, color);
+        font.begin(scale, false, true);
+        font.render(text, left + PAD, top + PAD, color);
+        font.end();
+    }
+
+    private void fillBox(double x, double y, double w, double h, Color textColor) {
+        if (!panelOn.get()) return;
+        Color base = panelTint.get();
+        Color fill = new Color(base.r, base.g, base.b, (int) Math.round(base.a * (textColor.a / 255.0)));
+        Renderer2D.COLOR.begin();
+        Renderer2D.COLOR.quad(x, y, w, h, fill);
+        Renderer2D.COLOR.render();
+    }
 }

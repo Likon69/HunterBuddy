@@ -1,27 +1,26 @@
 package com.hunterbuddy.modules.logistics;
 
-import baritone.api.BaritoneAPI;
-import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
-import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.gui.widgets.input.WTextBox;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
+import meteordevelopment.meteorclient.settings.BlockPosSetting;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.BlockPosSetting.Builder;
+import meteordevelopment.meteorclient.settings.StringListSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.utils.misc.ISerializable;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.nbt.NbtCompound;
@@ -31,778 +30,638 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
 
 public class PearlLoader extends Module {
-   private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
-   private final SettingGroup sgCoordinates = this.settings.createGroup("Coordinates");
-   private final SettingGroup sgWhitelist = this.settings.createGroup("Whitelist");
-   private final SettingGroup sgLoadLocations = this.settings.createGroup("Load Locations");
-   private final Setting<BlockPos> walkPoint1 = this.sgCoordinates
-      .add(
-         new Builder().name("Walk Point 1").description("First position for anti-AFK walking loop")
-               .defaultValue(new BlockPos(0, 64, 0)).build()
-      );
-   private final Setting<BlockPos> walkPoint2 = this.sgCoordinates
-      .add(
-         new Builder().name("Walk Point 2").description("Second position for anti-AFK walking loop")
-               .defaultValue(new BlockPos(10, 64, 0)).build()
-      );
-   private final Setting<Boolean> useWhitelist = this.sgWhitelist
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("Use Whitelist")
-                  .description("Only accept triggers from whitelisted players")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<List<String>> whitelistedPlayers = this.sgWhitelist
-      .add(
-         new meteordevelopment.meteorclient.settings.StringListSetting.Builder()
-                        .name("Whitelisted Players")
-                     .description("Players who can trigger pearl loading")
-                  .defaultValue(new ArrayList()).visible(this.useWhitelist::get)
-            .build()
-      );
-   private final Setting<Double> reachThreshold = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                  .name("Reach Threshold")
-               .description("Fallback distance threshold if Baritone check fails")
-            .defaultValue(1.0)
-            .min(0.1)
-            .max(5.0)
-            .sliderRange(0.1, 5.0)
-            .build()
-      );
-   private final Setting<Boolean> debugMode = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("Debug Mode")
-                  .description("Show detailed debug information")
-               .defaultValue(false)
-            .build()
-      );
-   private final Setting<Integer> arrivalWaitTicks = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("Arrival Wait Ticks")
-                  .description("Ticks to wait after arriving at position for lag")
-               .defaultValue(19)
-            .min(0)
-            .max(100)
-            .sliderRange(0, 100)
-            .build()
-      );
-   private List<PearlLoader.LoadLocation> loadLocations = new ArrayList<>();
-   private PearlLoader.State currentState = PearlLoader.State.WALKING_TO_POINT2;
-   private boolean pearlLoadTriggered = false;
-   private long stateStartTime = 0L;
-   private long lastInteractionTime = 0L;
-   private BlockPos currentTarget = null;
-   private int rotationTicks = 0;
-   private float targetYaw = 0.0F;
-   private float targetPitch = 0.0F;
-   private boolean trapdoorWasClosed = false;
-   private PearlLoader.LoadLocation currentLoadLocation = null;
+    private static final String SAVE_KEY = "loadLocations";
+    private static final long CLICK_GAP_MS = 500L;
+    private static final long RECLOSE_CHECK_MS = 500L;
+    private static final double SAFE_REACH = 5.0;
+    private static final int AIM_LIMIT = 50;
+    private static final double AIM_RATE = 0.1;
+    private static final double AIM_TOLERANCE = 2.0;
 
-   public PearlLoader() {
-      super(HunterBuddyAddon.LOGISTICS_CATEGORY, "PearlLoader", "Anti-AFK loop with pearl loading capability");
-   }
+    public enum LoadMode {
+        TRAPDOOR,
+        WALK_TO;
 
-   public NbtCompound toTag() {
-      NbtCompound tag = super.toTag();
-      NbtList locationsList = new NbtList();
+        @Override
+        public String toString() {
+            return switch (this) {
+                case TRAPDOOR -> "Trapdoor - Interact with trapdoor to load pearl";
+                case WALK_TO -> "Walk To - Walk to position and return";
+            };
+        }
+    }
 
-      for (PearlLoader.LoadLocation location : this.loadLocations) {
-         locationsList.add(location.toTag());
-      }
+    private enum Phase {
+        LOOP_TO_FIRST,
+        LOOP_TO_SECOND,
+        DOOR_APPROACH,
+        DOOR_SETTLE,
+        DOOR_AIM,
+        DOOR_CLOSE,
+        DOOR_HOLD,
+        DOOR_OPEN,
+        SPOT_APPROACH,
+        SPOT_SETTLE,
+        SPOT_STAND,
+        SPOT_BACK
+    }
 
-      tag.put("loadLocations", locationsList);
-      return tag;
-   }
+    public static class LoadLocation {
+        public String word = "!pearl";
+        public LoadMode kind = LoadMode.TRAPDOOR;
+        public BlockPos spot = new BlockPos(0, 64, 0);
+        public double closedSecs = 2.0;
+        public double standSecs = 1.0;
+    }
 
-   public Module fromTag(NbtCompound tag) {
-      super.fromTag(tag);
-      this.loadLocations.clear();
-      if (tag.contains("loadLocations")) {
-         Optional<NbtList> locationsListOpt = tag.getList("loadLocations");
-         if (locationsListOpt.isPresent()) {
-            NbtList locationsList = locationsListOpt.get();
+    private final SettingGroup sgDefault = settings.getDefaultGroup();
+    private final SettingGroup sgCoords = settings.createGroup("Coordinates");
+    private final SettingGroup sgList = settings.createGroup("Whitelist");
 
-            for (int i = 0; i < locationsList.size(); i++) {
-               Optional<NbtCompound> compoundOpt = locationsList.getCompound(i);
-               if (compoundOpt.isPresent()) {
-                  PearlLoader.LoadLocation location = new PearlLoader.LoadLocation();
-                  location.fromTag(compoundOpt.get());
-                  this.loadLocations.add(location);
-               }
+    private final Setting<BlockPos> loopA = sgCoords.add(new BlockPosSetting.Builder()
+        .name("Walk Point 1")
+        .description("First end of the walking loop.")
+        .defaultValue(new BlockPos(0, 64, 0))
+        .build()
+    );
+
+    private final Setting<BlockPos> loopB = sgCoords.add(new BlockPosSetting.Builder()
+        .name("Walk Point 2")
+        .description("Second end of the walking loop.")
+        .defaultValue(new BlockPos(10, 64, 0))
+        .build()
+    );
+
+    private final Setting<Boolean> filterSenders = sgList.add(new BoolSetting.Builder()
+        .name("Use Whitelist")
+        .description("Only react to keywords sent by the players listed below.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<List<String>> allowedSenders = sgList.add(new StringListSetting.Builder()
+        .name("Whitelisted Players")
+        .description("Players allowed to trigger a pearl load.")
+        .defaultValue(new ArrayList<>())
+        .visible(filterSenders::get)
+        .build()
+    );
+
+    private final Setting<Double> arriveRadius = sgDefault.add(new DoubleSetting.Builder()
+        .name("Reach Threshold")
+        .description("How close, in blocks, counts as arrived.")
+        .defaultValue(1.0)
+        .min(0.1)
+        .max(5.0)
+        .sliderRange(0.1, 5.0)
+        .build()
+    );
+
+    private final Setting<Boolean> verbose = sgDefault.add(new BoolSetting.Builder()
+        .name("Debug Mode")
+        .description("Report every step in chat.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Integer> settleTicks = sgDefault.add(new IntSetting.Builder()
+        .name("Arrival Wait Ticks")
+        .description("Ticks to stand still after arriving, to let the server catch up.")
+        .defaultValue(19)
+        .min(0)
+        .max(100)
+        .sliderRange(0, 100)
+        .build()
+    );
+
+    private final List<LoadLocation> places = new ArrayList<>();
+
+    private Phase phase = Phase.LOOP_TO_SECOND;
+    private boolean loading = false;
+    private LoadLocation activePlace = null;
+    private BlockPos goal = null;
+    private long phaseStart = 0L;
+    private long lastClick = 0L;
+    private int aimSteps = 0;
+    private Boolean baritoneKnown = null;
+
+    public PearlLoader() {
+        super(HunterBuddyAddon.LOGISTICS_CATEGORY, "pearl-butler", "Walks back and forth to stay online, and loads an ender pearl stasis when a chat keyword arrives.", "PearlLoader");
+    }
+
+    @Override
+    public NbtCompound toTag() {
+        NbtCompound tag = super.toTag();
+        NbtList saved = new NbtList();
+        for (LoadLocation place : places) {
+            NbtCompound entry = new NbtCompound();
+            entry.putString("keyword", place.word);
+            entry.putString("mode", place.kind.name());
+            entry.putInt("x", place.spot.getX());
+            entry.putInt("y", place.spot.getY());
+            entry.putInt("z", place.spot.getZ());
+            entry.putDouble("closeTime", place.closedSecs);
+            entry.putDouble("standTime", place.standSecs);
+            saved.add(entry);
+        }
+        tag.put(SAVE_KEY, saved);
+        return tag;
+    }
+
+    @Override
+    public Module fromTag(NbtCompound tag) {
+        super.fromTag(tag);
+        places.clear();
+        Optional<NbtList> saved = tag.getList(SAVE_KEY);
+        if (saved.isPresent()) {
+            NbtList entries = saved.get();
+            for (int i = 0; i < entries.size(); i++) {
+                Optional<NbtCompound> entry = entries.getCompound(i);
+                if (entry.isPresent()) places.add(readPlace(entry.get()));
             }
-         }
-      }
+        }
+        return this;
+    }
 
-      return this;
-   }
+    private static LoadLocation readPlace(NbtCompound entry) {
+        LoadLocation place = new LoadLocation();
+        place.word = entry.getString("keyword").orElse("");
+        place.kind = parseKind(entry.getString("mode").orElse("TRAPDOOR"));
+        place.spot = new BlockPos(
+            entry.getInt("x").orElse(0),
+            entry.getInt("y").orElse(0),
+            entry.getInt("z").orElse(0)
+        );
+        place.closedSecs = entry.getDouble("closeTime").orElse(1.0);
+        place.standSecs = entry.getDouble("standTime").orElse(0.0);
+        return place;
+    }
 
-   public void onActivate() {
-      this.currentState = PearlLoader.State.WALKING_TO_POINT2;
-      this.pearlLoadTriggered = false;
-      this.stateStartTime = System.currentTimeMillis();
-      this.currentTarget = (BlockPos)this.walkPoint2.get();
-      this.startPathing(this.currentTarget);
-      this.info("Pearl Loader activated - Starting anti-AFK loop", new Object[0]);
-   }
+    private static LoadMode parseKind(String name) {
+        try {
+            return LoadMode.valueOf(name);
+        } catch (IllegalArgumentException e) {
+            return LoadMode.TRAPDOOR;
+        }
+    }
 
-   public void onDeactivate() {
-      this.stopPathing();
-      this.pearlLoadTriggered = false;
-      this.currentState = PearlLoader.State.WALKING_TO_POINT2;
-      this.stateStartTime = 0L;
-      this.currentTarget = null;
-      this.info("Pearl Loader deactivated", new Object[0]);
-   }
+    @Override
+    public void onActivate() {
+        phase = Phase.LOOP_TO_SECOND;
+        loading = false;
+        phaseStart = System.currentTimeMillis();
+        goal = loopB.get();
+        walkTo(goal);
+        info("Pearl Loader activated - Starting anti-AFK loop");
+    }
 
-   @EventHandler
-   private void onReceiveMessage(ReceiveMessageEvent event) {
-      if (this.isActive() && !this.pearlLoadTriggered) {
-         String fullMessage = event.getMessage().getString();
-         String messageLower = fullMessage.toLowerCase();
-         Iterator var4 = this.loadLocations.iterator();
+    @Override
+    public void onDeactivate() {
+        haltWalking();
+        loading = false;
+        phase = Phase.LOOP_TO_SECOND;
+        phaseStart = 0L;
+        goal = null;
+        info("Pearl Loader deactivated");
+    }
 
-         PearlLoader.LoadLocation location;
-         while (true) {
-            if (!var4.hasNext()) {
-               return;
+    private void say(String text) {
+        info(text.replace("%", "%%"));
+    }
+
+    private void trace(String text) {
+        if (verbose.get()) say(text);
+    }
+
+    @EventHandler
+    private void onMessage(ReceiveMessageEvent event) {
+        if (!isActive() || loading) return;
+        String raw = event.getMessage().getString();
+        String lowered = raw.toLowerCase();
+        for (LoadLocation place : places) {
+            String word = place.word.toLowerCase();
+            if (!lowered.contains(word)) continue;
+            if (!filterSenders.get()) {
+                say("Pearl load triggered by keyword: " + place.word);
+                beginLoad(place);
+                return;
             }
-
-            location = (PearlLoader.LoadLocation)var4.next();
-            String keyword = location.triggerKeyword.toLowerCase();
-            if (messageLower.contains(keyword)) {
-               if (!(Boolean)this.useWhitelist.get()) {
-                  this.info("Pearl load triggered by keyword: " + location.triggerKeyword, new Object[0]);
-                  break;
-               }
-
-               String sender = this.extractSenderName(fullMessage);
-               if (sender != null && this.isPlayerWhitelisted(sender)) {
-                  this.info("Pearl load triggered by " + sender + " with keyword: " + location.triggerKeyword, new Object[0]);
-                  break;
-               }
-
-               if ((Boolean)this.debugMode.get()) {
-                  this.info("Trigger ignored - player not whitelisted: " + sender, new Object[0]);
-               }
+            String sender = findSender(raw);
+            if (sender != null && isAllowed(sender)) {
+                say("Pearl load triggered by " + sender + " with keyword: " + place.word);
+                beginLoad(place);
+                return;
             }
-         }
+            trace("Trigger ignored - player not whitelisted: " + sender);
+        }
+    }
 
-         this.triggerPearlLoad(location);
-      }
-   }
+    private boolean isAllowed(String sender) {
+        for (String name : allowedSenders.get()) {
+            if (name.equalsIgnoreCase(sender)) return true;
+        }
+        return false;
+    }
 
-   @EventHandler
-   private void onTick(Pre event) {
-      if (this.isActive() && this.mc.player != null && this.mc.world != null) {
-         if (this.pearlLoadTriggered) {
-            this.handlePearlLoadingSequence();
-         } else {
-            this.handleWalkingLoop();
-         }
-      }
-   }
+    private static String stripColors(String text) {
+        return text.replaceAll("§[0-9a-fk-or]", "");
+    }
 
-   private void handleWalkingLoop() {
-      if (this.currentTarget != null) {
-         if (this.isPathingDone()) {
-            if (this.currentState == PearlLoader.State.WALKING_TO_POINT1) {
-               this.currentState = PearlLoader.State.WALKING_TO_POINT2;
-               this.currentTarget = (BlockPos)this.walkPoint2.get();
-               if ((Boolean)this.debugMode.get()) {
-                  this.info("Reached Point 1, walking to Point 2", new Object[0]);
-               }
-            } else if (this.currentState == PearlLoader.State.WALKING_TO_POINT2) {
-               this.currentState = PearlLoader.State.WALKING_TO_POINT1;
-               this.currentTarget = (BlockPos)this.walkPoint1.get();
-               if ((Boolean)this.debugMode.get()) {
-                  this.info("Reached Point 2, walking to Point 1", new Object[0]);
-               }
-            }
-
-            this.startPathing(this.currentTarget);
-         }
-      }
-   }
-
-   private void handlePearlLoadingSequence() {
-      switch (this.currentState) {
-         case WALKING_TO_TRAPDOOR:
-            this.handleWalkingToTrapdoor();
-            break;
-         case ARRIVED_AT_TRAPDOOR:
-            this.handleArrivedAtTrapdoor();
-            break;
-         case ROTATING_TO_TRAPDOOR:
-            this.handleRotatingToTrapdoor();
-            break;
-         case CLOSING_TRAPDOOR:
-            this.handleClosingTrapdoor();
-            break;
-         case WAITING_CLOSED:
-            this.handleWaitingClosed();
-            break;
-         case OPENING_TRAPDOOR:
-            this.handleOpeningTrapdoor();
-            break;
-         case WALKING_TO_LOAD_POSITION:
-            this.handleWalkingToLoadPosition();
-            break;
-         case ARRIVED_AT_LOAD_POSITION:
-            this.handleArrivedAtLoadPosition();
-            break;
-         case STANDING_AT_LOAD:
-            this.handleStandingAtLoad();
-            break;
-         case RETURNING_FROM_LOAD:
-            this.handleReturningFromLoad();
-      }
-   }
-
-   private void handleWalkingToTrapdoor() {
-      BlockPos targetPos = this.getTrapdoorApproachPosition();
-      double distance = this.getDistanceToTarget(targetPos);
-      if (distance <= (Double)this.reachThreshold.get()) {
-         this.stopPathing();
-         this.currentState = PearlLoader.State.ARRIVED_AT_TRAPDOOR;
-         this.stateStartTime = System.currentTimeMillis();
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Within threshold of trapdoor approach position, waiting for settle", new Object[0]);
-         }
-      } else if (this.isPathingDone()) {
-         this.startPathing(targetPos);
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Pathing done but not close enough, restarting pathing to approach position", new Object[0]);
-         }
-      }
-   }
-
-   private void handleArrivedAtTrapdoor() {
-      long elapsed = System.currentTimeMillis() - this.stateStartTime;
-      long waitTime = (Integer)this.arrivalWaitTicks.get() * 50;
-      BlockPos targetPos = this.getTrapdoorApproachPosition();
-      double distance = this.getDistanceToTarget(targetPos);
-      if (distance > (Double)this.reachThreshold.get()) {
-         this.currentState = PearlLoader.State.WALKING_TO_TRAPDOOR;
-         this.startPathing(targetPos);
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Drifted away during wait, returning to walking", new Object[0]);
-         }
-      } else {
-         if (elapsed >= waitTime) {
-            this.currentState = PearlLoader.State.ROTATING_TO_TRAPDOOR;
-            this.stateStartTime = System.currentTimeMillis();
-            this.rotationTicks = 0;
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Wait after arrival complete, proceeding to rotate", new Object[0]);
-            }
-         }
-      }
-   }
-
-   private void handleWalkingToLoadPosition() {
-      BlockPos target = this.currentLoadLocation.position;
-      double distance = this.getDistanceToTarget(target);
-      if (distance <= (Double)this.reachThreshold.get()) {
-         this.stopPathing();
-         this.currentState = PearlLoader.State.ARRIVED_AT_LOAD_POSITION;
-         this.stateStartTime = System.currentTimeMillis();
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Within threshold of load position, waiting for settle", new Object[0]);
-         }
-      } else if (this.isPathingDone()) {
-         this.startPathing(target);
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Pathing done but not close enough, restarting pathing to load position", new Object[0]);
-         }
-      }
-   }
-
-   private void handleArrivedAtLoadPosition() {
-      long elapsed = System.currentTimeMillis() - this.stateStartTime;
-      long waitTime = (Integer)this.arrivalWaitTicks.get() * 50;
-      BlockPos target = this.currentLoadLocation.position;
-      double distance = this.getDistanceToTarget(target);
-      if (distance > (Double)this.reachThreshold.get()) {
-         this.currentState = PearlLoader.State.WALKING_TO_LOAD_POSITION;
-         this.startPathing(target);
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Drifted away during wait, returning to walking", new Object[0]);
-         }
-      } else {
-         if (elapsed >= waitTime) {
-            this.currentState = PearlLoader.State.STANDING_AT_LOAD;
-            this.stateStartTime = System.currentTimeMillis();
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Wait after arrival complete, starting stand time", new Object[0]);
-            }
-         }
-      }
-   }
-
-   private void handleRotatingToTrapdoor() {
-      if (this.rotateToBlock(this.currentLoadLocation.position)) {
-         BlockState state = this.mc.world.getBlockState(this.currentLoadLocation.position);
-         if (!(state.getBlock() instanceof TrapdoorBlock)) {
-            this.error("No trapdoor found at specified position!", new Object[0]);
-            this.resetToLoop();
-            return;
-         }
-
-         boolean isOpen = (Boolean)state.get(TrapdoorBlock.OPEN);
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Rotation complete, trapdoor is currently " + (isOpen ? "OPEN" : "CLOSED") + ", proceeding to interact", new Object[0]);
-         }
-
-         this.currentState = PearlLoader.State.CLOSING_TRAPDOOR;
-         this.stateStartTime = System.currentTimeMillis();
-      }
-   }
-
-   private void handleClosingTrapdoor() {
-      double distToTrapdoor = this.getDistanceToTarget(this.currentLoadLocation.position);
-      if (distToTrapdoor > 5.0) {
-         this.error("Too far from trapdoor to interact safely! Restarting approach.", new Object[0]);
-         this.currentState = PearlLoader.State.WALKING_TO_TRAPDOOR;
-         BlockPos approachPos = this.getTrapdoorApproachPosition();
-         this.startPathing(approachPos);
-      } else {
-         BlockState state = this.mc.world.getBlockState(this.currentLoadLocation.position);
-         boolean isOpen = (Boolean)state.get(TrapdoorBlock.OPEN);
-         if (isOpen) {
-            this.interactWithTrapdoor();
-            this.trapdoorWasClosed = true;
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Closed trapdoor", new Object[0]);
-            }
-         } else {
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Trapdoor already closed", new Object[0]);
-            }
-
-            this.trapdoorWasClosed = false;
-         }
-
-         this.currentState = PearlLoader.State.WAITING_CLOSED;
-         this.stateStartTime = System.currentTimeMillis();
-      }
-   }
-
-   private void handleWaitingClosed() {
-      long elapsed = System.currentTimeMillis() - this.stateStartTime;
-      long waitTime = (long)(this.currentLoadLocation.trapdoorCloseTime * 1000.0);
-      if (elapsed > 500L) {
-         BlockState state = this.mc.world.getBlockState(this.currentLoadLocation.position);
-         boolean isOpen = (Boolean)state.get(TrapdoorBlock.OPEN);
-         if (isOpen) {
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Trapdoor not closed properly, retrying close", new Object[0]);
-            }
-
-            this.currentState = PearlLoader.State.CLOSING_TRAPDOOR;
-            this.stateStartTime = System.currentTimeMillis();
-            return;
-         }
-      }
-
-      if ((Boolean)this.debugMode.get() && elapsed % 1000L < 50L) {
-         this.info(
-            String.format("Waiting with trapdoor closed: %.1f / %.1f seconds", elapsed / 1000.0, this.currentLoadLocation.trapdoorCloseTime), new Object[0]
-         );
-      }
-
-      if (elapsed >= waitTime) {
-         this.currentState = PearlLoader.State.OPENING_TRAPDOOR;
-         this.stateStartTime = System.currentTimeMillis();
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Wait complete after " + elapsed / 1000.0 + " seconds, now opening trapdoor", new Object[0]);
-         }
-      }
-   }
-
-   private void handleOpeningTrapdoor() {
-      double distToTrapdoor = this.getDistanceToTarget(this.currentLoadLocation.position);
-      if (distToTrapdoor > 5.0) {
-         this.error("Too far from trapdoor to interact safely! Restarting approach.", new Object[0]);
-         this.currentState = PearlLoader.State.WALKING_TO_TRAPDOOR;
-         BlockPos approachPos = this.getTrapdoorApproachPosition();
-         this.startPathing(approachPos);
-      } else {
-         BlockState state = this.mc.world.getBlockState(this.currentLoadLocation.position);
-         boolean isOpen = (Boolean)state.get(TrapdoorBlock.OPEN);
-         if (!isOpen) {
-            this.interactWithTrapdoor();
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Opened trapdoor", new Object[0]);
-            }
-         } else if ((Boolean)this.debugMode.get()) {
-            this.info("Trapdoor already open", new Object[0]);
-         }
-
-         this.info("Pearl loading complete", new Object[0]);
-         this.resetToLoop();
-      }
-   }
-
-   private void handleStandingAtLoad() {
-      long elapsed = System.currentTimeMillis() - this.stateStartTime;
-      long waitTime = (long)(this.currentLoadLocation.standTime * 1000.0);
-      if (elapsed >= waitTime) {
-         this.currentState = PearlLoader.State.RETURNING_FROM_LOAD;
-         this.currentTarget = (BlockPos)this.walkPoint1.get();
-         this.startPathing(this.currentTarget);
-         if ((Boolean)this.debugMode.get()) {
-            this.info("Stand time complete, returning to loop", new Object[0]);
-         }
-      }
-   }
-
-   private void handleReturningFromLoad() {
-      if (this.isPathingDone() || this.getDistanceToTarget(this.currentTarget) <= (Double)this.reachThreshold.get()) {
-         this.info("Pearl loading complete", new Object[0]);
-         this.resetToLoop();
-      }
-   }
-
-   private void triggerPearlLoad(PearlLoader.LoadLocation location) {
-      if (!this.pearlLoadTriggered) {
-         this.pearlLoadTriggered = true;
-         this.currentLoadLocation = location;
-         this.stopPathing();
-         if (location.mode == PearlLoader.LoadMode.TRAPDOOR) {
-            this.currentState = PearlLoader.State.WALKING_TO_TRAPDOOR;
-            BlockPos approachPos = this.getTrapdoorApproachPosition();
-            this.startPathing(approachPos);
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Starting trapdoor pearl load sequence for: " + location.triggerKeyword, new Object[0]);
-            }
-         } else {
-            this.currentState = PearlLoader.State.WALKING_TO_LOAD_POSITION;
-            this.startPathing(location.position);
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Starting walk-to pearl load sequence for: " + location.triggerKeyword, new Object[0]);
-            }
-         }
-
-         this.stateStartTime = System.currentTimeMillis();
-      }
-   }
-
-   private void resetToLoop() {
-      this.pearlLoadTriggered = false;
-      this.currentLoadLocation = null;
-      this.currentState = PearlLoader.State.WALKING_TO_POINT1;
-      this.currentTarget = (BlockPos)this.walkPoint1.get();
-      this.startPathing(this.currentTarget);
-      this.stateStartTime = System.currentTimeMillis();
-   }
-
-   private boolean rotateToBlock(BlockPos pos) {
-      Vec3d target = Vec3d.ofCenter(pos);
-      Vec3d playerEyes = this.mc.player.getEyePos();
-      Vec3d lookVec = target.subtract(playerEyes);
-      double dx = lookVec.x;
-      double dy = lookVec.y;
-      double dz = lookVec.z;
-      double distance = Math.sqrt(dx * dx + dz * dz);
-      this.targetYaw = (float)Math.toDegrees(Math.atan2(-dx, dz));
-      this.targetPitch = (float)Math.toDegrees(Math.atan2(-dy, distance));
-      this.targetPitch = MathHelper.clamp(this.targetPitch, -90.0F, 90.0F);
-      this.rotationTicks++;
-      float yawDiff = this.wrapDegrees(this.targetYaw - this.mc.player.getYaw());
-      float pitchDiff = this.targetPitch - this.mc.player.getPitch();
-      float rotSpeed = 0.1F;
-      this.mc.player.setYaw(this.mc.player.getYaw() + yawDiff * rotSpeed);
-      this.mc.player.setPitch(this.mc.player.getPitch() + pitchDiff * rotSpeed);
-      return Math.abs(yawDiff) < 2.0F && Math.abs(pitchDiff) < 2.0F || this.rotationTicks > 50;
-   }
-
-   private void interactWithTrapdoor() {
-      if (System.currentTimeMillis() - this.lastInteractionTime >= 500L) {
-         Vec3d hitVec = Vec3d.ofCenter(this.currentLoadLocation.position);
-         Direction hitSide = this.getClosestSide(this.currentLoadLocation.position);
-         BlockHitResult hitResult = new BlockHitResult(hitVec, hitSide, this.currentLoadLocation.position, false);
-         this.mc.interactionManager.interactBlock(this.mc.player, Hand.MAIN_HAND, hitResult);
-         this.mc.player.swingHand(Hand.MAIN_HAND);
-         this.lastInteractionTime = System.currentTimeMillis();
-      }
-   }
-
-   private BlockPos getTrapdoorApproachPosition() {
-      BlockPos trapPos = this.currentLoadLocation.position;
-      Direction[] dirs = new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
-      BlockPos bestPos = null;
-      double minDist = Double.MAX_VALUE;
-
-      for (Direction dir : dirs) {
-         BlockPos checkPos = trapPos.offset(dir);
-         BlockState state = this.mc.world.getBlockState(checkPos);
-         BlockState below = this.mc.world.getBlockState(checkPos.down());
-         if (state.isAir() && below.isSolidBlock(this.mc.world, checkPos.down())) {
-            double dist = this.mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(checkPos));
-            if (dist < minDist) {
-               minDist = dist;
-               bestPos = checkPos;
-            }
-         }
-      }
-
-      return bestPos != null ? bestPos : trapPos.north();
-   }
-
-   private Direction getClosestSide(BlockPos pos) {
-      Vec3d playerPos = this.mc.player.getEntityPos();
-      Vec3d blockCenter = Vec3d.ofCenter(pos);
-      Vec3d diff = playerPos.subtract(blockCenter);
-      if (Math.abs(diff.x) > Math.abs(diff.z)) {
-         return diff.x > 0.0 ? Direction.EAST : Direction.WEST;
-      } else {
-         return diff.z > 0.0 ? Direction.SOUTH : Direction.NORTH;
-      }
-   }
-
-   private double getDistanceToTarget(BlockPos target) {
-      return this.mc.player != null && target != null ? this.mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(target)) : Double.MAX_VALUE;
-   }
-
-   private void startPathing(BlockPos target) {
-      if (target != null) {
-         try {
-            Class.forName("baritone.api.BaritoneAPI");
-            BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(target));
-         } catch (ClassNotFoundException e) {
-            this.error("Baritone not available!", new Object[0]);
-         }
-      }
-   }
-
-   private void stopPathing() {
-      try {
-         Class.forName("baritone.api.BaritoneAPI");
-         BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().cancelEverything();
-      } catch (ClassNotFoundException var2) {
-      }
-   }
-
-   private boolean isPathingDone() {
-      try {
-         return !BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().isPathing();
-      } catch (Exception e) {
-         return false;
-      }
-   }
-
-   private String extractSenderName(String message) {
-      if (message.contains(" whispers: ")) {
-         String beforeWhispers = message.substring(0, message.indexOf(" whispers: "));
-         beforeWhispers = beforeWhispers.replaceAll("\u00a7[0-9a-fk-or]", "");
-         String[] parts = beforeWhispers.split(" ");
-         if (parts.length >= 1) {
-            String name = parts[parts.length - 1].trim();
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Extracted whisper sender: " + name, new Object[0]);
-            }
-
+    private String findSender(String message) {
+        if (message.contains(" whispers: ")) {
+            String head = stripColors(message.substring(0, message.indexOf(" whispers: "))).trim();
+            String[] parts = head.split(" ");
+            String name = parts[parts.length - 1];
+            trace("Extracted whisper sender: " + name);
             return name;
-         }
-      } else if (message.contains(": ")) {
-         String beforeColon = message.substring(0, message.indexOf(": "));
-         beforeColon = beforeColon.replaceAll("\u00a7[0-9a-fk-or]", "");
-         if (beforeColon.contains("<") && beforeColon.contains(">")) {
-            int start = beforeColon.lastIndexOf("<");
-            int end = beforeColon.lastIndexOf(">");
-            if (start < end) {
-               String name = beforeColon.substring(start + 1, end).trim();
-               if ((Boolean)this.debugMode.get()) {
-                  this.info("Extracted public sender: " + name, new Object[0]);
-               }
-
-               return name;
+        }
+        if (message.contains(": ")) {
+            String head = stripColors(message.substring(0, message.indexOf(": ")));
+            int open = head.lastIndexOf('<');
+            int close = head.lastIndexOf('>');
+            if (open >= 0 && close >= 0 && open < close) {
+                String name = head.substring(open + 1, close).trim();
+                trace("Extracted public sender: " + name);
+                return name;
             }
-         }
-
-         String[] parts = beforeColon.split(" ");
-         if (parts.length > 0) {
+            String[] parts = head.trim().split(" ");
             String name = parts[parts.length - 1].replaceAll("[<>\\[\\]]", "").trim();
-            if ((Boolean)this.debugMode.get()) {
-               this.info("Extracted sender: " + name, new Object[0]);
-            }
-
+            trace("Extracted sender: " + name);
             return name;
-         }
-      }
+        }
+        if (verbose.get()) warning("Could not extract sender from message: " + message.replace("%", "%%"));
+        return null;
+    }
 
-      if ((Boolean)this.debugMode.get()) {
-         this.warning("Could not extract sender from message: " + message, new Object[0]);
-      }
-
-      return null;
-   }
-
-   private boolean isPlayerWhitelisted(String playerName) {
-      if (playerName == null) {
-         return false;
-      }
-
-      for (String whitelisted : this.whitelistedPlayers.get()) {
-         if (whitelisted.equalsIgnoreCase(playerName)) {
-            return true;
-         }
-      }
-
-      return false;
-   }
-
-   private float wrapDegrees(float degrees) {
-      degrees %= 360.0F;
-      if (degrees >= 180.0F) {
-         degrees -= 360.0F;
-      }
-
-      if (degrees < -180.0F) {
-         degrees += 360.0F;
-      }
-
-      return degrees;
-   }
-
-   public WWidget getWidget(GuiTheme theme) {
-      WVerticalList mainList = theme.verticalList();
-      WButton addButton = (WButton)mainList.add(theme.button("Add Load Location")).widget();
-      addButton.action = () -> {
-         this.loadLocations
-            .add(new PearlLoader.LoadLocation("!pearl" + (this.loadLocations.size() + 1), PearlLoader.LoadMode.TRAPDOOR, new BlockPos(0, 64, 0), 2.0, 1.0));
-         this.info("Load location added. Close and reopen settings to see changes.", new Object[0]);
-      };
-
-      for (int i = 0; i < this.loadLocations.size(); i++) {
-         PearlLoader.LoadLocation location = this.loadLocations.get(i);
-         mainList.add(theme.horizontalSeparator()).expandX();
-         WHorizontalList headerList = (WHorizontalList)mainList.add(theme.horizontalList()).expandX().widget();
-         headerList.add(theme.label("Location " + (i + 1) + ":")).expandX();
-         WButton removeButton = (WButton)headerList.add(theme.button("-")).widget();
-         removeButton.action = () -> {
-            if (this.loadLocations.remove(location)) {
-               this.info("Load location removed. Close and reopen settings to see changes.", new Object[0]);
-            } else {
-               this.error("Failed to remove load location. Please close and reopen settings.", new Object[0]);
+    private boolean baritoneThere() {
+        if (baritoneKnown == null) {
+            try {
+                Class.forName("baritone.api.BaritoneAPI");
+                baritoneKnown = true;
+            } catch (ClassNotFoundException | LinkageError e) {
+                baritoneKnown = false;
             }
-         };
-         WButton triggerButton = (WButton)headerList.add(theme.button("Trigger")).widget();
-         triggerButton.action = () -> {
-            if (!this.pearlLoadTriggered && this.isActive()) {
-               this.info("Manually triggering pearl load: " + location.triggerKeyword, new Object[0]);
-               this.triggerPearlLoad(location);
+        }
+        return baritoneKnown;
+    }
+
+    private void walkTo(BlockPos pos) {
+        if (pos == null) return;
+        if (baritoneThere()) {
+            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
+                .getCustomGoalProcess()
+                .setGoalAndPath(new baritone.api.pathing.goals.GoalBlock(pos));
+        } else {
+            error("Baritone not available!");
+        }
+    }
+
+    private void haltWalking() {
+        if (!baritoneThere()) return;
+        try {
+            baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
+                .getPathingBehavior()
+                .cancelEverything();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private boolean walkFinished() {
+        try {
+            return !baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone()
+                .getPathingBehavior()
+                .isPathing();
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    private double gap(BlockPos pos) {
+        if (mc.player == null || pos == null) return Double.POSITIVE_INFINITY;
+        return mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(pos));
+    }
+
+    private boolean isNear(BlockPos pos) {
+        return gap(pos) <= arriveRadius.get();
+    }
+
+    private void enter(Phase next) {
+        phase = next;
+        phaseStart = System.currentTimeMillis();
+    }
+
+    private long inPhase() {
+        return System.currentTimeMillis() - phaseStart;
+    }
+
+    private void beginLoad(LoadLocation place) {
+        if (loading) return;
+        loading = true;
+        activePlace = place;
+        haltWalking();
+        if (place.kind == LoadMode.TRAPDOOR) {
+            phase = Phase.DOOR_APPROACH;
+            walkTo(standingSpotFor(place.spot));
+            trace("Starting trapdoor pearl load sequence for: " + place.word);
+        } else {
+            phase = Phase.SPOT_APPROACH;
+            walkTo(place.spot);
+            trace("Starting walk-to pearl load sequence for: " + place.word);
+        }
+        phaseStart = System.currentTimeMillis();
+    }
+
+    private void backToLoop() {
+        loading = false;
+        activePlace = null;
+        phase = Phase.LOOP_TO_FIRST;
+        goal = loopA.get();
+        walkTo(goal);
+        phaseStart = System.currentTimeMillis();
+    }
+
+    private BlockPos standingSpotFor(BlockPos door) {
+        BlockPos best = null;
+        double bestGap = Double.POSITIVE_INFINITY;
+        for (Direction side : new Direction[] {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+            BlockPos cand = door.offset(side);
+            if (!mc.world.getBlockState(cand).isAir()) continue;
+            BlockPos under = cand.down();
+            if (!mc.world.getBlockState(under).isSolidBlock(mc.world, under)) continue;
+            double d = gap(cand);
+            if (d < bestGap) {
+                bestGap = d;
+                best = cand;
             }
-         };
-         WTextBox keywordBox = (WTextBox)mainList.add(theme.textBox(location.triggerKeyword)).expandX().widget();
-         keywordBox.action = () -> location.triggerKeyword = keywordBox.get();
-         mainList.add(theme.label("Position: " + location.position.toShortString()));
-         WHorizontalList posButtons = (WHorizontalList)mainList.add(theme.horizontalList()).expandX().widget();
-         WButton setPosButton = (WButton)posButtons.add(theme.button("Set to Player Pos")).widget();
-         setPosButton.action = () -> {
-            if (this.mc.player != null) {
-               location.position = this.mc.player.getBlockPos();
+        }
+        return best != null ? best : door.north();
+    }
+
+    @EventHandler
+    private void onTick(TickEvent.Pre event) {
+        if (!isActive() || mc.player == null || mc.world == null) return;
+        if (!loading) {
+            stepLoop();
+            return;
+        }
+        stepLoad();
+    }
+
+    private void stepLoop() {
+        if (goal == null || !walkFinished()) return;
+        if (phase == Phase.LOOP_TO_FIRST) {
+            phase = Phase.LOOP_TO_SECOND;
+            goal = loopB.get();
+            walkTo(goal);
+            trace("Reached Point 1, walking to Point 2");
+        } else {
+            phase = Phase.LOOP_TO_FIRST;
+            goal = loopA.get();
+            walkTo(goal);
+            trace("Reached Point 2, walking to Point 1");
+        }
+    }
+
+    private void stepLoad() {
+        switch (phase) {
+            case DOOR_APPROACH -> stepDoorApproach();
+            case DOOR_SETTLE -> stepDoorSettle();
+            case DOOR_AIM -> stepDoorAim();
+            case DOOR_CLOSE -> stepDoorClose();
+            case DOOR_HOLD -> stepDoorHold();
+            case DOOR_OPEN -> stepDoorOpen();
+            case SPOT_APPROACH -> stepSpotApproach();
+            case SPOT_SETTLE -> stepSpotSettle();
+            case SPOT_STAND -> stepSpotStand();
+            case SPOT_BACK -> stepSpotBack();
+            default -> {
             }
-         };
-         mainList.add(theme.label("Mode: " + location.mode.toString()));
-         WHorizontalList modeButtons = (WHorizontalList)mainList.add(theme.horizontalList()).expandX().widget();
-         WButton trapdoorButton = (WButton)modeButtons.add(theme.button("Trapdoor")).widget();
-         trapdoorButton.action = () -> location.mode = PearlLoader.LoadMode.TRAPDOOR;
-         WButton walkToButton = (WButton)modeButtons.add(theme.button("Walk To")).widget();
-         walkToButton.action = () -> location.mode = PearlLoader.LoadMode.WALK_TO;
-         if (location.mode == PearlLoader.LoadMode.TRAPDOOR) {
-            mainList.add(theme.label("Close Time: " + location.trapdoorCloseTime + "s"));
-         } else {
-            mainList.add(theme.label("Stand Time: " + location.standTime + "s"));
-         }
-      }
+        }
+    }
 
-      mainList.add(theme.horizontalSeparator()).expandX();
-      WButton testLoop = (WButton)mainList.add(theme.button("Test Walking Loop")).widget();
-      testLoop.action = () -> {
-         if (this.isActive()) {
-            this.info("Testing walking loop", new Object[0]);
-            this.resetToLoop();
-         }
-      };
-      return mainList;
-   }
+    private boolean settled() {
+        return inPhase() >= settleTicks.get() * 50L;
+    }
 
-   public static class LoadLocation implements ISerializable<PearlLoader.LoadLocation> {
-      public String triggerKeyword = "!pearl";
-      public PearlLoader.LoadMode mode = PearlLoader.LoadMode.TRAPDOOR;
-      public BlockPos position = new BlockPos(0, 64, 0);
-      public double trapdoorCloseTime = 2.0;
-      public double standTime = 1.0;
+    private void stepDoorApproach() {
+        BlockPos stand = standingSpotFor(activePlace.spot);
+        if (isNear(stand)) {
+            haltWalking();
+            enter(Phase.DOOR_SETTLE);
+            trace("Arrived next to the trapdoor, waiting for the server");
+        } else if (walkFinished()) {
+            walkTo(stand);
+        }
+    }
 
-      public LoadLocation() {
-      }
+    private void stepDoorSettle() {
+        BlockPos stand = standingSpotFor(activePlace.spot);
+        if (gap(stand) > arriveRadius.get()) {
+            phase = Phase.DOOR_APPROACH;
+            walkTo(stand);
+            trace("Drifted away from the trapdoor, walking back");
+        } else if (settled()) {
+            enter(Phase.DOOR_AIM);
+            aimSteps = 0;
+            trace("Aiming at the trapdoor");
+        }
+    }
 
-      public LoadLocation(String keyword, PearlLoader.LoadMode mode, BlockPos pos, double closeTime, double standTime) {
-         this.triggerKeyword = keyword;
-         this.mode = mode;
-         this.position = pos;
-         this.trapdoorCloseTime = closeTime;
-         this.standTime = standTime;
-      }
+    private void stepDoorAim() {
+        if (!aimAt(Vec3d.ofCenter(activePlace.spot))) return;
+        BlockState state = mc.world.getBlockState(activePlace.spot);
+        if (!(state.getBlock() instanceof TrapdoorBlock)) {
+            error("No trapdoor found at specified position!");
+            backToLoop();
+            return;
+        }
+        enter(Phase.DOOR_CLOSE);
+        trace("Aim done, closing the trapdoor");
+    }
 
-      public NbtCompound toTag() {
-         NbtCompound tag = new NbtCompound();
-         tag.putString("keyword", this.triggerKeyword);
-         tag.putString("mode", this.mode.name());
-         tag.putInt("x", this.position.getX());
-         tag.putInt("y", this.position.getY());
-         tag.putInt("z", this.position.getZ());
-         tag.putDouble("closeTime", this.trapdoorCloseTime);
-         tag.putDouble("standTime", this.standTime);
-         return tag;
-      }
+    private boolean tooFarFromDoor() {
+        if (gap(activePlace.spot) <= SAFE_REACH) return false;
+        error("Too far from trapdoor to interact safely! Restarting approach.");
+        phase = Phase.DOOR_APPROACH;
+        walkTo(standingSpotFor(activePlace.spot));
+        return true;
+    }
 
-      public PearlLoader.LoadLocation fromTag(NbtCompound tag) {
-         this.triggerKeyword = tag.getString("keyword").orElse("");
-         this.mode = PearlLoader.LoadMode.valueOf(tag.getString("mode").orElse("TRAPDOOR"));
-         this.position = new BlockPos(tag.getInt("x").orElse(0), tag.getInt("y").orElse(0), tag.getInt("z").orElse(0));
-         this.trapdoorCloseTime = tag.getDouble("closeTime").orElse(1.0);
-         this.standTime = tag.getDouble("standTime").orElse(0.0);
-         return this;
-      }
-   }
+    private boolean doorIsOpen() {
+        BlockState state = mc.world.getBlockState(activePlace.spot);
+        return state.getBlock() instanceof TrapdoorBlock && state.get(TrapdoorBlock.OPEN);
+    }
 
-   public enum LoadMode {
-      TRAPDOOR("Trapdoor - Interact with trapdoor to load pearl"),
-      WALK_TO("Walk To - Walk to position and return");
+    private void stepDoorClose() {
+        if (tooFarFromDoor()) return;
+        if (doorIsOpen()) pressDoor();
+        enter(Phase.DOOR_HOLD);
+        trace("Trapdoor closed, holding it shut");
+    }
 
-      private final String description;
+    private void stepDoorHold() {
+        long elapsed = inPhase();
+        if (elapsed > RECLOSE_CHECK_MS && doorIsOpen()) {
+            enter(Phase.DOOR_CLOSE);
+            trace("Trapdoor still open, closing it again");
+            return;
+        }
+        if (elapsed >= activePlace.closedSecs * 1000.0) {
+            enter(Phase.DOOR_OPEN);
+            trace("Hold time over, reopening the trapdoor");
+        }
+    }
 
-      LoadMode(String description) {
-         this.description = description;
-      }
+    private void stepDoorOpen() {
+        if (tooFarFromDoor()) return;
+        if (!doorIsOpen()) pressDoor();
+        say("Pearl loading complete");
+        backToLoop();
+    }
 
-      @Override
-      public String toString() {
-         return this.description;
-      }
-   }
+    private void stepSpotApproach() {
+        BlockPos spot = activePlace.spot;
+        if (isNear(spot)) {
+            haltWalking();
+            enter(Phase.SPOT_SETTLE);
+            trace("Arrived at the load position, waiting for the server");
+        } else if (walkFinished()) {
+            walkTo(spot);
+        }
+    }
 
-   private enum State {
-      WALKING_TO_POINT1,
-      WALKING_TO_POINT2,
-      WALKING_TO_TRAPDOOR,
-      ARRIVED_AT_TRAPDOOR,
-      ROTATING_TO_TRAPDOOR,
-      CLOSING_TRAPDOOR,
-      WAITING_CLOSED,
-      OPENING_TRAPDOOR,
-      WALKING_TO_LOAD_POSITION,
-      ARRIVED_AT_LOAD_POSITION,
-      STANDING_AT_LOAD,
-      RETURNING_FROM_LOAD;
-   }
+    private void stepSpotSettle() {
+        BlockPos spot = activePlace.spot;
+        if (gap(spot) > arriveRadius.get()) {
+            phase = Phase.SPOT_APPROACH;
+            walkTo(spot);
+            trace("Drifted away from the load position, walking back");
+        } else if (settled()) {
+            enter(Phase.SPOT_STAND);
+            trace("Standing on the load position");
+        }
+    }
+
+    private void stepSpotStand() {
+        if (inPhase() < activePlace.standSecs * 1000.0) return;
+        phase = Phase.SPOT_BACK;
+        goal = loopA.get();
+        walkTo(goal);
+        phaseStart = System.currentTimeMillis();
+        trace("Stand time over, walking back to Point 1");
+    }
+
+    private void stepSpotBack() {
+        if (walkFinished() || isNear(goal)) {
+            say("Pearl loading complete");
+            backToLoop();
+        }
+    }
+
+    private boolean aimAt(Vec3d target) {
+        Vec3d eye = mc.player.getEyePos();
+        double dx = target.x - eye.x;
+        double dy = target.y - eye.y;
+        double dz = target.z - eye.z;
+        double flat = Math.sqrt(dx * dx + dz * dz);
+        float wantYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float wantPitch = (float) MathHelper.clamp(Math.toDegrees(Math.atan2(-dy, flat)), -90.0, 90.0);
+        aimSteps++;
+        float yawGap = MathHelper.wrapDegrees(wantYaw - mc.player.getYaw());
+        float pitchGap = wantPitch - mc.player.getPitch();
+        mc.player.setYaw((float) (mc.player.getYaw() + yawGap * AIM_RATE));
+        mc.player.setPitch((float) (mc.player.getPitch() + pitchGap * AIM_RATE));
+        boolean close = Math.abs(yawGap) < AIM_TOLERANCE && Math.abs(pitchGap) < AIM_TOLERANCE;
+        return close || aimSteps > AIM_LIMIT;
+    }
+
+    private void pressDoor() {
+        long now = System.currentTimeMillis();
+        if (now - lastClick < CLICK_GAP_MS) return;
+        lastClick = now;
+        BlockPos pos = activePlace.spot;
+        Vec3d center = Vec3d.ofCenter(pos);
+        double offX = mc.player.getX() - center.x;
+        double offZ = mc.player.getZ() - center.z;
+        Direction face;
+        if (Math.abs(offX) > Math.abs(offZ)) {
+            face = offX > 0 ? Direction.EAST : Direction.WEST;
+        } else {
+            face = offZ > 0 ? Direction.SOUTH : Direction.NORTH;
+        }
+        BlockHitResult hit = new BlockHitResult(center, face, pos, false);
+        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+        mc.player.swingHand(Hand.MAIN_HAND);
+    }
+
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        WVerticalList root = theme.verticalList();
+
+        WButton add = root.add(theme.button("Add Load Location")).expandX().widget();
+        add.action = () -> {
+            LoadLocation fresh = new LoadLocation();
+            fresh.word = "!pearl" + (places.size() + 1);
+            places.add(fresh);
+            info("Load location added. Close and reopen settings to see changes.");
+        };
+
+        for (int i = 0; i < places.size(); i++) {
+            addPlaceRows(theme, root, places.get(i), i);
+        }
+
+        root.add(theme.horizontalSeparator()).expandX();
+        WButton test = root.add(theme.button("Test Walking Loop")).expandX().widget();
+        test.action = () -> {
+            if (isActive()) {
+                info("Testing walking loop");
+                backToLoop();
+            }
+        };
+        return root;
+    }
+
+    private void addPlaceRows(GuiTheme theme, WVerticalList root, LoadLocation place, int index) {
+        root.add(theme.horizontalSeparator()).expandX();
+
+        WHorizontalList head = root.add(theme.horizontalList()).expandX().widget();
+        head.add(theme.label("Location " + (index + 1) + ":"));
+        WButton remove = head.add(theme.button("-")).widget();
+        remove.action = () -> {
+            places.remove(place);
+            info("Load location removed. Close and reopen settings to see changes.");
+        };
+        WButton trigger = head.add(theme.button("Trigger")).widget();
+        trigger.action = () -> {
+            if (isActive() && !loading) {
+                say("Manually triggering pearl load: " + place.word);
+                beginLoad(place);
+            }
+        };
+
+        WTextBox word = root.add(theme.textBox(place.word)).expandX().widget();
+        word.action = () -> place.word = word.get();
+
+        root.add(theme.label("Position: " + place.spot.toShortString()));
+        WButton here = root.add(theme.button("Set to Player Pos")).expandX().widget();
+        here.action = () -> {
+            if (mc.player != null) place.spot = mc.player.getBlockPos();
+        };
+
+        root.add(theme.label("Mode: " + place.kind));
+        WHorizontalList modes = root.add(theme.horizontalList()).expandX().widget();
+        WButton door = modes.add(theme.button("Trapdoor")).widget();
+        door.action = () -> place.kind = LoadMode.TRAPDOOR;
+        WButton walk = modes.add(theme.button("Walk To")).widget();
+        walk.action = () -> place.kind = LoadMode.WALK_TO;
+
+        if (place.kind == LoadMode.TRAPDOOR) {
+            root.add(theme.label("Close Time: " + place.closedSecs + "s"));
+        } else {
+            root.add(theme.label("Stand Time: " + place.standSecs + "s"));
+        }
+    }
 }

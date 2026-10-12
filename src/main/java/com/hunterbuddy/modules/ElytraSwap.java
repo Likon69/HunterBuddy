@@ -1,623 +1,514 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
+import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.IntSetting.Builder;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.ItemStack;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.Hand;
 
 public class ElytraSwap extends Module {
-   private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
-   private final Setting<Integer> durabilityThreshold = this.sgGeneral
-      .add(
-         new Builder()
-            .name("Durability Threshold")
-            .description("Swap elytra when durability drops below this percentage.")
-            .defaultValue(10)
-            .min(1)
-            .max(100)
-            .sliderRange(1, 100)
-            .build()
-      );
-   private final Setting<Boolean> onlyWhileFlying = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("Only While Flying")
-                  .description("Only swap elytras while actively flying.")
-               .defaultValue(false)
-            .build()
-      );
-   private final Setting<Boolean> pauseInInventory = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("Pause In Inventory")
-                  .description("Don't swap while inventory is open to prevent desync.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Integer> swapCooldown = this.sgGeneral
-      .add(
-         new Builder().name("Swap Cooldown").description("Ticks to wait after swapping before checking again.")
-               .defaultValue(100)
-            .min(20)
-            .max(200)
-            .sliderRange(20, 200)
-            .build()
-      );
-   private final Setting<Integer> stageDelay = this.sgGeneral
-      .add(
-         new Builder().name("Stage Delay")
-                  .description("Ticks to wait between swap stages. Higher values are safer for anticheat.")
-               .defaultValue(8)
-            .min(3)
-            .max(20)
-            .sliderRange(3, 20)
-            .build()
-      );
-   private final Setting<Boolean> notifySwap = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("Notify Swap")
-                  .description("Send a chat message when swapping elytras.")
-               .defaultValue(true)
-            .build()
-      );
-   private final SettingGroup sgCombat = this.settings.createGroup("Combat Protection");
-   private final Setting<Boolean> swapOnHit = this.sgCombat
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("Swap On Hit")
-                  .description("Automatically swap elytra to chestplate when hit by an entity.")
-               .defaultValue(false)
-            .build()
-      );
-   private final Setting<Integer> hitProtectionDuration = this.sgCombat
-      .add(
-         new Builder().name("Protection Duration").description("Ticks to keep chestplate equipped after being hit.")
-                  .defaultValue(60)
-               .min(20)
-               .max(200)
-               .sliderRange(20, 200)
-               .visible(this.swapOnHit::get)
-            .build()
-      );
-   private final Setting<Boolean> autoSwapBack = this.sgCombat
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("Auto Swap Back")
-                     .description("Automatically swap back to elytra after protection duration.")
-                  .defaultValue(true)
-               .visible(this.swapOnHit::get)
-            .build()
-      );
-   private final Setting<Boolean> prioritizeNetherite = this.sgCombat
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("Prioritize Netherite")
-                     .description("Prioritize netherite chestplates over diamond.")
-                  .defaultValue(true)
-               .visible(this.swapOnHit::get)
-            .build()
-      );
-   private int cooldownTimer = 0;
-   private boolean needsSwap = false;
-   private int swapStage = 0;
-   private int stageTimer = 0;
-   private int targetSlot = -1;
-   private boolean protectionActive = false;
-   private boolean noElytraWarned = false;
-   private int protectionTimer = 0;
-   private int lastHurtTime = 0;
-   private boolean needsChestplateSwap = false;
-   private int chestplateSwapStage = 0;
-   private int chestplateStageTimer = 0;
-   private int chestplateSwapFailures = 0;
-   private int chestplateSlot = -1;
-   private ItemStack storedElytra = ItemStack.EMPTY;
-   private boolean chestplateHold = false;
-   private boolean chestplateHoldAttempted = false;
+    private static final int INVENTORY_LAST = 35;
+    private static final int HOTBAR_LAST = 8;
+    private static final int MAX_FAILURES = 5;
+    private static final int ELYTRA_MATCH_DAMAGE = 5;
 
-   public ElytraSwap() {
-      super(HunterBuddyAddon.LOGISTICS_CATEGORY, "ElytraSwap", "Automatically swaps elytras when they reach low durability.");
-   }
+    private final SettingGroup sgMain = settings.getDefaultGroup();
+    private final SettingGroup sgGuard = settings.createGroup("Combat Protection");
 
-   public void onActivate() {
-      this.resetSwapState();
-   }
+    private final Setting<Integer> wornAt = sgMain.add(new IntSetting.Builder()
+        .name("Durability Threshold")
+        .description("Swap the worn elytra once its durability is at or below this percentage.")
+        .defaultValue(10)
+        .min(1)
+        .max(100)
+        .sliderRange(1, 100)
+        .build()
+    );
 
-   public void onDeactivate() {
-      this.resetSwapState();
-   }
+    private final Setting<Boolean> flyingOnly = sgMain.add(new BoolSetting.Builder()
+        .name("Only While Flying")
+        .description("Only swap a worn-out elytra while gliding.")
+        .defaultValue(false)
+        .build()
+    );
 
-   private boolean inventoryPaused() {
-      return (Boolean)this.pauseInInventory.get() && this.mc.player.currentScreenHandler != this.mc.player.playerScreenHandler;
-   }
+    private final Setting<Boolean> holdInMenus = sgMain.add(new BoolSetting.Builder()
+        .name("Pause In Inventory")
+        .description("Hold every swap while a container or other menu is open.")
+        .defaultValue(true)
+        .build()
+    );
 
-   private void pauseSwapState() {
-      this.needsSwap = false;
-      this.swapStage = 0;
-      this.stageTimer = 0;
-      this.targetSlot = -1;
-   }
+    private final Setting<Integer> restTicks = sgMain.add(new IntSetting.Builder()
+        .name("Swap Cooldown")
+        .description("Ticks to wait after a durability swap before checking again.")
+        .defaultValue(100)
+        .min(20)
+        .max(200)
+        .sliderRange(20, 200)
+        .build()
+    );
 
-   private void resetSwapState() {
-      this.cooldownTimer = 0;
-      this.needsSwap = false;
-      this.swapStage = 0;
-      this.stageTimer = 0;
-      this.targetSlot = -1;
-      this.protectionActive = false;
-      this.protectionTimer = 0;
-      this.lastHurtTime = 0;
-      this.needsChestplateSwap = false;
-      this.chestplateSwapStage = 0;
-      this.chestplateStageTimer = 0;
-      this.chestplateSwapFailures = 0;
-      this.chestplateSlot = -1;
-      this.storedElytra = ItemStack.EMPTY;
-      this.chestplateHold = false;
-      this.chestplateHoldAttempted = false;
-   }
+    private final Setting<Integer> stepTicks = sgMain.add(new IntSetting.Builder()
+        .name("Stage Delay")
+        .description("Ticks between two steps of a swap; higher is gentler on the anticheat.")
+        .defaultValue(8)
+        .min(3)
+        .max(20)
+        .sliderRange(3, 20)
+        .build()
+    );
 
-   public void setChestplateHold(boolean hold) {
-      if (hold == this.chestplateHold) {
-         return;
-      }
+    private final Setting<Boolean> chat = sgMain.add(new BoolSetting.Builder()
+        .name("Notify Swap")
+        .description("Say in chat what was swapped, and why a swap failed.")
+        .defaultValue(true)
+        .build()
+    );
 
-      this.chestplateHold = hold;
-      this.chestplateHoldAttempted = false;
-      if (!hold && this.protectionActive && (Boolean)this.swapOnHit.get() && (Boolean)this.autoSwapBack.get()) {
-         this.protectionTimer = 0;
-      }
-   }
+    private final Setting<Boolean> guardOnHit = sgGuard.add(new BoolSetting.Builder()
+        .name("Swap On Hit")
+        .description("Put a chestplate on when something hits you on the ground.")
+        .defaultValue(false)
+        .build()
+    );
 
-   @EventHandler
-   private void onTick(Pre event) {
-      if (this.mc.player != null && this.mc.world != null) {
-         if ((Boolean)this.swapOnHit.get()) {
-            this.handleCombatProtection();
-         }
+    private final Setting<Integer> guardTicks = sgGuard.add(new IntSetting.Builder()
+        .name("Protection Duration")
+        .description("Ticks the chestplate stays on after the last hit.")
+        .defaultValue(60)
+        .min(20)
+        .max(200)
+        .sliderRange(20, 200)
+        .visible(guardOnHit::get)
+        .build()
+    );
 
-         if (this.cooldownTimer > 0) {
-            this.cooldownTimer--;
-         } else if (this.inventoryPaused()) {
-            this.pauseSwapState();
-         } else {
-            ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-            if (!this.protectionActive) {
-               if (chestItem.getItem().equals(Items.ELYTRA)) {
-                  if (!(Boolean)this.onlyWhileFlying.get() || this.mc.player.isGliding()) {
-                     if (this.needsSwap) {
-                        this.processSwapStages();
-                     } else {
-                        double currentPercent = this.getDurabilityPercent(chestItem);
-                        if (currentPercent <= (Integer)this.durabilityThreshold.get()) {
-                           this.initiateSwap(chestItem);
-                        }
-                     }
-                  }
-               } else if (this.needsSwap) {
-                  this.processSwapStages();
-               } else if (chestItem.isEmpty()) {
-                  this.equipElytraOnBareChest();
-               }
+    private final Setting<Boolean> restoreElytra = sgGuard.add(new BoolSetting.Builder()
+        .name("Auto Swap Back")
+        .description("Put the elytra back on once the protection time is over.")
+        .defaultValue(true)
+        .visible(guardOnHit::get)
+        .build()
+    );
+
+    private final Setting<Boolean> netheriteFirst = sgGuard.add(new BoolSetting.Builder()
+        .name("Prioritize Netherite")
+        .description("Rank netherite chestplates above diamond ones.")
+        .defaultValue(true)
+        .visible(guardOnHit::get)
+        .build()
+    );
+
+    private int cooldown;
+    private boolean wearActive;
+    private int wearStage;
+    private int wearTimer;
+    private int wearSlot = -1;
+
+    private boolean guarding;
+    private int guardLeft;
+    private int lastHurt;
+    private boolean missingSaid;
+    private ItemStack parkedElytra = ItemStack.EMPTY;
+
+    private boolean chestActive;
+    private int chestStage;
+    private int chestTimer;
+    private int chestFailures;
+    private int chestSlot = -1;
+
+    private boolean hold;
+    private boolean holdTried;
+
+    public ElytraSwap() {
+        super(HunterBuddyAddon.LOGISTICS_CATEGORY, "elytra-keeper", "Keeps a working elytra on: swaps in a fresh one when it wears out, puts one on a bare chest, and can wear a chestplate while you are hit or on demand.", "ElytraSwap");
+    }
+
+    @Override
+    public void onActivate() {
+        resetAll();
+    }
+
+    @Override
+    public void onDeactivate() {
+        resetAll();
+    }
+
+    public void setChestplateHold(boolean value) {
+        if (value == hold) return;
+        hold = value;
+        holdTried = false;
+        if (!value && guarding && guardOnHit.get() && restoreElytra.get()) {
+            guardLeft = 0;
+        }
+    }
+
+    private void resetAll() {
+        cooldown = 0;
+        resetWear();
+        guarding = false;
+        guardLeft = 0;
+        lastHurt = 0;
+        parkedElytra = ItemStack.EMPTY;
+        chestActive = false;
+        chestStage = 0;
+        chestTimer = 0;
+        chestFailures = 0;
+        chestSlot = -1;
+        hold = false;
+        holdTried = false;
+    }
+
+    private void resetWear() {
+        wearActive = false;
+        wearStage = 0;
+        wearTimer = 0;
+        wearSlot = -1;
+    }
+
+    private static double percent(ItemStack stack) {
+        if (stack.isEmpty() || !stack.isDamageable() || stack.getMaxDamage() <= 0) return 100.0;
+        int max = stack.getMaxDamage();
+        return (max - stack.getDamage()) / (double) max * 100.0;
+    }
+
+    private static boolean isElytra(ItemStack stack) {
+        return !stack.isEmpty() && stack.getItem() == Items.ELYTRA;
+    }
+
+    private static boolean isWearable(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        Item item = stack.getItem();
+        return item == Items.ELYTRA
+            || item == Items.NETHERITE_CHESTPLATE
+            || item == Items.DIAMOND_CHESTPLATE
+            || item == Items.IRON_CHESTPLATE
+            || item == Items.GOLDEN_CHESTPLATE
+            || item == Items.CHAINMAIL_CHESTPLATE
+            || item == Items.LEATHER_CHESTPLATE;
+    }
+
+    private int value(ItemStack stack) {
+        if (stack.isEmpty()) return 0;
+        Item item = stack.getItem();
+        int left = stack.getMaxDamage() - stack.getDamage();
+        if (item == Items.NETHERITE_CHESTPLATE) return (netheriteFirst.get() ? 1000 : 400) + left;
+        if (item == Items.DIAMOND_CHESTPLATE) return 300 + left;
+        if (item == Items.IRON_CHESTPLATE) return 200 + left;
+        if (item == Items.CHAINMAIL_CHESTPLATE) return 150 + left;
+        if (item == Items.GOLDEN_CHESTPLATE) return 100 + left;
+        if (item == Items.LEATHER_CHESTPLATE) return 50 + left;
+        return 0;
+    }
+
+    private int bestChestplate() {
+        int best = -1;
+        int bestValue = 0;
+        for (int i = 0; i <= INVENTORY_LAST; i++) {
+            int v = value(mc.player.getInventory().getStack(i));
+            if (v > bestValue) {
+                bestValue = v;
+                best = i;
             }
-         }
-      }
-   }
+        }
+        return best;
+    }
 
-   private void initiateSwap(ItemStack equipped) {
-      int bestSlot = -1;
-      double bestPercent = this.getDurabilityPercent(equipped);
-      double minPercent = (Integer)this.durabilityThreshold.get();
+    private static boolean isEssential(ItemStack stack) {
+        Item item = stack.getItem();
+        return item == Items.TOTEM_OF_UNDYING
+            || item == Items.GOLDEN_APPLE
+            || item == Items.ENCHANTED_GOLDEN_APPLE
+            || item == Items.ENDER_PEARL
+            || item == Items.CHORUS_FRUIT;
+    }
 
-      for (int i = 0; i < 36; i++) {
-         ItemStack stack = this.mc.player.getInventory().getStack(i);
-         if (!this.isElytra(stack)) {
-            continue;
-         }
+    private boolean menuPaused() {
+        return holdInMenus.get() && mc.player.currentScreenHandler != mc.player.playerScreenHandler;
+    }
 
-         double percent = this.getDurabilityPercent(stack);
-         if (percent > bestPercent && percent > minPercent) {
-            bestPercent = percent;
-            bestSlot = i;
-         }
-      }
+    private ItemStack chest() {
+        return mc.player.getEquippedStack(EquipmentSlot.CHEST);
+    }
 
-      if (bestSlot != -1) {
-         this.targetSlot = bestSlot;
-         this.needsSwap = true;
-         this.swapStage = 1;
-         this.stageTimer = 0;
-      } else if ((Boolean)this.notifySwap.get()) {
-         this.warning(
-            "No better elytra found (equipped: %.1f%%, threshold: %.0f%%)",
-            this.getDurabilityPercent(equipped),
-            minPercent
-         );
-         this.cooldownTimer = (Integer)this.swapCooldown.get();
-      }
-   }
-
-   private void equipElytraOnBareChest() {
-      int bestSlot = -1;
-      double bestPercent = (Integer)this.durabilityThreshold.get();
-
-      for (int i = 0; i < 36; i++) {
-         ItemStack stack = this.mc.player.getInventory().getStack(i);
-         if (this.isElytra(stack)) {
-            double percent = this.getDurabilityPercent(stack);
-            if (percent > bestPercent) {
-               bestPercent = percent;
-               bestSlot = i;
+    private int bestElytraAbove(double floor) {
+        int best = -1;
+        double bestPercent = 0;
+        for (int i = 0; i <= INVENTORY_LAST; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!isElytra(stack)) continue;
+            double p = percent(stack);
+            if (p > floor && (best == -1 || p > bestPercent)) {
+                best = i;
+                bestPercent = p;
             }
-         }
-      }
+        }
+        return best;
+    }
 
-      if (bestSlot != -1) {
-         this.targetSlot = bestSlot;
-         this.needsSwap = true;
-         this.swapStage = 1;
-         this.stageTimer = 0;
-         if ((Boolean)this.notifySwap.get()) {
-            this.info("Chest slot is bare, putting on the elytra at %.1f%% from slot %d", bestPercent, bestSlot);
-         }
-      }
-   }
+    @EventHandler
+    private void onTick(TickEvent.Pre event) {
+        if (mc.player == null || mc.world == null) return;
 
-   /**
-    * Two stages. The first is one three-click move of the fresh elytra straight into the chest
-    * slot, the same call the regear uses to swap its chestplate in: the fresh one goes on and the
-    * worn one lands in the very slot the fresh one came from. Nothing passes through the hotbar,
-    * so nothing there is displaced. The old way parked the fresh elytra in the first hotbar slot
-    * without a totem or an apple in it, right-clicked it, and only then tried to sort the hotbar
-    * out again; any interruption in between (a hit, a container opening, a toggle) left the worn
-    * elytra sitting where the sword had been and the sword buried in the inventory. The second
-    * stage only reads back what the chest slot holds.
-    */
-   private void processSwapStages() {
-      this.stageTimer++;
-      if (this.stageTimer >= (Integer)this.stageDelay.get()) {
-         switch (this.swapStage) {
-            case 1:
-               ItemStack toEquip = this.mc.player.getInventory().getStack(this.targetSlot);
-               if (!this.isElytra(toEquip)) {
-                  if ((Boolean)this.notifySwap.get()) {
-                     this.warning("Elytra swap failed - the fresh elytra is no longer in slot %d", this.targetSlot);
-                  }
+        if (guardOnHit.get()) tickProtection();
 
-                  this.resetSwapState();
-                  return;
-               }
+        if (cooldown > 0) {
+            cooldown--;
+            return;
+        }
 
-               InvUtils.move().from(this.targetSlot).toArmor(2);
-               this.swapStage = 2;
-               this.stageTimer = 0;
-               break;
-            case 2:
-               ItemStack newChest = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-               if ((Boolean)this.notifySwap.get()) {
-                  if (this.isElytra(newChest) && this.getDurabilityPercent(newChest) > (Integer)this.durabilityThreshold.get()) {
-                     this.info(
-                        "Swapped to elytra at %.1f%% durability, worn one left in slot %d",
-                        this.getDurabilityPercent(newChest),
-                        this.targetSlot
-                     );
-                  } else {
-                     this.warning("Elytra swap failed - the chest slot did not take the fresh elytra", new Object[0]);
-                  }
-               }
+        if (menuPaused()) {
+            resetWear();
+            return;
+        }
 
-               this.finishSwap();
-         }
-      }
-   }
+        if (guarding) return;
 
-   private void finishSwap() {
-      this.needsSwap = false;
-      this.swapStage = 0;
-      this.stageTimer = 0;
-      this.targetSlot = -1;
-      this.cooldownTimer = (Integer)this.swapCooldown.get();
-   }
-
-   private boolean isEssentialItem(ItemStack stack) {
-      return stack.getItem().equals(Items.TOTEM_OF_UNDYING)
-         || stack.getItem().equals(Items.GOLDEN_APPLE)
-         || stack.getItem().equals(Items.ENCHANTED_GOLDEN_APPLE)
-         || stack.getItem().equals(Items.ENDER_PEARL)
-         || stack.getItem().equals(Items.CHORUS_FRUIT);
-   }
-
-   private void handleCombatProtection() {
-      if (this.mc.player != null) {
-         boolean newHit = this.mc.player.hurtTime > 0 && this.mc.player.hurtTime > this.lastHurtTime;
-         if (newHit) {
-            this.lastHurtTime = this.mc.player.hurtTime;
-         }
-
-         if (newHit && (this.protectionActive || (this.mc.player.isOnGround() && !this.mc.player.isGliding()))) {
-            ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-            if (chestItem.getItem().equals(Items.ELYTRA) && !this.protectionActive) {
-               int bestChestplate = this.findBestChestplate();
-               if (bestChestplate != -1) {
-                  this.storedElytra = chestItem.copy();
-                  this.chestplateSlot = bestChestplate;
-                  this.needsChestplateSwap = true;
-                  this.chestplateSwapStage = 1;
-                  this.chestplateStageTimer = 0;
-                  this.chestplateSwapFailures = 0;
-                  this.protectionActive = true;
-                  this.protectionTimer = (Integer)this.hitProtectionDuration.get();
-                  if ((Boolean)this.notifySwap.get()) {
-                     this.info("Swapping to chestplate for protection!", new Object[0]);
-                  }
-               }
-            } else if (this.protectionActive) {
-               this.protectionTimer = (Integer)this.hitProtectionDuration.get();
+        ItemStack worn = chest();
+        if (isElytra(worn)) {
+            if (flyingOnly.get() && !mc.player.isGliding()) return;
+            if (wearActive) {
+                advanceWear();
+            } else if (percent(worn) <= wornAt.get()) {
+                startWear(worn);
             }
-         }
+        } else if (wearActive) {
+            advanceWear();
+        } else if (worn.isEmpty()) {
+            wearOnBareChest();
+        }
+    }
 
-         if (this.mc.player.hurtTime < this.lastHurtTime) {
-            this.lastHurtTime = this.mc.player.hurtTime;
-         }
+    private void startWear(ItemStack worn) {
+        int slot = bestElytraAbove(Math.max(percent(worn), wornAt.get()));
+        if (slot != -1) {
+            wearActive = true;
+            wearStage = 1;
+            wearTimer = 0;
+            wearSlot = slot;
+            return;
+        }
+        if (chat.get()) {
+            warning("No better elytra in the inventory (worn one at %.1f%%, threshold %d%%)", percent(worn), wornAt.get());
+            cooldown = restTicks.get();
+        }
+    }
 
-         if (this.chestplateHold && (Boolean)this.autoSwapBack.get()) {
-            if (!this.protectionActive && !this.chestplateHoldAttempted && !this.mc.player.isGliding()) {
-               ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-               if (chestItem.getItem().equals(Items.ELYTRA)) {
-                  this.chestplateHoldAttempted = true;
-                  int bestChestplate = this.findBestChestplate();
-                  if (bestChestplate != -1) {
-                     this.storedElytra = chestItem.copy();
-                     this.chestplateSlot = bestChestplate;
-                     this.needsChestplateSwap = true;
-                     this.chestplateSwapStage = 1;
-                     this.chestplateStageTimer = 0;
-                     this.chestplateSwapFailures = 0;
-                     this.protectionActive = true;
-                     this.protectionTimer = (Integer)this.hitProtectionDuration.get();
-                     if ((Boolean)this.notifySwap.get()) {
-                        this.info("Swapping to chestplate for protection!", new Object[0]);
-                     }
-                  }
-               }
+    private void wearOnBareChest() {
+        int slot = bestElytraAbove(wornAt.get());
+        if (slot == -1) return;
+        wearActive = true;
+        wearStage = 1;
+        wearTimer = 0;
+        wearSlot = slot;
+        if (chat.get()) {
+            info("Bare chest, putting on the elytra at %.1f%% from slot %d", percent(mc.player.getInventory().getStack(slot)), slot);
+        }
+    }
+
+    private void advanceWear() {
+        wearTimer++;
+        if (wearTimer < stepTicks.get()) return;
+
+        if (wearStage == 1) {
+            if (!isElytra(mc.player.getInventory().getStack(wearSlot))) {
+                if (chat.get()) warning("Elytra swap failed: the fresh elytra left slot %d", wearSlot);
+                resetAll();
+                return;
             }
+            InvUtils.move().from(wearSlot).toArmor(2);
+            wearStage = 2;
+            wearTimer = 0;
+            return;
+        }
 
-            if (this.protectionActive) {
-               this.protectionTimer = (Integer)this.hitProtectionDuration.get();
+        if (wearStage == 2) {
+            if (chat.get()) {
+                ItemStack now = chest();
+                if (isElytra(now) && percent(now) > wornAt.get()) {
+                    info("Now wearing an elytra at %.1f%%, the worn one is in slot %d", percent(now), wearSlot);
+                } else {
+                    warning("Elytra swap failed: the chest slot did not take the fresh elytra");
+                }
             }
-         }
+            resetWear();
+            cooldown = restTicks.get();
+        }
+    }
 
-         if (this.needsChestplateSwap) {
-            if (!this.inventoryPaused()) {
-               this.processChestplateSwap();
+    private void tickProtection() {
+        int hurt = mc.player.hurtTime;
+        boolean freshHit = hurt > 0 && hurt > lastHurt;
+        if (freshHit) lastHurt = hurt;
+
+        if (freshHit && (guarding || (mc.player.isOnGround() && !mc.player.isGliding()))) {
+            if (isElytra(chest()) && !guarding) {
+                putChestplateOn();
+            } else if (guarding) {
+                guardLeft = guardTicks.get();
             }
-         } else {
-            if (this.protectionActive && !this.needsChestplateSwap) {
-               this.protectionTimer--;
-               if (this.protectionTimer <= 0 && (Boolean)this.autoSwapBack.get() && !this.inventoryPaused()) {
-                  ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-                  if (!chestItem.getItem().equals(Items.ELYTRA) && !this.storedElytra.isEmpty()) {
-                     int elytraSlot = this.findStoredElytra();
-                     if (elytraSlot != -1) {
-                        this.noElytraWarned = false;
-                        this.chestplateSlot = elytraSlot;
-                        this.needsChestplateSwap = true;
-                        this.chestplateSwapStage = 1;
-                        this.chestplateStageTimer = 0;
-                        this.chestplateSwapFailures = 0;
-                        if ((Boolean)this.notifySwap.get()) {
-                           this.info("Protection period ended, swapping back to elytra.", new Object[0]);
-                        }
-                     } else if (!this.noElytraWarned) {
-                        this.noElytraWarned = true;
-                        this.warning("No elytra in the inventory to swap back to, waiting for one.", new Object[0]);
-                     }
-                  } else {
-                     this.protectionActive = false;
-                     this.storedElytra = ItemStack.EMPTY;
-                  }
-               }
+        }
+
+        if (hurt < lastHurt) lastHurt = hurt;
+
+        if (hold && restoreElytra.get()) {
+            if (!guarding && !holdTried && !mc.player.isGliding() && isElytra(chest())) {
+                holdTried = true;
+                putChestplateOn();
             }
-         }
-      }
-   }
+            if (guarding) guardLeft = guardTicks.get();
+        }
 
-   private void processChestplateSwap() {
-      this.chestplateStageTimer++;
-      if (this.chestplateStageTimer >= (Integer)this.stageDelay.get()) {
-         switch (this.chestplateSwapStage) {
-            case 1:
-               if (this.chestplateSlot >= 9) {
-                  int hotbarSlot = -1;
-                  int hotbarRank = 0;
+        if (chestActive) {
+            if (!menuPaused()) advanceChest();
+            return;
+        }
 
-                  for (int i = 0; i < 9; i++) {
-                     ItemStack stack = this.mc.player.getInventory().getStack(i);
-                     int rank = 0;
-                     if (stack.isEmpty()) {
-                        rank = 3;
-                     } else if (stack.getItem().equals(Items.OBSIDIAN)) {
-                        rank = 2;
-                     } else if (!this.isEssentialItem(stack)
-                           && !stack.isIn(ItemTags.SWORDS)
-                           && !stack.isIn(ItemTags.AXES)
-                           && !stack.getItem().equals(Items.MACE)
-                           && !stack.getItem().equals(Items.TRIDENT)
-                           && !stack.isIn(ItemTags.PICKAXES)
-                           && !stack.getItem().equals(Items.FIREWORK_ROCKET)) {
-                        rank = 1;
-                     }
+        if (guarding) {
+            guardLeft--;
+            if (guardLeft <= 0 && restoreElytra.get() && !menuPaused()) {
+                finishProtection();
+            }
+        }
+    }
 
-                     if (rank > hotbarRank) {
-                        hotbarRank = rank;
-                        hotbarSlot = i;
-                     }
-                  }
+    private void putChestplateOn() {
+        int slot = bestChestplate();
+        if (slot == -1) return;
+        parkedElytra = chest().copy();
+        startChestSwap(slot);
+        guarding = true;
+        guardLeft = guardTicks.get();
+        if (chat.get()) info("Hit, putting the chestplate on.");
+    }
 
-                  if (hotbarSlot == -1) {
-                     this.needsChestplateSwap = false;
-                     this.chestplateSwapStage = 0;
-                     this.chestplateSwapFailures++;
-                     if ((Boolean)this.notifySwap.get()) {
-                        this.warning("Chestplate swap failed - no hotbar slot to put it in (attempt %d)", this.chestplateSwapFailures);
-                     }
+    private void finishProtection() {
+        if (!isElytra(chest()) && !parkedElytra.isEmpty()) {
+            int slot = findReplacementElytra();
+            if (slot != -1) {
+                missingSaid = false;
+                startChestSwap(slot);
+                if (chat.get()) info("Protection over, putting the elytra back on.");
+            } else if (!missingSaid) {
+                missingSaid = true;
+                warning("No elytra in the inventory to put back on, waiting for one.");
+            }
+        } else {
+            guarding = false;
+            parkedElytra = ItemStack.EMPTY;
+        }
+    }
 
-                     if (this.chestplateSwapFailures >= 5) {
-                        this.protectionActive = false;
-                        this.storedElytra = ItemStack.EMPTY;
-                        this.chestplateSwapFailures = 0;
-                        if ((Boolean)this.notifySwap.get()) {
-                           this.warning("Giving up on the chestplate swap after %d failed attempts.", 5);
-                        }
-                     }
+    private int findReplacementElytra() {
+        int first = -1;
+        for (int i = 0; i <= INVENTORY_LAST; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!isElytra(stack)) continue;
+            if (Math.abs(stack.getDamage() - parkedElytra.getDamage()) <= ELYTRA_MATCH_DAMAGE) return i;
+            if (first == -1) first = i;
+        }
+        return first;
+    }
 
-                     return;
-                  }
+    private void startChestSwap(int slot) {
+        chestActive = true;
+        chestStage = 1;
+        chestTimer = 0;
+        chestFailures = 0;
+        chestSlot = slot;
+    }
 
-                  InvUtils.move().from(this.chestplateSlot).toHotbar(hotbarSlot);
-                  this.chestplateSlot = hotbarSlot;
-               }
+    private void advanceChest() {
+        chestTimer++;
+        if (chestTimer < stepTicks.get()) return;
 
-               this.chestplateSwapStage = 2;
-               this.chestplateStageTimer = 0;
-               break;
-            case 2:
-               ItemStack toEquip = this.mc.player.getInventory().getStack(this.chestplateSlot);
-               if (!this.isChestplateItem(toEquip)) {
-                  this.needsChestplateSwap = false;
-                  this.chestplateSwapStage = 0;
-                  this.chestplateSwapFailures++;
-                  if ((Boolean)this.notifySwap.get()) {
-                     this.warning("Chestplate swap failed - item not in hotbar slot (attempt %d)", this.chestplateSwapFailures);
-                  }
-                  // Whatever moved the item out from under this (another module's own hotbar
-                  // shuffling, a desync) leaves protectionActive stuck true forever with nothing
-                  // retrying it, unless something forces the issue -- handleCombatProtection
-                  // re-enters this same attempt every tick since protectionTimer is already at or
-                  // past zero, so a few failures in a row means retrying is not the fix. Giving up
-                  // and dropping protection is: the player keeps whatever is currently equipped
-                  // rather than being stuck mid-swap indefinitely.
-                  if (this.chestplateSwapFailures >= 5) {
-                     this.protectionActive = false;
-                     this.storedElytra = ItemStack.EMPTY;
-                     this.chestplateSwapFailures = 0;
-                     if ((Boolean)this.notifySwap.get()) {
-                        this.warning("Giving up on the chestplate swap after %d failed attempts.", 5);
-                     }
-                  }
-                  return;
-               }
+        if (chestStage == 1) {
+            if (chestSlot > HOTBAR_LAST) {
+                int hotbar = freeHotbarSlot();
+                if (hotbar == -1) {
+                    failChestSwap("Chestplate swap failed: no free hotbar slot (attempt %d)");
+                    return;
+                }
+                InvUtils.move().from(chestSlot).toHotbar(hotbar);
+                chestSlot = hotbar;
+            }
+            chestStage = 2;
+            chestTimer = 0;
+            return;
+        }
 
-               InvUtils.swap(this.chestplateSlot, true);
-               this.mc.interactionManager.interactItem(this.mc.player, Hand.MAIN_HAND);
-               this.mc.player.swingHand(Hand.MAIN_HAND);
-               InvUtils.swapBack();
-               this.chestplateSwapStage = 3;
-               this.chestplateStageTimer = 0;
-               break;
-            case 3:
-               this.needsChestplateSwap = false;
-               this.chestplateSwapStage = 0;
-               this.chestplateStageTimer = 0;
-               this.chestplateSwapFailures = 0;
-               this.chestplateSlot = -1;
-               ItemStack chestItem = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-               if (chestItem.getItem().equals(Items.ELYTRA)) {
-                  this.protectionActive = false;
-                  this.storedElytra = ItemStack.EMPTY;
-               }
-         }
-      }
-   }
+        if (chestStage == 2) {
+            if (!isWearable(mc.player.getInventory().getStack(chestSlot))) {
+                failChestSwap("Chestplate swap failed: the item left the hotbar slot (attempt %d)");
+                return;
+            }
+            InvUtils.swap(chestSlot, true);
+            mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+            mc.player.swingHand(Hand.MAIN_HAND);
+            InvUtils.swapBack();
+            chestStage = 3;
+            chestTimer = 0;
+            return;
+        }
 
-   private int findBestChestplate() {
-      int bestSlot = -1;
-      int bestValue = 0;
+        chestActive = false;
+        chestStage = 0;
+        chestTimer = 0;
+        chestFailures = 0;
+        chestSlot = -1;
+        if (isElytra(chest())) {
+            guarding = false;
+            parkedElytra = ItemStack.EMPTY;
+        }
+    }
 
-      for (int i = 0; i < 36; i++) {
-         ItemStack stack = this.mc.player.getInventory().getStack(i);
-         int value = this.getChestplateValue(stack);
-         if (value > bestValue) {
-            bestValue = value;
-            bestSlot = i;
-         }
-      }
+    private void failChestSwap(String message) {
+        chestActive = false;
+        chestStage = 0;
+        chestFailures++;
+        if (chat.get()) warning(message, chestFailures);
+        if (chestFailures >= MAX_FAILURES) {
+            guarding = false;
+            parkedElytra = ItemStack.EMPTY;
+            chestFailures = 0;
+            if (chat.get()) warning("Giving up on the chestplate swap after %d failed attempts.", MAX_FAILURES);
+        }
+    }
 
-      return bestSlot;
-   }
+    private int freeHotbarSlot() {
+        int best = -1;
+        int bestRank = 0;
+        for (int i = 0; i <= HOTBAR_LAST; i++) {
+            int rank = hotbarRank(mc.player.getInventory().getStack(i));
+            if (rank > bestRank) {
+                bestRank = rank;
+                best = i;
+            }
+        }
+        return best;
+    }
 
-   private int getChestplateValue(ItemStack stack) {
-      if (stack.isEmpty()) {
-         return 0;
-      } else if (stack.getItem().equals(Items.NETHERITE_CHESTPLATE)) {
-         return this.prioritizeNetherite.get() ? 1000 + (stack.getMaxDamage() - stack.getDamage()) : 400 + (stack.getMaxDamage() - stack.getDamage());
-      } else if (stack.getItem().equals(Items.DIAMOND_CHESTPLATE)) {
-         return 300 + (stack.getMaxDamage() - stack.getDamage());
-      } else if (stack.getItem().equals(Items.IRON_CHESTPLATE)) {
-         return 200 + (stack.getMaxDamage() - stack.getDamage());
-      } else if (stack.getItem().equals(Items.GOLDEN_CHESTPLATE)) {
-         return 100 + (stack.getMaxDamage() - stack.getDamage());
-      } else if (stack.getItem().equals(Items.CHAINMAIL_CHESTPLATE)) {
-         return 150 + (stack.getMaxDamage() - stack.getDamage());
-      } else {
-         return stack.getItem().equals(Items.LEATHER_CHESTPLATE) ? 50 + (stack.getMaxDamage() - stack.getDamage()) : 0;
-      }
-   }
-
-   private boolean isChestplateItem(ItemStack stack) {
-      return stack.isEmpty()
-         ? false
-         : stack.getItem().equals(Items.ELYTRA)
-            || stack.getItem().equals(Items.NETHERITE_CHESTPLATE)
-            || stack.getItem().equals(Items.DIAMOND_CHESTPLATE)
-            || stack.getItem().equals(Items.IRON_CHESTPLATE)
-            || stack.getItem().equals(Items.GOLDEN_CHESTPLATE)
-            || stack.getItem().equals(Items.CHAINMAIL_CHESTPLATE)
-            || stack.getItem().equals(Items.LEATHER_CHESTPLATE);
-   }
-
-   private boolean isElytra(ItemStack stack) {
-      return !stack.isEmpty() && stack.getItem().equals(Items.ELYTRA);
-   }
-
-   private double getDurabilityPercent(ItemStack stack) {
-      if (stack.isEmpty() || !stack.isDamageable()) {
-         return 100.0;
-      }
-
-      int maxDamage = stack.getMaxDamage();
-      if (maxDamage <= 0) {
-         return 100.0;
-      }
-
-      return (double)(maxDamage - stack.getDamage()) / maxDamage * 100.0;
-   }
-
-   private int findStoredElytra() {
-      for (int i = 0; i < 36; i++) {
-         ItemStack stack = this.mc.player.getInventory().getStack(i);
-         if (stack.getItem().equals(Items.ELYTRA) && Math.abs(stack.getDamage() - this.storedElytra.getDamage()) <= 5) {
-            return i;
-         }
-      }
-
-      for (int i = 0; i < 36; i++) {
-         ItemStack stack = this.mc.player.getInventory().getStack(i);
-         if (stack.getItem().equals(Items.ELYTRA)) {
-            return i;
-         }
-      }
-
-      return -1;
-   }
+    private static int hotbarRank(ItemStack stack) {
+        if (stack.isEmpty()) return 3;
+        if (stack.getItem() == Items.OBSIDIAN) return 2;
+        boolean protectedItem = isEssential(stack)
+            || stack.isIn(ItemTags.SWORDS)
+            || stack.isIn(ItemTags.AXES)
+            || stack.getItem() == Items.MACE
+            || stack.getItem() == Items.TRIDENT
+            || stack.isIn(ItemTags.PICKAXES)
+            || stack.getItem() == Items.FIREWORK_ROCKET;
+        return protectedItem ? 0 : 1;
+    }
 }

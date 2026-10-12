@@ -6,6 +6,10 @@
   "authors": [
     "Texy&Dragonfood"
   ],
+  "license": "GPL-3.0-only",
+  "contact": {
+    "sources": "https://github.com/Likon69/HunterBuddy"
+  },
   "accessWidener": "hunterbuddy.accessWidener",
   "icon": "assets/hunterbuddy/icon.png",
   "environment": "client",

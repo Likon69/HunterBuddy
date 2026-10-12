@@ -1,6 +1,6 @@
 package com.hunterbuddy.modules.sorter;
 
-import com.hunterbuddy.modules.regear.util.ShulkerDataParser;
+import com.hunterbuddy.util.ShulkerContents;
 import com.hunterbuddy.modules.sorter.logic.CategoryRules;
 import com.hunterbuddy.modules.sorter.logic.ShulkerClassifier;
 import java.util.ArrayList;
@@ -18,7 +18,7 @@ public final class SorterShulkers {
 
     public static ShulkerClassifier.Result classify(ItemStack stack, CategoryRules rules, double purity) {
         List<ShulkerClassifier.Slot> slots = new ArrayList<>();
-        for (ItemStack inner : ShulkerDataParser.parseShulkerContentsAsList(stack)) {
+        for (ItemStack inner : ShulkerContents.stacks(stack)) {
             slots.add(new ShulkerClassifier.Slot(itemId(inner), inner.getCount()));
         }
         return ShulkerClassifier.classify(slots, rules, purity);

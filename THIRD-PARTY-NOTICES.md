@@ -1,6 +1,6 @@
 # Third-party notices
 
-Parts of HunterBuddy are derived from mlep by globalelitehooper and are used under the MIT License below. Those parts stay under this license; the CC0 dedication in `LICENSE` covers the rest of the project.
+Parts of HunterBuddy are derived from mlep by globalelitehooper and are used under the MIT License below. Those parts stay under this license; the rest of the project is licensed under the GNU General Public License v3.0, see `LICENSE`.
 
 ```
 MIT License
@@ -25,3 +25,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Stardust
+
+The firework hooks of `rocket-boost` (stronger push, rocket kept alive) are ported from `RocketMan` in [Stardust](https://github.com/0xTas/stardust) by 0xTas, licensed under the GNU General Public License v3.0, the same license as this project.
