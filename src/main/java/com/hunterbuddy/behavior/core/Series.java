@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.core;
 import java.util.Objects;
 
 public final class Series {
+    private static final double MIN_RECORD_GAIN = 0.1;
     private Sensors snapshot;
     private long sampledTick = -1;
     private long positionTick = -1;
@@ -47,7 +48,7 @@ public final class Series {
             stillZ = sensors.z();
         }
         if (Double.isNaN(highestY)) highestY = sensors.y();
-        else if (sensors.y() > highestY) {
+        else if (sensors.y() >= highestY + MIN_RECORD_GAIN) {
             highestY = sensors.y();
             yImprovedAt = tick;
         }
@@ -70,7 +71,7 @@ public final class Series {
         if (positionTick != sampledTick || distanceTick == sampledTick) return;
         distanceTick = sampledTick;
         if (Double.isNaN(shortestDistance)) shortestDistance = value;
-        else if (value < shortestDistance) {
+        else if (value <= shortestDistance - MIN_RECORD_GAIN) {
             shortestDistance = value;
             distanceImprovedAt = sampledTick;
         }
