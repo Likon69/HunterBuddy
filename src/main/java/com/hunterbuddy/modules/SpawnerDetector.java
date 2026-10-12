@@ -829,6 +829,23 @@ public class SpawnerDetector extends Module {
     private String autoBreachLabel;
     private BlockPos autoShipwreckWalkStart;
     private boolean autoShipwreckWalkRisen;
+    private boolean autoShipwreckRiseFromHole;
+    private double autoShipwreckRiseBestY;
+    private int autoShipwreckRiseBestTick;
+    private double autoShipwreckSideBestGap;
+    private int autoShipwreckSideBestTick;
+    private BlockPos autoShipwreckSideSpot;
+    private boolean autoShipwreckSideTried;
+    private int autoShipwreckSideStartTick;
+    private List<BlockPos> autoShipwreckPath;
+    private int autoShipwreckPathIndex;
+    private int autoShipwreckPathProgressTick;
+    private int autoShipwreckPathReplans;
+    private boolean autoShipwreckPathOff;
+    private int autoShipwreckPathRetryTick;
+    private double autoShipwreckWalkBestGap;
+    private double autoShipwreckWalkBestReach;
+    private int autoShipwreckWalkProgressTick;
 
     private int autoShaftFlyAttempts;
     private boolean autoShaftFlyReroute;
@@ -4679,8 +4696,233 @@ public class SpawnerDetector extends Module {
         autoAscendFromAbort = false;
         autoWalkReapproach = false;
         logShipwreckChest(target);
+        autoShipwreckRiseFromHole = mc.player.isSubmergedInWater();
         enterState(AutoState.WALK, details);
         return true;
+    }
+
+    private boolean shipwreckChestInReach() {
+        return isContainerPresent(autoSite.center)
+            && mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(autoSite.center)) <= 4.2 * 4.2;
+    }
+
+    private BlockPos findShipwreckSideSpot() {
+        BlockPos chest = autoSite.center;
+        Vec3d chestCenter = Vec3d.ofCenter(chest);
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int dx = -4; dx <= 4; dx++) {
+            for (int dz = -4; dz <= 4; dz++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    BlockPos p = chest.add(dx, dy, dz);
+                    if (Vec3d.ofCenter(p).distanceTo(chestCenter) > 3.8) continue;
+                    BlockState state = mc.world.getBlockState(p);
+                    if (!state.getFluidState().isIn(FluidTags.WATER) || !isShipwreckPassable(state, p)) continue;
+                    boolean clear = false;
+                    int topY = mc.world.getBottomY() + mc.world.getHeight() - 1;
+                    for (int y = p.getY() + 1; y <= topY; y++) {
+                        cursor.set(p.getX(), y, p.getZ());
+                        BlockState above = mc.world.getBlockState(cursor);
+                        if (above.getFluidState().isIn(FluidTags.WATER)) {
+                            if (!isShipwreckPassable(above, cursor)) break;
+                            continue;
+                        }
+                        clear = above.isAir();
+                        break;
+                    }
+                    if (!clear) continue;
+                    double dist = Math.hypot(p.getX() + 0.5 - mc.player.getX(), p.getZ() + 0.5 - mc.player.getZ());
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = p.toImmutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean shipwreckPassableAt(int[] box, int x, int y, int z) {
+        if (x < box[0] || x > box[3] || y < box[1] || y > box[4] || z < box[2] || z > box[5]) return false;
+        BlockPos pos = new BlockPos(x, y, z);
+        return isShipwreckPassable(mc.world.getBlockState(pos), pos);
+    }
+
+    private byte shipwreckCellType(Map<Long, Byte> cache, int[] box, int x, int y, int z) {
+        long key = BlockPos.asLong(x, y, z);
+        Byte cached = cache.get(key);
+        if (cached != null) return cached;
+        byte type = 0;
+        if (shipwreckPassableAt(box, x, y, z) && shipwreckPassableAt(box, x, y + 1, z)) {
+            if (mc.world.getBlockState(new BlockPos(x, y, z)).getFluidState().isIn(FluidTags.WATER)) {
+                type = 1;
+            } else if (y - 1 >= box[1]) {
+                BlockPos below = new BlockPos(x, y - 1, z);
+                BlockState belowState = mc.world.getBlockState(below);
+                if (!isShipwreckPassable(belowState, below) && !belowState.getFluidState().isIn(FluidTags.WATER)
+                    && !belowState.getFluidState().isIn(FluidTags.LAVA) && belowState.getBlock() != Blocks.MAGMA_BLOCK) type = 2;
+            }
+        }
+        cache.put(key, type);
+        return type;
+    }
+
+    private List<BlockPos> findShipwreckPath(boolean toEntry, int x, int z) {
+        ShipwreckSite.Bounds b = autoSite.shipwreck.bounds();
+        BlockPos me = mc.player.getBlockPos();
+        int[] box = {
+            Math.min(b.minX() - 4, me.getX() - 2), Math.min(b.minY() - 2, me.getY() - 2), Math.min(b.minZ() - 4, me.getZ() - 2),
+            Math.max(b.maxX() + 4, me.getX() + 2), Math.max(b.maxY() + 3, me.getY() + 2), Math.max(b.maxZ() + 4, me.getZ() + 2)
+        };
+        if (box[3] - box[0] + 1 > 64 || box[4] - box[1] + 1 > 64 || box[5] - box[2] + 1 > 64) return null;
+        Map<Long, Byte> cache = new HashMap<>();
+        BlockPos start = null;
+        for (BlockPos candidate : new BlockPos[] {me, me.up(), me.down()}) {
+            if (shipwreckCellType(cache, box, candidate.getX(), candidate.getY(), candidate.getZ()) != 0) {
+                start = candidate;
+                break;
+            }
+        }
+        if (start == null) return null;
+        Vec3d chestCenter = Vec3d.ofCenter(autoSite.center);
+        int chestY = autoSite.center.getY();
+        Map<Long, Double> best = new HashMap<>();
+        Map<Long, Long> parent = new HashMap<>();
+        Set<Long> closed = new HashSet<>();
+        java.util.PriorityQueue<Map.Entry<Long, Double>> queue = new java.util.PriorityQueue<>(Map.Entry.comparingByValue());
+        long startKey = start.asLong();
+        best.put(startKey, 0.0);
+        queue.add(new java.util.AbstractMap.SimpleEntry<>(startKey, 0.0));
+        int expanded = 0;
+        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+        while (!queue.isEmpty()) {
+            Map.Entry<Long, Double> entry = queue.poll();
+            long key = entry.getKey();
+            if (!closed.add(key)) continue;
+            if (++expanded > 30000) return null;
+            double cost = entry.getValue();
+            BlockPos a = BlockPos.fromLong(key);
+            int ax = a.getX(), ay = a.getY(), az = a.getZ();
+            boolean goal;
+            if (toEntry) {
+                goal = ax == x && az == z;
+            } else {
+                goal = (ax == x && az == z && ay > chestY)
+                    || new Vec3d(ax + 0.5, ay + 1.62, az + 0.5).distanceTo(chestCenter) <= 3.6;
+            }
+            if (goal) {
+                List<BlockPos> path = new ArrayList<>();
+                Long cursor = key;
+                while (cursor != null) {
+                    path.add(BlockPos.fromLong(cursor));
+                    cursor = parent.get(cursor);
+                }
+                Collections.reverse(path);
+                return path;
+            }
+            byte ta = shipwreckCellType(cache, box, ax, ay, az);
+            for (int[] d : dirs) {
+                int dx = d[0], dz = d[1];
+                boolean diagonal = dx != 0 && dz != 0;
+                int bx = ax + dx, bz = az + dz;
+                byte tb = shipwreckCellType(cache, box, bx, ay, bz);
+                if (tb != 0) {
+                    boolean open = !diagonal
+                        || (shipwreckPassableAt(box, ax + dx, ay, az) && shipwreckPassableAt(box, ax + dx, ay + 1, az)
+                        && shipwreckPassableAt(box, ax, ay, az + dz) && shipwreckPassableAt(box, ax, ay + 1, az + dz));
+                    if (open) {
+                        boolean swim = ta == 1 || tb == 1;
+                        double step = swim ? (diagonal ? 2.26 : 1.6) : (diagonal ? 1.41 : 1.0);
+                        shipwreckRelax(best, parent, queue, key, BlockPos.asLong(bx, ay, bz), cost + step);
+                    }
+                }
+                if (diagonal) continue;
+                if (shipwreckCellType(cache, box, bx, ay + 1, bz) == 2 && shipwreckPassableAt(box, ax, ay + 2, az)
+                    && (ta == 2 || (ta == 1 && !mc.world.getBlockState(new BlockPos(ax, ay + 1, az)).getFluidState().isIn(FluidTags.WATER)))) {
+                    shipwreckRelax(best, parent, queue, key, BlockPos.asLong(bx, ay + 1, bz), cost + (ta == 1 ? 1.6 : 1.0) + 1.0);
+                }
+                if (tb == 0 && shipwreckPassableAt(box, bx, ay, bz) && shipwreckPassableAt(box, bx, ay + 1, bz)
+                    && !mc.world.getBlockState(new BlockPos(bx, ay, bz)).getFluidState().isIn(FluidTags.WATER)) {
+                    for (int k = 1; k <= 20; k++) {
+                        int fy = ay - k;
+                        if (!shipwreckPassableAt(box, bx, fy, bz)) break;
+                        byte tf = shipwreckCellType(cache, box, bx, fy, bz);
+                        if (tf == 0) continue;
+                        if (tf == 1 || k <= 3) {
+                            shipwreckRelax(best, parent, queue, key, BlockPos.asLong(bx, fy, bz), cost + (tf == 1 ? 1.6 : 1.0) + 0.5);
+                        }
+                        break;
+                    }
+                }
+            }
+            if (ta == 1) {
+                if (shipwreckCellType(cache, box, ax, ay + 1, az) == 1) shipwreckRelax(best, parent, queue, key, BlockPos.asLong(ax, ay + 1, az), cost + 1.6);
+                if (shipwreckCellType(cache, box, ax, ay - 1, az) == 1) shipwreckRelax(best, parent, queue, key, BlockPos.asLong(ax, ay - 1, az), cost + 1.6);
+            }
+        }
+        return null;
+    }
+
+    private void shipwreckRelax(Map<Long, Double> best, Map<Long, Long> parent,
+                                java.util.PriorityQueue<Map.Entry<Long, Double>> queue, long from, long to, double cost) {
+        Double known = best.get(to);
+        if (known != null && known <= cost) return;
+        best.put(to, cost);
+        parent.put(to, from);
+        queue.add(new java.util.AbstractMap.SimpleEntry<>(to, cost));
+    }
+
+    private boolean followShipwreckPath() {
+        List<BlockPos> path = autoShipwreckPath;
+        int last = path.size() - 1;
+        for (int i = Math.min(autoShipwreckPathIndex + 4, last); i > autoShipwreckPathIndex; i--) {
+            BlockPos w = path.get(i);
+            if (mc.player.getBlockX() == w.getX() && mc.player.getBlockZ() == w.getZ() && Math.abs(mc.player.getY() - w.getY()) < 0.6) {
+                autoShipwreckPathIndex = i;
+                autoShipwreckPathProgressTick = stateTicks;
+                break;
+            }
+        }
+        if (stateTicks - autoShipwreckPathProgressTick >= 40) {
+            autoLog("WALK", autoSite.center, "shipwreck path stalled, replanning");
+            autoShipwreckPath = null;
+            autoShipwreckPathReplans++;
+            return false;
+        }
+        BlockPos t = path.get(Math.min(autoShipwreckPathIndex + 1, last));
+        boolean touching = mc.player.isTouchingWater();
+        releaseAllAutoKeys();
+        recenterDig(t.getX(), t.getZ(), 0.12);
+        mc.player.setPitch(0.0f);
+        Utils.setPressed(mc.options.sprintKey, false);
+        Utils.setPressed(mc.options.jumpKey, t.getY() > mc.player.getY() + 0.3
+            || (!touching && mc.player.isOnGround() && mc.player.horizontalCollision));
+        Utils.setPressed(mc.options.sneakKey, touching
+            && mc.world.getBlockState(t).getFluidState().isIn(FluidTags.WATER) && t.getY() < mc.player.getY() - 0.3);
+        return true;
+    }
+
+    private boolean shipwreckPathStep(boolean returningToEntry, int x, int z) {
+        if (!autoShipwreckPathOff && autoShipwreckPathReplans >= 3) {
+            autoShipwreckPathOff = true;
+            autoShipwreckPath = null;
+            autoLog("WALK", autoSite.center, "shipwreck path given up, straight swim");
+        }
+        if (autoShipwreckPathOff) return false;
+        if (autoShipwreckPath == null && stateTicks >= autoShipwreckPathRetryTick) {
+            List<BlockPos> found = findShipwreckPath(returningToEntry, x, z);
+            if (found == null) {
+                autoShipwreckPathRetryTick = stateTicks + 40;
+                return false;
+            }
+            autoShipwreckPath = found;
+            autoShipwreckPathIndex = 0;
+            autoShipwreckPathProgressTick = stateTicks;
+            autoLog("WALK", autoSite.center, "shipwreck path nodes=" + found.size());
+        }
+        if (autoShipwreckPath != null) return followShipwreckPath();
+        return false;
     }
 
     private void tickShipwreckWalk() {
@@ -4688,7 +4930,21 @@ public class SpawnerDetector extends Module {
         if (stateTicks == 1) {
             resetBreach();
             autoShipwreckWalkStart = mc.player.getBlockPos();
-            autoShipwreckWalkRisen = false;
+            autoShipwreckWalkRisen = !autoShipwreckRiseFromHole;
+            autoShipwreckRiseFromHole = false;
+            autoShipwreckRiseBestY = mc.player.getY();
+            autoShipwreckRiseBestTick = 1;
+            autoShipwreckSideBestTick = 1;
+            autoShipwreckSideSpot = null;
+            autoShipwreckSideTried = false;
+            autoShipwreckSideStartTick = 0;
+            autoShipwreckPath = null;
+            autoShipwreckPathIndex = 0;
+            autoShipwreckPathProgressTick = 0;
+            autoShipwreckPathReplans = 0;
+            autoShipwreckPathOff = false;
+            autoShipwreckPathRetryTick = 0;
+            autoShipwreckWalkProgressTick = 1;
         }
         saveShipwreckSettings();
         if (mc.player.isInLava()) { abort("lava"); return; }
@@ -4696,11 +4952,35 @@ public class SpawnerDetector extends Module {
         int x = returningToEntry ? autoShipwreckEntryColumn.getX() : autoColumn.x();
         int z = returningToEntry ? autoShipwreckEntryColumn.getZ() : autoColumn.z();
         double gap = Math.hypot(x + 0.5 - mc.player.getX(), z + 0.5 - mc.player.getZ());
+        if (stateTicks == 1) autoShipwreckSideBestGap = gap;
+        double walkReach = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(autoSite.center));
+        if (stateTicks == 1) {
+            autoShipwreckWalkBestGap = gap;
+            autoShipwreckWalkBestReach = walkReach;
+        }
+        boolean walkProgress = gap < autoShipwreckWalkBestGap - 0.3
+            || (!returningToEntry && walkReach < autoShipwreckWalkBestReach - 0.3)
+            || (!autoShipwreckWalkRisen && mc.player.getY() > autoShipwreckRiseBestY + 0.1)
+            || (autoShipwreckPath != null && autoShipwreckPathProgressTick >= stateTicks - 1);
+        if (walkProgress) {
+            autoShipwreckWalkBestGap = Math.min(autoShipwreckWalkBestGap, gap);
+            autoShipwreckWalkBestReach = Math.min(autoShipwreckWalkBestReach, walkReach);
+            autoShipwreckWalkProgressTick = stateTicks;
+        }
+        if (stateTicks - autoShipwreckWalkProgressTick > 200) { abort("walk no progress"); return; }
         int goalY = mc.player.isTouchingWater() ? autoSite.shipwreck.bounds().maxY() + 1 : autoColumn.exitY();
         BlockPos goal = new BlockPos(x, goalY, z);
         IBaritone bt = primaryBaritone();
-        if (stateTicks % 40 == 0) logNavTelemetry(String.format("WALK shipwreck gap=%.2f water=%s calculating=%s", gap,
-            mc.player.isTouchingWater(), bt != null && bt.getPathingBehavior().getInProgress().isPresent()), goal, 0);
+        if (stateTicks % 40 == 0) logNavTelemetry(String.format("WALK shipwreck gap=%.2f water=%s calculating=%s path=%d/%d", gap,
+            mc.player.isTouchingWater(), bt != null && bt.getPathingBehavior().getInProgress().isPresent(),
+            autoShipwreckPath == null ? 0 : autoShipwreckPathIndex, autoShipwreckPath == null ? 0 : autoShipwreckPath.size()), goal, 0);
+        if (!returningToEntry && shipwreckChestInReach()) {
+            releaseAllAutoKeys();
+            BaritoneHelper.stopAllPathing();
+            shipwreckExitColumn(true);
+            enterState(AutoState.ROOM, "shipwreck chest in reach");
+            return;
+        }
         if (gap <= 0.15) {
             releaseAllAutoKeys();
             BaritoneHelper.stopAllPathing();
@@ -4716,8 +4996,16 @@ public class SpawnerDetector extends Module {
         if (mc.player.isTouchingWater()) {
             if (bt != null && (bt.getPathingBehavior().isPathing() || bt.getPathingBehavior().getInProgress().isPresent())) BaritoneHelper.stopAllPathing();
             releaseAllAutoKeys();
+            if (shipwreckPathStep(returningToEntry, x, z)) {
+                autoShipwreckWalkRisen = true;
+                return;
+            }
             double y = mc.player.getY();
-            if (y >= goalY - 0.5) autoShipwreckWalkRisen = true;
+            if (y > autoShipwreckRiseBestY + 0.1) {
+                autoShipwreckRiseBestY = y;
+                autoShipwreckRiseBestTick = stateTicks;
+            }
+            if (y >= goalY - 0.5 || !mc.player.isSubmergedInWater() || stateTicks - autoShipwreckRiseBestTick >= 20) autoShipwreckWalkRisen = true;
             boolean rising = !autoShipwreckWalkRisen;
             BlockPos start = autoShipwreckWalkStart != null ? autoShipwreckWalkStart : mc.player.getBlockPos();
             if (rising) {
@@ -4725,14 +5013,56 @@ public class SpawnerDetector extends Module {
                 mc.player.setPitch(0.0f);
                 Utils.setPressed(mc.options.jumpKey, true);
                 Utils.setPressed(mc.options.sprintKey, false);
+                autoShipwreckSideBestGap = gap;
+                autoShipwreckSideBestTick = stateTicks;
                 return;
+            }
+            if (!returningToEntry) {
+                if (gap < autoShipwreckSideBestGap - 0.3) {
+                    autoShipwreckSideBestGap = gap;
+                    autoShipwreckSideBestTick = stateTicks;
+                }
+                if (autoShipwreckSideSpot == null && !autoShipwreckSideTried && stateTicks - autoShipwreckSideBestTick >= 40) {
+                    autoShipwreckSideTried = true;
+                    BlockPos spot = findShipwreckSideSpot();
+                    if (spot != null) {
+                        autoShipwreckSideSpot = spot;
+                        autoShipwreckSideStartTick = stateTicks;
+                        autoLog("WALK", spot, "shipwreck side approach");
+                    }
+                }
+                if (autoShipwreckSideSpot != null && stateTicks - autoShipwreckSideStartTick > 200) {
+                    autoLog("WALK", autoShipwreckSideSpot, "shipwreck side approach gave up");
+                    autoShipwreckSideSpot = null;
+                }
+                if (autoShipwreckSideSpot != null) {
+                    BlockPos spot = autoShipwreckSideSpot;
+                    recenterDig(spot.getX(), spot.getZ(), 0.12);
+                    mc.player.setPitch(0.0f);
+                    Utils.setPressed(mc.options.sprintKey, false);
+                    double spotGap = Math.hypot(spot.getX() + 0.5 - mc.player.getX(), spot.getZ() + 0.5 - mc.player.getZ());
+                    if (spotGap < 0.3) {
+                        Utils.setPressed(mc.options.jumpKey, false);
+                        Utils.setPressed(mc.options.sneakKey, y > spot.getY() + 0.2);
+                    } else {
+                        Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision);
+                        Utils.setPressed(mc.options.sneakKey, false);
+                    }
+                    return;
+                }
             }
             recenterDig(x, z, 0.12);
             mc.player.setPitch(0.0f);
             Utils.setPressed(mc.options.jumpKey, y < goalY - 0.15 || mc.player.horizontalCollision);
             Utils.setPressed(mc.options.sneakKey, y > goalY + 0.6);
-            Utils.setPressed(mc.options.sprintKey, gap > 2 && y >= goalY - 0.5);
+            Utils.setPressed(mc.options.sprintKey, gap > 2 && (y >= goalY - 0.5 || !mc.player.isSubmergedInWater()));
         } else {
+            boolean overWater = mc.world.getBlockState(new BlockPos(x, goalY - 1, z)).getFluidState().isIn(FluidTags.WATER);
+            if ((autoShipwreckPath != null || overWater) && shipwreckPathStep(returningToEntry, x, z)) {
+                if (bt != null && (bt.getPathingBehavior().isPathing() || bt.getPathingBehavior().getInProgress().isPresent())) BaritoneHelper.stopAllPathing();
+                resetBreach();
+                return;
+            }
             boolean breaching = autoBreachPos != null;
             tickBreach("WALK", goal);
             if (autoBreachPos != null) return;
@@ -4767,6 +5097,13 @@ public class SpawnerDetector extends Module {
         if (!mc.world.getBlockState(autoSite.center).isOf(Blocks.CHEST)) { abort("chest absent"); return; }
         if (handleAutoPause(true)) return;
         if (otherPlayerPresent()) { abort("player appeared"); return; }
+        if (shipwreckChestInReach()) {
+            releaseAllAutoKeys();
+            mc.interactionManager.cancelBlockBreaking();
+            shipwreckExitColumn(false);
+            enterState(AutoState.ROOM, "shipwreck chest in reach");
+            return;
+        }
         long now = System.currentTimeMillis();
         int mined = com.hunterbuddy.util.SessionStats.get().blocksMined();
         if (mc.player.getY() <= autoShipwreckDigProgressY - 0.5 || mined > autoShipwreckDigProgressMined
