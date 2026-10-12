@@ -17,7 +17,7 @@ public final class Retry extends Decorator {
     private Set<FailureCode> codes = EnumSet.complementOf(EnumSet.of(
         FailureCode.BUDGET, FailureCode.LOOP, FailureCode.PREEMPTED, FailureCode.FAULT));
     private int failures;
-    private int waiting;
+    private long waiting;
     private boolean resume;
 
     public Retry(int attempts, int backoffTicks, Node child) {
@@ -53,7 +53,7 @@ public final class Retry extends Decorator {
         failures++;
         if (!codes.contains(failure.code()) || failures >= attempts) return failure;
         child().resetMemory();
-        waiting = backoffTicks;
+        waiting = (long) backoffTicks * failures;
         return new Running("retry attempt=" + (failures + 1) + "/" + attempts);
     }
 

@@ -160,6 +160,9 @@ public final class CatalogChecks {
         retry.halt(sim.ctx(), ExitReason.PAUSED);
         sim.tick(retry);
         sim.tick(retry);
+        require(action.starts() == 2, "Retry increases backoff after second failed attempt");
+        sim.tick(retry);
+        sim.tick(retry);
         require(sim.tick(retry) instanceof Success && action.starts() == 3 && action.cleanups() == 3,
             "Retry preserves attempts across pause and cleans each attempt");
 
