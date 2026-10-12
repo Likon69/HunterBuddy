@@ -40,6 +40,9 @@ public final class WithLease extends Decorator {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
+        if (resources().contains(Resource.MOVEMENT) && !ctx.sensors().baritoneAvailable()) {
+            return fail(FailureCode.UNSUPPORTED, "Baritone is required for MOVEMENT");
+        }
         if (lease == null) {
             lease = ctx.leases().request(ctx.owner(), resources).orElse(null);
             if (lease == null) {

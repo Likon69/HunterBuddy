@@ -30,7 +30,7 @@ import java.util.Set;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 
 public final class LabBot implements Bot {
-    private static final BotConfig CONFIG = new BotConfig(false, DeathPolicy.STOP, false, ProgressPolicy.DEFAULT, 1_200);
+    static final BotConfig CONFIG = new BotConfig(false, DeathPolicy.STOP, false, ProgressPolicy.DEFAULT, 1_200);
     private final LabSettings settings;
     private final LabScenario scenario;
     private BotContext context;

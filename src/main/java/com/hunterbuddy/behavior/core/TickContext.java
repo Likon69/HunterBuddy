@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.core;
 import com.hunterbuddy.behavior.bot.BotStats;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.resource.Leases;
+import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.Trace;
 import com.hunterbuddy.behavior.trace.TraceEvent;
@@ -16,6 +17,7 @@ public final class TickContext {
     private final Clock clock;
     private final Blackboard blackboard;
     private final Leases leases;
+    private final Outputs outputs;
     private final Trace trace;
     private final ProgressMonitor monitor;
     private final UtilityFailures utilityFailures;
@@ -36,13 +38,18 @@ public final class TickContext {
         this.clock = Objects.requireNonNull(clock);
         this.blackboard = Objects.requireNonNull(blackboard);
         this.leases = Objects.requireNonNull(leases);
+        outputs = new Outputs(leases, this::owner);
         this.trace = Objects.requireNonNull(trace);
         monitor = new ProgressMonitor(Objects.requireNonNull(policy));
         utilityFailures = new UtilityFailures(blackboard);
     }
 
     public void begin(Sensors sensors) {
-        this.sensors = Objects.requireNonNull(sensors);
+        Objects.requireNonNull(sensors);
+        if (this.sensors != null && (!this.sensors.dimensionKey().equals(sensors.dimensionKey())
+            || this.sensors.worldId() != sensors.worldId() || this.sensors.playerId() != sensors.playerId())) monitor.resetSamples();
+        this.sensors = sensors;
+        outputs.begin(tick());
         current = null;
         executedHook = null;
         monitor.observeSetbacks(tick(), sensors.setbacks());
@@ -112,7 +119,8 @@ public final class TickContext {
         if (pluginAccess()) throw new IllegalStateException("Plugins cannot report progress evidence");
         if (current == null) throw new IllegalStateException("progress outside node execution");
         boolean accepted = monitor.accept(tick(), evidence);
-        event(current, Kind.PROGRESS, null, evidence.reason(), "kind=" + evidence.kind() + " accepted=" + accepted);
+        event(current, Kind.PROGRESS, null, evidence.reason(), "kind=" + evidence.kind() + " accepted=" + accepted
+            + (!monitor.samplesValid(tick()) ? " rejected=setback" : ""));
         if (accepted) {
             transitions.progress();
             evidenceSequence++;
@@ -152,6 +160,11 @@ public final class TickContext {
         return leases;
     }
 
+    public Outputs outputs() {
+        if (pluginAccess()) throw new IllegalStateException("Plugins cannot access outputs");
+        return outputs;
+    }
+
     public <T> T plugin(String owner, Supplier<T> work) {
         Objects.requireNonNull(work);
         if (owner == null || !owner.startsWith("plugin:") || owner.substring(7).isBlank()) {
@@ -180,6 +193,7 @@ public final class TickContext {
 
     public void goalDistance(String target, double distance) {
         if (pluginAccess()) throw new IllegalStateException("Plugins cannot report goal distance");
+        series.sample(tick(), sensors(), monitor.samplesValid(tick()));
         series.distance(target, distance);
     }
 

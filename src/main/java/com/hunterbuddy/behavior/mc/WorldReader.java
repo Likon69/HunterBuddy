@@ -1,0 +1,108 @@
+package com.hunterbuddy.behavior.mc;
+
+import com.hunterbuddy.behavior.core.TargetPoint;
+import com.hunterbuddy.behavior.resource.Resource;
+import com.hunterbuddy.modules.AutoEatSync;
+import com.hunterbuddy.modules.AutoFlyingRegear;
+import com.hunterbuddy.modules.AutoPortal;
+import com.hunterbuddy.modules.ElytraBounce;
+import com.hunterbuddy.modules.ElytraRecast;
+import com.hunterbuddy.modules.HMine;
+import com.hunterbuddy.modules.KillAuraPlus;
+import com.hunterbuddy.modules.MlepAirPlace;
+import com.hunterbuddy.modules.MlepScaffold;
+import com.hunterbuddy.modules.Pitch40;
+import com.hunterbuddy.modules.Pitch40Classic;
+import com.hunterbuddy.modules.RocketFly;
+import com.hunterbuddy.modules.SpawnerDetector;
+import com.hunterbuddy.modules.TrailFollower;
+import com.hunterbuddy.modules.WaypointFollower;
+import com.hunterbuddy.modules.logistics.PearlButler;
+import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
+import com.hunterbuddy.modules.sorter.ShulkerSorter;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderModule;
+import com.hunterbuddy.modules.tradingsystem.ExperienceTraderStarterModule;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Predicate;
+import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.math.Vec3d;
+
+public final class WorldReader {
+    private static final Set<Class<? extends Module>> REFUSED = Set.of(SpawnerDetector.class, WaypointFollower.class,
+        TrailFollower.class, AreaLoader.class, RocketFly.class, Pitch40.class, Pitch40Classic.class, ElytraRecast.class,
+        ElytraBounce.class, AutoPortal.class, MlepScaffold.class, MlepAirPlace.class, PearlButler.class, ShulkerSorter.class,
+        ExperienceTraderModule.class, ExperienceTraderStarterModule.class);
+    private final MinecraftClient client;
+
+    public WorldReader(MinecraftClient client) {
+        this.client = Objects.requireNonNull(client);
+    }
+
+    public boolean available() {
+        return client.world != null && client.player != null && client.interactionManager != null;
+    }
+
+    public WorldIdentity identity() {
+        return WorldIdentity.capture(client);
+    }
+
+    public boolean loaded(TargetPoint point) {
+        return available() && client.world.getChunkManager().isChunkLoaded((int) Math.floor(point.x()) >> 4, (int) Math.floor(point.z()) >> 4);
+    }
+
+    public TargetPoint eyes() {
+        if (!available()) throw new IllegalStateException("Minecraft world is unavailable");
+        Vec3d eyes = client.player.getEyePos();
+        return new TargetPoint(eyes.x, eyes.y, eyes.z);
+    }
+
+    public int findSlot(Predicate<ItemStack> filter) {
+        Objects.requireNonNull(filter);
+        if (!available()) return -1;
+        for (int slot = 0; slot < 9; slot++) {
+            if (filter.test(client.player.getInventory().getStack(slot))) return slot;
+        }
+        return -1;
+    }
+
+    public int count(Item item) {
+        if (!available()) return 0;
+        int count = 0;
+        for (int slot = 0; slot < client.player.getInventory().size(); slot++) {
+            ItemStack stack = client.player.getInventory().getStack(slot);
+            if (stack.isOf(item)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    public boolean matchesSlot(int slot, Predicate<ItemStack> filter) {
+        return available() && slot >= 0 && slot < 9 && filter.test(client.player.getInventory().getStack(slot));
+    }
+
+    public String refusal(Set<Resource> resources, BaritoneSnapshot baritone) {
+        if (!available()) return "Minecraft world is unavailable";
+        if (client.player.isGliding()) return "Land before starting a ground laboratory scenario";
+        if (resources.contains(Resource.MOVEMENT) && !baritone.available()) return "Baritone is unavailable for movement";
+        if (baritone.inControl() || baritone.pathing() || baritone.calcInProgress()) return "Baritone is already controlling the player";
+        Modules modules = Modules.get();
+        for (Module module : modules.getActive()) {
+            if (REFUSED.contains(module.getClass())) return "Active producer: " + module.name;
+        }
+        AutoFlyingRegear regear = modules.get(AutoFlyingRegear.class);
+        if (regear != null && (regear.isRunning() || regear.wantsRegear())) return "AutoFlyingRegear owns the player";
+        KillAuraPlus combat = modules.get(KillAuraPlus.class);
+        if (resources.contains(Resource.LOOK) && combat != null && combat.hasActiveTarget()) return "KillAuraPlus owns LOOK";
+        AutoEatSync eat = modules.get(AutoEatSync.class);
+        if (resources.contains(Resource.SLOT) && eat != null && eat.isEating()) return "AutoEatSync owns SLOT";
+        HMine mine = modules.get(HMine.class);
+        if ((resources.contains(Resource.LOOK) || resources.contains(Resource.SLOT)) && mine != null && mine.isActive() && mine.isMining()) {
+            return "HMine owns LOOK and SLOT";
+        }
+        return null;
+    }
+}

@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.behavior.lab.SelfCheck;
 import com.hunterbuddy.behavior.lab.SelfCheckReport;
 import com.hunterbuddy.modules.TreeJava;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import java.util.Locale;
 import meteordevelopment.meteorclient.commands.Command;
@@ -14,7 +15,7 @@ import net.minecraft.command.CommandSource;
 
 public final class BehaviorCommand extends Command {
     public BehaviorCommand() {
-        super("bt", "Control TreeJava and the simulated behavior laboratory.");
+        super("bt", "Control TreeJava, live walk/look and simulated laboratory scenarios.");
     }
 
     @Override
@@ -36,7 +37,23 @@ public final class BehaviorCommand extends Command {
             BehaviorStatus.lines(module().snapshot()).forEach(line -> info("%s", line)))));
         builder.then(literal("stats").executes(context -> control(() ->
             BehaviorStatus.statsLines(module().snapshot()).forEach(line -> info("%s", line)))));
+        builder.then(literal("outputs").executes(context -> control(() ->
+            module().outputStatus().forEach(line -> info("%s", line)))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
+        lab.then(literal("walk").then(argument("x", DoubleArgumentType.doubleArg())
+            .then(argument("y", DoubleArgumentType.doubleArg()).then(argument("z", DoubleArgumentType.doubleArg())
+                .executes(context -> control(() -> {
+                    module().walkTo(DoubleArgumentType.getDouble(context, "x"), DoubleArgumentType.getDouble(context, "y"),
+                        DoubleArgumentType.getDouble(context, "z"));
+                    info("Live lab walk requested.");
+                }))))));
+        lab.then(literal("look").then(argument("yaw", DoubleArgumentType.doubleArg())
+            .then(argument("pitch", DoubleArgumentType.doubleArg()).executes(context -> control(() -> {
+                module().lookAt(DoubleArgumentType.getDouble(context, "yaw"), DoubleArgumentType.getDouble(context, "pitch"));
+                info("Live lab look requested.");
+            })))));
+        lab.then(literal("stop").executes(context -> control(() ->
+            module().stopEngine(ExitReason.STOPPED, "Stopped by .bt lab stop"))));
         for (LabScenario scenario : LabScenario.values()) {
             lab.then(literal(scenario.name().toLowerCase(Locale.ROOT)).executes(context -> control(() -> {
                 module().selectScenario(scenario);
@@ -65,7 +82,7 @@ public final class BehaviorCommand extends Command {
     private int selfcheck() {
         try {
             SelfCheckReport report = SelfCheck.run();
-            info("Foundation OK: %d checks, %d simulated ticks. Phase 1 acceptance remains incomplete.", report.checks().size(), report.ticks());
+            info("Foundation OK: %d checks, %d simulated ticks. Live scenarios require in-game acceptance.", report.checks().size(), report.ticks());
             return SINGLE_SUCCESS;
         } catch (RuntimeException ex) {
             error("SelfCheck failed: %s", ex.getMessage());

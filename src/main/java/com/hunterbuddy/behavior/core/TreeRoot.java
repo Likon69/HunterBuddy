@@ -72,9 +72,13 @@ public final class TreeRoot {
         } finally {
             ctx.endIdlePeriod();
             ctx.leases().releaseAll();
-            ctx.utilityFailures().clear();
-            hooks.build().resetMemory();
-            recovery.resetMemory();
+            try {
+                ctx.utilityFailures().clear();
+                hooks.build().resetMemory();
+                recovery.resetMemory();
+            } finally {
+                ctx.outputs().release(ctx.tick());
+            }
         }
         if (failure != null) throw failure;
     }
@@ -112,6 +116,11 @@ public final class TreeRoot {
             pending.clear();
             hooks.discardPendingChanges();
             ctx.leases().releaseAll();
+            try {
+                ctx.outputs().release(ctx.tick());
+            } catch (RuntimeException cleanup) {
+                if (cleanup != ex) ex.addSuppressed(cleanup);
+            }
         }
         try {
             ctx.end();
@@ -136,6 +145,9 @@ public final class TreeRoot {
         }
         ctx.clock().countActive();
         ctx.monitor().sample(ctx.clock(), sensors);
+        if (!ctx.monitor().samplesValid(ctx.tick())) {
+            ctx.event(hooks.build(), Kind.PROGRESS, null, "sample rejected", "rejected=setback");
+        }
         if (hookReady(Hook.DEATH)) {
             if (recovering) {
                 recovery.halt(ctx, ExitReason.DEAD);

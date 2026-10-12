@@ -8,6 +8,7 @@ import com.hunterbuddy.behavior.nodes.Landing;
 import com.hunterbuddy.behavior.nodes.ProgressGuard;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Timeout;
+import com.hunterbuddy.behavior.nodes.WalkTowards;
 import com.hunterbuddy.behavior.nodes.WithLease;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -19,7 +20,7 @@ public final class TreeValidator {
     }
 
     public static void validate(Node root) {
-        visit(root, false, false, Collections.newSetFromMap(new IdentityHashMap<>()));
+        visit(root, false, false, false, Collections.newSetFromMap(new IdentityHashMap<>()));
     }
 
     public static void validate(List<HookEntry> entries) {
@@ -47,7 +48,7 @@ public final class TreeValidator {
             if (entry.contributor() == Contributor.PLUGIN && containsLease(entry.node())) {
                 throw new IllegalArgumentException("PLUGIN cannot request a resource: " + entry.owner());
             }
-            visit(entry.guard(), false, false, visited);
+            visit(entry.guard(), false, false, false, visited);
             if (entry.contributor() == Contributor.ROUTINE && entries.stream()
                 .filter(other -> other.hook() == entry.hook() && other.owner().equals(entry.owner())).count() > 1
                 && entry.hook() != Hook.BOT_PRE && entry.hook() != Hook.BOT_POST && entry.hook() != Hook.RECOVERY) {
@@ -56,17 +57,19 @@ public final class TreeValidator {
         }
     }
 
-    private static void visit(Node node, boolean bounded, boolean landing, Set<Node> visited) {
+    private static void visit(Node node, boolean bounded, boolean progressBounded, boolean landing, Set<Node> visited) {
         if (!visited.add(node)) throw new IllegalArgumentException("double parent or cycle: " + node.name());
         if (landing && node instanceof RocketAction) throw new IllegalArgumentException("rocket emission under Landing: " + node.name());
         if (node instanceof Action && !bounded) throw new IllegalArgumentException("Action without Timeout/ProgressGuard: " + node.name());
+        if (node instanceof WalkTowards && !progressBounded) throw new IllegalArgumentException("WalkTowards without ProgressGuard");
         if (node instanceof WithLease lease && lease.resources().isEmpty()) throw new IllegalArgumentException("empty WithLease");
         if (node instanceof ReactiveSelector && node.children().stream().anyMatch(child -> !(child instanceof Guard))) {
             throw new IllegalArgumentException("ReactiveSelector child without Guard");
         }
         boolean nextBounded = bounded || node instanceof Timeout || node instanceof ProgressGuard;
+        boolean nextProgressBounded = progressBounded || node instanceof ProgressGuard;
         boolean nextLanding = landing || node instanceof Landing;
-        for (Node child : node.children()) visit(child, nextBounded, nextLanding, visited);
+        for (Node child : node.children()) visit(child, nextBounded, nextProgressBounded, nextLanding, visited);
     }
 
     private static boolean containsLease(Node node) {
@@ -103,7 +106,7 @@ public final class TreeValidator {
 
     public static void validate(Node root, Node recovery) {
         Set<Node> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        visit(root, false, false, visited);
-        visit(recovery, false, false, visited);
+        visit(root, false, false, false, visited);
+        visit(recovery, false, false, false, visited);
     }
 }

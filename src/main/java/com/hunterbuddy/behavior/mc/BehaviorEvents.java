@@ -1,6 +1,5 @@
 package com.hunterbuddy.behavior.mc;
 
-import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.modules.TreeJava;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -21,6 +20,6 @@ public final class BehaviorEvents {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
-        module.stopEngine(ExitReason.DISCONNECTED, "Game session ended");
+        module.worldLost();
     }
 }

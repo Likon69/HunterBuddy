@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.core;
 
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 public final class ProgressMonitor {
     private ProgressPolicy policy;
@@ -9,6 +10,7 @@ public final class ProgressMonitor {
     private long invalidUntilTick;
     private long activeMs;
     private long firstProgressAt = -1;
+    private BooleanSupplier sampleValidity;
 
     public ProgressMonitor(ProgressPolicy policy) {
         this.policy = Objects.requireNonNull(policy);
@@ -36,6 +38,15 @@ public final class ProgressMonitor {
         setbacks = count;
     }
 
+    void sampleValidity(BooleanSupplier sampleValidity) {
+        this.sampleValidity = sampleValidity;
+    }
+
+    void resetSamples() {
+        setbacks = 0;
+        invalidUntilTick = 0;
+    }
+
     public boolean accept(long tick, ProgressEvidence evidence) {
         if (!samplesValid(tick) || !policy.accepted().contains(evidence.kind())) return false;
         inactiveMs = 0;
@@ -48,7 +59,7 @@ public final class ProgressMonitor {
     }
 
     public boolean samplesValid(long tick) {
-        return tick >= invalidUntilTick;
+        return sampleValidity == null ? tick >= invalidUntilTick : sampleValidity.getAsBoolean();
     }
 
     public long inactiveMs() {

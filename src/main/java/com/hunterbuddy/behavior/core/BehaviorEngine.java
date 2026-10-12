@@ -10,12 +10,15 @@ import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
 import com.hunterbuddy.behavior.lab.LabBot;
+import com.hunterbuddy.behavior.lab.LiveLabBot;
 import com.hunterbuddy.behavior.lab.SimulatedSensors;
 import com.hunterbuddy.behavior.nodes.Fail;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.plugin.PluginRegistry;
+import com.hunterbuddy.behavior.resource.Leases;
+import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.ResourceArbiter;
 import com.hunterbuddy.behavior.routine.DeathPolicy;
 import com.hunterbuddy.behavior.routine.DeathRoutine;
@@ -37,7 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public final class BehaviorEngine {
     private final Clock clock;
@@ -119,7 +124,7 @@ public final class BehaviorEngine {
 
     private void checkBot(Bot next) {
         Objects.requireNonNull(next);
-        if (!(next instanceof LabBot)) throw new IllegalArgumentException("Phase 1 supports simulated LabBot only");
+        if (!(next instanceof LabBot) && !(next instanceof LiveLabBot)) throw new IllegalArgumentException("Only LabBot scenarios are available");
     }
 
     private void install(Bot next, String reason) {
@@ -222,20 +227,32 @@ public final class BehaviorEngine {
         tick(sensors);
     }
 
-    public void tick(Sensors simulatedSensors) {
-        Objects.requireNonNull(simulatedSensors);
+    public void tick(Sensors capturedSensors) {
+        Objects.requireNonNull(capturedSensors);
+        tickCaptured(() -> capturedSensors);
+    }
+
+    public void tickCaptured(Supplier<Sensors> capture) {
+        tickCaptured(capture, null);
+    }
+
+    public void tickCaptured(Supplier<Sensors> capture, BooleanSupplier sampleValidity) {
+        Objects.requireNonNull(capture);
         if (!running()) return;
         if (ticking) throw new IllegalStateException("reentrant engine tick");
         ticking = true;
         long started = System.nanoTime();
+        ctx.monitor().sampleValidity(sampleValidity);
         try {
             try {
                 clock.advance();
-                ctx.begin(simulatedSensors);
+                Sensors capturedSensors = Objects.requireNonNull(capture.get(), "sensor capture returned null");
+                ctx.bb().world(capturedSensors.dimensionKey() + "/" + capturedSensors.worldId() + "/" + capturedSensors.playerId());
+                ctx.begin(capturedSensors);
                 plugins.pulse();
                 long activeBefore = clock.activeMs();
                 try {
-                    root.tick(simulatedSensors);
+                    root.tick(capturedSensors);
                 } finally {
                     if (stats != null) stats.sampleTime(clock.activeMs() - activeBefore, ctx.executedHook());
                 }
@@ -243,6 +260,7 @@ public final class BehaviorEngine {
                 if (running()) {
                     while (!pending.isEmpty()) pending.removeFirst().run();
                 }
+                ctx.outputs().flush(ctx.tick());
             } catch (RuntimeException ex) {
                 pending.clear();
                 root.fault(ex);
@@ -252,6 +270,7 @@ public final class BehaviorEngine {
                 finishStop();
             }
         } finally {
+            ctx.monitor().sampleValidity(null);
             tickMs = (System.nanoTime() - started) / 1_000_000.0;
             ticking = false;
         }
@@ -327,6 +346,25 @@ public final class BehaviorEngine {
 
     public BotRegistry bots() {
         return bots;
+    }
+
+    public Outputs outputs() {
+        return ctx.outputs();
+    }
+
+    public Leases leases() {
+        return ctx.leases();
+    }
+
+    public LiveLabBot liveLab() {
+        return bot instanceof LiveLabBot lab ? lab : null;
+    }
+
+    public void fault(RuntimeException failure) {
+        Objects.requireNonNull(failure);
+        pending.clear();
+        root.fault(failure);
+        finishStop();
     }
 
     private boolean running() {
