@@ -56,6 +56,8 @@ public final class BehaviorCommand extends Command {
             .then(literal("off").executes(context -> control(() -> module().setPlugin(StringArgumentType.getString(context, "name"), false))))));
         builder.then(literal("outputs").executes(context -> control(() ->
             module().outputStatus().forEach(line -> info("%s", line)))));
+        builder.then(literal("farmer").then(literal("zone").executes(context -> control(() ->
+            module().farmerZoneStatus().forEach(line -> info("%s", line))))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
         for (String scenario : java.util.List.of("exitwater", "takeoff")) {
             lab.then(literal(scenario).executes(context -> control(() -> {

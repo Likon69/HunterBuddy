@@ -94,6 +94,23 @@ public final class WorldReader {
             && client.world.getWorldBorder().contains(pos);
     }
 
+    public int bottomY() {
+        if (!available()) throw new IllegalStateException("Minecraft world is unavailable");
+        return client.world.getBottomY();
+    }
+
+    public int topY() {
+        if (!available()) throw new IllegalStateException("Minecraft world is unavailable");
+        return client.world.getTopYInclusive();
+    }
+
+    public double elytraDurabilityFraction() {
+        if (!available()) return 0;
+        ItemStack chest = client.player.getEquippedStack(EquipmentSlot.CHEST);
+        if (!chest.isOf(net.minecraft.item.Items.ELYTRA) || chest.getMaxDamage() <= 0) return 0;
+        return 1.0 - (double) chest.getDamage() / chest.getMaxDamage();
+    }
+
     public BlockState state(BlockPos pos) {
         if (!loaded(pos)) throw new IllegalStateException("Block chunk is not loaded: " + pos);
         return client.world.getBlockState(pos);

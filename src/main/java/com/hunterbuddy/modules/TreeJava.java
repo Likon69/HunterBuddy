@@ -10,7 +10,11 @@ import com.hunterbuddy.behavior.core.RootState;
 import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.farmer.FarmerBuddyBot;
+import com.hunterbuddy.behavior.farmer.FarmerCatalog;
 import com.hunterbuddy.behavior.farmer.FarmerSettings;
+import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
+import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
+import com.hunterbuddy.behavior.farmer.FarmerZoneReport;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
 import com.hunterbuddy.behavior.lab.FlightTask;
@@ -36,6 +40,7 @@ import com.hunterbuddy.behavior.mc.PlacementBridge;
 import com.hunterbuddy.behavior.mc.ResumeGate;
 import com.hunterbuddy.behavior.mc.ServerFacts;
 import com.hunterbuddy.behavior.mc.WorldReader;
+import com.hunterbuddy.behavior.mc.XaeroWaypoints;
 import com.hunterbuddy.behavior.nodes.KeepFlying;
 import com.hunterbuddy.behavior.persist.PersistentStore;
 import com.hunterbuddy.behavior.plugin.AlertPlugin;
@@ -69,6 +74,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 
@@ -81,6 +87,9 @@ public final class TreeJava extends Module {
     private final BaritoneBridge baritone = new BaritoneBridge();
     private final LabSettings labSettings = new LabSettings(LabScenario.WORK, ignored -> scenarioChanged());
     private final FarmerSettings farmerSettings = new FarmerSettings();
+    private final FarmerCatalog farmerCatalog = FarmerCatalog.load();
+    private final XaeroWaypoints farmerWaypoints = new XaeroWaypoints(world);
+    private final FarmerZoneLookup farmerZoneLookup = new FarmerZoneLookup(farmerWaypoints);
     private final Setting<Boolean> hud = general.add(new BoolSetting.Builder()
         .name("hud").description("Show the registered TreeJava behavior HUD.").defaultValue(true).build());
     private final Setting<Boolean> fullTraceLog = general.add(new BoolSetting.Builder()
@@ -112,8 +121,13 @@ public final class TreeJava extends Module {
         runInMainMenu = true;
         autoSubscribe = false;
         engine.bots().register("lab", () -> new LabBot(labSettings));
-        engine.bots().register("farmerbuddy", () -> new FarmerBuddyBot(farmerSettings, world, baritone, engine.outputs()));
-        for (String bot : engine.bots().names()) engine.bots().create(bot).onRegister(settings.createGroup("Bot: " + bot));
+        engine.bots().register("farmerbuddy", () -> new FarmerBuddyBot(farmerSettings, farmerCatalog, world, baritone, engine.outputs(), farmerWaypoints));
+        List<SettingGroup> farmerStepGroups = new ArrayList<>();
+        for (int i = 1; i <= FarmerSettings.MAX_STEPS; i++) farmerStepGroups.add(settings.createGroup("FarmerBuddy: étape " + i));
+        farmerSettings.register(farmerStepGroups, settings.createGroup("FarmerBuddy: base"));
+        for (String bot : engine.bots().names()) {
+            if (!bot.equals("farmerbuddy")) engine.bots().create(bot).onRegister(settings.createGroup("Bot: " + bot));
+        }
         engine.outputs().connect(new MovementOutput(baritone), new LookOutput(mc), new SlotOutput(mc), serverFacts::tick);
         engine.outputs().connectBaritone(new BaritoneOutput(baritone, engine.leases(), consumables, serverFacts::tick));
         engine.outputs().connectMinecraft(mining, placement);
@@ -223,12 +237,21 @@ public final class TreeJava extends Module {
             baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
         if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
         if (refusal == null) refusal = mining.refusal();
-        if (refusal == null && name.equals("farmerbuddy")) refusal = farmerSettings.refusal(world.feet());
+        if (refusal == null && name.equals("farmerbuddy")) {
+            AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
+            if (regear != null && regear.isActive()) refusal = "FarmerBuddy fait son propre regear";
+        }
+        if (refusal == null && name.equals("farmerbuddy")) refusal = farmerSettings.refusal(farmerCatalog);
         if (refusal != null) throw new IllegalStateException(refusal);
     }
 
     private boolean pauseOnPlayer() {
-        return engine.botName().equals("farmerbuddy") ? farmerSettings.pauseOnPlayer() : labSettings.pauseOnPlayer();
+        return engine.botName().equals("farmerbuddy") ? true : labSettings.pauseOnPlayer();
+    }
+
+    public List<String> farmerZoneStatus() {
+        FarmerStepConfig step = farmerSettings.steps().stream().filter(FarmerStepConfig::enabled).findFirst().orElse(null);
+        return FarmerZoneReport.lines(step, farmerZoneLookup, farmerCatalog, world);
     }
 
     public void selectScenario(LabScenario next) {

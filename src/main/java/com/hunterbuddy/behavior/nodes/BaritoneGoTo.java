@@ -15,10 +15,11 @@ import com.hunterbuddy.behavior.resource.BaritoneOutput;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.trace.Kind;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 public final class BaritoneGoTo extends Action {
     private final Key<Goal> goalKey;
-    private final boolean allowBreak;
+    private final BooleanSupplier allowBreak;
     private final boolean allowPlace;
     private final BaritoneBridge bridge;
     private final Outputs outputs;
@@ -27,10 +28,10 @@ public final class BaritoneGoTo extends Action {
     private long startedAt;
     private Stage stage;
 
-    public BaritoneGoTo(Key<Goal> goalKey, boolean allowBreak, boolean allowPlace, BaritoneBridge bridge, Outputs outputs) {
+    public BaritoneGoTo(Key<Goal> goalKey, BooleanSupplier allowBreak, boolean allowPlace, BaritoneBridge bridge, Outputs outputs) {
         super("baritone");
         this.goalKey = Objects.requireNonNull(goalKey);
-        this.allowBreak = allowBreak;
+        this.allowBreak = Objects.requireNonNull(allowBreak);
         this.allowPlace = allowPlace;
         this.bridge = Objects.requireNonNull(bridge);
         this.outputs = Objects.requireNonNull(outputs);
@@ -39,7 +40,7 @@ public final class BaritoneGoTo extends Action {
     @Override
     protected void onActionStart(TickContext ctx) {
         Goal goal = ctx.bb().get(ctx.owner(), goalKey).orElse(null);
-        intent = goal == null ? null : new BaritoneIntent(goal, allowBreak, allowPlace);
+        intent = goal == null ? null : new BaritoneIntent(goal, allowBreak.getAsBoolean(), allowPlace);
         startedAt = outputs.nativeTick();
         failures = bridge.failures();
         Key<Integer> attempts = attempts(ctx);

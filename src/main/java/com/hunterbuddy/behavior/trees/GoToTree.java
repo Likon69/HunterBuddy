@@ -41,6 +41,8 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiPredicate;
+import java.util.function.BooleanSupplier;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.util.math.BlockPos;
 
@@ -56,12 +58,17 @@ public final class GoToTree {
 
     public static Node build(Key<TargetPoint> targetKey, TargetPoint target, double radius, WorldReader world,
                              BaritoneBridge baritone, Outputs outputs) {
+        return build(targetKey, target, radius, world, baritone, outputs, () -> true);
+    }
+
+    public static Node build(Key<TargetPoint> targetKey, TargetPoint target, double radius, WorldReader world,
+                             BaritoneBridge baritone, Outputs outputs, BooleanSupplier allowBreak) {
         Node path = new Sequence("baritone-reach",
             new SetValue<>(GOAL, ctx -> new GoalNear(BlockPos.ofFloored(target.x(), target.y(), target.z()), Math.max(1, (int) Math.floor(radius)))),
             new Retry(3, 20, new Budget("baritone", 3,
                 new ProgressGuard(sensors -> -Conditions.distance(sensors, target), 1, 240,
                     new Timeout(2_400, new WithLease(Set.of(Resource.BARITONE, Resource.MINING), LeasePolicy.WAIT,
-                        new BaritoneGoTo(GOAL, true, false, baritone, outputs).limit(2_400))))
+                        new BaritoneGoTo(GOAL, allowBreak, false, baritone, outputs).limit(2_400))))
                     .keyedBy(ctx -> "baritone/" + target)).keyedBy(ctx -> target.toString())),
             near(target, radius));
         Node breakFront = new Sequence("break-front",
@@ -99,6 +106,11 @@ public final class GoToTree {
     }
 
     public static Node build(Key<TargetPoint> targetKey, double radius, WorldReader world, BaritoneBridge baritone, Outputs outputs) {
+        return build(targetKey, radius, world, baritone, outputs, (ctx, point) -> true);
+    }
+
+    public static Node build(Key<TargetPoint> targetKey, double radius, WorldReader world, BaritoneBridge baritone, Outputs outputs,
+                             BiPredicate<TickContext, TargetPoint> allowBreakRule) {
         return new Node("dynamic-goto") {
             private Node child;
             @Override
@@ -110,7 +122,8 @@ public final class GoToTree {
                 if (child == null) {
                     TargetPoint target = ctx.bb().get(ctx.owner(), targetKey).orElse(null);
                     if (target == null) return fail(FailureCode.NO_OPTION, "goto target missing");
-                    child = GoToTree.build(targetKey, target, radius, world, baritone, outputs);
+                    boolean allowBreak = allowBreakRule.test(ctx, target);
+                    child = GoToTree.build(targetKey, target, radius, world, baritone, outputs, () -> allowBreak);
                     com.hunterbuddy.behavior.core.TreeValidator.validate(child);
                     com.hunterbuddy.behavior.core.TreeValidator.bind(child, path() + "/instance", ctx.owner(), hook());
                 }

@@ -1,0 +1,94 @@
+{
+  "profiles": [
+    {
+      "key": "sand",
+      "label": "Sable",
+      "blocks": ["minecraft:sand"],
+      "acceptedItems": ["minecraft:sand"],
+      "tool": "shovel",
+      "strategy": "surface",
+      "biomes": ["minecraft:desert", "minecraft:beach"]
+    },
+    {
+      "key": "red_sand",
+      "label": "Sable rouge",
+      "blocks": ["minecraft:red_sand"],
+      "acceptedItems": ["minecraft:red_sand"],
+      "tool": "shovel",
+      "strategy": "surface",
+      "biomes": ["minecraft:badlands", "minecraft:eroded_badlands", "minecraft:wooded_badlands"]
+    },
+    {
+      "key": "gravel",
+      "label": "Gravier",
+      "blocks": ["minecraft:gravel"],
+      "acceptedItems": ["minecraft:gravel"],
+      "tool": "shovel",
+      "strategy": "surface",
+      "biomes": []
+    },
+    {
+      "key": "dirt",
+      "label": "Terre",
+      "blocks": ["minecraft:dirt", "minecraft:grass_block", "minecraft:coarse_dirt"],
+      "acceptedItems": ["minecraft:dirt"],
+      "tool": "shovel",
+      "strategy": "surface",
+      "biomes": []
+    },
+    {
+      "key": "deepslate",
+      "label": "Deepslate",
+      "blocks": ["minecraft:deepslate"],
+      "acceptedItems": ["minecraft:cobbled_deepslate", "minecraft:deepslate"],
+      "tool": "pickaxe",
+      "strategy": "layer",
+      "biomes": []
+    },
+    {
+      "key": "terracotta",
+      "label": "Terracotta",
+      "blocks": [
+        "minecraft:terracotta",
+        "minecraft:white_terracotta",
+        "minecraft:orange_terracotta",
+        "minecraft:magenta_terracotta",
+        "minecraft:light_blue_terracotta",
+        "minecraft:yellow_terracotta",
+        "minecraft:lime_terracotta",
+        "minecraft:pink_terracotta",
+        "minecraft:gray_terracotta",
+        "minecraft:light_gray_terracotta",
+        "minecraft:cyan_terracotta",
+        "minecraft:purple_terracotta",
+        "minecraft:blue_terracotta",
+        "minecraft:brown_terracotta",
+        "minecraft:green_terracotta",
+        "minecraft:red_terracotta",
+        "minecraft:black_terracotta"
+      ],
+      "acceptedItems": [
+        "minecraft:terracotta",
+        "minecraft:white_terracotta",
+        "minecraft:orange_terracotta",
+        "minecraft:magenta_terracotta",
+        "minecraft:light_blue_terracotta",
+        "minecraft:yellow_terracotta",
+        "minecraft:lime_terracotta",
+        "minecraft:pink_terracotta",
+        "minecraft:gray_terracotta",
+        "minecraft:light_gray_terracotta",
+        "minecraft:cyan_terracotta",
+        "minecraft:purple_terracotta",
+        "minecraft:blue_terracotta",
+        "minecraft:brown_terracotta",
+        "minecraft:green_terracotta",
+        "minecraft:red_terracotta",
+        "minecraft:black_terracotta"
+      ],
+      "tool": "pickaxe",
+      "strategy": "surface",
+      "biomes": ["minecraft:badlands", "minecraft:eroded_badlands", "minecraft:wooded_badlands"]
+    }
+  ]
+}
