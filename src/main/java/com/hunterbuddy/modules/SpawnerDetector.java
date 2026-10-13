@@ -2625,7 +2625,7 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        return plainChests > 2;
+        return plainChests >= 4;
     }
 
     private int countContainersAround(BlockPos pos) {
@@ -3105,7 +3105,7 @@ public class SpawnerDetector extends Module {
         if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
         for (ShipwreckSite wreck : ShipwreckDetector.foundSites()) {
             ShipwreckSite.Bounds bounds = wreck.bounds();
-            if (bounds == null) continue;
+            if (bounds == null || !shipwreckInOldChunk(wreck)) continue;
             int present = shipwreckPresentChests(wreck);
             boolean looted = present > 0 && shipwreckLootedChests(wreck, outcomes) == present;
             if (looted && lootedStyle.get() == LootedStyle.HIDE) continue;
@@ -3134,12 +3134,22 @@ public class SpawnerDetector extends Module {
         }
     }
 
+    private boolean shipwreckInOldChunk(ShipwreckSite wreck) {
+        PaletteNewChunks module = ModuleManager.getModule(PaletteNewChunks.class);
+        if (module == null) return true;
+        for (ShipwreckSite.Chest chest : wreck.chests()) {
+            if (chest.status() == ShipwreckSite.ChestStatus.PRESENT
+                && module.isInverseNewChunk(chest.pos().getX() >> 4, chest.pos().getZ() >> 4, net.minecraft.world.World.OVERWORLD)) return true;
+        }
+        return false;
+    }
+
     private void renderShipwreckLabels(meteordevelopment.meteorclient.events.render.Render2DEvent event,
                                       Map<Long, String> outcomes, Vec3d eye, double maxDistance, double maxDistanceSq) {
         if (mc.world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
         for (ShipwreckSite wreck : ShipwreckDetector.foundSites()) {
             ShipwreckSite.Bounds bounds = wreck.bounds();
-            if (bounds == null) continue;
+            if (bounds == null || !shipwreckInOldChunk(wreck)) continue;
             int present = shipwreckPresentChests(wreck), looted = shipwreckLootedChests(wreck, outcomes);
             boolean complete = present > 0 && looted == present;
             if (complete && lootedStyle.get() == LootedStyle.HIDE) continue;
@@ -4084,11 +4094,16 @@ public class SpawnerDetector extends Module {
         topY = descendPastFloatingBlockTop(siteCenter, x, z, topY, room.cy() - 2, cursor);
         int exitY = topY + 1;
         boolean water = mc.world.getBlockState(cursor.set(x, topY, z)).getFluidState().isIn(FluidTags.WATER);
+        boolean cushion = water && !mc.world.getBlockState(cursor.set(x, topY - 1, z)).getFluidState().isIn(FluidTags.WATER);
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (cushion && mc.world.getBlockState(cursor.set(x + dir.getOffsetX(), topY, z + dir.getOffsetZ())).getFluidState().isIn(FluidTags.WATER)) cushion = false;
+        }
+        if (cushion) water = false;
 
         BlockPos rim = null;
         int holeTopY = exitY;
         if (!water) {
-            RimResult rr = computeRim(x, z, sc.bottomFeet());
+            RimResult rr = computeRim(x, z, cushion ? topY + 1 : sc.bottomFeet());
             rim = rr.rim();
             if (rim != null) holeTopY = rr.holeTopY();
         }
@@ -4407,7 +4422,6 @@ public class SpawnerDetector extends Module {
         double dist = Math.hypot(site.center.getX() + 0.5 - mc.player.getX(), site.center.getZ() + 0.5 - mc.player.getZ());
         if (dist > (walkChain ? 64 : autoMaxDistance.get())) return QualResult.reject("too far");
         if (!walkChain && !mc.player.isGliding() && dist > 96) return QualResult.reject("too far to walk");
-        if (nearOceanMonument(site.center)) return QualResult.reject("near ocean monument");
         AutoFlyingRegear regear = autoFlyingRegearModule();
         if (regear != null && regear.isRunning()) return QualResult.reject("AutoFlyingRegear running");
         if (regear != null && regear.wantsRegear()) return QualResult.reject("AutoFlyingRegear pending");
@@ -4703,7 +4717,8 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean shipwreckChestInReach() {
-        return isContainerPresent(autoSite.center) && mc.player.canInteractWithBlockAt(autoSite.center, -0.5);
+        return isContainerPresent(autoSite.center) && mc.player.canInteractWithBlockAt(autoSite.center, -0.5)
+            && !net.minecraft.block.ChestBlock.isChestBlocked(mc.world, autoSite.center);
     }
 
     private BlockPos findShipwreckSideSpot() {
@@ -8163,18 +8178,30 @@ public class SpawnerDetector extends Module {
                     if (autoRoomOpenAttempts < 2) {
                         autoRoomSubState = 2;
                     } else {
-                        autoLog("ROOM", target, "container did not open, breaking it unread");
-                        autoRoomBreakStartMs = System.currentTimeMillis();
-                        autoRoomBreakTicks = 0;
-                        autoRoomContainerGoneTicks = 0;
-                        autoRoomBreakAnchor = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
-                        autoRoomBreakRepositioning = false;
-                        autoRoomSubState = 5;
+                        autoLog("ROOM", target, "container did not open, left unbroken");
+                        autoRoomIndex++;
+                        autoRoomContainerFails = 0;
+                        autoRoomSubState = 0;
+                        autoRoomPillarTarget = null;
+                        autoRoomPillarPhase = 0;
+                        if (isShipwreck()) autoShipwreckChestOutcome = "not opened";
                     }
                 }
             }
             case 4 -> {
                 if (autoRoomWaitTicks > 0) { autoRoomWaitTicks--; return; }
+                if (mc.player.currentScreenHandler.getRevision() == 0) {
+                    if (System.currentTimeMillis() - autoRoomSubStateStartMs < 8000L) return;
+                    mc.player.closeHandledScreen();
+                    autoLog("ROOM", target, "container contents never arrived, left unbroken");
+                    autoRoomIndex++;
+                    autoRoomContainerFails = 0;
+                    autoRoomSubState = 0;
+                    autoRoomPillarTarget = null;
+                    autoRoomPillarPhase = 0;
+                    if (isShipwreck()) autoShipwreckChestOutcome = "not opened";
+                    return;
+                }
                 boolean kept = readContainer(target, null);
                 if (kept) {
                     autoRoomIndex++;
