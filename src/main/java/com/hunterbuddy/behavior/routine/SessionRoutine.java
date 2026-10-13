@@ -1,8 +1,10 @@
 package com.hunterbuddy.behavior.routine;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
+import com.hunterbuddy.behavior.mc.ResumeGate;
 import com.hunterbuddy.behavior.mc.RoutineSettings;
 import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Selector;
@@ -15,6 +17,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 
 public final class SessionRoutine extends CoreRoutine {
     private BooleanSupplier pauseOnForeignScreen = () -> true;
+    private ResumeGate resumeGate;
 
     public SessionRoutine() {
         super("session", Hook.SESSION);
@@ -27,6 +30,12 @@ public final class SessionRoutine extends CoreRoutine {
 
     private boolean pauseOnForeignScreen() {
         return pauseOnForeignScreen.getAsBoolean();
+    }
+
+    public void connect(ResumeGate gate) { resumeGate = java.util.Objects.requireNonNull(gate); }
+    public void worldLost() { if (resumeGate != null) resumeGate.reset(); }
+    public ResumeGate.Decision resume(Sensors sensors, long nowMs) {
+        return java.util.Objects.requireNonNull(resumeGate, "resume gate is not connected").check(sensors, nowMs);
     }
 
     @Override
@@ -45,6 +54,6 @@ public final class SessionRoutine extends CoreRoutine {
 
     @Override
     protected String readyDetail() {
-        return "pause on foreign screen=" + pauseOnForeignScreen();
+        return "pause on foreign screen=" + pauseOnForeignScreen() + (resumeGate == null ? "" : "; resume=" + resumeGate.cause());
     }
 }

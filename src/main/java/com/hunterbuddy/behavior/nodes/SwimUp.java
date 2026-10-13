@@ -41,8 +41,18 @@ public final class SwimUp extends Action {
         var sensors = ctx.sensors();
         if (!sensors.inWater() && !sensors.submerged()) return Success.INSTANCE;
         BlockPos feet = world.feet();
-        if (feet.getX() != column.getX() || feet.getZ() != column.getZ() || world.openDryNeighbor(feet)) return Success.INSTANCE;
-        outputs.look(ctx.owner(), new LookIntent(sensors.yaw(), -90));
+        if (!sensors.submerged()) return Success.INSTANCE;
+        LookIntent look = new LookIntent(sensors.yaw(), -90);
+        for (var direction : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+            BlockPos next = feet.offset(direction);
+            if (world.loaded(next) && world.state(next).isAir() && world.state(next.up()).isAir()) {
+                LookIntent desired = com.hunterbuddy.behavior.mc.Conditions.towards(world.eyes(),
+                    new com.hunterbuddy.behavior.core.TargetPoint(next.getX() + 0.5, next.getY() + 1.5, next.getZ() + 0.5));
+                look = new LookIntent(sensors.yaw() + com.hunterbuddy.behavior.mc.Conditions.wrap(desired.yaw() - sensors.yaw()), desired.pitch());
+                break;
+            }
+        }
+        outputs.look(ctx.owner(), look);
         outputs.movement(ctx.owner(), new MovementIntent(true, false, false, false, true, false, sensors.food() > 6));
         if (sensors.y() - bestY >= 0.5 && ctx.progress(new ProgressEvidence(EvidenceKind.GOAL_BEST, sensors.y() - bestY, "swim Y best"))) bestY = sensors.y();
         return new Running("swimming up column=" + column);

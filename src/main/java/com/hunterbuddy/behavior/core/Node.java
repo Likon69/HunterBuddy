@@ -121,6 +121,15 @@ public abstract class Node {
         return stage == Stage.SUSPENDED;
     }
 
+    public final void post(TickContext ctx) {
+        if (!active()) return;
+        Node previous = ctx.enter(this);
+        try {
+            if (this instanceof PostTickable post) post.tickPost(ctx);
+            for (Node child : children()) child.post(ctx);
+        } finally { ctx.leave(previous); }
+    }
+
     protected abstract NodeResult onTick(TickContext ctx);
 
     protected void onStop(TickContext ctx, ExitReason reason) {

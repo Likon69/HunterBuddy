@@ -9,6 +9,7 @@ import baritone.api.utils.IInputOverrideHandler;
 import java.util.List;
 import java.util.Optional;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.util.math.BlockPos;
 
 public final class BaritoneBridge {
     private final BaritoneEvents events = new BaritoneEvents();
@@ -80,6 +81,18 @@ public final class BaritoneBridge {
     public void pause(boolean pause) {
         requireInstance();
         gatePause.pause(pause);
+    }
+
+    public boolean elytraAvailable() {
+        IBaritone current = instance();
+        return current != null && current.getPlayerContext().player() != null
+            && current.getPlayerContext().world().getRegistryKey().getValue().toString().equals("minecraft:the_nether") && current.getElytraProcess().isLoaded();
+    }
+
+    public void flyTo(BlockPos destination) { requireInstance().getElytraProcess().pathTo(destination); }
+    public boolean ownsFlight(BlockPos destination) {
+        IBaritone current = instance();
+        return current != null && current.getElytraProcess().isActive() && destination.equals(current.getElytraProcess().currentDestination());
     }
 
     public boolean pauseReady() {

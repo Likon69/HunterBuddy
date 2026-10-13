@@ -7,7 +7,7 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
 
-public sealed interface LabTask permits WalkTask, LookTask, GoToTask, BreakColumnTask, PlaceTask, PillarTask, OpenTask {
+public sealed interface LabTask permits WalkTask, LookTask, GoToTask, BreakColumnTask, PlaceTask, PillarTask, OpenTask, FlightTask {
     String name();
     String target();
     Set<Resource> resources();
@@ -17,4 +17,6 @@ public sealed interface LabTask permits WalkTask, LookTask, GoToTask, BreakColum
     default boolean recoverFailure() {
         return false;
     }
+
+    default boolean flightAware() { return false; }
 }

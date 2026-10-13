@@ -118,6 +118,36 @@ public final class TreeRoot {
         }
     }
 
+    public void suspendSession() {
+        if (state != RootState.RUNNING && state != RootState.PAUSED) return;
+        pending.clear();
+        hooks.haltAll(ctx, ExitReason.DISCONNECTED);
+        recovery.halt(ctx, ExitReason.DISCONNECTED);
+        ctx.leases().releaseAll();
+        ctx.outputs().release(ctx.tick());
+        hooks.build().resetMemory();
+        recovery.resetMemory();
+        recovering = false;
+        pauseEntry = null;
+        heldGates = List.of();
+        pauseCause = "waiting for reconnection";
+        state = RootState.SUSPENDED;
+    }
+
+    public void resumeSession() {
+        if (state != RootState.SUSPENDED) throw new IllegalStateException("root is not suspended");
+        recovery.reset();
+        beginAttempt();
+        pauseCause = "none";
+        state = RootState.RUNNING;
+    }
+
+    public void sessionCause(String cause) { if (state == RootState.SUSPENDED) pauseCause = Objects.requireNonNull(cause); }
+
+    public void tickPost() {
+        if (state == RootState.RUNNING) { hooks.build().post(ctx); recovery.post(ctx); }
+    }
+
     void fault(RuntimeException ex) {
         pending.clear();
         hooks.discardPendingChanges();

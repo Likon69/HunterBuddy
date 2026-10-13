@@ -31,7 +31,7 @@ public final class LiveLabBot implements Bot {
     private final LabTask task;
     private final WorldReader world;
     private final Outputs outputs;
-    private final WorldIdentity identity;
+    private WorldIdentity identity;
     private Stage stage = Stage.READY;
     private long completed;
 
@@ -72,7 +72,7 @@ public final class LiveLabBot implements Bot {
             stage = Stage.COMPLETE;
         }, task.recoverFailure() ? () -> stage = Stage.UNREACHABLE : null);
         return new HookEntry(Hook.BOT, context.owner(), Contributor.BOT, 0,
-            new Guard(new Condition("live-lab-ready", sensors -> stage == Stage.RUNNING), work), false, work);
+            new Guard(new Condition("live-lab-ready", sensors -> stage == Stage.RUNNING), work), task.flightAware(), work);
     }
 
     @Override
@@ -85,7 +85,7 @@ public final class LiveLabBot implements Bot {
 
     @Override
     public BotConfig config() {
-        return LabBot.CONFIG;
+        return new BotConfig(false, LabBot.CONFIG.deathPolicy(), settings.resumeAfterReconnect(), LabBot.CONFIG.progress(), LabBot.CONFIG.defaultActionLimitTicks());
     }
 
     @Override
@@ -111,6 +111,15 @@ public final class LiveLabBot implements Bot {
 
     public WorldIdentity identity() {
         return identity;
+    }
+
+    @Override
+    public void onResume(BotContext context) {
+        requireContext(context);
+        identity = world.identity();
+        context.ticks().bb().set(context.owner(), TickContext.CURRENT_TARGET, task.target());
+        task.initialize(context);
+        if (stage != Stage.COMPLETE) stage = Stage.RUNNING;
     }
 
     public Set<Resource> resources() {

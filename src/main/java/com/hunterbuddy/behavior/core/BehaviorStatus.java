@@ -15,7 +15,7 @@ public final class BehaviorStatus {
         lines.add("Hook: " + snapshot.hook() + " | " + snapshot.status().task() + " | target=" + snapshot.status().target()
             + " | steps=" + snapshot.status().completed());
         lines.add("Path: " + snapshot.path());
-        if (snapshot.state() == RootState.PAUSED) lines.add("Paused: " + snapshot.pauseCause());
+        if (snapshot.state() == RootState.PAUSED || snapshot.state() == RootState.SUSPENDED) lines.add(snapshot.state() + ": " + snapshot.pauseCause());
         lines.addAll(snapshot.gates());
         snapshot.outputs().stream().filter(line -> line.contains("QUARANTINED") || line.contains("RETURNING") || line.contains("REVOKING")).forEach(lines::add);
         lines.add(String.format(Locale.ROOT, "No progress: %.1fs/%.1fs | action: %dt | recovery=%d | leases=%d",

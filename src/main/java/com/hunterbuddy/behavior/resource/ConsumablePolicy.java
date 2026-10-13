@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.resource;
 
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.WorldReader;
+import com.hunterbuddy.util.Rockets;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.IntSupplier;
@@ -32,6 +33,8 @@ public final class ConsumablePolicy {
     public boolean placement(ItemStack stack) {
         return !stack.isEmpty() && stack.getItem() instanceof BlockItem && mayConsume(stack.getItem());
     }
+
+    public boolean rocket() { return world.countMatching(Rockets::isPlain) > Math.max(0, rocketsMin.getAsInt()); }
 
     public boolean pillar(ItemStack stack) {
         return placement(stack) && baritone.settings().acceptableThrowawayItems.value.contains(stack.getItem());

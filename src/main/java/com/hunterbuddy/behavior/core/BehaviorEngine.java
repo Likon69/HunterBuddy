@@ -12,11 +12,13 @@ import com.hunterbuddy.behavior.hooks.TreeHooks;
 import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LiveLabBot;
 import com.hunterbuddy.behavior.lab.SimulatedSensors;
+import com.hunterbuddy.behavior.mc.ResumeGate;
 import com.hunterbuddy.behavior.nodes.Fail;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.UtilitySelector;
+import com.hunterbuddy.behavior.persist.PersistentStore;
 import com.hunterbuddy.behavior.plugin.PluginRegistry;
 import com.hunterbuddy.behavior.resource.Leases;
 import com.hunterbuddy.behavior.resource.LegacyGates;
@@ -40,11 +42,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -78,12 +83,24 @@ public final class BehaviorEngine {
     private boolean ticking;
     private long evidenceBaseline;
     private double tickMs;
+    private PersistentStore store;
+    private String worldKey = "simulated";
+    private CompletableFuture<Map<Key<?>, Object>> memoryLoad;
+    private CompletableFuture<BotStats.Snapshot> statsLoad;
+    private final SessionRoutine session;
+    private long saveAt;
+    private long loadingAt = -1;
+    private final Map<String, CompletableFuture<BotStats.Snapshot>> statsReads = new LinkedHashMap<>();
+    private final Set<String> statsRestored = new HashSet<>();
+    private final AtomicLong checkpoint = new AtomicLong();
+    private ConnectionPhase connectionPhase = ConnectionPhase.CONNECTED;
 
     public BehaviorEngine(Clock clock, Consumer<StopReport> stopped, Consumer<String> alerts, TraceSink... sinks) {
         this.clock = Objects.requireNonNull(clock);
         this.stopped = Objects.requireNonNull(stopped);
         this.alerts = Objects.requireNonNull(alerts);
-        routines = new ArrayList<>(List.of(new SessionRoutine(), new DeathRoutine(), new IdleRoutine(alerts, restarts)));
+        session = new SessionRoutine();
+        routines = new ArrayList<>(List.of(session, new DeathRoutine(), new IdleRoutine(alerts, restarts)));
         List<TraceSink> allSinks = new ArrayList<>(List.of(sinks));
         allSinks.add(ring);
         Trace trace = new Trace(allSinks.toArray(TraceSink[]::new));
@@ -103,7 +120,7 @@ public final class BehaviorEngine {
 
     public void startBot(Bot next) {
         checkBot(next);
-        if (running()) throw new IllegalStateException("TreeJava is already running; use switch");
+        if (running() || suspended()) throw new IllegalStateException("TreeJava is already running; use switch");
         if (ticking || callback != Callback.NONE) throw new IllegalStateException("cannot start during an engine tick or bot callback");
         try {
             install(next, "started");
@@ -117,16 +134,22 @@ public final class BehaviorEngine {
     }
 
     public void switchBot(Bot next) {
+        switchBot(next, next instanceof LabBot ? "simulated" : worldKey);
+    }
+
+    public void switchBot(Bot next, String key) {
         checkBot(next);
-        if (!running()) throw new IllegalStateException("TreeJava is not running");
+        if (!running() && !suspended()) throw new IllegalStateException("TreeJava is not running");
         pending.addLast(() -> {
             stopNow(ExitReason.STOPPED, "Switching to " + next.name());
             if (root.stopReport().orElseThrow().reason() == ExitReason.FAULT) {
                 pending.clear();
                 return;
             }
+            bindWorld(key);
             install(next, "switched");
         });
+        if (suspended() && !ticking && callback == Callback.NONE) while (!pending.isEmpty()) pending.removeFirst().run();
     }
 
     private void checkBot(Bot next) {
@@ -159,6 +182,11 @@ public final class BehaviorEngine {
         botContext = context;
         stats = statsByBot.computeIfAbsent(next.name(), name -> new BotStats());
         stats.startSession();
+        if (store != null) {
+            memoryLoad = store.load(worldKey, context.owner());
+            statsLoad = statsRestored.contains(next.name()) ? null : statsReads.computeIfAbsent(next.name(), store::loadStats);
+            loadingAt = -1;
+        }
         ctx.botStats(stats);
         ctx.monitor().configure(context.config().progress());
         ctx.resetSeries();
@@ -245,7 +273,7 @@ public final class BehaviorEngine {
 
     public void tickCaptured(Supplier<Sensors> capture, BooleanSupplier sampleValidity) {
         Objects.requireNonNull(capture);
-        if (!running()) return;
+        if (!running() && !suspended()) return;
         if (ticking) throw new IllegalStateException("reentrant engine tick");
         ticking = true;
         long started = System.nanoTime();
@@ -254,8 +282,25 @@ public final class BehaviorEngine {
             try {
                 clock.advance();
                 Sensors capturedSensors = Objects.requireNonNull(capture.get(), "sensor capture returned null");
-                ctx.bb().world(capturedSensors.dimensionKey() + "/" + capturedSensors.worldId() + "/" + capturedSensors.playerId());
+                ctx.bb().world(store == null ? capturedSensors.dimensionKey() + "/" + capturedSensors.worldId() + "/" + capturedSensors.playerId() : worldKey);
                 ctx.begin(capturedSensors);
+                if (!loadMemory()) { root.sessionCause("loading persistent world"); ctx.end(); return; }
+                if (suspended()) {
+                    if (connectionPhase != ConnectionPhase.CONNECTED) { root.sessionCause("waiting for GameJoined"); ctx.end(); return; }
+                    ResumeGate.Decision decision = session.resume(capturedSensors, clock.nowMs());
+                    root.sessionCause(decision.cause());
+                    if (decision.state() == ResumeGate.State.STOP || decision.state() == ResumeGate.State.DEAD) {
+                        stopNow(decision.state() == ResumeGate.State.DEAD ? ExitReason.DEAD : ExitReason.STOPPED, decision.cause());
+                    } else if (decision.state() == ResumeGate.State.READY) {
+                        ctx.bb().restoreOwner(botOwner);
+                        ctx.resetSeries();
+                        callBot(Callback.RESUME, () -> bot.onResume(botContext));
+                        root.resumeSession();
+                        ctx.event(hooks.build(), Kind.BOT, null, "reconnected", "RESUME gate=ok");
+                    }
+                    ctx.end();
+                    return;
+                }
                 plugins.pulse();
                 long activeBefore = clock.activeMs();
                 try {
@@ -275,6 +320,7 @@ public final class BehaviorEngine {
                 plugins.applyPendingCleanup();
                 ctx.end();
                 ctx.outputs().flush(ctx.tick());
+                if (store != null && clock.tick() - saveAt >= 40) persist();
             } catch (RuntimeException ex) {
                 pending.clear();
                 root.fault(ex);
@@ -317,6 +363,7 @@ public final class BehaviorEngine {
         }
         for (Routine routine : routines) routine.onUninstall(report);
         if (stats != null) stats.stopped(report.reason());
+        persist();
         announced = report;
         stopped.accept(report);
     }
@@ -334,7 +381,89 @@ public final class BehaviorEngine {
     }
 
     private enum Callback {
-        NONE, START, STOP
+        NONE, START, STOP, RESUME
+    }
+
+    public void persistence(PersistentStore store, ResumeGate gate) {
+        if (bot != null) throw new IllegalStateException("connect persistence before starting");
+        this.store = Objects.requireNonNull(store);
+        session.connect(gate);
+    }
+
+    public void bindWorld(String key) {
+        if (running() && !worldKey.equals(key)) throw new IllegalStateException("world must be stopped before rebinding");
+        worldKey = Objects.requireNonNull(key);
+        ctx.bb().world(key);
+    }
+
+    public String worldKey() { return worldKey; }
+    public boolean suspended() { return root.state() == RootState.SUSPENDED; }
+
+    public void disconnected() {
+        if (suspended() || bot == null || !running()) return;
+        if (!bot.config().resumeAfterReconnect()) { stopBot(ExitReason.DISCONNECTED, "Game session ended"); return; }
+        pending.clear();
+        persist();
+        root.suspendSession();
+        connectionPhase = ConnectionPhase.DISCONNECTED;
+        ctx.bb().removeOwner(botOwner);
+        session.worldLost();
+        if (store != null) memoryLoad = store.load(worldKey, botOwner);
+        ctx.event(hooks.build(), Kind.BOT, null, "suspended", "disconnected; all outputs released");
+        ctx.end();
+    }
+
+    public void joined() { if (suspended()) { connectionPhase = ConnectionPhase.CONNECTED; session.worldLost(); } }
+
+    private enum ConnectionPhase { CONNECTED, DISCONNECTED }
+
+    public void tickPost() {
+        if (!running()) return;
+        try { root.tickPost(); ctx.end(); }
+        catch (RuntimeException ex) { fault(ex); }
+    }
+
+    private boolean loadMemory() {
+        if (memoryLoad != null && !memoryLoad.isDone() || statsLoad != null && !statsLoad.isDone()) {
+            if (loadingAt < 0) loadingAt = clock.nowMs();
+            if (clock.nowMs() - loadingAt >= 5_000) stopNow(ExitReason.STOPPED, "Persistent store loading exceeded 5 seconds");
+            return false;
+        }
+        if (memoryLoad != null) {
+            ctx.bb().loadDurable(botOwner, memoryLoad.exceptionally(ex -> Map.of()).join());
+            memoryLoad = null;
+        }
+        if (statsLoad != null) {
+            BotStats.Snapshot stored = statsLoad.exceptionally(ex -> BotStats.EMPTY).join();
+            stats.mergeCumulative(stored.cumulative());
+            statsRestored.add(bot.name());
+            statsLoad = null;
+        }
+        return true;
+    }
+
+    private void persist() {
+        if (store == null || bot == null || stats == null) return;
+        String owner = "bot:" + bot.name();
+        Map<Key<?>, Object> memory = new LinkedHashMap<>(ctx.bb().durable(owner));
+        Map<Key<?>, Object> current = Map.copyOf(memory);
+        BotStats.Snapshot snapshot = stats.snapshot();
+        String key = worldKey;
+        String name = bot.name();
+        long sequence = checkpoint.incrementAndGet();
+        CompletableFuture<Map<Key<?>, Object>> worldRead = memoryLoad == null ? CompletableFuture.completedFuture(Map.of()) : memoryLoad.exceptionally(ex -> Map.of());
+        CompletableFuture<BotStats.Snapshot> totals = statsLoad == null ? CompletableFuture.completedFuture(BotStats.EMPTY) : statsLoad.exceptionally(ex -> BotStats.EMPTY);
+        worldRead.thenCombine(totals, (loaded, previous) -> {
+            if (checkpoint.get() != sequence) return null;
+            Map<Key<?>, Object> merged = new LinkedHashMap<>(loaded);
+            merged.putAll(current);
+            BotStats.Snapshot combined = BotStats.combine(snapshot, previous.cumulative());
+            merged.put(new Key<>("stats", BotStats.Snapshot.class, Scope.WORLD, true), combined);
+            store.save(key, owner, merged);
+            store.saveStats(name, combined);
+            return null;
+        });
+        saveAt = clock.tick();
     }
 
     public EngineSnapshot snapshot() {
@@ -366,6 +495,9 @@ public final class BehaviorEngine {
 
     public void resetStats() {
         statsByBot.values().forEach(BotStats::reset);
+        statsRestored.addAll(statsByBot.keySet());
+        statsLoad = null;
+        persist();
     }
 
     public void registerRoutine(Routine routine) {

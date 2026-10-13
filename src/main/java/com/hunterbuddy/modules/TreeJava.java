@@ -6,9 +6,11 @@ import com.hunterbuddy.behavior.core.Clock;
 import com.hunterbuddy.behavior.core.EngineSnapshot;
 import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.RootState;
+import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
+import com.hunterbuddy.behavior.lab.FlightTask;
 import com.hunterbuddy.behavior.lab.GoToTask;
 import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LabScenario;
@@ -22,22 +24,23 @@ import com.hunterbuddy.behavior.lab.WalkTask;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.BehaviorEvents;
 import com.hunterbuddy.behavior.mc.BehaviorMessages;
+import com.hunterbuddy.behavior.mc.FlightBridge;
 import com.hunterbuddy.behavior.mc.InventoryBridge;
 import com.hunterbuddy.behavior.mc.LabSettings;
 import com.hunterbuddy.behavior.mc.McSensors;
 import com.hunterbuddy.behavior.mc.MiningBridge;
 import com.hunterbuddy.behavior.mc.PlacementBridge;
+import com.hunterbuddy.behavior.mc.ResumeGate;
 import com.hunterbuddy.behavior.mc.ServerFacts;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.nodes.KeepFlying;
-import com.hunterbuddy.behavior.nodes.Landing;
-import com.hunterbuddy.behavior.nodes.WithLease;
+import com.hunterbuddy.behavior.persist.PersistentStore;
 import com.hunterbuddy.behavior.plugin.AlertPlugin;
 import com.hunterbuddy.behavior.plugin.PlayerWatchPlugin;
 import com.hunterbuddy.behavior.plugin.StatsPlugin;
 import com.hunterbuddy.behavior.resource.BaritoneOutput;
 import com.hunterbuddy.behavior.resource.ConsumablePolicy;
-import com.hunterbuddy.behavior.resource.LeasePolicy;
+import com.hunterbuddy.behavior.resource.ElytraOutput;
 import com.hunterbuddy.behavior.resource.LookIntent;
 import com.hunterbuddy.behavior.resource.LookOutput;
 import com.hunterbuddy.behavior.resource.MovementOutput;
@@ -92,6 +95,8 @@ public final class TreeJava extends Module {
     private final MiningBridge mining = new MiningBridge(world, baritone, engine.outputs()::ownBaritone);
     private final PlacementBridge placement = new PlacementBridge(world, engine.outputs(), consumables);
     private final InventoryBridge inventory = new InventoryBridge(world, serverFacts::tick, alerts::notify);
+    private final FlightBridge flight = new FlightBridge(world, consumables, engine.outputs(), baritone);
+    private final PersistentStore store = new PersistentStore(MeteorClient.FOLDER.toPath().resolve("hunterbuddy/bt"));
     private final Map<Hook, Setting<GateMode>> routineSelection = new EnumMap<>(Hook.class);
     private final Map<String, Setting<Boolean>> pluginSelection = new java.util.LinkedHashMap<>();
     private LabTask requestedTask;
@@ -106,9 +111,11 @@ public final class TreeJava extends Module {
         engine.outputs().connectBaritone(new BaritoneOutput(baritone, engine.leases(), consumables, serverFacts::tick));
         engine.outputs().connectMinecraft(mining, placement);
         engine.outputs().connectInventory(inventory);
+        engine.outputs().connectFlight(flight, new ElytraOutput(baritone, world));
+        engine.persistence(store, new ResumeGate(world, this::resumeRefusal));
         engine.gates().connect(mining::ownsMining, engine.outputs()::ownBaritone);
         mcSensors.screenOwner(inventory::isOurs);
-        engine.flightKeeper(new Landing(new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT, new KeepFlying(engine.outputs()))));
+        engine.flightKeeper(new KeepFlying(world, baritone, engine.outputs()));
         engine.registerRoutine(new GateSurvivalRoutine());
         engine.registerRoutine(new GateCombatRoutine(world, baritone, engine.outputs()));
         engine.registerRoutine(new GateRegearRoutine());
@@ -133,6 +140,7 @@ public final class TreeJava extends Module {
         MeteorClient.EVENT_BUS.subscribe(mining);
         MeteorClient.EVENT_BUS.subscribe(placement);
         MeteorClient.EVENT_BUS.subscribe(inventory);
+        MeteorClient.EVENT_BUS.subscribe(flight);
         MeteorClient.EVENT_BUS.subscribe(new BehaviorEvents(this));
     }
 
@@ -140,6 +148,7 @@ public final class TreeJava extends Module {
     public void onActivate() {
         try {
             jsonl.session("lab");
+            engine.bindWorld(requestedTask == null ? "simulated" : world.storageKey());
             if (requestedTask == null) engine.startBot(engine.bots().create("lab"));
             else {
                 requireLive(requestedTask);
@@ -212,6 +221,21 @@ public final class TreeJava extends Module {
         startLive(new OpenTask(new BlockPos(x, y, z), baritone));
     }
 
+    public void flightLab(String scenario) { startLive(new FlightTask(scenario, baritone)); }
+
+    private String resumeRefusal(Sensors sensors) {
+        LiveLabBot live = engine.liveLab();
+        String refused = world.refusal(live == null ? Set.of() : live.resources(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
+        if (refused != null) return refused;
+        if (sensors.eating()) return "AutoEatSync eating";
+        if (sensors.combatTarget()) return "KillAuraPlus combat target";
+        if (sensors.regearRunning() || sensors.regearPending()) return "AutoFlyingRegear running or pending";
+        if (sensors.mlepMining() && !mining.ownsMining()) return "HMine foreign mining";
+        if (labSettings.pauseOnPlayer() && sensors.playersVisible() > 0) return "another player visible";
+        if (engine.outputs().foreignMovement()) return "foreign forced movement";
+        return null;
+    }
+
     private void requireLive(LabTask task) {
         String refusal = world.refusal(task.resources(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
         if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
@@ -223,7 +247,7 @@ public final class TreeJava extends Module {
     private void startLive(LabTask task) {
         requireLive(task);
         if (isActive()) {
-            engine.switchBot(new LiveLabBot(labSettings, task, world, engine.outputs()));
+            engine.switchBot(new LiveLabBot(labSettings, task, world, engine.outputs()), world.storageKey());
             return;
         }
         requestedTask = task;
@@ -243,6 +267,7 @@ public final class TreeJava extends Module {
     }
 
     public void stopEngine(ExitReason reason, String detail) {
+        if (reason == ExitReason.WORLD_CHANGED) engine.outputs().worldLost();
         engine.stopBot(reason, detail);
         if (isActive()) disable();
     }
@@ -256,7 +281,12 @@ public final class TreeJava extends Module {
             if (!isActive()) return;
             LiveLabBot live = engine.liveLab();
             if (live == null) engine.tick();
-            else if (!world.available()) stopEngine(ExitReason.DISCONNECTED, "Minecraft world became unavailable");
+            else if (!world.available()) engine.disconnected();
+            else if (engine.suspended()) {
+                Sensors captured = mcSensors.capture();
+                if (!captured.inQueue() && !engine.worldKey().equals(world.storageKey())) stopEngine(ExitReason.WORLD_CHANGED, "Reconnected into another server or dimension");
+                else engine.tickCaptured(() -> captured, serverFacts::samplesValid);
+            }
             else if (!live.identity().equals(world.identity())) stopEngine(ExitReason.WORLD_CHANGED, "Live laboratory world or player changed");
             else {
                 String refusal = world.refusal(live.resources(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
@@ -283,6 +313,7 @@ public final class TreeJava extends Module {
     public List<String> outputStatus() {
         List<String> lines = new ArrayList<>(engine.outputs().status());
         lines.add(jsonl.status());
+        lines.add(store.status());
         return List.copyOf(lines);
     }
 
@@ -290,6 +321,7 @@ public final class TreeJava extends Module {
         List<String> lines = new ArrayList<>(engine.why());
         lines.add(inventory.status());
         lines.add(jsonl.status());
+        lines.add(store.status());
         return List.copyOf(lines);
     }
     public List<String> routineStatus() { return engine.routineStatus(); }
@@ -321,8 +353,20 @@ public final class TreeJava extends Module {
         mining.worldLost();
         placement.worldLost();
         inventory.worldLost();
-        engine.outputs().discardSlot();
-        stopEngine(ExitReason.DISCONNECTED, "Game session ended");
+        engine.outputs().worldLost();
+        engine.disconnected();
+        if (isActive() && engine.snapshot().state() == RootState.STOPPED) disable();
+    }
+
+    public void worldJoined() { engine.joined(); }
+
+    public void tickPost() {
+        if (!isActive() || !world.available() || engine.suspended()) return;
+        LiveLabBot live = engine.liveLab();
+        if (live == null || !live.identity().equals(world.identity())) return;
+        if (world.legacyRegear()) { flight.cancel(); return; }
+        engine.tickPost();
+        if (engine.snapshot().state() == RootState.STOPPED) disable();
     }
 
     public boolean hudEnabled() {

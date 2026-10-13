@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.resource;
 
+import com.hunterbuddy.behavior.mc.FlightBridge;
 import com.hunterbuddy.behavior.mc.InventoryBridge;
 import com.hunterbuddy.behavior.mc.MiningBridge;
 import com.hunterbuddy.behavior.mc.PlacementBridge;
@@ -9,6 +10,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import net.minecraft.util.math.BlockPos;
 
 public final class Outputs {
     private final Leases leases;
@@ -23,6 +25,8 @@ public final class Outputs {
     private MiningBridge mining;
     private PlacementBridge placement;
     private InventoryBridge inventory;
+    private FlightBridge flight;
+    private ElytraOutput elytra;
     private LongSupplier nativeTicks;
     private MovementIntent movement;
     private LookIntent look;
@@ -69,6 +73,8 @@ public final class Outputs {
 
     private boolean releaseReady(Lease lease) {
         boolean pathReady = !lease.resources().contains(Resource.BARITONE) || baritoneOutput.stop(lease);
+        if (elytra != null) pathReady &= elytra.stop(lease);
+        if (flight != null) flight.release(lease);
         boolean inventoryReady = inventory == null || !lease.resources().contains(Resource.INVENTORY) || inventory.release(lease);
         return pathReady && inventoryReady;
     }
@@ -76,6 +82,22 @@ public final class Outputs {
     public InventoryBridge inventory() {
         return Objects.requireNonNull(inventory, "Inventory bridge is not connected");
     }
+
+    public void connectFlight(FlightBridge flight, ElytraOutput elytra) {
+        if (this.flight != null) throw new IllegalStateException("flight bridges already connected");
+        this.flight = Objects.requireNonNull(flight);
+        this.elytra = Objects.requireNonNull(elytra);
+    }
+
+    public FlightBridge flight() { return Objects.requireNonNull(flight, "flight bridge not connected"); }
+    public void elytra(String owner, BlockPos destination, boolean rockets) {
+        Lease lease = requireLease(owner, Resource.BARITONE);
+        if (rockets) requireLease(owner, Resource.ROCKETS);
+        Objects.requireNonNull(elytra).apply(lease, destination, rockets);
+    }
+    public boolean ownElytra() { return elytra != null && elytra.owns(); }
+    public boolean landingFlight() { return elytra != null && elytra.noRockets(); }
+    public BlockPos lastGoal() { return baritoneOutput == null ? null : baritoneOutput.lastGoal(); }
 
     public void connectMinecraft(MiningBridge mining, PlacementBridge placement) {
         if (this.mining != null) throw new IllegalStateException("Minecraft bridges already connected");
@@ -108,11 +130,12 @@ public final class Outputs {
     }
 
     public boolean ownBaritone() {
-        return baritoneOutput != null && baritoneOutput.ownsControl();
+        return ownElytra() || baritoneOutput != null && baritoneOutput.ownsControl();
     }
 
     public void advanceNative() {
         if (baritoneOutput != null) baritoneOutput.advance();
+        if (elytra != null) elytra.advance();
         if (inventory != null) inventory.advance();
         if (leases instanceof ResourceArbiter arbiter) arbiter.advanceClosing();
     }
@@ -124,17 +147,20 @@ public final class Outputs {
         if (slotOutput != null) slotOutput.discard();
         if (mining != null) mining.releaseClick();
         if (inventory != null) inventory.suspend();
-        if (baritoneOutput != null) baritoneOutput.suspend(borrowed);
+        if (baritoneOutput != null) baritoneOutput.suspend(borrowed && (elytra == null || !elytra.attached()));
+        if (elytra != null) elytra.suspend(borrowed);
+        if (flight != null) flight.cancel();
     }
 
     public boolean resume() {
         if (baritoneOutput != null && !baritoneOutput.resume()) return false;
+        if (elytra != null && !elytra.resume()) return false;
         if (inventory != null) inventory.resume();
         return true;
     }
 
     public boolean borrowedBaritone() {
-        return baritoneOutput != null && baritoneOutput.borrowed();
+        return elytra != null && elytra.borrowed() || baritoneOutput != null && baritoneOutput.borrowed();
     }
 
     public void movement(String owner, MovementIntent intent) {
@@ -189,7 +215,7 @@ public final class Outputs {
     }
 
     public boolean foreignMovement() {
-        return !ownBaritone() && !borrowedBaritone() && movementOutput != null && movementOutput.foreignInput();
+        return !ownBaritone() && !borrowedBaritone() && (flight == null || !flight.ownsMovement()) && movementOutput != null && movementOutput.foreignInput();
     }
 
     public void discardSlot() {
@@ -199,6 +225,7 @@ public final class Outputs {
     public List<String> status() {
         List<String> lines = new ArrayList<>();
         if (inventory != null) lines.add(inventory.status());
+        if (elytra != null && elytra.status() != null) lines.add(elytra.status());
         if (baritoneOutput != null && baritoneOutput.status() != null) lines.add(baritoneOutput.status());
         if (movement != null && valid(movementLease, Resource.MOVEMENT)) lines.add("MOVEMENT " + movementLease.owner() + " " + movement);
         if (look != null && valid(lookLease, Resource.LOOK)) lines.add("LOOK " + lookLease.owner() + " " + look);
@@ -212,6 +239,8 @@ public final class Outputs {
 
     public void release(long tick) {
         clear();
+        if (flight != null) flight.cancel();
+        if (elytra != null) elytra.release();
         if (inventory != null) inventory.stop();
         if (nativeTicks != null) tick = nativeTicks.getAsLong();
         RuntimeException failure = null;
@@ -251,5 +280,12 @@ public final class Outputs {
         baritone = null;
         baritoneLease = null;
         baritoneEvents = null;
+    }
+
+    public void worldLost() {
+        if (flight != null) flight.cancel();
+        if (elytra != null) elytra.release();
+        if (baritoneOutput != null) baritoneOutput.worldLost();
+        discardSlot();
     }
 }

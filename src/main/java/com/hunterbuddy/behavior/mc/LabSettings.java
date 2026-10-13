@@ -13,6 +13,7 @@ public final class LabSettings {
     private final Consumer<LabScenario> changed;
     private Setting<LabScenario> scenario;
     private Setting<Boolean> pauseOnPlayer;
+    private Setting<Boolean> resumeAfterReconnect;
 
     public LabSettings(LabScenario defaultScenario) {
         this(defaultScenario, null);
@@ -33,9 +34,12 @@ public final class LabSettings {
         scenario = settings.add(builder.build());
         pauseOnPlayer = settings.add(new BoolSetting.Builder().name("pause-on-player")
             .description("Pause LabBot while another player is visible.").defaultValue(true).build());
+        resumeAfterReconnect = settings.add(new BoolSetting.Builder().name("resume-after-reconnect")
+            .description("Resume live LabBot tasks after the reconnect safety gate opens.").defaultValue(true).build());
     }
 
     public boolean pauseOnPlayer() { return pauseOnPlayer == null || pauseOnPlayer.get(); }
+    public boolean resumeAfterReconnect() { return resumeAfterReconnect == null || resumeAfterReconnect.get(); }
 
     public LabScenario scenario() {
         return scenario == null ? defaultScenario : scenario.get();

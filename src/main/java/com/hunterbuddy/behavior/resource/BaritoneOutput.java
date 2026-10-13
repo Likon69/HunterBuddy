@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.resource;
 
 import baritone.api.Settings;
+import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.BaritoneSnapshot;
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import net.minecraft.block.Block;
 import net.minecraft.item.Item;
+import net.minecraft.util.math.BlockPos;
 
 public final class BaritoneOutput {
     private final BaritoneBridge bridge;
@@ -27,6 +29,7 @@ public final class BaritoneOutput {
     private long revokingAt;
     private long pausedAt;
     private boolean graceReported;
+    private BlockPos lastGoal;
 
     public BaritoneOutput(BaritoneBridge bridge, Leases leases, ConsumablePolicy consumables, LongSupplier ticks) {
         this.bridge = Objects.requireNonNull(bridge);
@@ -44,6 +47,7 @@ public final class BaritoneOutput {
         if (stage != Stage.IDLE) throw new IllegalStateException("Baritone goal still owns its lease");
         lease = current;
         intent = desired;
+        if (desired.goal() instanceof GoalBlock block) lastGoal = new BlockPos(block.x, block.y, block.z);
         this.events = Objects.requireNonNull(events);
         settings = bridge.settings();
         saved = new Saved(settings.allowBreak.value, settings.allowPlace.value,
@@ -124,6 +128,14 @@ public final class BaritoneOutput {
         if (lease != null) stop(lease);
     }
 
+    public void worldLost() {
+        lastGoal = null;
+        if (lease == null) { stage = Stage.IDLE; return; }
+        bridge.pause(false);
+        if (bridge.belongsTo(intent.goal())) { bridge.forceCancel(); bridge.clearInputs(); }
+        finish(false);
+    }
+
     public void suspend(boolean borrowed) {
         if (stage == Stage.IDLE || stage == Stage.BORROWED) {
             if (borrowed) stage = Stage.BORROWED;
@@ -202,6 +214,8 @@ public final class BaritoneOutput {
         if (stage == Stage.BORROWED) return "BARITONE waiting for legacy handoff";
         return stage == Stage.IDLE ? null : "BARITONE " + lease.owner() + " " + stage + " " + intent.goal();
     }
+
+    public BlockPos lastGoal() { return lastGoal; }
 
     private void restoreSettings() {
         if (Objects.equals(settings.allowBreak.value, intent.allowBreak())) settings.allowBreak.value = saved.allowBreak();

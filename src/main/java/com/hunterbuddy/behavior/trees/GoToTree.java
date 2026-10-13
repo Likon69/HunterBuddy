@@ -96,6 +96,27 @@ public final class GoToTree {
         };
     }
 
+    public static Node build(Key<TargetPoint> targetKey, double radius, WorldReader world, BaritoneBridge baritone, Outputs outputs) {
+        return new Node("dynamic-goto") {
+            private Node child;
+            @Override
+            public java.util.List<Node> children() { return child == null ? java.util.List.of() : java.util.List.of(child); }
+            @Override
+            protected void onStart(TickContext ctx) { child = null; }
+            @Override
+            protected NodeResult onTick(TickContext ctx) {
+                if (child == null) {
+                    TargetPoint target = ctx.bb().get(ctx.owner(), targetKey).orElse(null);
+                    if (target == null) return fail(FailureCode.NO_OPTION, "goto target missing");
+                    child = GoToTree.build(targetKey, target, radius, world, baritone, outputs);
+                    com.hunterbuddy.behavior.core.TreeValidator.validate(child);
+                    com.hunterbuddy.behavior.core.TreeValidator.bind(child, path() + "/instance", ctx.owner(), hook());
+                }
+                return child.execute(ctx);
+            }
+        };
+    }
+
     private static BlockPos front(TickContext ctx, TargetPoint target) {
         double dx = target.x() - ctx.sensors().x();
         double dz = target.z() - ctx.sensors().z();
@@ -114,6 +135,7 @@ public final class GoToTree {
 
         @Override
         protected NodeResult onTick(TickContext ctx) {
+            ctx.bb().set(ctx.owner(), TickContext.CURRENT_TARGET, target.toString());
             ctx.goalDistance(target.toString(), Conditions.distance(ctx.sensors(), target));
             NodeResult result = child().execute(ctx);
             return result instanceof Failure ? fail(FailureCode.UNREACHABLE, "all options spent") : result;

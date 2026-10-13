@@ -27,6 +27,7 @@ public final class Blackboard {
 
     public void remove(String owner, Key<?> key) {
         values(owner, key.scope()).remove(key);
+        if (key.durable()) values(owner, Scope.WORLD).remove(key);
     }
 
     public void openTask(String owner) {
@@ -60,6 +61,20 @@ public final class Blackboard {
         values(owner, Scope.WORLD).forEach((key, value) -> {
             if (key.durable() && key.scope() == Scope.OWNER) values(owner, Scope.OWNER).put(key, value);
         });
+    }
+
+    public Map<Key<?>, Object> durable(String owner) {
+        Map<Key<?>, Object> durable = new HashMap<>(values(owner, Scope.WORLD));
+        values(owner, Scope.OWNER).forEach((key, value) -> { if (key.durable()) durable.put(key, value); });
+        durable.entrySet().removeIf(entry -> !entry.getKey().durable());
+        return Map.copyOf(durable);
+    }
+
+    public void loadDurable(String owner, Map<Key<?>, Object> memory) {
+        memory.forEach((key, value) -> {
+            if (key.durable() && key.scope() != Scope.TASK) values(owner, Scope.WORLD).put(key, key.type().cast(value));
+        });
+        restoreOwner(owner);
     }
 
     private Map<Key<?>, Object> values(String owner, Scope scope) {

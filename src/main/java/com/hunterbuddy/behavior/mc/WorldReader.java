@@ -28,10 +28,14 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.WorldSavePath;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Heightmap;
 
 public final class WorldReader {
     private static final Set<Class<? extends Module>> REFUSED = Set.of(SpawnerDetector.class, WaypointFollower.class,
@@ -50,6 +54,27 @@ public final class WorldReader {
 
     public WorldIdentity identity() {
         return WorldIdentity.capture(client);
+    }
+
+    public String storageKey() {
+        if (!available()) throw new IllegalStateException("Minecraft world is unavailable");
+        String server = client.getCurrentServerEntry() != null ? client.getCurrentServerEntry().address
+            : client.getServer() != null ? "sp:" + client.getServer().getSavePath(WorldSavePath.ROOT).toAbsolutePath().normalize() : null;
+        if (server == null) throw new IllegalStateException("server identity is unavailable");
+        return server + "/" + identity().dimensionKey();
+    }
+
+    public boolean loadedRadiusOne() {
+        if (!available() || !client.player.isAlive()) return false;
+        BlockPos feet = feet();
+        for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+            if (!client.world.getChunkManager().isChunkLoaded((feet.getX() >> 4) + dx, (feet.getZ() >> 4) + dz)) return false;
+        }
+        return true;
+    }
+
+    public boolean elytraEquipped() {
+        return available() && LivingEntity.canGlideWith(client.player.getEquippedStack(EquipmentSlot.CHEST), EquipmentSlot.CHEST);
     }
 
     MinecraftClient client() {
@@ -119,6 +144,24 @@ public final class WorldReader {
             if (stack.isOf(item)) count += stack.getCount();
         }
         return count;
+    }
+
+    public int countMatching(Predicate<ItemStack> filter) {
+        if (!available()) return 0;
+        int count = 0;
+        for (int slot = 0; slot < client.player.getInventory().size(); slot++) {
+            ItemStack stack = client.player.getInventory().getStack(slot);
+            if (filter.test(stack)) count += stack.getCount();
+        }
+        return count;
+    }
+
+    public BlockPos surface(int x, int z) {
+        BlockPos column = new BlockPos(x, feet().getY(), z);
+        if (!loaded(column)) return null;
+        BlockPos point = new BlockPos(x, client.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z), z);
+        if (!inBounds(point.up(2)) || !state(point).isAir() || !state(point.up()).isAir() || !state(point.up(2)).isAir()) return null;
+        return state(point.down()).getFluidState().isEmpty() && !cleared(point.down()) ? point : null;
     }
 
     public boolean matchesSlot(int slot, Predicate<ItemStack> filter) {

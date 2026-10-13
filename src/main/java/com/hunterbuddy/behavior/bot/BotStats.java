@@ -19,6 +19,14 @@ public final class BotStats {
         session = new Counters();
     }
 
+    public void mergeCumulative(Values previous) { cumulative.merge(new Counters(previous)); }
+
+    public static Snapshot combine(Snapshot current, Values previous) {
+        Counters total = new Counters(current.cumulative());
+        total.merge(new Counters(previous));
+        return new Snapshot(current.session(), total.snapshot());
+    }
+
     public void reset() {
         session = new Counters();
         cumulative = new Counters();
@@ -102,9 +110,32 @@ public final class BotStats {
         private long faults;
         private final Map<String, Double> metrics = new LinkedHashMap<>();
 
+        private Counters() {
+        }
+
+        private Counters(Values values) {
+            activeMs = Math.max(0, values.activeMs());
+            values.hookMs().forEach((key, value) -> { if (value >= 0) hookMs.put(key, value); });
+            values.proofs().forEach((key, value) -> { if (value >= 0) proofs.put(key, value); });
+            values.gains().forEach((key, value) -> { if (Double.isFinite(value) && value >= 0) gains.put(key, value); });
+            deaths = Math.max(0, values.deaths());
+            faults = Math.max(0, values.faults());
+            values.metrics().forEach((key, value) -> { if (Double.isFinite(value) && value >= 0) metrics.put(key, value); });
+        }
+
         private void sampleTime(long elapsedMs, Hook hook) {
             activeMs += elapsedMs;
             if (elapsedMs > 0 && hook != null) hookMs.merge(hook, elapsedMs, Long::sum);
+        }
+
+        private void merge(Counters other) {
+            activeMs += other.activeMs;
+            deaths += other.deaths;
+            faults += other.faults;
+            other.hookMs.forEach((key, value) -> hookMs.merge(key, value, Long::sum));
+            other.proofs.forEach((key, value) -> proofs.merge(key, value, Long::sum));
+            other.gains.forEach((key, value) -> gains.merge(key, value, Double::sum));
+            other.metrics.forEach((key, value) -> metrics.merge(key, value, Double::sum));
         }
 
         private void evidence(ProgressEvidence evidence) {

@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.mc;
 
 import com.hunterbuddy.modules.TreeJava;
+import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.orbit.EventHandler;
@@ -22,4 +23,10 @@ public final class BehaviorEvents {
     private void onGameLeft(GameLeftEvent event) {
         module.worldLost();
     }
+
+    @EventHandler
+    private void onGameJoined(GameJoinedEvent event) { module.worldJoined(); }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    private void onTickPost(TickEvent.Post event) { module.tickPost(); }
 }

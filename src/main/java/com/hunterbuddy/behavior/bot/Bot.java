@@ -14,5 +14,7 @@ public interface Bot {
     BotConfig config();
     void onStart(BotContext context);
     void onStop(StopReport report);
+    default void onResume(BotContext context) {
+    }
     BotStatus status();
 }
