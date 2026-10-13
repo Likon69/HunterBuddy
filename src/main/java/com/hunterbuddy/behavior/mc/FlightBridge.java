@@ -10,6 +10,10 @@ import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.util.Rockets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.IntSupplier;
 import meteordevelopment.meteorclient.events.entity.player.InteractItemEvent;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
@@ -29,6 +33,9 @@ public final class FlightBridge {
     private long preAt = -1;
     private long postAt = -1;
     private boolean waterJump;
+    private String pilot;
+    private String requestedPilot;
+    private final Map<String, Integer> landings = new HashMap<>();
 
     public FlightBridge(WorldReader world, ConsumablePolicy consumables, Outputs outputs, BaritoneBridge baritone) {
         this.world = world; this.consumables = consumables; this.outputs = outputs; this.baritone = baritone;
@@ -83,6 +90,7 @@ public final class FlightBridge {
 
     public boolean rocket(TickContext ctx, int slot) {
         require(ctx, Resource.SLOT, Resource.ROCKETS, Resource.INTERACT);
+        if (ctx.landing() || landing()) return false;
         if (!world.available() || !world.client().player.isGliding() || !world.matchesSlot(slot, Rockets::isPlain) || !consumables.rocket()) return false;
         return world.client().interactionManager.interactItem(world.client().player, Hand.MAIN_HAND).isAccepted();
     }
@@ -104,12 +112,63 @@ public final class FlightBridge {
     public boolean running() { return stage == Stage.ACTIVE; }
     public String failure() { return stage == Stage.FAILED ? failure : null; }
 
+    public void claim(String owner, IntSupplier reserve) {
+        if (pilot != null || requestedPilot != null && !requestedPilot.equals(owner)) {
+            throw new IllegalStateException("another subtree already owns flight");
+        }
+        consumables.claimFlight(owner, reserve);
+        pilot = owner;
+        requestedPilot = null;
+    }
+
+    public void requestPilot(String owner) {
+        if (Objects.equals(pilot, owner)) return;
+        if (pilot != null || requestedPilot != null && !requestedPilot.equals(owner)) {
+            throw new IllegalStateException("another subtree already requested flight");
+        }
+        requestedPilot = owner;
+    }
+
+    public void releasePilot(String owner) {
+        if (Objects.equals(requestedPilot, owner)) requestedPilot = null;
+        if (!Objects.equals(pilot, owner)) return;
+        pilot = null;
+        consumables.releaseFlight(owner);
+    }
+
+    public boolean claimed() { return pilot != null || requestedPilot != null; }
+
+    public boolean ownsPilot(String owner) { return Objects.equals(pilot, owner); }
+
+    public void stopPilots() {
+        if (pilot != null) releasePilot(pilot);
+        requestedPilot = null;
+        landings.clear();
+    }
+
+    public int minimumRockets() { return consumables.minimumRockets(); }
+
+    public void enterLanding(String owner) {
+        landings.merge(owner, 1, Integer::sum);
+    }
+
+    public void leaveLanding(String owner) {
+        landings.computeIfPresent(owner, (key, depth) -> depth == 1 ? null : depth - 1);
+    }
+
+    public boolean landing() { return !landings.isEmpty(); }
+
     @EventHandler(priority = EventPriority.LOWEST)
     private void interact(InteractItemEvent event) {
-        if (!world.available() || world.legacyRegear() || !world.client().player.getStackInHand(event.hand).isOf(Items.FIREWORK_ROCKET)) return;
-        boolean owned = outputs.ownElytra() || stage == Stage.ACTIVE;
+        if (!world.available() || !world.client().player.getStackInHand(event.hand).isOf(Items.FIREWORK_ROCKET)) return;
+        if (landing() || claimed() && !consumables.rocket()) {
+            event.toReturn = ActionResult.FAIL;
+            return;
+        }
+        if (world.legacyRegear()) return;
+        boolean owned = claimed() || landing() || outputs.ownElytra() || stage == Stage.ACTIVE;
         if (owned && (!Rockets.isPlain(world.client().player.getStackInHand(event.hand)) || !consumables.rocket() || outputs.landingFlight()
-            || stage == Stage.ACTIVE && (lease == null || lease.state() != LeaseState.GRANTED))) {
+            || landing() || stage == Stage.ACTIVE && (lease == null || lease.state() != LeaseState.GRANTED))) {
             event.toReturn = ActionResult.FAIL;
         }
     }

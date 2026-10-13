@@ -31,6 +31,10 @@ public final class StopBot extends Node {
         return new StopBot(ExitReason.STOPPED, reason);
     }
 
+    public static StopBot withReason(ExitReason exitReason, Function<TickContext, String> reason) {
+        return new StopBot(exitReason, reason);
+    }
+
     private static Function<TickContext, String> fixedReason(String reason) {
         Objects.requireNonNull(reason);
         return ctx -> reason;

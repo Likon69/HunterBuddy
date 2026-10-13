@@ -11,6 +11,13 @@ public final class Landing extends Decorator {
     }
 
     @Override
+    protected void onStart(TickContext ctx) {
+        String owner = ctx.owner();
+        ctx.outputs().flight().enterLanding(owner);
+        activation().defer(() -> ctx.outputs().flight().leaveLanding(owner));
+    }
+
+    @Override
     protected NodeResult onTick(TickContext ctx) {
         return child().execute(ctx);
     }

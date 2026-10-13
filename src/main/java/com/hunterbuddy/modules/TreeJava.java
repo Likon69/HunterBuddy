@@ -20,6 +20,7 @@ import com.hunterbuddy.behavior.farmer.FarmerZoneReport;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
 import com.hunterbuddy.behavior.lab.FlightTask;
+import com.hunterbuddy.behavior.lab.FlyToTask;
 import com.hunterbuddy.behavior.lab.GoToTask;
 import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LabScenario;
@@ -302,6 +303,12 @@ public final class TreeJava extends Module {
     }
 
     public void flightLab(String scenario) { startLive(new FlightTask(scenario, baritone)); }
+
+    public void flyToLab(int x, int z) {
+        if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
+        BlockPos home = world.feet();
+        startLive(new FlyToTask(new BlockPos(x, home.getY(), z), home, world.storageKey(), baritone));
+    }
 
     public void logisticsLab(String scenario, String profileKey) {
         if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");

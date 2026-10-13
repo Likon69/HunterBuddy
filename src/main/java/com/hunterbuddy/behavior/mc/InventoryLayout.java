@@ -14,6 +14,11 @@ public final class InventoryLayout {
     private final WorldReader world;
     private final List<Predicate<ItemStack>> plan;
 
+    public InventoryLayout(WorldReader world) {
+        this.world = world;
+        plan = List.of();
+    }
+
     public InventoryLayout(WorldReader world, FarmerProfile profile) {
         this.world = world;
         net.minecraft.registry.tag.TagKey<net.minecraft.item.Item> toolTag = switch (profile.tool()) {

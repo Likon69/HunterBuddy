@@ -239,7 +239,10 @@ public final class Outputs {
 
     public void release(long tick) {
         clear();
-        if (flight != null) flight.cancel();
+        if (flight != null) {
+            flight.cancel();
+            flight.stopPilots();
+        }
         if (elytra != null) elytra.release();
         if (inventory != null) inventory.stop();
         if (nativeTicks != null) tick = nativeTicks.getAsLong();

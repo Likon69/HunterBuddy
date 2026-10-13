@@ -29,7 +29,8 @@ public final class FlightKeeperRoutine extends CoreRoutine {
 
     @Override
     protected List<HookEntry> buildEntries(RoutineContext context) {
-        HookEntry entry = entry(new Condition("unclaimed flight", sensors -> sensors.gliding() && sensors.movementHolder() == null),
+        HookEntry entry = entry(new Condition("unclaimed flight", sensors -> sensors.gliding() && sensors.movementHolder() == null
+            && !context.ticks().outputs().flight().claimed()),
             new FlightTask(new Timeout(12_000, keepFlying)));
         String owner = entry.owner();
         entry.guard().stayWhile(new Condition("unclaimed or retained flight", sensors -> sensors.gliding()

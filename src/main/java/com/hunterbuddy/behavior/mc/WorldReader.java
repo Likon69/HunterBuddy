@@ -6,6 +6,7 @@ import com.hunterbuddy.modules.AutoFlyingRegear;
 import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
+import com.hunterbuddy.modules.ElytraSwap;
 import com.hunterbuddy.modules.MlepAirPlace;
 import com.hunterbuddy.modules.MlepScaffold;
 import com.hunterbuddy.modules.Pitch40;
@@ -24,6 +25,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.systems.modules.movement.elytrafly.ElytraFly;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.client.MinecraftClient;
@@ -39,8 +41,8 @@ import net.minecraft.world.Heightmap;
 public final class WorldReader {
     private static final Set<Class<? extends Module>> REFUSED = Set.of(SpawnerDetector.class, WaypointFollower.class,
         TrailFollower.class, AreaLoader.class, RocketFly.class, Pitch40.class, Pitch40Classic.class, ElytraRecast.class,
-        ElytraBounce.class, AutoPortal.class, MlepScaffold.class, MlepAirPlace.class, PearlButler.class, ShulkerSorter.class,
-        ExperienceTraderModule.class, ExperienceTraderStarterModule.class);
+        ElytraBounce.class, ElytraSwap.class, AutoPortal.class, MlepScaffold.class, MlepAirPlace.class, PearlButler.class, ShulkerSorter.class,
+        ExperienceTraderModule.class, ExperienceTraderStarterModule.class, ElytraFly.class);
     private final MinecraftClient client;
 
     public WorldReader(MinecraftClient client) {

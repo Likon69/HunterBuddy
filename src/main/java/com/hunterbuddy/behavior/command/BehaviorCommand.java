@@ -59,6 +59,11 @@ public final class BehaviorCommand extends Command {
         builder.then(literal("farmer").then(literal("zone").executes(context -> control(() ->
             module().farmerZoneStatus().forEach(line -> info("%s", line))))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
+        lab.then(literal("flyto").then(argument("x", IntegerArgumentType.integer())
+            .then(argument("z", IntegerArgumentType.integer()).executes(context -> control(() -> {
+                module().flyToLab(IntegerArgumentType.getInteger(context, "x"), IntegerArgumentType.getInteger(context, "z"));
+                info("Live flight round trip requested.");
+            })))));
         for (String scenario : java.util.List.of("store", "regear")) {
             lab.then(literal(scenario).then(argument("profile", StringArgumentType.word()).executes(context -> control(() -> {
                 module().logisticsLab(scenario, StringArgumentType.getString(context, "profile"));

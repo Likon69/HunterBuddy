@@ -21,6 +21,7 @@ import com.hunterbuddy.behavior.resource.MovementIntent;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
+import java.util.function.Supplier;
 import net.minecraft.util.math.BlockPos;
 
 public final class KeepFlying extends Composite {
@@ -31,14 +32,20 @@ public final class KeepFlying extends Composite {
     private final BaritoneBridge bridge;
     private final Outputs outputs;
     private Stage stage;
+    private final Supplier<BlockPos> preferred;
 
     public KeepFlying(WorldReader world, BaritoneBridge bridge, Outputs outputs) {
+        this(world, bridge, outputs, null);
+    }
+
+    public KeepFlying(WorldReader world, BaritoneBridge bridge, Outputs outputs, Supplier<BlockPos> preferred) {
         super("keep-flying",
             new Timeout(2_400, new Sequence("landing-probe", new SetValue<>(ORIGIN, ctx -> world.feet()),
                 new FindTakeoffPoints(ORIGIN, POINTS, world))),
             new Landing(new WithLease(Set.of(Resource.BARITONE), LeasePolicy.WAIT, new Pilot(world, bridge, outputs, true))),
             new Landing(new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT, new Pilot(world, bridge, outputs, false))));
         this.world = world; this.bridge = bridge; this.outputs = outputs;
+        this.preferred = preferred;
     }
 
     @Override
@@ -54,14 +61,14 @@ public final class KeepFlying extends Composite {
                 return flight instanceof Failure ? flight : result;
             }
             children().get(2).halt(ctx, com.hunterbuddy.behavior.core.ExitReason.PREEMPTED);
-            BlockPos target = outputs.lastGoal();
+            BlockPos target = preferred == null ? outputs.lastGoal() : preferred.get();
             if (target == null || !world.loaded(target) || !world.inBounds(target) || world.cleared(target.down())) {
                 target = result instanceof Failure ? null : ctx.bb().get(ctx.owner(), POINTS).orElseThrow().blocks().stream()
                     .min(java.util.Comparator.comparingDouble(pos -> Math.hypot(pos.getX() - ctx.sensors().x(), pos.getZ() - ctx.sensors().z()))).orElse(null);
             }
             if (target != null) ctx.bb().set(ctx.owner(), TARGET, target);
             else ctx.bb().remove(ctx.owner(), TARGET);
-            stage = target != null && bridge.elytraAvailable() ? Stage.NATIVE : Stage.FLAT;
+            stage = preferred == null && target != null && bridge.elytraAvailable() ? Stage.NATIVE : Stage.FLAT;
         }
         return children().get(stage == Stage.NATIVE ? 1 : 2).execute(ctx);
     }
@@ -86,6 +93,9 @@ public final class KeepFlying extends Composite {
         @Override
         protected NodeResult onActionTick(TickContext ctx) {
             if (!ctx.sensors().gliding()) return Success.INSTANCE;
+            if (!nativeFlight && (bridge.capture().inControl() || bridge.capture().pathing() || bridge.capture().calcInProgress())) {
+                return new Running("waiting for native Baritone movement; no flight takeover");
+            }
             if (!nativeFlight && !world.available()) return fail(FailureCode.UNREACHABLE, "Minecraft world is unavailable");
             BlockPos target = ctx.bb().get(ctx.owner(), TARGET).orElse(null);
             if (nativeFlight) {

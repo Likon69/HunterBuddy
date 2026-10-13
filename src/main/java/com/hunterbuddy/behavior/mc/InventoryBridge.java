@@ -530,6 +530,14 @@ public final class InventoryBridge {
         return playerReceipts[38] != null && ItemStack.areEqual(stack, playerReceipts[38]);
     }
 
+    public int confirmedTotal(Predicate<ItemStack> filter) {
+        int count = 0;
+        for (ItemStack stack : playerReceipts) {
+            if (stack != null && filter.test(stack)) count += stack.getCount();
+        }
+        return count;
+    }
+
     public boolean confirmedPlayerSlot(int index, ItemStack stack) {
         return index >= 0 && index < playerReceipts.length && playerReceipts[index] != null && ItemStack.areEqual(stack, playerReceipts[index]);
     }

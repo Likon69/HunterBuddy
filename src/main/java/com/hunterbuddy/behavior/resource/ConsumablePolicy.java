@@ -17,6 +17,8 @@ public final class ConsumablePolicy {
     private final WorldReader world;
     private final BaritoneBridge baritone;
     private final IntSupplier rocketsMin;
+    private String flightOwner;
+    private IntSupplier flightReserve = () -> 0;
 
     public ConsumablePolicy(WorldReader world, BaritoneBridge baritone, IntSupplier rocketsMin) {
         this.world = Objects.requireNonNull(world);
@@ -26,7 +28,7 @@ public final class ConsumablePolicy {
 
     public boolean mayConsume(Item item) {
         int reserve = item == Items.OBSIDIAN ? OBSIDIAN_RESERVE : item == Items.ENDER_CHEST ? ENDER_CHESTS_MIN
-            : item == Items.FIREWORK_ROCKET ? Math.max(0, rocketsMin.getAsInt()) : 0;
+            : item == Items.FIREWORK_ROCKET ? rocketReserve() : 0;
         return world.count(item) > reserve;
     }
 
@@ -34,7 +36,27 @@ public final class ConsumablePolicy {
         return !stack.isEmpty() && stack.getItem() instanceof BlockItem && mayConsume(stack.getItem());
     }
 
-    public boolean rocket() { return world.countMatching(Rockets::isPlain) > Math.max(0, rocketsMin.getAsInt()); }
+    public boolean rocket() { return world.countMatching(Rockets::isPlain) > rocketReserve(); }
+
+    private int rocketReserve() {
+        return Math.max(Math.max(0, rocketsMin.getAsInt()), Math.max(0, flightReserve.getAsInt()));
+    }
+
+    public int minimumRockets() {
+        return Math.max(0, rocketsMin.getAsInt());
+    }
+
+    public void claimFlight(String owner, IntSupplier reserve) {
+        if (flightOwner != null) throw new IllegalStateException("another flight already owns the fuel reserve");
+        flightOwner = Objects.requireNonNull(owner);
+        flightReserve = Objects.requireNonNull(reserve);
+    }
+
+    public void releaseFlight(String owner) {
+        if (!Objects.equals(owner, flightOwner)) return;
+        flightOwner = null;
+        flightReserve = () -> 0;
+    }
 
     public boolean pillar(ItemStack stack) {
         return placement(stack) && baritone.settings().acceptableThrowawayItems.value.contains(stack.getItem());
