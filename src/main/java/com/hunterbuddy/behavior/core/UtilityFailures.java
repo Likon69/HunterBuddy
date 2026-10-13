@@ -18,11 +18,11 @@ public final class UtilityFailures {
         return blackboard.get(owner, key(path, target)).orElse(UtilityFailure.NONE);
     }
 
-    public void failed(String owner, String path, String target, long nowMs) {
+    public void failed(String owner, String path, String target, long nowMs, Failure cause) {
         Key<UtilityFailure> key = key(path, target);
         int consecutive = Math.min(3, get(owner, path, target).consecutive() + 1);
         long retryAt = consecutive == 3 ? 0 : Math.addExact(nowMs, consecutive == 1 ? 30_000 : 60_000);
-        blackboard.set(owner, key, new UtilityFailure(consecutive, retryAt));
+        blackboard.set(owner, key, new UtilityFailure(consecutive, retryAt, cause));
         recorded.computeIfAbsent(owner, ignored -> new HashSet<>()).add(key);
     }
 

@@ -12,6 +12,7 @@ import meteordevelopment.meteorclient.settings.StringSetting;
 import net.minecraft.util.math.BlockPos;
 
 public final class FarmerSettings {
+    public static final int ACTIVITY_TIMEOUT_TICKS = 144_000;
     public static final int MAX_STEPS = 8;
     private final List<StepSettings> steps = new ArrayList<>(MAX_STEPS);
     private Setting<BlockPos> emptyShulkersChest;
@@ -65,6 +66,10 @@ public final class FarmerSettings {
 
     public int flightRadius() {
         return flightRadius.get();
+    }
+
+    public long playerWaitMillis() {
+        return playerWaitTicks() * 50L;
     }
 
     public int playerWaitTicks() {

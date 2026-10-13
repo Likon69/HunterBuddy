@@ -1,14 +1,16 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.mc.BaseReserveInventory;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.mc.ShulkerSignature;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
-import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.RepeatUntil;
+import com.hunterbuddy.behavior.nodes.Sequence;
 import java.util.List;
 
 public final class BaseReserveTree {
@@ -45,7 +47,7 @@ public final class BaseReserveTree {
             refresh(visit, inventory),
             new InventoryMilestone("réserve-base-confirmée", ctx -> {
                 if (!inventory.ready()) {
-                    throw new IllegalStateException("base sans réserve préparée complète");
+                    throw new OperationFailure(FailureCode.MISSION_STOP, "base has no complete prepared reserve");
                 }
                 List<String> missing = LogisticsInventory.missing(visit.logistics.world, visit.logistics.profile, List.of());
                 if (!missing.isEmpty()) {
@@ -54,7 +56,7 @@ public final class BaseReserveTree {
                 }
                 visit.logistics.facts.incomplete = "";
                 if (inventory.carriedWear() < visit.facts.wearBudget) {
-                    throw new IllegalStateException("durabilité portée insuffisante pour l'aller-retour mesuré");
+                    throw new OperationFailure(FailureCode.MISSION_STOP, "base has insufficient elytra durability for the measured round trip");
                 }
                 visit.logistics.mission.equipment(ctx, "reserve-status", "ready");
                 visit.save(ctx, "réserve préparée rangée dans l'ender chest");

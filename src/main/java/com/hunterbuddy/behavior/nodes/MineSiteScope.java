@@ -34,7 +34,7 @@ public final class MineSiteScope extends Decorator {
             return fail(FailureCode.REFUSED, mine.failure);
         }
         try {
-            mine.zone = mine.zoneSource.get();
+            mine.zone = mine.recordedZone == null ? mine.zoneSource.get() : mine.recordedZone;
         } catch (IllegalStateException ex) {
             mine.zone = null;
             mine.failure = "invalid mining zone: " + ex.getMessage();

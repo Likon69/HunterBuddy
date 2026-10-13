@@ -58,6 +58,10 @@ public final class BehaviorCommand extends Command {
             module().outputStatus().forEach(line -> info("%s", line)))));
         builder.then(literal("farmer").then(literal("zone").executes(context -> control(() ->
             module().farmerZoneStatus().forEach(line -> info("%s", line)))))
+            .then(literal("reset").executes(context -> control(() -> {
+                module().farmerReset();
+                info("FarmerBuddy mission reset.");
+            })))
             .then(literal("survey").executes(context -> control(() -> {
                 module().farmerSurvey();
                 info("Prospection de la zone de l'étape FarmerBuddy courante demandée.");

@@ -74,6 +74,7 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     private Node survey;
     private Node store;
     private Node regear;
+    private boolean recoveryOnSite;
 
     public FarmerBuddyBot(FarmerSettings settings, FarmerCatalog catalog, WorldReader world, BaritoneBridge baritone,
                           Outputs outputs, XaeroWaypoints waypoints) {
@@ -132,9 +133,9 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         Guard guard = new Guard(new Condition("farmer-recovery", sensors -> true), recovery);
         Node change = new InventoryMilestone("demander-un-autre-site-après-échec-de-reprise", ctx -> {
             mission.tick = ctx;
-            if (mission.facts == null) return;
+            if (mission.facts == null || !recoveryOnSite || mission.fieldActive() || mission.baseActive()) return;
             mission.facts.changeRequested = true;
-            mission.facts.changeReason = "site inaccessible après reprise du dernier appui";
+            mission.facts.changeReason = "site inaccessible after recovery to the last safe position";
             if (ctx.sensors().gliding()) mission.facts.baseRequested = true;
             mission.save(ctx, mission.facts.changeReason);
         });
@@ -152,14 +153,12 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     public void onStart(BotContext context) {
         requireContext(context);
         identity = world.identity();
-        outputs.flight().requestPilot(context.owner());
     }
 
     @Override
     public void onResume(BotContext context) {
         requireContext(context);
         identity = world.identity();
-        outputs.flight().requestPilot(context.owner());
     }
 
     @Override
@@ -194,18 +193,34 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     }
 
     private Node buildCycle() {
-        mining = new Deferred("miner-le-site-vérifié", () -> FarmerSiteTree.mine(mission, value -> mined += value)).resumable();
-        base = new Deferred("visite-unique-de-base", () -> FarmerBaseTree.build(mission)).resumable();
-        survey = new Deferred("prospecter-la-zone", () -> FarmerSurveyTree.build(mission)).resumable();
+        mining = new Deferred("mine-verified-site", () -> {
+            recoveryOnSite = true;
+            return FarmerSiteTree.mine(mission, value -> mined += value);
+        }).resumable();
+        base = new Deferred("single-base-visit", () -> {
+            recoveryOnSite = false;
+            return FarmerBaseTree.build(mission);
+        }).resumable();
+        survey = new Deferred("survey-zone", () -> {
+            recoveryOnSite = false;
+            return FarmerSurveyTree.build(mission);
+        }).resumable();
         store = new Deferred("ranger-et-regear-sous-la-même-protection", () -> {
+            recoveryOnSite = false;
             LogisticsContext logistics = new LogisticsContext(() -> activeProfile, () -> mission.zone, true,
                 () -> regearAvailable && LogisticsInventory.needsRegear(world, activeProfile), () -> false,
                 () -> mission.step.index() - 1, world, baritone, outputs, journal);
-            logistics.evacuationRequested = () -> mission.players() || mission.facts.changeRequested || mission.fuelDue();
+            logistics.evacuationRequested = () -> mission.players() || mission.fuelDue();
+            logistics.requiredFlightWear = mission.returnWear();
             return StoreTree.build(logistics);
         }).resumable();
-        regear = new Deferred("regear-dans-la-zone", () -> RegearTree.build(() -> activeProfile,
-            () -> mission.zone, () -> mission.step.index() - 1, world, baritone, outputs, journal)).resumable();
+        regear = new Deferred("field-regear", () -> {
+            recoveryOnSite = false;
+            LogisticsContext logistics = new LogisticsContext(() -> activeProfile, () -> mission.zone, false,
+                () -> true, () -> false, () -> mission.step.index() - 1, world, baritone, outputs, journal);
+            logistics.requiredFlightWear = mission.returnWear();
+            return RegearTree.build(logistics);
+        }).resumable();
         return new Sequence("cerveau-de-mission",
             new ResolveProfile(),
             new UtilitySelector("farmer-task",
@@ -221,37 +236,35 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     }
 
     private boolean busy() {
-        return mission.unfinishedMine() || mission.fieldActive() || mission.baseActive()
+        return mission.facts.siteActive || mission.unfinishedMine() || mission.fieldActive() || mission.baseActive()
             || mining.active() || store.active() || regear.active() || base.active() || survey.active();
     }
 
     private double mineScore(TickContext ctx) {
-        if (mining.active() || mission.unfinishedMine()) return 4;
+        if (mining.active() || mission.facts.siteActive || mission.unfinishedMine()) return 4;
         if (busy() || mission.facts.waitUntil > 0 || mission.facts.baseRequested || mission.facts.changeRequested) return 0;
         if (mission.selected == null || !mission.selected.usable() || !mission.eligible(mission.selected)) return 0;
-        if (mission.siteOccupied() || mission.fuelDue() || mission.freeSlots() <= 2
-            || world.countMatching(LogisticsInventory.accepted(activeProfile)) >= MaterialSite.SHULKER_BLOCKS
-            || LogisticsInventory.needsRegear(world, activeProfile)) return 0;
+        if (mission.retreatDue()) return 0;
         return delivered(ctx, mission.step) < mission.step.shulkerTarget() ? 0.5 : 0;
     }
 
     private double storeScore(TickContext ctx) {
         if (store.active()) return 5;
-        if (mission.fieldActive()) return new LogisticsMemory(journal, ctx.owner()).load(ctx).store ? 5 : 0;
+        if (mission.fieldActive()) return mission.fieldFacts().store ? 5 : 0;
         if (busy() || mission.facts.waitUntil > 0 || mission.storageUnavailable() || mission.players()) return 0;
         int objects = world.countMatching(LogisticsInventory.accepted(activeProfile))
             + world.countMatching(LogisticsInventory.miscellaneous(activeProfile));
         if (objects == 0) return 0;
         if (mission.facts.changeRequested && mission.capacity() == 0) return 0;
         if (mission.mineFacts() != null && mission.mineFacts().exited
-            && mission.mineFacts().outcome.startsWith("rangement nécessaire")) return 1;
+            && mission.mineFacts().storageNeeded) return 1;
         return world.countMatching(LogisticsInventory.accepted(activeProfile)) >= MaterialSite.SHULKER_BLOCKS
             || mission.freeSlots() <= 2 ? 1 : 0;
     }
 
     private double regearScore(TickContext ctx) {
         if (regear.active()) return 5;
-        if (mission.fieldActive()) return new LogisticsMemory(journal, ctx.owner()).load(ctx).store ? 0 : 5;
+        if (mission.fieldActive()) return mission.fieldFacts().store ? 0 : 5;
         if (busy() || mission.facts.waitUntil > 0 || mission.players() || mission.facts.changeRequested) return 0;
         return regearAvailable && LogisticsInventory.needsRegear(world, activeProfile) ? 0.9 : 0;
     }
@@ -318,7 +331,10 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         @Override
         protected NodeResult onTick(TickContext ctx) {
             mission.tick = ctx;
-            outputs.flight().requestPilot(ctx.owner());
+            if (mission.zone != null) {
+                outputs.mining().breakRule(mission.baseActive() || base.active() ? pos -> false
+                    : pos -> mission.zone.contains(pos.getX() + 0.5, pos.getZ() + 0.5));
+            }
             if (mission.facts != null && mission.zone != null) mission.avoidVisiblePlayers(ctx);
             NodeResult result = child().execute(ctx);
             updateStatus(ctx);
@@ -376,6 +392,7 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             journal.milestone(ctx, "step-" + step.index() + "-complete");
             FarmerStepConfig next = enabledSteps().stream().filter(candidate -> candidate.index() > step.index()).findFirst().orElse(null);
             if (next == null) {
+                journal.reset(ctx);
                 ctx.stopBot(ExitReason.COMPLETED, "FarmerBuddy mission complete: step " + step.index() + " was the last one");
                 return Success.INSTANCE;
             }

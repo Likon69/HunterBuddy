@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
@@ -9,8 +11,8 @@ import com.hunterbuddy.behavior.nodes.Sequence;
 import java.util.List;
 import java.util.function.IntSupplier;
 import java.util.function.Predicate;
-import java.util.function.ToIntFunction;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
@@ -62,7 +64,10 @@ public final class BaseCargoTree {
                     }
                     int index = select.applyAsInt(contents);
                     if (index < 0) {
-                        throw new IllegalStateException("base sans " + role + " au coffre " + source.get().toShortString());
+                        FailureCode code = source.get().equals(visit.position(visit.facts.supply))
+                            || source.get().equals(visit.position(visit.facts.empties))
+                            ? FailureCode.MISSION_STOP : FailureCode.MISSING_ITEM;
+                        throw new OperationFailure(code, "base has no " + role + " at chest " + source.get().toShortString());
                     }
                     return visit.logistics.outputs.inventory().takeStackToHotbar(index, contents.get(index), 8);
                 }), ContainerTree.close(visit.logistics.outputs)));
@@ -75,7 +80,8 @@ public final class BaseCargoTree {
                     BaseOperations.transfer(visit, target, purpose, () -> {
                         ItemStack expected = BaseOperations.cargo(visit);
                         return visit.logistics.outputs.inventory().firstDeposit(
-                            stack -> ItemStack.areEqual(stack, expected));
+                            stack -> ItemStack.areEqual(stack, expected), target.get().equals(visit.position(visit.facts.delivery))
+                                ? FailureCode.MISSION_STOP : FailureCode.NO_OPTION);
                     })), ContainerTree.close(visit.logistics.outputs)));
     }
 }

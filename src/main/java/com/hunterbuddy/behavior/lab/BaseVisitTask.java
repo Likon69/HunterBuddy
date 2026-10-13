@@ -40,7 +40,6 @@ public record BaseVisitTask(FarmerCatalog catalog, FarmerZoneLookup lookup, Farm
 
     @Override
     public void initialize(BotContext context) {
-        context.ticks().outputs().flight().requestPilot(context.owner());
     }
 
     @Override

@@ -40,10 +40,7 @@ public final class LogisticsFacts {
     }
 
     public FarmerZone activeZone() {
-        List<BlockPos> points = new ArrayList<>(zone.stream().map(LogisticsFacts::position).toList());
-        if (points.size() < 3 || points.size() > 4) throw new IllegalStateException("invalid saved logistics zone");
-        while (points.size() < 4) points.add(points.getFirst());
-        return FarmerZone.build(points);
+        return FarmerZone.restore(zone.stream().map(LogisticsFacts::position).toList());
     }
 
     public BlockPos origin() {

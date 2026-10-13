@@ -6,9 +6,10 @@ import com.hunterbuddy.behavior.core.Failure;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.TickContext;
-import com.hunterbuddy.behavior.mc.FlightMeasurement;
 import com.hunterbuddy.behavior.mc.FlightBiomes;
+import com.hunterbuddy.behavior.mc.FlightMeasurement;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 
 public final class FlightScope extends Decorator {
@@ -55,9 +56,12 @@ public final class FlightScope extends Decorator {
             NodeResult result = child().execute(ctx);
             if (result instanceof Failure failure) rememberFailure(ctx, failure.reason());
             return result;
+        } catch (OperationFailure ex) {
+            rememberFailure(ctx, ex.getMessage());
+            return fail(ex.code(), ex.getMessage());
         } catch (IllegalStateException ex) {
             rememberFailure(ctx, ex.getMessage());
-            return fail(FailureCode.REFUSED, ex.getMessage());
+            return fail(FailureCode.FAULT, ex.getMessage());
         }
     }
 

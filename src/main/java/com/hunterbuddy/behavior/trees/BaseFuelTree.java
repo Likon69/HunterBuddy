@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
@@ -52,7 +54,7 @@ public final class BaseFuelTree {
                         return visit.logistics.outputs.inventory().takeStack(i, contents.get(i));
                     }
                 }
-                throw new IllegalStateException("base sans fusées simples au ravitaillement");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "base has no plain rockets in the supply chest");
             }));
     }
 }

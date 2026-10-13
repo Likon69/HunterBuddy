@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.mc.BaseTransferReceipt;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.InventoryTransaction;
@@ -30,7 +32,8 @@ public final class BaseOperations {
             BlockPos pos = position.get();
             if (visit.configuredChest(pos) && visit.logistics.world.loaded(pos)
                 && !(visit.logistics.world.state(pos).getBlock() instanceof ChestBlock)) {
-                throw new IllegalStateException("coffre attendu disparu à " + pos.toShortString());
+                throw new OperationFailure(pos.equals(visit.position(visit.facts.delivery))
+                    ? FailureCode.MISSION_STOP : FailureCode.MISSING_ITEM, "expected chest missing at " + pos.toShortString());
             }
             if (visit.logistics.outputs.inventory().at(pos)) {
                 return new Succeed();
@@ -39,10 +42,11 @@ public final class BaseOperations {
                 GroundTravel.build(pos, 2, visit.logistics.baritone, visit.logistics.outputs),
                 new InventoryMilestone("coffre-attendu-présent", ctx -> {
                     if (!visit.logistics.world.loaded(pos)) {
-                        throw new IllegalStateException("coffre non chargé à " + pos);
+                        throw new OperationFailure(FailureCode.UNREACHABLE, "chest not loaded at " + pos);
                     }
                     if (visit.configuredChest(pos) && !(visit.logistics.world.state(pos).getBlock() instanceof ChestBlock)) {
-                        throw new IllegalStateException("coffre attendu disparu à " + pos.toShortString());
+                        throw new OperationFailure(pos.equals(visit.position(visit.facts.delivery))
+                            ? FailureCode.MISSION_STOP : FailureCode.MISSING_ITEM, "expected chest missing at " + pos.toShortString());
                     }
                 }), ContainerTree.open(pos, visit.logistics.world, visit.logistics.outputs, visit.logistics.mission));
         });
@@ -63,8 +67,10 @@ public final class BaseOperations {
                 new TransferItems(visit.logistics.outputs.inventory(), () -> {
                     try {
                         return transaction.get();
+                    } catch (OperationFailure ex) {
+                        throw new OperationFailure(ex.code(), purpose + " at chest " + position.get().toShortString() + ": " + ex.getMessage());
                     } catch (IllegalStateException ex) {
-                        throw new IllegalStateException(purpose + " au coffre " + position.get().toShortString() + " : " + ex.getMessage());
+                        throw new OperationFailure(FailureCode.NO_OPTION, purpose + " at chest " + position.get().toShortString() + ": " + ex.getMessage());
                     }
                 }, null, visit.logistics.mission,
                     purpose, receipt::before, ctx -> BaseTransferReceipt.accept(ctx, visit))));

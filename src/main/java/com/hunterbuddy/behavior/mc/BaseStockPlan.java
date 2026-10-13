@@ -28,10 +28,9 @@ public final class BaseStockPlan {
         if (distance > visit.settings.flightRadius()) {
             throw new IllegalStateException("zone hors du rayon de vol configuré");
         }
-        int outward = 2 + (int) Math.ceil(performance.rocketsPerKm() * distance / 1000);
-        int reserve = Math.max(visit.logistics.outputs.flight().minimumRockets(), 8 + (int) Math.ceil(outward * 1.5));
-        visit.facts.rocketBudget = (int) Math.ceil(outward * 1.5) + reserve;
-        visit.facts.wearBudget = 16 + (int) Math.ceil(performance.durabilityPerKm() * distance / 1000 * 3);
+        FlightBudget budget = new FlightBudget(performance, visit.logistics.outputs.flight().minimumRockets());
+        visit.facts.rocketBudget = budget.departureRockets(distance);
+        visit.facts.wearBudget = budget.departureWear(distance);
         visit.logistics.requiredFlightWear = visit.facts.wearBudget;
         visit.save(ctx, "budget mesuré : " + visit.facts.rocketBudget + " fusées et " + visit.facts.wearBudget + " durabilité");
     }

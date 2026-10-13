@@ -28,10 +28,14 @@ public final class RegearTree {
                              IntSupplier step, WorldReader world, BaritoneBridge baritone, Outputs outputs, MissionJournal journal) {
         LogisticsContext logistics = new LogisticsContext(profile, zone, false, () -> true, exitTop,
             step, world, baritone, outputs, journal);
+        return build(logistics);
+    }
+
+    public static Node build(LogisticsContext logistics) {
         return new TaskScope(new LogisticsRun(logistics, new Sequence("regear",
             new InventoryMilestone("charger-faits-logistiques", logistics::initialize), LogisticsSiteTree.build(logistics),
             LogisticsOperations.unless("ender chest revenu ou en ramassage", () -> logistics.returned("chest")
-                || logistics.equipment("chest").breakRequested() && world.cleared(logistics.facts.chest()),
+                || logistics.equipment("chest").breakRequested() && logistics.world.cleared(logistics.facts.chest()),
                 TrackedEquipmentTree.place(logistics, "chest")),
             LogisticsOperations.pendingTransfer(logistics), protectedCycle(logistics), LogisticsFinishTree.build(logistics))));
     }

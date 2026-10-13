@@ -73,7 +73,7 @@ public final class SurveyTree {
             new Guard(new Condition("sufficient measured site found", sensors -> survey.selected != null),
                 new Sequence("reach-and-verify-site-before-mining",
                     new Deferred("access-selected-site", () -> new SiteAccess(survey,
-                        GroundTravel.build(SiteArrival.stand(survey.selected, survey.profile, survey.world), 3,
+                        GroundTravel.build(SiteArrival.stand(survey.selected, survey.profile, survey.zone, survey.world), 0,
                             survey.baritone, survey.outputs))),
                     new Deferred("verify-selected-site", () -> new Timeout(2400,
                         new VerifySite(survey.world, survey.zone, survey.profile,

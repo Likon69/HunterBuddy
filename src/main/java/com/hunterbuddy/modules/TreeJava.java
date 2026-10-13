@@ -17,11 +17,8 @@ import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.FarmerZoneReport;
-import com.hunterbuddy.behavior.lab.SurveyTask;
-import com.hunterbuddy.behavior.lab.MineSiteTask;
-import com.hunterbuddy.behavior.lab.BaseVisitTask;
-import java.util.concurrent.CompletableFuture;
 import com.hunterbuddy.behavior.hooks.Hook;
+import com.hunterbuddy.behavior.lab.BaseVisitTask;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
 import com.hunterbuddy.behavior.lab.FlightTask;
 import com.hunterbuddy.behavior.lab.FlyToTask;
@@ -30,11 +27,13 @@ import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.behavior.lab.LabTask;
 import com.hunterbuddy.behavior.lab.LiveLabBot;
-import com.hunterbuddy.behavior.lab.LookTask;
 import com.hunterbuddy.behavior.lab.LogisticsTask;
+import com.hunterbuddy.behavior.lab.LookTask;
+import com.hunterbuddy.behavior.lab.MineSiteTask;
 import com.hunterbuddy.behavior.lab.OpenTask;
 import com.hunterbuddy.behavior.lab.PillarTask;
 import com.hunterbuddy.behavior.lab.PlaceTask;
+import com.hunterbuddy.behavior.lab.SurveyTask;
 import com.hunterbuddy.behavior.lab.WalkTask;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.BehaviorEvents;
@@ -76,6 +75,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
@@ -256,12 +256,17 @@ public final class TreeJava extends Module {
     }
 
     private boolean pauseOnPlayer() {
-        return engine.botName().equals("farmerbuddy") ? true : labSettings.pauseOnPlayer();
+        return !engine.botName().equals("farmerbuddy") && labSettings.pauseOnPlayer();
     }
 
     public List<String> farmerZoneStatus() {
         FarmerStepConfig step = farmerSettings.steps().stream().filter(FarmerStepConfig::enabled).findFirst().orElse(null);
         return FarmerZoneReport.lines(step, farmerZoneLookup, farmerCatalog, world);
+    }
+
+    public void farmerReset() {
+        if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
+        engine.resetFarmerMission(world.storageKey());
     }
 
     public void selectScenario(LabScenario next) {
@@ -438,14 +443,17 @@ public final class TreeJava extends Module {
             else if (!world.available()) engine.disconnected();
             else if (engine.suspended()) {
                 Sensors captured = mcSensors.capture();
-                if (!captured.inQueue() && !engine.worldKey().equals(world.storageKey())) stopEngine(ExitReason.WORLD_CHANGED, "Reconnected into another server or dimension");
+                if (!captured.inQueue() && !engine.worldKey().equals(world.storageKey())) engine.requestStop(
+                    ExitReason.WORLD_CHANGED, "Reconnected into another server or dimension", captured);
                 else engine.tickCaptured(() -> captured, serverFacts::samplesValid);
             }
-            else if (!live.identity().equals(world.identity())) stopEngine(ExitReason.WORLD_CHANGED, "Live world or player changed");
+            else if (!engine.landingToStop() && !live.identity().equals(world.identity())) engine.requestStop(
+                ExitReason.WORLD_CHANGED, "Live world or player changed", mcSensors.capture());
             else {
                 String refusal = world.refusal(live.resources(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
                 if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
-                if (refusal != null) stopEngine(ExitReason.STOPPED, "Live refused: " + refusal);
+                if (refusal != null && !engine.landingToStop()) engine.requestStop(
+                    ExitReason.STOPPED, "Live refused: " + refusal, mcSensors.capture());
                 else engine.tickCaptured(mcSensors::capture, serverFacts::samplesValid);
             }
         } catch (RuntimeException ex) {

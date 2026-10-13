@@ -11,6 +11,7 @@ public final class MineSiteFacts {
     public String world;
     public String profile;
     public long site;
+    public List<int[]> zone = new ArrayList<>();
     public long entrance;
     public long stand;
     public int stairDirection = -1;
@@ -33,5 +34,6 @@ public final class MineSiteFacts {
     public Set<String> changedChunks = new HashSet<>();
     public long receiptVersion;
     public boolean exited;
+    public boolean storageNeeded;
     public String outcome = "";
 }

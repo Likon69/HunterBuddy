@@ -38,7 +38,6 @@ public record SurveyTask(FarmerCatalog catalog, FarmerZoneLookup lookup, List<Fa
 
     @Override
     public void initialize(BotContext context) {
-        context.ticks().outputs().flight().requestPilot(context.owner());
     }
 
     @Override

@@ -52,7 +52,8 @@ public final class ValidateMineBlock extends Node {
         if (mine.world.client().world.getBlockEntity(point) != null || mine.world.hardness(point) < 0
             || mine.outputs.mining().protectedBlock(point)) return fail(FailureCode.REFUSED, "unbreakable, container or protected target");
         if (!MineInventorySafety.room(mine, mine.world.state(point).getBlock())) {
-            mine.facts.outcome = "rangement nécessaire, le slot libre est conservé";
+            mine.facts.storageNeeded = true;
+            mine.facts.outcome = "storage needed to preserve the free inventory slot";
             return fail(FailureCode.BUDGET, mine.facts.outcome);
         }
         if (mine.world.countMatching(stack -> LogisticsInventory.tool(stack, mine.profile) && LogisticsInventory.healthy(stack)) == 0) {

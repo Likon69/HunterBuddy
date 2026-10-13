@@ -22,6 +22,13 @@ public final class FarmerZone {
         return hull;
     }
 
+    public static FarmerZone restore(List<BlockPos> corners) {
+        List<BlockPos> points = new ArrayList<>(corners);
+        if (points.size() < 3 || points.size() > 4) throw new IllegalStateException("invalid recorded zone");
+        while (points.size() < 4) points.add(points.getFirst());
+        return build(points);
+    }
+
     public boolean sameFootprint(FarmerZone other) {
         if (other == null || hull.size() != other.hull.size()) return false;
         for (int i = 0; i < hull.size(); i++) {

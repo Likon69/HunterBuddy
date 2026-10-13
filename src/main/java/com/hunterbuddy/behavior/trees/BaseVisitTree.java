@@ -1,17 +1,20 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
+import com.hunterbuddy.behavior.farmer.LogisticsFacts;
+import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.mc.BaseSite;
 import com.hunterbuddy.behavior.mc.BaseStockPlan;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
+import com.hunterbuddy.behavior.mc.FarmerFlightBudget;
 import com.hunterbuddy.behavior.nodes.BaseVisitScope;
 import com.hunterbuddy.behavior.nodes.ChooseShulker;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.TaskScope;
-import com.hunterbuddy.behavior.farmer.LogisticsFacts;
-import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import java.util.List;
 
 public final class BaseVisitTree {
@@ -26,6 +29,10 @@ public final class BaseVisitTree {
             new InventoryMilestone("visite-base-terminée", ctx -> {
                 if (!visit.logistics.returned("chest")) {
                     throw new IllegalStateException("ender chest non revenu dans l'inventaire");
+                }
+                if (FarmerFlightBudget.returnDue(ctx, visit.position(visit.facts.delivery),
+                    visit.logistics.world, visit.logistics.outputs)) {
+                    throw new OperationFailure(FailureCode.MISSION_STOP, "base has insufficient rockets or elytra durability");
                 }
                 visit.facts.recoveredAt = LogisticsFacts.coordinates(visit.logistics.world.feet());
                 visit.logistics.facts.departure = visit.facts.recoveredAt;
@@ -62,6 +69,7 @@ public final class BaseVisitTree {
                     BaseOperations.pending(visit), LogisticsOperations.pendingTransfer(visit.logistics),
                     BasePackTree.resumeMaterial(visit),
                     BaseCargoResumeTree.build(visit), BaseOperations.ender(visit),
+                    BaseInventorySpaceTree.build(visit),
                     new ChooseShulker(visit.logistics, "reserve"),
                     new InventoryMilestone("rôles-base-identifiés", ctx -> {
                         if (visit.logistics.facts.reserve.takenContents.isEmpty()
@@ -72,10 +80,10 @@ public final class BaseVisitTree {
                         }
                         visit.save(ctx, "rôles réserve et divers identifiés par contenu et journal");
                     }), ContainerTree.close(visit.logistics.outputs),
+                    BasePackTree.build(visit),
                     BaseDeliveryTree.build(visit), BaseSurplusTree.build(visit), BaseMiscTree.build(visit),
                     new InventoryMilestone("mesurer-budget-de-départ", ctx -> BaseStockPlan.measure(ctx, visit)),
-                    BaseFuelTree.recoverStock(visit), BaseEmptyShulkersTree.build(visit),
-                    BasePackTree.build(visit), BaseDeliveryTree.build(visit), BaseSurplusTree.build(visit), BaseMiscTree.build(visit),
+                    BaseFuelTree.recoverStock(visit),
                     BaseEmptyShulkersTree.build(visit),
                     BaseReserveTree.build(visit), BaseFuelTree.build(visit))),
             new Deferred("retour-au-matériel-base", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,

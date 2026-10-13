@@ -4,14 +4,21 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.mc.BaseStockPlan;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.ShulkerSignature;
-import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.Deferred;
+import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.RepeatUntil;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import net.minecraft.item.ItemStack;
 
 public final class BaseEmptyShulkersTree {
     private BaseEmptyShulkersTree() {}
+
+    public static Node loadOne(BaseVisitContext visit) {
+        return new Sequence("load-empty-shulker-for-base-packing",
+            BaseCargoTree.take(visit, () -> visit.position(visit.facts.empties), "vides", stack -> empty(visit, stack)),
+            BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), "ranger-vides"),
+            BaseOperations.ender(visit));
+    }
 
     public static Node build(BaseVisitContext visit) {
         return new Sequence("charger-vides-prévues", BaseOperations.ender(visit),

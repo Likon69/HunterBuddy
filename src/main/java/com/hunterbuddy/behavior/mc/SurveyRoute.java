@@ -1,13 +1,15 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.CoverageState;
 import com.hunterbuddy.behavior.farmer.MaterialSite;
 import com.hunterbuddy.util.Rockets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -143,8 +145,7 @@ public final class SurveyRoute {
         if (target.equals(plan.destination)) return;
         double distance = Math.hypot(target.getX() - survey.world.feet().getX(), target.getZ() - survey.world.feet().getZ());
         double back = Math.hypot(target.getX() - survey.home.getX(), target.getZ() - survey.home.getZ());
-        int reserve = Math.max(plan.outputs.flight().minimumRockets(), 8 + (int) Math.ceil(plan.estimatedRockets(back) * 1.5));
-        int required = reserve + (int) Math.ceil(plan.estimatedRockets(distance) * 1.5);
+        int required = plan.budget.tripRockets(distance, back, false);
         if (survey.world.countMatching(Rockets::isPlain) < required) {
             survey.result = "prospection incomplète: réserve de retour atteinte; " + survey.coverageReport();
             if (survey.missionMode) {
@@ -153,10 +154,10 @@ public final class SurveyRoute {
                 finish(plan, survey.home, ctx);
                 return;
             }
-            throw new IllegalStateException(survey.result);
+            throw new OperationFailure(FailureCode.BUDGET, survey.result);
         }
-        double wear = plan.performance.durabilityPerKm() * (distance + back) / 1000 * 1.5;
-        if (plan.totalDurability() < 16 + Math.ceil(wear)) {
+        int wear = plan.budget.tripWear(distance, back, false);
+        if (plan.totalDurability() < wear) {
             survey.result = "prospection incomplète: durabilité réservée au retour; " + survey.coverageReport();
             if (survey.missionMode) {
                 survey.interrupted = true;
@@ -164,7 +165,7 @@ public final class SurveyRoute {
                 finish(plan, survey.home, ctx);
                 return;
             }
-            throw new IllegalStateException(survey.result);
+            throw new OperationFailure(FailureCode.BUDGET, survey.result);
         }
         plan.destination = target;
         plan.bestDistance = plan.distance(target);

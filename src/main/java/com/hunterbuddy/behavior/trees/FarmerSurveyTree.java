@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.FarmerSettings;
 import com.hunterbuddy.behavior.mc.FarmerMissionContext;
 import com.hunterbuddy.behavior.mc.SurveyContext;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
@@ -21,12 +22,12 @@ public final class FarmerSurveyTree {
         survey.returnRequested = () -> mission.fuelDue()
             || (mission.players() || mission.facts.changeRequested) && mission.best() == null;
         return new Sequence("prospecter-puis-rendre-la-main-au-cerveau",
-            new Timeout(144_000, SurveyTree.build(survey)),
+            new Timeout(FarmerSettings.ACTIVITY_TIMEOUT_TICKS, SurveyTree.build(survey)),
             new InventoryMilestone("prospection-de-mission-confirmée", ctx -> {
                 mission.select(ctx, survey.selected);
                 if (survey.interrupted) {
                     mission.facts.baseRequested = true;
-                    mission.facts.waitAtBase = mission.occupiedOnly() || !mission.facts.occupied.isEmpty();
+                    mission.facts.waitAtBase = mission.occupiedOnly();
                     mission.save(ctx, "prospection suspendue, ravitaillement ou attente à la base");
                 }
             }));

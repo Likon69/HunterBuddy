@@ -4,8 +4,8 @@ import com.google.gson.Gson;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.core.TickContext;
-import java.util.LinkedHashMap;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.util.math.BlockPos;
@@ -18,6 +18,9 @@ public final class WorldKnowledge {
     private static final Key<WorldKnowledge> CACHE = new Key<>("knowledge-cache", WorldKnowledge.class, Scope.WORLD, false);
     public Map<String, BiomeObservation> biomes = new LinkedHashMap<>();
     public Map<String, ZoneKnowledge> zones = new LinkedHashMap<>();
+    public int[] biomeBase;
+    public int biomeRadius = 3000;
+    private transient long savedAt = Long.MIN_VALUE;
 
     public static WorldKnowledge load(TickContext ctx) {
         WorldKnowledge cached = ctx.bb().get(OWNER, CACHE).orElse(null);
@@ -38,8 +41,30 @@ public final class WorldKnowledge {
     }
 
     public void save(TickContext ctx) {
+        if (savedAt != Long.MIN_VALUE && ctx.nowMs() - savedAt < 60_000) return;
+        saveNow(ctx);
+    }
+
+    public void saveNow(TickContext ctx) {
+        pruneBiomes();
         ctx.bb().set(OWNER, DATA, GSON.toJson(this));
         ctx.checkpoint(OWNER);
+        savedAt = ctx.nowMs();
+    }
+
+    public void biomeBounds(BlockPos home, int radius) {
+        biomeBase = LogisticsFacts.coordinates(home);
+        biomeRadius = radius;
+        pruneBiomes();
+    }
+
+    public boolean acceptsBiome(ChunkPos chunk) {
+        return biomeBase == null || Math.hypot(chunk.getCenterX() - biomeBase[0],
+            chunk.getCenterZ() - biomeBase[2]) <= biomeRadius;
+    }
+
+    private void pruneBiomes() {
+        biomes.keySet().removeIf(key -> !acceptsBiome(chunk(key)));
     }
 
     public List<ChunkPos> biomeHints(FarmerProfile profile, BlockPos from, int limit) {

@@ -1,13 +1,15 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.BaseTransferFacts;
-import com.hunterbuddy.behavior.farmer.TransferFacts;
 import com.hunterbuddy.behavior.farmer.LogisticsFacts;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
+import com.hunterbuddy.behavior.farmer.TransferFacts;
 import java.util.List;
-import net.minecraft.item.ItemStack;
 import net.minecraft.block.ChestBlock;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
 public final class BaseTransferReceipt {
@@ -53,7 +55,7 @@ public final class BaseTransferReceipt {
         ItemStack expected = LogisticsInventory.decode(receipt.stack, 1, visit.logistics.world).getFirst();
         if (!LogisticsInventory.authorizedTransfer(beforePlayer, before, LogisticsInventory.player(visit.logistics.world),
             after, expected, receipt.deposit)) {
-            throw new IllegalStateException("transfert " + receipt.purpose + " ambigu : conservation exacte non confirmée");
+            throw new OperationFailure(FailureCode.MISSION_STOP, "ambiguous transfer " + receipt.purpose + ": exact conservation cannot be confirmed");
         }
         if (receipt.purpose.equals("livrer")) {
             if (!receipt.deposit || expected.getCount() != 1 || !ShulkerSignature.isShulker(expected)
@@ -62,13 +64,13 @@ public final class BaseTransferReceipt {
                 || !visit.logistics.world.loaded(visit.position(facts.position))
                 || !(visit.logistics.world.state(visit.position(facts.position)).getBlock() instanceof ChestBlock)
                 || visit.logistics.mission.delivered(ctx, visit.facts.step) != facts.deliveredBefore) {
-                throw new IllegalStateException("livraison sans preuve unique du profil, du coffre et du compteur");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "delivery has no unique evidence for the profile, chest and counter");
             }
 
         }
         if (receipt.purpose.startsWith("prendre-")) {
             if (receipt.deposit || !visit.facts.cargo.isEmpty()) {
-                throw new IllegalStateException("chargement de base ambigu");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "ambiguous base cargo transfer");
             }
             visit.facts.cargo = receipt.stack;
             visit.facts.cargoRole = receipt.purpose.substring("prendre-".length());
@@ -95,7 +97,7 @@ public final class BaseTransferReceipt {
             boolean partial = visit.facts.cargoRole.equals("divers-contenu");
             if (!ItemStack.areItemsAndComponentsEqual(expected, cargo)
                 || remaining < visit.facts.cargoBaseline || !partial && remaining != visit.facts.cargoBaseline) {
-                throw new IllegalStateException("objet transporté pas entièrement reçu par le coffre");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "cargo receipt cannot be reconciled with the actual chest");
             }
             if (remaining == visit.facts.cargoBaseline) {
                 visit.facts.cargo = "";
@@ -140,12 +142,12 @@ public final class BaseTransferReceipt {
         for (int i = 0; i < after.size(); i++) {
             if (!before.get(i).isEmpty() || !signature.matches(after.get(i))) continue;
             if (slot >= 0) {
-                throw new IllegalStateException("plusieurs cases ont reçu la shulker de rôle");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "several slots received the role shulker");
             }
             slot = i;
         }
         if (slot < 0) {
-            throw new IllegalStateException("case de réception de la shulker non confirmée");
+            throw new OperationFailure(FailureCode.MISSION_STOP, "shulker receiving slot cannot be confirmed");
         }
         return slot;
     }

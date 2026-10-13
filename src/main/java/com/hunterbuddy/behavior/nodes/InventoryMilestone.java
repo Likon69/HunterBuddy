@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.nodes;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import java.util.function.Consumer;
@@ -20,6 +21,10 @@ public final class InventoryMilestone extends Node {
         try {
             operation.accept(ctx);
             return Success.INSTANCE;
-        } catch (IllegalStateException | IllegalArgumentException ex) { return fail(FailureCode.REFUSED, ex.getMessage()); }
+        } catch (OperationFailure ex) {
+            return fail(ex.code(), ex.getMessage());
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            return fail(FailureCode.REFUSED, ex.getMessage());
+        }
     }
 }

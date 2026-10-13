@@ -1,7 +1,9 @@
 package com.hunterbuddy.behavior.nodes;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.TransferFacts;
@@ -30,12 +32,12 @@ public final class ReconcileLogisticsTransfer extends Node {
         List<ItemStack> actual = logistics.outputs.inventory().containerContents();
         if (!transfer.pending) {
             if (inShulker && !ShulkerSignature.decode(logistics.cycle(role).signature, logistics.world).matchesContents(actual)) {
-                throw new IllegalStateException("shulker content changed without a transfer intent");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "shulker content changed without a transfer intent");
             }
             String expected = logistics.facts.enderContents;
             if (!inShulker && !expected.isEmpty()
                 && !LogisticsInventory.equal(LogisticsInventory.decode(expected, 27, logistics.world), actual)) {
-                throw new IllegalStateException("ender chest changed without a transfer intent");
+                throw new OperationFailure(FailureCode.MISSION_STOP, "ender chest changed without a transfer intent");
             }
             return Success.INSTANCE;
         }
@@ -53,7 +55,7 @@ public final class ReconcileLogisticsTransfer extends Node {
         }
         ItemStack stack = LogisticsInventory.decode(transfer.stack, 1, logistics.world).getFirst();
         if (!LogisticsInventory.authorizedTransfer(beforePlayer, beforeContainer, player, actual, stack, transfer.deposit)) {
-            throw new IllegalStateException("pending transfer fails exact item, component, direction and conservation checks");
+            throw new OperationFailure(FailureCode.MISSION_STOP, "pending transfer fails exact item, component, direction and conservation checks");
         }
         LogisticsTransferReceipt.accept(ctx, logistics);
         return Success.INSTANCE;

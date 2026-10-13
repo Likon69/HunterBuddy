@@ -1,16 +1,19 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.util.GliderSwap;
 import com.hunterbuddy.util.Rockets;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.function.Supplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
@@ -24,6 +27,7 @@ public final class FlightPlan {
     private final Supplier<BlockPos> homeSource;
     public boolean returning;
     public FlightPerformance performance;
+    public FlightBudget budget;
     public BlockPos destination;
     public BlockPos home;
     public BlockPos landing;
@@ -49,7 +53,10 @@ public final class FlightPlan {
         destination = destinationSource.get().toImmutable();
         home = homeSource.get().toImmutable();
         worldKey = world.storageKey();
+        WorldKnowledge knowledge = WorldKnowledge.load(ctx);
+        if (knowledge.biomeBase == null) knowledge.biomeBounds(home, 3000);
         performance = FlightPerformance.load(ctx);
+        budget = new FlightBudget(performance, outputs.flight().minimumRockets());
         landing = null;
         failedLandings.clear();
         bestDistance = Double.POSITIVE_INFINITY;
@@ -60,25 +67,26 @@ public final class FlightPlan {
         }
         altitude = Math.min(world.topY() - 8, altitude);
         if (!world.client().world.getWorldBorder().contains(destination)) {
-            throw new IllegalStateException("flight destination outside world border");
+            throw new OperationFailure(FailureCode.REFUSED, "flight destination outside world border");
         }
         if (atDestination()) return;
-        int outward = estimatedRockets(distance(destination));
         double homeDistance = Math.hypot(destination.getX() - home.getX(), destination.getZ() - home.getZ());
-        int required = returning ? outward + Math.max(8, outputs.flight().minimumRockets())
-            : (int) Math.ceil(outward * 1.5) + reserveAt(homeDistance);
+        int required = budget.tripRockets(distance(destination), homeDistance, returning);
         if (world.countMatching(Rockets::isPlain) < required) {
-            throw new IllegalStateException("flight budget missing: need " + required + " plain rockets including return reserve");
+            throw new OperationFailure(FailureCode.BUDGET, "flight budget missing: need " + required + " plain rockets including return reserve");
+        }
+        if (world.countMatching(GliderSwap::isGlider) == 0) {
+            throw new OperationFailure(FailureCode.MISSING_ITEM, "elytra missing for flight");
         }
         if (totalDurability() < wearRequired() || bestGlider().isEmpty()) {
-            throw new IllegalStateException("carried elytra durability cannot cover flight and return reserve");
+            throw new OperationFailure(FailureCode.BUDGET, "carried elytra durability cannot cover flight and return reserve");
         }
         if (!GliderSwap.isChestPiece(world.client().player.getEquippedStack(EquipmentSlot.CHEST))
             && world.countMatching(GliderSwap::isChestPiece) == 0) {
-            throw new IllegalStateException("chestplate missing for landing");
+            throw new OperationFailure(FailureCode.MISSING_ITEM, "chestplate missing for landing");
         }
         if (new InventoryLayout(world).freeSlot() < 0) {
-            throw new IllegalStateException("flight needs a free inventory slot; nothing will be discarded");
+            throw new OperationFailure(FailureCode.MISSING_ITEM, "flight needs a free inventory slot; nothing will be discarded");
         }
     }
 
@@ -94,23 +102,13 @@ public final class FlightPlan {
         cruiseThrough = false;
     }
 
-    public int estimatedRockets(double metres) {
-        return 2 + (int) Math.ceil(performance.rocketsPerKm() * metres / 1000);
-    }
-
-    private int reserveAt(double metres) {
-        return Math.max(outputs.flight().minimumRockets(), 8 + (int) Math.ceil(estimatedRockets(metres) * 1.5));
-    }
-
     public int rocketReserve() {
-        return returning ? Math.max(8, outputs.flight().minimumRockets()) : reserveAt(distance(home));
+        return returning ? budget.landingRockets() : budget.reserve(distance(home));
     }
 
     public int wearRequired() {
-        double outbound = performance.durabilityPerKm() * distance(destination) / 1000;
         double backDistance = Math.hypot(destination.getX() - home.getX(), destination.getZ() - home.getZ());
-        double back = returning ? 0 : performance.durabilityPerKm() * backDistance / 1000 * 1.5;
-        return 16 + (int) Math.ceil(outbound * 1.5 + back);
+        return budget.tripWear(distance(destination), backDistance, returning);
     }
 
     public ItemStack bestGlider() {
@@ -144,7 +142,7 @@ public final class FlightPlan {
     }
 
     public int returnWear() {
-        return 16 + (int) Math.ceil(performance.durabilityPerKm() * distance(home) / 1000 * 1.5);
+        return budget.returnWear(distance(home));
     }
 
     public boolean nearDestination() {

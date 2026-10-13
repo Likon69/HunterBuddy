@@ -1,7 +1,9 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.FlightTerrain;
@@ -39,7 +41,7 @@ public final class FlightTakeoffTree {
                     BlockPos chosen = ctx.bb().get(ctx.owner(), POINTS).orElseThrow().blocks().stream()
                         .filter(pos -> FlightTerrain.launch(pos, plan.world))
                         .min(Comparator.comparingDouble(plan::distance)).orElseThrow(() ->
-                            new IllegalStateException("no loaded launch point: return or choose another destination"));
+                            new OperationFailure(FailureCode.UNSUPPORTED, "no loaded launch point within 96 blocks of the player"));
                     ctx.bb().set(ctx.owner(), CHOSEN, chosen);
                 }),
                 new TravelToFlightLaunch(plan, CHOSEN),

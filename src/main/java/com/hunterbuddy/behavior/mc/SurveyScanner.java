@@ -51,7 +51,7 @@ public final class SurveyScanner {
             finish(ctx);
             if (SiteSelection.best(memory, zone, world.feet(), System.currentTimeMillis()) != null) break;
         }
-        if (dirty && ctx.tick() - savedAt >= 200) save(ctx);
+        if (dirty && ctx.tick() - savedAt >= 1200) save(ctx);
     }
 
     private void refresh(TickContext ctx) {

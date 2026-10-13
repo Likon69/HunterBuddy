@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.core.Action;
 import com.hunterbuddy.behavior.core.EvidenceKind;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.ProgressEvidence;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
@@ -84,6 +85,8 @@ public final class TransferItems extends Action {
             ticket = inventory.click(next, lease, ctx.nowMs() - ctx.clock().frozenMs(), detail -> {
                 journal.milestone(ctx, owner, label + " transferred=" + count + " " + detail);
             });
+        } catch (OperationFailure ex) {
+            return fail(ex.code(), ex.getMessage());
         } catch (IllegalStateException ex) {
             return fail(FailureCode.REFUSED, ex.getMessage());
         }

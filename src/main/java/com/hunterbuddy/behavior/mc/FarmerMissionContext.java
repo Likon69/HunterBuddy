@@ -18,10 +18,12 @@ import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.farmer.ZoneKnowledge;
 import com.hunterbuddy.behavior.resource.Outputs;
 import java.util.List;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
 public final class FarmerMissionContext {
+    private static final long OCCUPATION_SAVE_MS = 10_000;
     public final FarmerSettings settings;
     public final FarmerCatalog catalog;
     public final WorldReader world;
@@ -40,6 +42,11 @@ public final class FarmerMissionContext {
     public MaterialSite selected;
     private String miningData;
     private MineSiteFacts savedMining;
+    private String fieldData;
+    private LogisticsFacts savedField;
+    private String baseData;
+    private BaseVisitFacts savedBase;
+    private long occupationSavedAt;
 
     public FarmerMissionContext(FarmerSettings settings, FarmerCatalog catalog, WorldReader world,
                                 BaritoneBridge baritone, Outputs outputs, FarmerZoneLookup lookup, MissionJournal journal) {
@@ -57,12 +64,25 @@ public final class FarmerMissionContext {
         tick = ctx;
         step = current;
         profile = material;
-        FarmerZoneLookup.Resolved resolved = lookup.resolve(step.name());
-        if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
-        zone = resolved.zone();
-        knowledge = WorldKnowledge.load(ctx);
-        sites = knowledge.zone(zone, profile);
         facts = memory.load(ctx);
+        boolean retained = facts.siteActive || unfinishedMine() || fieldActive() || baseActive();
+        if (retained && facts.zone != null && !facts.zone.isEmpty()) {
+            zone = FarmerZone.restore(facts.zone.stream().map(LogisticsFacts::position).toList());
+        } else if (fieldActive()) {
+            zone = fieldFacts().activeZone();
+        } else if (baseActive()) {
+            LogisticsFacts baseLogistics = new LogisticsMemory(journal, ctx.owner(), "base-logistics-facts").load(ctx);
+            zone = baseLogistics.activeZone();
+        } else if (unfinishedMine() && mineFacts().zone != null && !mineFacts().zone.isEmpty()) {
+            zone = FarmerZone.restore(mineFacts().zone.stream().map(LogisticsFacts::position).toList());
+        } else {
+            FarmerZoneLookup.Resolved resolved = lookup.resolve(step.name());
+            if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
+            zone = resolved.zone();
+        }
+        knowledge = WorldKnowledge.load(ctx);
+        knowledge.biomeBounds(step.deliveryChest(), settings.flightRadius());
+        sites = knowledge.zone(zone, profile);
         if (facts.occupied.entrySet().removeIf(entry -> entry.getValue() <= System.currentTimeMillis())) {
             save(ctx, "observations de joueurs expirées");
         }
@@ -80,11 +100,18 @@ public final class FarmerMissionContext {
             save(ctx, "étape de mission sélectionnée");
         }
         selected = facts.site == null ? null : sites.sites.get(Long.toString(facts.site));
+        if (retained && selected == null && facts.siteSnapshot != null
+            && facts.site != null && facts.siteSnapshot.seed().asLong() == facts.site) {
+            selected = facts.siteSnapshot;
+            sites.sites.put(Long.toString(facts.site), selected);
+        }
         MineSiteFacts mine = mineFacts();
         if (mine != null && !mine.exited && selected == null) {
             throw new IllegalStateException("site du minage interrompu absent de la connaissance persistée");
         }
         ProtectionRegistry.restore(ctx, journal, outputs.mining());
+        outputs.mining().breakRule(baseActive() ? pos -> false
+            : pos -> zone.contains(pos.getX() + 0.5, pos.getZ() + 0.5));
     }
 
     public MineSiteFacts mineFacts() {
@@ -102,26 +129,45 @@ public final class FarmerMissionContext {
     }
 
     public boolean fieldActive() {
-        return LogisticsMemory.active(tick, journal);
+        LogisticsFacts field = fieldFacts();
+        return field != null && field.departure == null;
+    }
+
+    public LogisticsFacts fieldFacts() {
+        String data = journal.equipment(tick, "logistics-facts");
+        if (!data.equals(fieldData)) {
+            savedField = new LogisticsMemory(journal, journal.owner(tick)).load(tick);
+            fieldData = data;
+        }
+        return savedField;
     }
 
     public boolean baseActive() {
-        BaseVisitFacts visit = new BaseVisitMemory(journal).load(tick);
-        return visit != null && visit.recoveredAt == null;
+        String data = journal.equipment(tick, "base-visit-facts");
+        if (!data.equals(baseData)) {
+            savedBase = new BaseVisitMemory(journal).load(tick);
+            baseData = data;
+        }
+        return savedBase != null && savedBase.recoveredAt == null;
     }
 
     public boolean players() {
-        return tick.sensors().playersVisible() > 0 && zone.contains(tick.sensors().x(), tick.sensors().z());
+        return !visiblePlayers().isEmpty();
+    }
+
+    private List<? extends PlayerEntity> visiblePlayers() {
+        return world.client().world.getPlayers().stream().filter(player -> player != world.client().player
+            && !player.isInvisibleTo(world.client().player)).toList();
     }
 
     public boolean siteOccupied() {
-        return players() && (selected == null || Math.hypot(selected.x - world.feet().getX(),
-            selected.z - world.feet().getZ()) <= 96);
+        return selected != null && !eligible(selected);
     }
 
     public boolean eligible(MaterialSite site) {
         long now = System.currentTimeMillis();
-        return facts.occupied.entrySet().stream().noneMatch(entry -> entry.getValue() > now
+        return visiblePlayers().stream().noneMatch(player -> Math.hypot(player.getX() - site.x,
+            player.getZ() - site.z) <= 96) && facts.occupied.entrySet().stream().noneMatch(entry -> entry.getValue() > now
             && Math.hypot(BlockPos.fromLong(entry.getKey()).getX() - site.x,
                 BlockPos.fromLong(entry.getKey()).getZ() - site.z) <= 96);
     }
@@ -135,18 +181,24 @@ public final class FarmerMissionContext {
     }
 
     public void avoidVisiblePlayers(TickContext ctx) {
-        if (!players() || facts.changeRequested) return;
-        boolean known = facts.occupied.entrySet().stream().anyMatch(entry -> entry.getValue() > System.currentTimeMillis()
-            && Math.hypot(BlockPos.fromLong(entry.getKey()).getX() - world.feet().getX(),
-                BlockPos.fromLong(entry.getKey()).getZ() - world.feet().getZ()) <= 32);
-        if (known && !siteOccupied()) return;
-        long until = System.currentTimeMillis() + settings.playerWaitTicks() * 50L;
-        facts.occupied.put(world.feet().asLong(), until);
-        if (siteOccupied()) {
-            if (selected != null) facts.occupied.put(selected.seed().asLong(), until);
-            facts.changeRequested = true;
+        List<? extends PlayerEntity> players = visiblePlayers();
+        if (players.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        boolean recorded = facts.occupied.entrySet().removeIf(entry -> entry.getValue() <= now);
+        for (PlayerEntity player : players) {
+            long cell = new BlockPos(player.getBlockX() & -16, 0, player.getBlockZ() & -16).asLong();
+            Long previous = facts.occupied.get(cell);
+            if (previous == null || previous - now < settings.playerWaitMillis() - OCCUPATION_SAVE_MS) {
+                facts.occupied.put(cell, now + settings.playerWaitMillis());
+                recorded = true;
+            }
         }
-        save(ctx, "site occupé : évitement temporaire, changement demandé");
+        boolean requested = siteOccupied() && !facts.changeRequested;
+        if (requested) facts.changeRequested = true;
+        if (requested || recorded && now - occupationSavedAt >= OCCUPATION_SAVE_MS) {
+            occupationSavedAt = now;
+            save(ctx, "visible player positions recorded for temporary site avoidance");
+        }
     }
 
     public List<ItemStack> stock() {
@@ -177,6 +229,12 @@ public final class FarmerMissionContext {
         return FarmerFlightBudget.returnDue(tick, step.deliveryChest(), world, outputs);
     }
 
+    public int returnWear() {
+        double distance = Math.hypot(world.feet().getX() - step.deliveryChest().getX(),
+            world.feet().getZ() - step.deliveryChest().getZ());
+        return new FlightBudget(FlightPerformance.load(tick), outputs.flight().minimumRockets()).returnWear(distance);
+    }
+
     public boolean retreatDue() {
         return siteOccupied() || facts.changeRequested || fuelDue() || freeSlots() <= 2
             || world.countMatching(LogisticsInventory.accepted(profile)) >= MaterialSite.SHULKER_BLOCKS
@@ -192,7 +250,7 @@ public final class FarmerMissionContext {
     }
 
     public boolean storageUnavailable() {
-        LogisticsFacts previous = new LogisticsMemory(journal, tick.owner()).load(tick);
+        LogisticsFacts previous = fieldFacts();
         return previous != null && previous.departure != null && previous.profile.equals(profile.key())
             && (!previous.material.unavailable.isEmpty() || !previous.divers.unavailable.isEmpty());
     }
@@ -206,6 +264,8 @@ public final class FarmerMissionContext {
     }
 
     public void save(TickContext ctx, String milestone) {
+        if (zone != null) facts.zone = zone.corners().stream().map(LogisticsFacts::coordinates).toList();
+        facts.siteSnapshot = selected;
         memory.save(ctx, facts, milestone);
     }
 }

@@ -5,6 +5,8 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.FarmerZone;
+import com.hunterbuddy.behavior.farmer.LogisticsFacts;
 import com.hunterbuddy.behavior.farmer.MineSiteFacts;
 import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.mc.MineGeometry;
@@ -30,6 +32,9 @@ public final class InitializeMineSite extends Node {
         MineSiteFacts saved = mine.memory.load(ctx);
         boolean resume = saved != null && !saved.exited;
         if (resume) {
+            if (saved.zone != null && !saved.zone.isEmpty()) {
+                mine.zone = FarmerZone.restore(saved.zone.stream().map(LogisticsFacts::position).toList());
+            }
             if (!saved.world.equals(mine.world.storageKey()) || !saved.profile.equals(mine.profile.key())
                 || saved.site != mine.site.seed().asLong()) return fail(FailureCode.REFUSED, "unfinished mining belongs to another site");
             mine.facts = saved;
@@ -45,6 +50,7 @@ public final class InitializeMineSite extends Node {
             mine.facts.world = mine.world.storageKey();
             mine.facts.profile = mine.profile.key();
             mine.facts.site = mine.site.seed().asLong();
+            mine.facts.zone = mine.zone.corners().stream().map(LogisticsFacts::coordinates).toList();
             mine.facts.entrance = mine.world.feet().asLong();
             mine.protectSupport(mine.world.feet().down());
             if (saved != null && saved.exited && saved.world.equals(mine.facts.world) && saved.profile.equals(mine.facts.profile)

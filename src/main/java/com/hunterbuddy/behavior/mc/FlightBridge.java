@@ -34,7 +34,6 @@ public final class FlightBridge {
     private long postAt = -1;
     private boolean waterJump;
     private String pilot;
-    private String requestedPilot;
     private final Map<String, Integer> landings = new HashMap<>();
 
     public FlightBridge(WorldReader world, ConsumablePolicy consumables, Outputs outputs, BaritoneBridge baritone) {
@@ -113,36 +112,25 @@ public final class FlightBridge {
     public String failure() { return stage == Stage.FAILED ? failure : null; }
 
     public void claim(String owner, IntSupplier reserve) {
-        if (pilot != null || requestedPilot != null && !requestedPilot.equals(owner)) {
+        if (pilot != null) {
             throw new IllegalStateException("another subtree already owns flight");
         }
         consumables.claimFlight(owner, reserve);
         pilot = owner;
-        requestedPilot = null;
-    }
-
-    public void requestPilot(String owner) {
-        if (Objects.equals(pilot, owner)) return;
-        if (pilot != null || requestedPilot != null && !requestedPilot.equals(owner)) {
-            throw new IllegalStateException("another subtree already requested flight");
-        }
-        requestedPilot = owner;
     }
 
     public void releasePilot(String owner) {
-        if (Objects.equals(requestedPilot, owner)) requestedPilot = null;
         if (!Objects.equals(pilot, owner)) return;
         pilot = null;
         consumables.releaseFlight(owner);
     }
 
-    public boolean claimed() { return pilot != null || requestedPilot != null; }
+    public boolean claimed() { return pilot != null; }
 
     public boolean ownsPilot(String owner) { return Objects.equals(pilot, owner); }
 
     public void stopPilots() {
         if (pilot != null) releasePilot(pilot);
-        requestedPilot = null;
         landings.clear();
     }
 

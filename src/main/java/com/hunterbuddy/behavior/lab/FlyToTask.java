@@ -35,7 +35,6 @@ public record FlyToTask(BlockPos destination, BlockPos home, String homeWorld, B
 
     @Override
     public void initialize(BotContext context) {
-        context.ticks().outputs().flight().requestPilot(context.owner());
     }
 
     @Override

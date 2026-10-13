@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.core.Failure;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 
@@ -21,20 +22,27 @@ public final class BaseVisitScope extends Decorator {
     protected NodeResult onTick(TickContext ctx) {
         try {
             if (visit.facts != null && !visit.facts.world.equals(visit.logistics.world.storageKey())) {
-                throw new IllegalStateException("visite de base interrompue par un changement de monde");
+                return fail(FailureCode.REFUSED, "base visit interrupted by a world change");
             }
             NodeResult result = child().execute(ctx);
-            if (result instanceof Failure failure) stop(ctx, failure.reason());
+            if (result instanceof Failure failure && (failure.code() == FailureCode.MISSION_STOP
+                || failure.code() == FailureCode.NOT_CONFIRMED || failure.code() == FailureCode.FAULT)) {
+                stop(ctx, "[" + failure.code() + "] " + failure.reason());
+            }
             return result;
+        } catch (OperationFailure ex) {
+            if (ex.code() == FailureCode.MISSION_STOP || ex.code() == FailureCode.NOT_CONFIRMED
+                || ex.code() == FailureCode.FAULT) stop(ctx, ex.getMessage());
+            return fail(ex.code(), ex.getMessage());
         } catch (RuntimeException ex) {
             stop(ctx, ex.getMessage());
-            return fail(FailureCode.REFUSED, ex.getMessage());
+            return fail(FailureCode.FAULT, ex.getMessage());
         }
     }
 
     private void stop(TickContext ctx, String cause) {
-        visit.logistics.mission.milestone(ctx, "base interrompue : " + cause);
-        ctx.stopBot(ExitReason.FAILED, "Visite de base arrêtée : " + cause);
+        visit.logistics.mission.milestone(ctx, "base interrupted: " + cause);
+        ctx.stopBot(ExitReason.FAILED, "Base visit stopped: " + cause);
     }
 
     @Override

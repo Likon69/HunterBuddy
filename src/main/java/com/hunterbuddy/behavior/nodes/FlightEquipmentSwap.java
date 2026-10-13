@@ -57,10 +57,10 @@ public final class FlightEquipmentSwap extends Action {
             }
             return new Running("waiting for actual server chest equipment");
         }
-        if (expected.getCount() != 1) return fail(FailureCode.REFUSED, "single wearable item required; nothing may be dropped");
+        if (expected.getCount() != 1) return fail(FailureCode.MISSING_ITEM, "single wearable item required; nothing may be dropped");
         if (!world.client().player.isCreative()
             && EnchantmentHelper.hasAnyEnchantmentsWith(worn, EnchantmentEffectComponentTypes.PREVENT_ARMOR_CHANGE)) {
-            return fail(FailureCode.REFUSED, "chest equipment has Curse of Binding");
+            return fail(FailureCode.MISSING_ITEM, "chest equipment cannot be exchanged because of Curse of Binding");
         }
         int slot = world.findSlot(stack -> ItemStack.areEqual(stack, expected));
         if (slot < 0) return fail(FailureCode.MISSING_ITEM, "identified wearable left the hotbar");

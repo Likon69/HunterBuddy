@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.core.Failure;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 
@@ -21,17 +22,24 @@ public final class LogisticsRun extends Decorator {
     protected NodeResult onTick(TickContext ctx) {
         try {
             NodeResult result = child().execute(ctx);
-            if (result instanceof Failure failure) stop(ctx, failure.reason());
+            if (result instanceof Failure failure && (failure.code() == FailureCode.MISSION_STOP
+                || failure.code() == FailureCode.NOT_CONFIRMED || failure.code() == FailureCode.FAULT)) {
+                stop(ctx, "[" + failure.code() + "] " + failure.reason());
+            }
             return result;
+        } catch (OperationFailure ex) {
+            if (ex.code() == FailureCode.MISSION_STOP || ex.code() == FailureCode.NOT_CONFIRMED
+                || ex.code() == FailureCode.FAULT) stop(ctx, ex.getMessage());
+            return fail(ex.code(), ex.getMessage());
         } catch (RuntimeException ex) {
             stop(ctx, ex.getMessage());
-            return fail(FailureCode.REFUSED, ex.getMessage());
+            return fail(FailureCode.FAULT, ex.getMessage());
         }
     }
 
     private void stop(TickContext ctx, String reason) {
         logistics.mission.milestone(ctx, "logistics ambiguous: " + reason);
-        ctx.stopBot(ExitReason.FAILED, "Opération logistique impossible à vérifier: " + reason);
+        ctx.stopBot(ExitReason.FAILED, "Logistics operation cannot be verified: " + reason);
     }
 
     @Override

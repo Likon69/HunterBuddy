@@ -15,9 +15,10 @@ public final class FarmerBaseTree {
         return new Sequence("livrer-et-ravitailler-en-une-visite",
             BaseVisitTree.build(visit),
             new InventoryMilestone("retour-de-base-confirmé", ctx -> {
+                mission.tick = ctx;
                 mission.facts.baseRequested = false;
                 if (mission.facts.waitAtBase) {
-                    mission.facts.waitUntil = System.currentTimeMillis() + mission.settings.playerWaitTicks() * 50L;
+                    mission.facts.waitUntil = System.currentTimeMillis() + mission.settings.playerWaitMillis();
                 }
                 mission.journal.equipment(ctx, "logistics-facts", "");
                 mission.save(ctx, "visite unique terminée : livraisons et stocks confirmés");

@@ -52,7 +52,7 @@ public final class PrepareInventory extends Action {
             inventory.release(lease);
             ticket = null;
         }
-        if (!inventory.claimPlayer(lease)) return fail(FailureCode.REFUSED, "player inventory unavailable or foreign screen");
+        if (!inventory.claimPlayer(lease)) return fail(FailureCode.PREEMPTED, "player inventory unavailable or foreign screen");
         int from = -1;
         int to = -1;
         if (held != null) {

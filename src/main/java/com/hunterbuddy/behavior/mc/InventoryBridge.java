@@ -1,5 +1,7 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.resource.GatePolicy;
 import com.hunterbuddy.behavior.resource.Lease;
 import com.hunterbuddy.behavior.resource.LeaseState;
@@ -7,6 +9,7 @@ import com.hunterbuddy.behavior.resource.Resource;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -22,12 +25,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.s2c.play.SetCursorItemS2CPacket;
+import net.minecraft.network.packet.s2c.play.SetPlayerInventoryS2CPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.screen.ShulkerBoxScreenHandler;
-import net.minecraft.network.packet.s2c.play.SetPlayerInventoryS2CPacket;
-import java.util.List;
 import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.ShulkerBoxScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.sync.ItemStackHash;
@@ -131,6 +133,10 @@ public final class InventoryBridge {
     }
 
     public InventoryTransaction firstDeposit(Predicate<ItemStack> filter) {
+        return firstDeposit(filter, FailureCode.NO_OPTION);
+    }
+
+    public InventoryTransaction firstDeposit(Predicate<ItemStack> filter, FailureCode fullCode) {
         if (!ready() || !container()) {
             throw new IllegalStateException("owned chest is not synchronized");
         }
@@ -143,7 +149,7 @@ public final class InventoryBridge {
                 return new InventoryTransaction(handler.syncId, from.id, to.id, item(from.getStack()), from.getStack().getCount(), SlotActionType.QUICK_MOVE);
             }
         }
-        throw new IllegalStateException("chest has no free space for a deposit");
+        throw new OperationFailure(fullCode, "chest has no free space for a deposit");
     }
 
     public Ticket click(InventoryTransaction transaction, Lease lease, long nowMs, Consumer<String> confirmed) {

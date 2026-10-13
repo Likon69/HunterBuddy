@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.InventoryLayout;
@@ -27,7 +29,10 @@ public final class FlightEquipmentTree {
                 : GliderSwap.isChestPiece(plan.world.client().player.getEquippedStack(EquipmentSlot.CHEST)),
             new Deferred(glider ? "choose-replacement-elytra" : "hold-chestplate", () -> {
                 ItemStack chosen = glider ? plan.bestGlider() : chestplate(plan);
-                if (chosen.isEmpty()) throw new IllegalStateException("wearable missing for flight budget or landing");
+                if (chosen.isEmpty()) {
+                    throw new OperationFailure(glider && plan.world.countMatching(GliderSwap::isGlider) > 0
+                        ? FailureCode.BUDGET : FailureCode.MISSING_ITEM, "usable wearable missing for flight or landing");
+                }
                 ItemStack expected = chosen.copy();
                 Node exchange = new Timeout(600, new Sequence("prepare-and-equip-flight-item",
                     EquipmentTree.prepareHeld(new InventoryLayout(plan.world), stack -> ItemStack.areEqual(stack, expected),

@@ -4,13 +4,14 @@ import com.hunterbuddy.behavior.bot.Bot;
 import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotRegistry;
 import com.hunterbuddy.behavior.bot.BotStats;
-import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.bot.BotStatus;
+import com.hunterbuddy.behavior.bot.LiveWorldBot;
+import com.hunterbuddy.behavior.farmer.MissionJournal;
+import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
-import com.hunterbuddy.behavior.bot.LiveWorldBot;
 import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LiveLabBot;
 import com.hunterbuddy.behavior.lab.SimulatedSensors;
@@ -391,7 +392,7 @@ public final class BehaviorEngine {
         try {
             work.run();
         } finally {
-            ctx.stopReportHandler((reason, detail) -> root.stop(reason, detail));
+            ctx.stopReportHandler((reason, detail) -> root.requestStop(reason, detail));
             callback = Callback.NONE;
         }
     }
@@ -415,8 +416,32 @@ public final class BehaviorEngine {
     public String worldKey() { return worldKey; }
     public boolean suspended() { return root.state() == RootState.SUSPENDED; }
 
+    public boolean landingToStop() { return root.landingToStop(); }
+
+    public void requestStop(ExitReason reason, String detail, Sensors sensors) {
+        ctx.begin(sensors);
+        root.requestStop(reason, detail);
+        ctx.end();
+        if (root.state() == RootState.STOPPED) finishStop();
+    }
+
     public Map<Key<?>, Object> durableMemory(String owner) {
         return ctx.bb().durable(owner);
+    }
+
+    public void resetFarmerMission(String key) {
+        if ((running() || suspended()) && botName().equals("farmerbuddy")) {
+            throw new IllegalStateException("Stop FarmerBuddy before resetting its mission");
+        }
+        Map<Key<?>, Object> memory = store == null ? Map.of() : store.load(key, "bot:farmerbuddy").join();
+        ctx.bb().world(key);
+        try {
+            ctx.bb().loadDurable("bot:farmerbuddy", memory);
+            MissionJournal.clear(ctx, "bot:farmerbuddy");
+            if (store != null) store.save(key, "bot:farmerbuddy", ctx.bb().durable("bot:farmerbuddy")).join();
+        } finally {
+            ctx.bb().world(worldKey);
+        }
     }
 
     public void disconnected() {
@@ -425,6 +450,10 @@ public final class BehaviorEngine {
         pending.clear();
         persist();
         root.suspendSession();
+        if (root.state() == RootState.STOPPED) {
+            finishStop();
+            return;
+        }
         connectionPhase = ConnectionPhase.DISCONNECTED;
         ctx.bb().removeOwner(botOwner);
         session.worldLost();
@@ -644,7 +673,7 @@ public final class BehaviorEngine {
         Objects.requireNonNull(failure);
         pending.clear();
         root.fault(failure);
-        finishStop();
+        if (root.state() == RootState.STOPPED) finishStop();
     }
 
     private boolean running() {

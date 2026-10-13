@@ -32,6 +32,8 @@ public final class TreeRoot {
     private long pauseFrozen;
     private boolean pauseLimited;
     private boolean borrowed;
+    private ExitReason landingStopReason;
+    private String landingStopDetail;
 
     public TreeRoot(TickContext ctx, TreeHooks hooks, Recovery recovery) {
         this.ctx = Objects.requireNonNull(ctx);
@@ -41,7 +43,7 @@ public final class TreeRoot {
         TreeValidator.validate(hooks.build(), recovery);
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
         recovery.taskOwner(hooks.taskOwner());
-        ctx.stopReportHandler((reason, detail) -> stop(reason, detail));
+        ctx.stopReportHandler(this::requestStop);
     }
 
     public void start() {
@@ -62,9 +64,39 @@ public final class TreeRoot {
         mutate(() -> stopNow(reason, detail));
     }
 
+    public void requestStop(ExitReason reason, String detail) {
+        mutate(() -> requestStopNow(reason, detail));
+    }
+
+    private void requestStopNow(ExitReason reason, String detail) {
+        if (state == RootState.STOPPED) return;
+        if (landingStopReason != null) {
+            stopNow(reason, landingStopReason + ": " + landingStopDetail + "; landing failed: " + detail);
+        } else if (ctx.sensors().gliding() && reason != ExitReason.DEAD
+            && reason != ExitReason.DISCONNECTED) {
+            landingStopReason = reason;
+            landingStopDetail = detail;
+            hooks.haltAll(ctx, ExitReason.ABORTED);
+            recovery.halt(ctx, ExitReason.ABORTED);
+            ctx.leases().releaseAll();
+            ctx.outputs().release(ctx.tick());
+            recovering = false;
+            pauseEntry = null;
+            heldGates = List.of();
+            pauseCause = "landing before stop: " + detail;
+            state = RootState.RUNNING;
+        } else stopNow(reason, detail);
+    }
+
+    public boolean landingToStop() {
+        return landingStopReason != null;
+    }
+
     private void stopNow(ExitReason reason, String detail) {
         if (state == RootState.STOPPED && reason != ExitReason.FAULT) return;
         state = RootState.STOPPED;
+        landingStopReason = null;
+        landingStopDetail = null;
         pauseEntry = null;
         pauseCause = "none";
         heldGates = List.of();
@@ -117,6 +149,10 @@ public final class TreeRoot {
 
     public void suspendSession() {
         if (state != RootState.RUNNING && state != RootState.PAUSED) return;
+        if (landingStopReason != null) {
+            stopNow(ExitReason.DISCONNECTED, landingStopDetail + "; disconnected during landing");
+            return;
+        }
         pending.clear();
         hooks.haltAll(ctx, ExitReason.DISCONNECTED);
         recovery.halt(ctx, ExitReason.DISCONNECTED);
@@ -149,8 +185,19 @@ public final class TreeRoot {
         pending.clear();
         hooks.discardPendingChanges();
         ctx.event(hooks.build(), Kind.FAULT, FailureCode.FAULT, ex.getClass().getSimpleName(), Objects.toString(ex.getMessage(), ""));
+        if (landingStopReason == null && ctx.sensors().gliding() && !ctx.sensors().dead()) {
+            try {
+                requestStopNow(ExitReason.FAULT, ex.getClass().getSimpleName() + ": " + Objects.toString(ex.getMessage(), ""));
+                ctx.end();
+                return;
+            } catch (RuntimeException cleanup) {
+                if (cleanup != ex) ex.addSuppressed(cleanup);
+            }
+        }
         try {
-            stopNow(ExitReason.FAULT, ex.getClass().getSimpleName() + ": " + Objects.toString(ex.getMessage(), ""));
+            String cause = ex.getClass().getSimpleName() + ": " + Objects.toString(ex.getMessage(), "");
+            stopNow(ExitReason.FAULT, landingStopReason == null ? cause
+                : landingStopReason + ": " + landingStopDetail + "; FlightKeeper fault: " + cause);
         } catch (RuntimeException cleanup) {
             if (cleanup != ex) ex.addSuppressed(cleanup);
         } finally {
@@ -171,6 +218,25 @@ public final class TreeRoot {
     }
 
     private void tickRunning(Sensors sensors) {
+        if (landingStopReason != null) {
+            if (sensors.dead()) {
+                stopNow(ExitReason.DEAD, landingStopDetail + "; player died during landing");
+            } else if (sensors.onGround() || sensors.inWater() || sensors.submerged()) {
+                stopNow(landingStopReason, landingStopDetail);
+            } else {
+                HookEntry flight = hooks.entries().stream().filter(entry -> entry.hook() == Hook.FLIGHT)
+                    .findFirst().orElse(null);
+                if (flight == null) stopNow(ExitReason.FAILED, landingStopDetail + "; FlightKeeper unavailable");
+                else {
+                    NodeResult result = flight.node().execute(ctx);
+                    if (result instanceof Failure failure) {
+                        stopNow(ExitReason.FAILED, landingStopReason + ": " + landingStopDetail + "; FlightKeeper failed ["
+                            + failure.code() + "]: " + failure.reason());
+                    }
+                }
+            }
+            return;
+        }
         synchronizeTaskOwner();
         ctx.gates().poll(sensors);
         HookEntry session = readyEntry(Hook.SESSION);

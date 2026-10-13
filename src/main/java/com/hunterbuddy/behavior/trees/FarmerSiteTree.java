@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.Scope;
+import com.hunterbuddy.behavior.farmer.FarmerSettings;
 import com.hunterbuddy.behavior.farmer.MaterialSite;
 import com.hunterbuddy.behavior.mc.FarmerFlightBudget;
 import com.hunterbuddy.behavior.mc.FarmerMissionContext;
@@ -25,16 +26,19 @@ public final class FarmerSiteTree {
         if (!mission.unfinishedMine() && !FarmerFlightBudget.canReach(mission.tick, mission.selected.seed(),
             mission.step.deliveryChest(), mission.world, mission.outputs)) {
             return new InventoryMilestone("budget-de-changement-insuffisant-retour-base", ctx -> {
+                mission.facts.siteActive = false;
                 mission.facts.baseRequested = true;
                 mission.save(ctx, "ravitaillement avant d'atteindre le prochain site, réserve de retour préservée");
             });
         }
+        mission.facts.siteActive = true;
+        mission.save(mission.tick, "site operation started with its recorded zone");
         MineSiteContext mine = new MineSiteContext(mission.selected, mission.profile, () -> mission.zone,
             mission.world, mission.baritone, mission.outputs, mission.journal);
         mine.retreatRequested = mission::retreatDue;
         return new FarmerSiteResult(mission, new Sequence("rejoindre-vérifier-miner-et-remonter",
             mission.unfinishedMine() ? new Succeed() : arrival(mission),
-            new Timeout(144_000, MineSiteTree.build(mine)),
+            new Timeout(FarmerSettings.ACTIVITY_TIMEOUT_TICKS, MineSiteTree.build(mine)),
             new InventoryMilestone("minage-terminé-à-l'entrée", ctx -> {
                 if (!mine.facts.exited) throw new IllegalStateException("minage non remonté, reprise requise");
                 counted.accept(mine.facts.mined);
@@ -83,7 +87,7 @@ public final class FarmerSiteTree {
                     mission.world, mission.baritone, mission.outputs);
             }),
             new Deferred("atteindre-l'accès-au-site", () -> GroundTravel.build(
-                SiteArrival.stand(mission.selected, mission.profile, mission.world), 0, mission.baritone, mission.outputs)),
+                SiteArrival.stand(mission.selected, mission.profile, mission.zone, mission.world), 0, mission.baritone, mission.outputs)),
             new Timeout(2400, new VerifySite(mission.world, mission.zone, mission.profile, mission.knowledge,
                 mission.sites, () -> mission.selected, verified)));
     }

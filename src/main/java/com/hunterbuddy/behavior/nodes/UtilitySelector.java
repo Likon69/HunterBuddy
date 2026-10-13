@@ -65,8 +65,8 @@ public final class UtilitySelector extends Composite {
                 previousTargets[executing] = null;
                 return result;
             }
-            if (!(result instanceof Failure)) return result;
-            ctx.utilityFailures().failed(ctx.owner(), children().get(executing).path(), selectedTarget, ctx.nowMs());
+            if (!(result instanceof Failure failure)) return result;
+            ctx.utilityFailures().failed(ctx.owner(), children().get(executing).path(), selectedTarget, ctx.nowMs(), failure);
             previousTargets[executing] = null;
             attempted.computeIfAbsent(executing, ignored -> new HashSet<>()).add(selectedTarget);
             clearSelection();
@@ -137,15 +137,20 @@ public final class UtilitySelector extends Composite {
     private NodeResult unavailable(TickContext ctx) {
         long retryAt = Long.MAX_VALUE;
         boolean abandoned = false;
+        String lastCause = "";
         for (UtilityScore score : scores) {
             if (!score.wanted()) continue;
             if (score.eligible()) return new Running("utility selection deferred");
             if (score.waiting()) retryAt = Math.min(retryAt, score.retryAtMs());
             abandoned |= score.abandoned() || score.exhausted();
+            if (score.abandoned()) {
+                Failure cause = ctx.utilityFailures().get(ctx.owner(), score.path(), score.target()).cause();
+                if (cause != null) lastCause = score.path() + " [" + cause.code() + "]: " + cause.reason();
+            }
         }
         if (retryAt != Long.MAX_VALUE) return new Running("utility retry remainingMs=" + Math.max(0, retryAt - ctx.nowMs()));
         if (abandoned) {
-            String reason = name() + ": no remaining target";
+            String reason = name() + ": no remaining target" + (lastCause.isEmpty() ? "" : "; " + lastCause);
             ctx.event(this, Kind.BOT, FailureCode.NO_OPTION, "stop", reason);
             ctx.stopBot(reason);
         }
