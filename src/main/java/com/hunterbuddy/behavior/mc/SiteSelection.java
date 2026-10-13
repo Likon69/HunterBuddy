@@ -11,7 +11,16 @@ public final class SiteSelection {
     private SiteSelection() {}
 
     public static MaterialSite best(ZoneKnowledge memory, FarmerZone zone, BlockPos from, long now) {
+        return best(memory, zone, from, now, false);
+    }
+
+    public static MaterialSite bestVerified(ZoneKnowledge memory, FarmerZone zone, BlockPos from, long now) {
+        return best(memory, zone, from, now, true);
+    }
+
+    private static MaterialSite best(ZoneKnowledge memory, FarmerZone zone, BlockPos from, long now, boolean verified) {
         return memory.sites.values().stream().filter(MaterialSite::usable)
+            .filter(site -> !verified || site.status.equals("verified") && site.verifiedAt > 0)
             .filter(site -> zone.containsWithMargin(site.x + 0.5, site.z + 0.5, FarmerZoneLookup.TARGET_MARGIN))
             .max(Comparator.comparingDouble(site -> score(site, from, now))).orElse(null);
     }

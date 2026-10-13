@@ -61,6 +61,10 @@ public final class BehaviorCommand extends Command {
             .then(literal("survey").executes(context -> control(() -> {
                 module().farmerSurvey();
                 info("Prospection de la zone de l'étape FarmerBuddy courante demandée.");
+            })))
+            .then(literal("minesite").executes(context -> control(() -> {
+                module().farmerMineSite();
+                info("Minage du site vérifié de l'étape FarmerBuddy courante demandé.");
             }))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
         lab.then(literal("flyto").then(argument("x", IntegerArgumentType.integer())

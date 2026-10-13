@@ -6,6 +6,9 @@ import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.MaterialSite;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -16,6 +19,7 @@ public final class PatchMeasurement {
     private final FarmerProfile profile;
     private final Set<Long> measured;
     private final Set<Long> queued = new HashSet<>();
+    private final Set<Long> members = new LinkedHashSet<>();
     private final ArrayDeque<BlockPos> frontier = new ArrayDeque<>();
     private BlockPos entry;
     private int count;
@@ -40,6 +44,7 @@ public final class PatchMeasurement {
         }
         if (!matches(point) || !measured.add(point.asLong())) return done();
         count++;
+        members.add(point.asLong());
         if (entry == null && zone.containsWithMargin(point.getX() + 0.5, point.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)
             && exposed(point, world)) entry = point;
         for (Direction direction : Direction.values()) {
@@ -75,7 +80,13 @@ public final class PatchMeasurement {
 
     public MaterialSite site(long now) {
         if (!sufficient()) throw new IllegalStateException("a material site needs 1728 connected accessible blocks");
-        return new MaterialSite(entry, count, !complete(), now);
+        MaterialSite result = new MaterialSite(entry, count, !complete(), now);
+        result.blocks = blocks();
+        return result;
+    }
+
+    public List<Long> blocks() {
+        return new ArrayList<>(members);
     }
 
     public static boolean exposed(BlockPos point, WorldReader world) {

@@ -18,6 +18,7 @@ import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.FarmerZoneReport;
 import com.hunterbuddy.behavior.lab.SurveyTask;
+import com.hunterbuddy.behavior.lab.MineSiteTask;
 import java.util.concurrent.CompletableFuture;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
@@ -318,6 +319,15 @@ public final class TreeJava extends Module {
             isActive() && engine.botName().equals("farmerbuddy")
                 ? CompletableFuture.completedFuture(engine.durableMemory("bot:farmerbuddy"))
                 : store.load(world.storageKey(), "bot:farmerbuddy"), world.feet(), world.storageKey(), baritone));
+    }
+
+    public void farmerMineSite() {
+        if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
+        if (mc.player.isGliding()) throw new IllegalStateException("minesite starts on the ground after the survey");
+        startLive(new MineSiteTask(farmerCatalog, farmerZoneLookup, farmerSettings.steps(),
+            isActive() && engine.botName().equals("farmerbuddy")
+                ? CompletableFuture.completedFuture(engine.durableMemory("bot:farmerbuddy"))
+                : store.load(world.storageKey(), "bot:farmerbuddy"), world.storageKey(), baritone));
     }
 
     public void logisticsLab(String scenario, String profileKey) {

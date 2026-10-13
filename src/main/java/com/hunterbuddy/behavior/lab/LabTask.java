@@ -7,7 +7,7 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
 
-public sealed interface LabTask permits SurveyTask, FlyToTask, LogisticsTask, InventoryTask, WalkTask, LookTask,
+public sealed interface LabTask permits MineSiteTask, SurveyTask, FlyToTask, LogisticsTask, InventoryTask, WalkTask, LookTask,
     GoToTask, BreakColumnTask, PlaceTask, PillarTask, OpenTask, FlightTask {
     String name();
     String target();

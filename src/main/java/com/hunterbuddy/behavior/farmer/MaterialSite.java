@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.farmer;
 
 import net.minecraft.util.math.BlockPos;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class MaterialSite {
     public static final int SHULKER_BLOCKS = 1728;
@@ -13,6 +15,7 @@ public final class MaterialSite {
     public String status = "observed";
     public String reason = "";
     public boolean lowerBound;
+    public List<Long> blocks = new ArrayList<>();
 
     public MaterialSite(BlockPos seed, int quantity, boolean lowerBound, long now) {
         x = seed.getX();

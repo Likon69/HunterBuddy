@@ -91,6 +91,7 @@ public final class VerifySite extends Action {
         }
         site.quantity = count;
         site.lowerBound = !measurement.complete();
+        site.blocks = measurement.blocks();
         site.observedAt = System.currentTimeMillis();
         site.verifiedAt = site.observedAt;
         site.status = "verified";
