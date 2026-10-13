@@ -6,13 +6,16 @@ import meteordevelopment.meteorclient.settings.BlockListSetting;
 import meteordevelopment.meteorclient.settings.BlockPosSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.ItemListSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import net.minecraft.block.Block;
+import net.minecraft.item.Item;
 import net.minecraft.util.math.BlockPos;
 
 public final class FarmerSettings {
     private Setting<List<Block>> blocks;
+    private Setting<List<Item>> depositItems;
     private Setting<Integer> radius;
     private Setting<BlockPos> chest;
     private Setting<Integer> threshold;
@@ -24,6 +27,8 @@ public final class FarmerSettings {
         if (blocks != null) throw new IllegalStateException("FarmerBuddy settings already registered");
         blocks = settings.add(new BlockListSetting.Builder()
             .name("block-types").description("Block types FarmerBuddy is allowed to mine and deposit.").build());
+        depositItems = settings.add(new ItemListSetting.Builder()
+            .name("deposit-items").description("Items to deposit; empty deposits the chosen block types' own items.").build());
         radius = settings.add(new IntSetting.Builder()
             .name("radius").description("Scan radius around FarmerBuddy for the next block to mine.")
             .defaultValue(8).min(1).max(16).sliderRange(1, 16).build());
@@ -43,6 +48,10 @@ public final class FarmerSettings {
 
     public List<Block> blocks() {
         return blocks == null ? List.of() : blocks.get();
+    }
+
+    public List<Item> depositItems() {
+        return depositItems == null ? List.of() : depositItems.get();
     }
 
     public int radius() {

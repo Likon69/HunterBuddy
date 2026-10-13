@@ -5,7 +5,6 @@ import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
-import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.trace.Kind;
@@ -13,12 +12,12 @@ import java.util.Objects;
 import java.util.function.Predicate;
 
 public final class GateWait extends Node {
-    private final Predicate<Sensors> busy;
+    private final Predicate<TickContext> busy;
     private final long limitMs;
     private long started;
     private long frozen;
 
-    public GateWait(String name, Predicate<Sensors> busy, long limitMs) {
+    public GateWait(String name, Predicate<TickContext> busy, long limitMs) {
         super(name);
         if (limitMs < 1) throw new IllegalArgumentException("invalid gate wait bound");
         this.busy = Objects.requireNonNull(busy);
@@ -33,7 +32,7 @@ public final class GateWait extends Node {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        if (!busy.test(ctx.sensors())) return Success.INSTANCE;
+        if (!busy.test(ctx)) return Success.INSTANCE;
         if (ctx.nowMs() - started - (ctx.clock().frozenMs() - frozen) >= limitMs) {
             String reason = name() + " still active after " + limitMs / 1_000 + "s";
             ctx.event(this, Kind.GATE, null, "overdue", reason);

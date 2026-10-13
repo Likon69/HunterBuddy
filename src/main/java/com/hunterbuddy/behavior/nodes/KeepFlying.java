@@ -86,6 +86,7 @@ public final class KeepFlying extends Composite {
         @Override
         protected NodeResult onActionTick(TickContext ctx) {
             if (!ctx.sensors().gliding()) return Success.INSTANCE;
+            if (!nativeFlight && !world.available()) return fail(FailureCode.UNREACHABLE, "Minecraft world is unavailable");
             BlockPos target = ctx.bb().get(ctx.owner(), TARGET).orElse(null);
             if (nativeFlight) {
                 if (target == null) return fail(FailureCode.NO_OPTION, "landing destination missing");

@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.nodes;
 
 import com.hunterbuddy.behavior.core.Action;
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
@@ -11,6 +12,7 @@ import com.hunterbuddy.behavior.mc.Conditions;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.resource.LookIntent;
 import com.hunterbuddy.behavior.resource.Outputs;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -45,7 +47,12 @@ public final class LookAt extends Action {
 
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
-        LookIntent desired = target.apply(ctx);
+        LookIntent desired;
+        try {
+            desired = target.apply(ctx);
+        } catch (IllegalStateException | NoSuchElementException ex) {
+            return fail(FailureCode.UNREACHABLE, ex.getMessage());
+        }
         if (Conditions.facing(ctx.sensors(), desired)) return Success.INSTANCE;
         float currentYaw = ctx.sensors().yaw();
         float yaw = currentYaw + Math.clamp(Conditions.wrap(desired.yaw() - currentYaw), -turnRate, turnRate);

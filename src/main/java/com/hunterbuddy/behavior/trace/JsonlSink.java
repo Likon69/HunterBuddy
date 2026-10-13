@@ -7,12 +7,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class JsonlSink implements TraceSink {
+    private static final long MAX_FILE_BYTES = 64L * 1024 * 1024;
+    private static final long MAX_AGE_DAYS = 7;
     private final Path directory;
     private final ArrayBlockingQueue<Entry> queue = new ArrayBlockingQueue<>(4_096);
     private final AtomicLong dropped = new AtomicLong();
@@ -43,9 +47,11 @@ public final class JsonlSink implements TraceSink {
     }
 
     private void write() {
+        cleanupOldFiles();
         Gson gson = new Gson();
         BufferedWriter writer = null;
         Path file = null;
+        long fileBytes = 0;
         try {
             while (!Thread.currentThread().isInterrupted()) {
                 Entry entry = queue.take();
@@ -57,11 +63,17 @@ public final class JsonlSink implements TraceSink {
                         Files.createDirectories(directory);
                         writer = Files.newBufferedWriter(next, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                         file = next;
+                        fileBytes = Files.exists(next) ? Files.size(next) : 0;
                     }
-                    writer.write(gson.toJson(entry.event));
-                    writer.newLine();
-                    if (queue.isEmpty()) writer.flush();
-                    written.incrementAndGet();
+                    byte[] line = (gson.toJson(entry.event) + System.lineSeparator()).getBytes(StandardCharsets.UTF_8);
+                    if (fileBytes + line.length > MAX_FILE_BYTES) {
+                        dropped.incrementAndGet();
+                    } else {
+                        writer.write(new String(line, StandardCharsets.UTF_8));
+                        fileBytes += line.length;
+                        if (queue.isEmpty()) writer.flush();
+                        written.incrementAndGet();
+                    }
                     error = null;
                 } catch (IOException ex) {
                     dropped.incrementAndGet();
@@ -78,6 +90,22 @@ public final class JsonlSink implements TraceSink {
             if (writer != null) {
                 try { writer.close(); } catch (IOException ex) { error = ex.getMessage(); }
             }
+        }
+    }
+
+    private void cleanupOldFiles() {
+        try {
+            if (!Files.isDirectory(directory)) return;
+            Instant cutoff = Instant.now().minus(MAX_AGE_DAYS, ChronoUnit.DAYS);
+            try (var listing = Files.list(directory)) {
+                listing.filter(path -> path.getFileName().toString().endsWith(".jsonl")).forEach(path -> {
+                    try {
+                        if (Files.getLastModifiedTime(path).toInstant().isBefore(cutoff)) Files.deleteIfExists(path);
+                    } catch (IOException ignored) {
+                    }
+                });
+            }
+        } catch (IOException ignored) {
         }
     }
 

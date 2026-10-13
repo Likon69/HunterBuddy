@@ -29,11 +29,14 @@ import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
 public final class OpenChestTree {
     private static final Key<TargetPoint> TARGET = new Key<>("chest-target", TargetPoint.class, Scope.OWNER, false);
+    private static final int MAX_DEPOSITS = 36;
 
     private OpenChestTree() {
     }
@@ -56,6 +59,29 @@ public final class OpenChestTree {
             new SetValue<>(TARGET, ctx -> target),
             GoToTree.build(TARGET, target, 2, world, baritone, outputs),
             new Flow(inventory, open, transfer, close))));
+    }
+
+    public static Node buildDepositAll(BlockPos pos, WorldReader world, BaritoneBridge baritone, Outputs outputs,
+                                       Predicate<ItemStack> filter) {
+        TargetPoint target = new TargetPoint(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+        InventoryBridge inventory = outputs.inventory();
+        Node open = new Timeout(100, new WithLease(Set.of(Resource.LOOK, Resource.INTERACT, Resource.SCREEN), LeasePolicy.WAIT,
+            new Sequence("open-owned-screen", new LookAt(TARGET, 90, world, outputs),
+                new OpenContainer(pos, inventory), new WaitScreen(inventory))));
+        Node transfer = new Timeout(100, new WithLease(Set.of(Resource.INVENTORY), LeasePolicy.WAIT,
+            new ClickSlot(() -> inventory.firstDeposit(filter), inventory)));
+        Node close = new Timeout(100, new WithLease(Set.of(Resource.SCREEN), LeasePolicy.WAIT, new CloseScreen(inventory)));
+        return new TaskScope(new Timeout(12_000, new Sequence("open-chest-deposit",
+            new SetValue<>(TARGET, ctx -> target),
+            GoToTree.build(TARGET, target, 2, world, baritone, outputs),
+            new Node("deposit chest present") {
+                @Override
+                protected NodeResult onTick(TickContext ctx) {
+                    return world.loaded(pos) && world.state(pos).hasBlockEntity() ? com.hunterbuddy.behavior.core.Success.INSTANCE
+                        : fail(FailureCode.REFUSED, "deposit chest is missing at " + pos.toShortString());
+                }
+            },
+            new DepositFlow(inventory, filter, open, transfer, close))));
     }
 
     private static final class Flow extends Composite {
@@ -94,6 +120,60 @@ public final class OpenChestTree {
                 NodeResult result = children().get(1).execute(ctx);
                 if (result instanceof Running || result instanceof Failure) return result;
                 stage = Stage.CLOSE;
+            }
+            if (!inventory.isOurs()) return com.hunterbuddy.behavior.core.Success.INSTANCE;
+            return children().get(2).execute(ctx);
+        }
+
+        private enum Stage { OPEN, TRANSFER, CLOSE }
+    }
+
+    private static final class DepositFlow extends Composite {
+        private final InventoryBridge inventory;
+        private final Predicate<ItemStack> filter;
+        private Stage stage;
+        private int reopens;
+        private int transfers;
+
+        private DepositFlow(InventoryBridge inventory, Predicate<ItemStack> filter, Node open, Node transfer, Node close) {
+            super("chest-deposit-all", open, transfer, close);
+            this.inventory = inventory;
+            this.filter = filter;
+        }
+
+        @Override
+        protected void onStart(TickContext ctx) { stage = Stage.OPEN; reopens = 0; transfers = 0; }
+
+        @Override
+        protected void onResume(TickContext ctx, long ticks, long ms) {
+            if (stage != Stage.CLOSE && !inventory.ready() && !inventory.transactionPending()) {
+                children().forEach(child -> child.halt(ctx, ExitReason.PREEMPTED));
+                children().forEach(Node::resetMemory);
+                inventory.retryOpen();
+                stage = Stage.OPEN;
+                reopens++;
+            }
+        }
+
+        @Override
+        protected NodeResult onTick(TickContext ctx) {
+            if (reopens > 3) return fail(FailureCode.UNREACHABLE, "chest changed after three reopen attempts");
+            if (stage == Stage.OPEN) {
+                NodeResult result = children().getFirst().execute(ctx);
+                if (result instanceof Running || result instanceof Failure) return result;
+                stage = Stage.TRANSFER;
+            }
+            if (stage == Stage.TRANSFER) {
+                if (!inventory.hasMatchingItem(filter) || transfers >= MAX_DEPOSITS) {
+                    stage = Stage.CLOSE;
+                } else {
+                    NodeResult result = children().get(1).execute(ctx);
+                    if (result instanceof Running) return result;
+                    if (result instanceof Failure failure) return fail(failure.code(), failure.reason());
+                    transfers++;
+                    children().get(1).resetMemory();
+                    return new Running("deposited=" + transfers);
+                }
             }
             if (!inventory.isOurs()) return com.hunterbuddy.behavior.core.Success.INSTANCE;
             return children().get(2).execute(ctx);

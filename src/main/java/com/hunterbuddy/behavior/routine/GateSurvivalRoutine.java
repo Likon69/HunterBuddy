@@ -22,7 +22,7 @@ public final class GateSurvivalRoutine extends CoreRoutine {
     @Override
     protected List<HookEntry> buildEntries(RoutineContext context) {
         return List.of(entry(new Condition("eating or critical health", sensors -> sensors.eating() || sensors.health() <= 6),
-            new GateWait("survival gate", sensors -> sensors.eating() || sensors.health() <= 6, 60_000)));
+            new GateWait("survival gate", ctx -> ctx.sensors().eating() || ctx.sensors().health() <= 6, 60_000)));
     }
 
     @Override

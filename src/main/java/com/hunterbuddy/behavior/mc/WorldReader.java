@@ -1,6 +1,5 @@
 package com.hunterbuddy.behavior.mc;
 
-import baritone.api.pathing.goals.GoalXZ;
 import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.modules.AutoFlyingRegear;
@@ -182,15 +181,5 @@ public final class WorldReader {
     public boolean legacyRegear() {
         AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
         return regear != null && (regear.isRunning() || regear.wantsRegear());
-    }
-
-    public GoalXZ awayFrom(com.hunterbuddy.behavior.core.Sensors sensors, int distance) {
-        var attacker = available() ? client.world.getEntityById(sensors.lastAttackerId()) : null;
-        double dx = attacker == null ? Math.sin(Math.toRadians(sensors.yaw())) : sensors.x() - attacker.getX();
-        double dz = attacker == null ? -Math.cos(Math.toRadians(sensors.yaw())) : sensors.z() - attacker.getZ();
-        double length = Math.hypot(dx, dz);
-        if (length < 0.01) { dx = 1; dz = 0; length = 1; }
-        return new GoalXZ((int) Math.floor(sensors.x() + dx / length * distance),
-            (int) Math.floor(sensors.z() + dz / length * distance));
     }
 }

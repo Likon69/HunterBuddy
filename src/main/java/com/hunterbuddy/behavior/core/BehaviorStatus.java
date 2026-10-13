@@ -23,6 +23,7 @@ public final class BehaviorStatus {
             snapshot.actionRemainingTicks(), snapshot.recoveryLevel(), snapshot.leases()));
         lines.add(String.format(Locale.ROOT, "Tick: %.3fms | %s proofs=%d", snapshot.tickMs(), mode(snapshot), snapshot.evidence()));
         lines.add(statsLine("Session", snapshot.stats().session()));
+        lines.addAll(snapshot.scores());
         if (snapshot.stop() != null) lines.add("Stopped [" + snapshot.stop().reason() + "]: " + snapshot.stop().detail());
         for (var routine : snapshot.routines()) lines.add("Routine " + routine.name() + ": " + routine.state() + " | " + routine.detail());
         for (var event : snapshot.recent()) lines.add(event.kind() + " " + event.reason());

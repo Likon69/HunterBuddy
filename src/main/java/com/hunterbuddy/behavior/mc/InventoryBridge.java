@@ -98,6 +98,14 @@ public final class InventoryBridge {
         throw new IllegalStateException("chest needs an item and an empty player hotbar slot");
     }
 
+    public boolean hasMatchingItem(Predicate<ItemStack> filter) {
+        if (!ready()) return false;
+        for (Slot slot : handler.slots) {
+            if (slot.inventory == world.client().player.getInventory() && !slot.getStack().isEmpty() && filter.test(slot.getStack())) return true;
+        }
+        return false;
+    }
+
     public InventoryTransaction firstDeposit(Predicate<ItemStack> filter) {
         if (!ready() || !(handler instanceof GenericContainerScreenHandler container)) {
             throw new IllegalStateException("owned chest is not synchronized");

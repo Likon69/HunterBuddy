@@ -124,7 +124,7 @@ public final class TreeJava extends Module {
         mcSensors.screenOwner(inventory::isOurs);
         engine.flightKeeper(new KeepFlying(world, baritone, engine.outputs()));
         engine.registerRoutine(new GateSurvivalRoutine());
-        engine.registerRoutine(new GateCombatRoutine(world, baritone, engine.outputs()));
+        engine.registerRoutine(new GateCombatRoutine());
         engine.registerRoutine(new GateRegearRoutine());
         for (var routine : engine.routines()) routine.onRegister(settings.createGroup("Routine: " + routine.name()));
         for (Hook slot : List.of(Hook.SURVIVAL, Hook.COMBAT, Hook.REGEAR)) {

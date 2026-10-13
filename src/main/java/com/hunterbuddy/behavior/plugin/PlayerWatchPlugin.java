@@ -35,7 +35,7 @@ public final class PlayerWatchPlugin implements Plugin {
 
     @Override
     public List<HookEntry> entries(PluginContext context) {
-        GateWait wait = new GateWait("player visible", sensors -> context.ticks().bb().get(context.owner(), PLAYER_VISIBLE).orElse(false), 120_000);
+        GateWait wait = new GateWait("player visible", ignored -> context.ticks().bb().get(context.owner(), PLAYER_VISIBLE).orElse(false), 120_000);
         Guard guard = new Guard(new Condition("player visible and pause enabled", sensors -> pauseOnPlayer.getAsBoolean()
             && context.ticks().bb().get(context.owner(), PLAYER_VISIBLE).orElse(false)), wait);
         return List.of(new HookEntry(Hook.BOT_PRE, context.owner(), Contributor.PLUGIN, 0, guard, true, wait));

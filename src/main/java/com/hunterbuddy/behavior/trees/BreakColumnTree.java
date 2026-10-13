@@ -77,6 +77,7 @@ public final class BreakColumnTree {
             }
             if (!scan.world().equals(world.identity())) return fail(FailureCode.REFUSED, "column world changed");
             if (index >= scan.blocks().size()) return Success.INSTANCE;
+            if (!world.available()) return fail(FailureCode.UNREACHABLE, "Minecraft world is unavailable");
             BlockPos pos = scan.blocks().get(index);
             ctx.bb().set(ctx.owner(), BLOCK, pos);
             var eyes = world.eyes();

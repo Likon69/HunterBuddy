@@ -22,7 +22,7 @@ public final class GateRegearRoutine extends CoreRoutine {
     @Override
     protected List<HookEntry> buildEntries(RoutineContext context) {
         return List.of(entry(new Condition("regear running or pending", sensors -> sensors.regearRunning() || sensors.regearPending()),
-            new GateWait("regear gate", sensors -> sensors.regearRunning() || sensors.regearPending(), 900_000)));
+            new GateWait("regear gate", ctx -> ctx.sensors().regearRunning() || ctx.sensors().regearPending(), 900_000)));
     }
 
     @Override

@@ -35,7 +35,6 @@ public final class TickContext {
     private String pluginOwner;
     private BotStats botStats;
     private Hook executedHook;
-    private Runnable yieldTask;
 
     public TickContext(Clock clock, Blackboard blackboard, Leases leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);
@@ -80,13 +79,6 @@ public final class TickContext {
 
     public Hook executedHook() {
         return executedHook;
-    }
-
-    void taskYieldHandler(Runnable handler) { yieldTask = Objects.requireNonNull(handler); }
-
-    public void yieldTask() {
-        if (pluginAccess() || current == null || current.hook() != Hook.COMBAT) throw new IllegalStateException("only COMBAT may preempt BOT for fleeing");
-        Objects.requireNonNull(yieldTask).run();
     }
 
     void botStats(BotStats stats) {

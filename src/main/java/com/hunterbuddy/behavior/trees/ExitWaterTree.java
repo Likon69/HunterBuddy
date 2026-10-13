@@ -94,6 +94,7 @@ public final class ExitWaterTree {
         protected void onStart(TickContext ctx) { stage = Stage.PROBE; swimming = 0; ascents = 0; platformSpent = false; setHere(ctx); }
 
         private void setHere(TickContext ctx) {
+            if (!world.available()) return;
             spot = world.feet(); ctx.bb().set(ctx.owner(), HERE, spot); ctx.bb().set(ctx.owner(), ABOVE, spot.up(2));
         }
 
@@ -104,6 +105,7 @@ public final class ExitWaterTree {
 
         @Override
         protected NodeResult onTick(TickContext ctx) {
+            if (!world.available()) return fail(FailureCode.UNREACHABLE, "Minecraft world is unavailable");
             if (ctx.sensors().gliding() && stage != Stage.WATER && stage != Stage.TAKEOFF) return Success.INSTANCE;
             if (stage == Stage.PROBE) {
                 setHere(ctx);

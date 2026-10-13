@@ -474,12 +474,15 @@ public final class BehaviorEngine {
         Node active = deepest(tree);
         int actionRemaining = remaining(tree);
         List<TraceEvent> events = ring.snapshot();
+        List<String> scoreLines = new ArrayList<>();
+        scores(hooks.build(), scoreLines);
         return new EngineSnapshot(bot == null ? "none" : bot.name(), root.state(), active == null ? "none" : active.hook().name(),
             active == null ? "none" : active.path(), bot == null ? new BotStatus("none", "none", 0) : bot.status(),
             root.noProgressRemainingMs(), ctx.monitor().windowMs(), actionRemaining == Integer.MAX_VALUE ? 0 : actionRemaining, root.recoveryLevel(),
             ctx.leases().snapshot().size(), ctx.evidenceSequence() - evidenceBaseline, tickMs,
             events.subList(Math.max(0, events.size() - 5), events.size()), root.stopReport().orElse(null),
-            routines.stream().map(this::routineState).toList(), stats == null ? BotStats.EMPTY : stats.snapshot(), root.pauseCause(), ctx.gates().status(), ctx.outputs().status());
+            routines.stream().map(this::routineState).toList(), stats == null ? BotStats.EMPTY : stats.snapshot(), root.pauseCause(),
+            ctx.gates().status(), ctx.outputs().status(), scoreLines);
     }
 
     private RoutineStatus routineState(Routine routine) {

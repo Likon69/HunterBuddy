@@ -5,6 +5,10 @@ import com.hunterbuddy.behavior.bot.BotConfig;
 import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.bot.LiveWorldBot;
+import com.hunterbuddy.behavior.core.Decorator;
+import com.hunterbuddy.behavior.core.ExitReason;
+import com.hunterbuddy.behavior.core.Failure;
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
@@ -18,7 +22,6 @@ import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
-import com.hunterbuddy.behavior.mc.InventoryBridge;
 import com.hunterbuddy.behavior.mc.WorldIdentity;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.nodes.Budget;
@@ -50,6 +53,7 @@ import java.util.function.ToDoubleFunction;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import net.minecraft.block.BlockState;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
@@ -151,13 +155,15 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
 
     private Node buildCycle() {
         Predicate<BlockState> mineFilter = state -> !state.isAir() && settings.blocks().contains(state.getBlock());
-        Predicate<ItemStack> depositFilter = stack -> !stack.isEmpty() && stack.getItem() instanceof BlockItem item
-            && settings.blocks().contains(item.getBlock());
-        InventoryBridge inventory = outputs.inventory();
+        Predicate<ItemStack> depositFilter = stack -> {
+            if (stack.isEmpty()) return false;
+            List<Item> items = settings.depositItems();
+            if (!items.isEmpty()) return items.contains(stack.getItem());
+            return stack.getItem() instanceof BlockItem item && settings.blocks().contains(item.getBlock());
+        };
 
         Node mineCycle = new Sequence("farmer-mine",
-            new SetValue<>(TARGET_POS, ctx -> parsePos(ctx.bb().get(ctx.owner(), TickContext.CURRENT_TARGET).orElseThrow())),
-            new SetValue<>(TARGET_POINT, ctx -> center(ctx.bb().get(ctx.owner(), TARGET_POS).orElseThrow())),
+            new ParseTarget(),
             GoToTree.build(TARGET_POINT, 3, world, baritone, outputs),
             new Budget("farmer-mine", 10, new Timeout(300, new WithLease(Set.of(Resource.MINING), LeasePolicy.WAIT,
                 new BreakBlock(TARGET_POS, false, world, outputs))))
@@ -175,8 +181,8 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         ToDoubleFunction<BlockPos> candidateScore = pos -> 1;
         Function<BlockPos, String> id = pos -> pos.getX() + "," + pos.getY() + "," + pos.getZ();
 
-        Node depositCycle = new ForceSuccess(new Sequence("farmer-deposit",
-            OpenChestTree.build(settings.chest(), world, baritone, outputs, () -> inventory.firstDeposit(depositFilter)),
+        Node depositCycle = new StopOnFailure(new Sequence("farmer-deposit",
+            OpenChestTree.buildDepositAll(settings.chest(), world, baritone, outputs, depositFilter),
             new Count(() -> deposited++)));
 
         BlockPos start = settings.startPoint();
@@ -199,7 +205,12 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
 
     private static BlockPos parsePos(String id) {
         String[] parts = id.split(",");
-        return new BlockPos(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+        if (parts.length != 3) return null;
+        try {
+            return new BlockPos(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private static TargetPoint center(BlockPos pos) {
@@ -218,6 +229,38 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         protected NodeResult onTick(TickContext ctx) {
             action.run();
             return Success.INSTANCE;
+        }
+    }
+
+    private static final class ParseTarget extends Node {
+        private ParseTarget() {
+            super("parse-target");
+        }
+
+        @Override
+        protected NodeResult onTick(TickContext ctx) {
+            String id = ctx.bb().get(ctx.owner(), TickContext.CURRENT_TARGET).orElse(null);
+            BlockPos pos = id == null ? null : parsePos(id);
+            if (pos == null) return fail(FailureCode.NO_OPTION, "mine target is missing");
+            ctx.bb().set(ctx.owner(), TARGET_POS, pos);
+            ctx.bb().set(ctx.owner(), TARGET_POINT, center(pos));
+            return Success.INSTANCE;
+        }
+    }
+
+    private static final class StopOnFailure extends Decorator {
+        private StopOnFailure(Node child) {
+            super("stop-on-failure", child);
+        }
+
+        @Override
+        protected NodeResult onTick(TickContext ctx) {
+            NodeResult result = child().execute(ctx);
+            if (result instanceof Failure failure) {
+                ctx.stopBot(ExitReason.STOPPED, failure.reason());
+                return Success.INSTANCE;
+            }
+            return result;
         }
     }
 }

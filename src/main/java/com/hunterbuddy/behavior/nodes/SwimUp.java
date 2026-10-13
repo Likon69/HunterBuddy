@@ -40,6 +40,7 @@ public final class SwimUp extends Action {
         if (column == null) return fail(FailureCode.NO_OPTION, "swim column is missing");
         var sensors = ctx.sensors();
         if (!sensors.inWater() && !sensors.submerged()) return Success.INSTANCE;
+        if (!world.available()) return fail(FailureCode.UNREACHABLE, "Minecraft world is unavailable");
         BlockPos feet = world.feet();
         if (!sensors.submerged()) return Success.INSTANCE;
         LookIntent look = new LookIntent(sensors.yaw(), -90);

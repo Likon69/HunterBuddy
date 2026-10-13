@@ -3,7 +3,6 @@ package com.hunterbuddy.behavior.core;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
-import com.hunterbuddy.behavior.nodes.GateCombat;
 import com.hunterbuddy.behavior.nodes.GateWait;
 import com.hunterbuddy.behavior.resource.GateOwner;
 import com.hunterbuddy.behavior.resource.GatePolicy;
@@ -43,8 +42,6 @@ public final class TreeRoot {
         TreeValidator.bind(recovery, "recovery", "core", Hook.RECOVERY);
         recovery.taskOwner(hooks.taskOwner());
         ctx.stopReportHandler((reason, detail) -> stop(reason, detail));
-        ctx.taskYieldHandler(() -> hooks.entries().stream().filter(entry -> entry.hook() == Hook.BOT)
-            .forEach(entry -> entry.guard().halt(ctx, ExitReason.PREEMPTED)));
     }
 
     public void start() {
@@ -182,7 +179,7 @@ public final class TreeRoot {
             hooks.build().execute(ctx);
             return;
         }
-        HookEntry gate = session == null ? hooks.entries().stream().filter(entry -> entry.node() instanceof GateWait || entry.node() instanceof GateCombat)
+        HookEntry gate = session == null ? hooks.entries().stream().filter(entry -> entry.node() instanceof GateWait)
             .filter(entry -> entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null) : session;
         if (gate != null || !ctx.gates().active().isEmpty()) {
             pause(gate, sensors);
