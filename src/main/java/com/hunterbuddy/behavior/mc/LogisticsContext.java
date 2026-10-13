@@ -35,7 +35,9 @@ public final class LogisticsContext {
     public LogisticsMemory memory;
     public FarmerProfile profile;
     public InventoryLayout layout;
+    public int requiredFlightWear;
     private WorldIdentity identity;
+    public String equipmentPrefix = "logistics";
 
     public LogisticsContext(Supplier<FarmerProfile> profiles, Supplier<FarmerZone> zones, boolean store,
                             BooleanSupplier regear, BooleanSupplier exitTop, IntSupplier step, WorldReader world,
@@ -129,11 +131,15 @@ public final class LogisticsContext {
         return equipment.computeIfAbsent(role, key -> {
             boolean chest = key.equals("chest");
             BlockPos pos = chest ? facts.chest() : facts.shulker();
-            TemporaryEquipment item = new TemporaryEquipment((chest ? "logistics-chest" : "logistics-box-" + key), pos, chest, world,
+            TemporaryEquipment item = new TemporaryEquipment(equipmentName(key), pos, chest, world,
                 mission);
             if (!chest) item.signature(ShulkerSignature.decode(cycle(key).signature, world));
             return item;
         });
+    }
+
+    public String equipmentName(String role) {
+        return equipmentPrefix + (role.equals("chest") ? "-chest" : "-box-" + role);
     }
 
     public void forget(String role) {

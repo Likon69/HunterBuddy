@@ -113,6 +113,10 @@ public final class BehaviorEngine {
         ctx.checkpointHandler(owner -> {
             if (owner.equals(botOwner)) persist();
             if (owner.equals(WorldKnowledge.OWNER)) persistKnowledge();
+            if (store != null && owner.equals("bot:farmerbuddy") && !owner.equals(botOwner)) {
+                checkpoint.incrementAndGet();
+                store.save(worldKey, owner, ctx.bb().durable(owner));
+            }
         });
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);

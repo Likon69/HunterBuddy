@@ -31,7 +31,7 @@ public final class TrackedEquipmentTree {
             new ConfirmEquipmentPlacement(logistics, role),
             new Deferred("poser-" + role, () -> new Sequence("préparer-et-poser-" + role,
                 LogisticsOperations.prepare(logistics, logistics.equipment(role).filter(), role.equals("chest") ? 4 : 8),
-                EquipmentTree.place(logistics.equipment(role), logistics.world, logistics.outputs))));
+                EquipmentTree.place(logistics.equipment(role), logistics.world, logistics.outputs)))).propagateFailures();
     }
 
     public static Node recover(LogisticsContext logistics, String role) {

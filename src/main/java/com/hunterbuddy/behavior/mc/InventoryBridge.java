@@ -188,6 +188,10 @@ public final class InventoryBridge {
         }
     }
 
+    public boolean screenOpen() {
+        return world.available() && world.client().currentScreen != null;
+    }
+
     public boolean close() {
         if (!isOurs()) return false;
         if (quarantine != null || !handler.getCursorStack().isEmpty() || ticket != null && !ticket.finished()) return false;
@@ -499,6 +503,17 @@ public final class InventoryBridge {
         Slot free = handler.slots.stream().filter(slot -> slot.inventory == world.client().player.getInventory()
             && slot.getIndex() < 36 && slot.getStack().isEmpty()).findFirst().orElseThrow(() -> new IllegalStateException("free player slot required"));
         return new InventoryTransaction(handler.syncId, from.id, free.id, item(expected), expected.getCount(), SlotActionType.QUICK_MOVE);
+    }
+
+    public InventoryTransaction takeStackToHotbar(int containerSlot, ItemStack expected, int hotbar) {
+        if (!container() || hotbar < 0 || hotbar > 8) throw new IllegalStateException("owned container and hotbar required");
+        if (containerSlot < 0 || containerSlot >= containerContents().size()) throw new IllegalStateException("source slot missing");
+        Slot from = handler.slots.get(containerSlot);
+        Slot destination = playerSlot(hotbar);
+        if (!ItemStack.areEqual(from.getStack(), expected) || !destination.getStack().isEmpty()) {
+            throw new IllegalStateException("precise source changed or destination occupied");
+        }
+        return new InventoryTransaction(handler.syncId, from.id, destination.id, item(expected), expected.getCount(), SlotActionType.SWAP);
     }
 
     public InventoryTransaction takeShulker(ShulkerSignature signature) {

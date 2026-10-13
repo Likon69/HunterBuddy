@@ -23,7 +23,7 @@ public final class CloseScreen extends Action {
         if (ctx.leases().holder(Resource.SCREEN).filter(lease -> lease.owner().equals(ctx.owner())).isEmpty()) {
             return fail(FailureCode.LEASE_TIMEOUT, "SCREEN lease required");
         }
-        if (!ctx.sensors().screenOpen()) return Success.INSTANCE;
+        if (!inventory.screenOpen()) return Success.INSTANCE;
         if (!inventory.isOurs()) return fail(FailureCode.REFUSED, "never close a player-owned screen");
         return inventory.close() ? Success.INSTANCE : new Running("waiting for empty cursor before closing");
     }

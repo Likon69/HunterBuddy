@@ -21,17 +21,21 @@ public final class ShulkerCycleTree {
     private ShulkerCycleTree() {}
 
     public static Node build(LogisticsContext logistics, String role, Supplier<Node> work) {
+        return build(logistics, role, work, true);
+    }
+
+    public static Node build(LogisticsContext logistics, String role, Supplier<Node> work, boolean requireCapacity) {
         return LogisticsOperations.unless("cycle-shulker-" + role,
             () -> logistics.stored(role) || !logistics.cycle(role).unavailable.isEmpty(),
             new Sequence("cycle-" + role,
-                ready(logistics, role),
+                ready(logistics, role, requireCapacity),
                 available(logistics, role, new Selector("remplir-" + role,
                     new Guard(new Condition("contenu travaillé " + role, sensors -> workProven(logistics, role)),
                         new Deferred("vérifier-contenu-travaillé-" + role, () -> {
                             if (!logistics.placed(role)) return new Succeed();
                             return new Sequence("contenu-réel-confirmé-" + role,
                                 LogisticsOperations.open(logistics, role, true), ContainerTree.close(logistics.outputs));
-                        })), new Deferred("travailler-" + role, work))),
+                        })), new Deferred("travailler-" + role, work)).propagateFailures()),
                 available(logistics, role, TrackedEquipmentTree.recover(logistics, role)),
                 available(logistics, role, store(logistics, role))));
     }
@@ -52,19 +56,19 @@ public final class ShulkerCycleTree {
         return logistics.equipment(role).breakRequested() && logistics.world.cleared(logistics.facts.shulker());
     }
 
-    private static Node ready(LogisticsContext logistics, String role) {
+    private static Node ready(LogisticsContext logistics, String role, boolean requireCapacity) {
         return new Selector("shulker-prête-" + role,
             LogisticsOperations.guard("shulker suivie " + role, () -> !logistics.cycle(role).signature.isEmpty()
                 && (logistics.placed(role) || logistics.returned(role) || workProven(logistics, role))),
             new Guard(new Condition("signature identifiée " + role,
                 sensors -> !logistics.cycle(role).signature.isEmpty()), new ConfirmEquipmentPlacement(logistics, role)),
             new Sequence("prendre-et-poser-" + role,
-                LogisticsOperations.open(logistics, role, false), new ChooseShulker(logistics, role),
+                LogisticsOperations.open(logistics, role, false), new ChooseShulker(logistics, role, requireCapacity),
                 new Deferred("prendre-shulker-identifiée-" + role, () -> {
                     if (!logistics.cycle(role).unavailable.isEmpty()) return ContainerTree.close(logistics.outputs);
                     return new Sequence("sortir-shulker-" + role, take(logistics, role),
                         ContainerTree.close(logistics.outputs), TrackedEquipmentTree.place(logistics, role));
-                })));
+                }))).propagateFailures();
     }
 
     private static Node take(LogisticsContext logistics, String role) {

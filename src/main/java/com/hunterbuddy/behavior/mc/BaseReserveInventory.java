@@ -1,0 +1,63 @@
+package com.hunterbuddy.behavior.mc;
+
+import com.hunterbuddy.util.GliderSwap;
+import java.util.List;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.item.ItemStack;
+
+public final class BaseReserveInventory {
+    private final BaseVisitContext visit;
+
+    public BaseReserveInventory(BaseVisitContext visit) {
+        this.visit = visit;
+    }
+
+    public boolean prepared(ItemStack stack) {
+        if (!ShulkerSignature.isShulker(stack)) {
+            return false;
+        }
+        List<ItemStack> contents = ShulkerSignature.of(stack, visit.logistics.world).contents();
+        ReserveInventory reserve = new ReserveInventory(visit.logistics);
+        return contents.stream().anyMatch(item -> LogisticsInventory.tool(item, visit.logistics.profile)
+                && item.getDamage() == 0)
+            && contents.stream().anyMatch(item -> InventoryLayout.silkPickaxe(item) && item.getDamage() == 0)
+            && contents.stream().filter(item -> item.contains(DataComponentTypes.FOOD)).mapToInt(ItemStack::getCount).sum() >= 16
+            && contents.stream().anyMatch(item -> GliderSwap.isGlider(item) && item.getDamage() == 0 && FlightPlan.remaining(item) > 16)
+            && ReserveInventory.ARMOR.stream().allMatch(slot -> contents.stream().anyMatch(item -> reserve.freshArmor(item, slot)));
+    }
+
+    public int carriedWear() {
+        int wear = 0;
+        for (int i = 0; i < visit.logistics.world.client().player.getInventory().size(); i++) {
+            ItemStack stack = visit.logistics.world.client().player.getInventory().getStack(i);
+            if (GliderSwap.isGlider(stack) && FlightPlan.remaining(stack) > 16) wear += FlightPlan.remaining(stack);
+        }
+        return wear;
+    }
+
+    public boolean canRegear() {
+        int slot = slot();
+        if (slot < 0) {
+            return false;
+        }
+        List<ItemStack> contents = ShulkerSignature.of(visit.enderContents().get(slot), visit.logistics.world).contents();
+        int spareWear = contents.stream().filter(item -> GliderSwap.isGlider(item) && FlightPlan.remaining(item) > 16)
+            .mapToInt(FlightPlan::remaining).sum();
+        return (carriedWear() >= visit.facts.wearBudget || spareWear > 0)
+            && LogisticsInventory.missing(visit.logistics.world, visit.logistics.profile, contents).isEmpty();
+    }
+
+    public int slot() {
+        for (int i = 0; i < visit.enderContents().size(); i++) {
+            if (visit.roleSlot(i, "reserve")) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public boolean ready() {
+        int slot = slot();
+        return slot >= 0 && prepared(visit.enderContents().get(slot));
+    }
+}

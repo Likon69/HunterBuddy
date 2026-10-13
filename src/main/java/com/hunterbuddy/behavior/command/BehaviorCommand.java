@@ -62,6 +62,10 @@ public final class BehaviorCommand extends Command {
                 module().farmerSurvey();
                 info("Prospection de la zone de l'étape FarmerBuddy courante demandée.");
             })))
+            .then(literal("basevisit").executes(context -> control(() -> {
+                module().farmerBaseVisit();
+                info("Visite complète de la base FarmerBuddy demandée.");
+            })))
             .then(literal("minesite").executes(context -> control(() -> {
                 module().farmerMineSite();
                 info("Minage du site vérifié de l'étape FarmerBuddy courante demandé.");

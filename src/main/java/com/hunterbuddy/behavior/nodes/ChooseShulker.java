@@ -15,9 +15,15 @@ import net.minecraft.item.ItemStack;
 public final class ChooseShulker extends Node {
     private final LogisticsContext logistics;
     private final String role;
+    private final boolean requireCapacity;
 
     public ChooseShulker(LogisticsContext logistics, String role) {
+        this(logistics, role, true);
+    }
+
+    public ChooseShulker(LogisticsContext logistics, String role, boolean requireCapacity) {
         super("choisir-shulker-" + role);
+        this.requireCapacity = requireCapacity;
         this.logistics = logistics;
         this.role = role;
     }
@@ -65,14 +71,14 @@ public final class ChooseShulker extends Node {
             return Success.INSTANCE;
         }
         ShulkerSignature signature = ShulkerSignature.of(contents.get(selected), logistics.world);
-        if (!role.equals("reserve") && signature.contents().stream()
+        if (requireCapacity && !role.equals("reserve") && signature.contents().stream()
             .allMatch(stack -> !stack.isEmpty() && stack.getCount() == stack.getMaxCount())) {
             cycle.unavailable = "shulker " + role + " pleine";
             logistics.facts.incomplete = cycle.unavailable;
             logistics.save(ctx, cycle.unavailable);
             return Success.INSTANCE;
         }
-        if (!role.equals("reserve") && !acceptsPlayer(signature)) {
+        if (requireCapacity && !role.equals("reserve") && !acceptsPlayer(signature)) {
             cycle.unavailable = "shulker " + role + " sans place pour les objets présents";
             logistics.facts.incomplete = cycle.unavailable;
             logistics.save(ctx, cycle.unavailable);
@@ -82,7 +88,7 @@ public final class ChooseShulker extends Node {
         cycle.signature = signature.encoded();
         cycle.sourceSlot = selected;
         cycle.takeBaseline = logistics.world.countMatching(signature::matches);
-        logistics.mission.equipment(ctx, "logistics-box-" + role, "");
+        logistics.mission.equipment(ctx, logistics.equipmentName(role), "");
         logistics.forget(role);
         logistics.equipment(role).milestone(ctx, "identified");
         logistics.save(ctx, "shulker identified role=" + role + " source=" + selected);

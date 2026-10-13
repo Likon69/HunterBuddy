@@ -71,6 +71,14 @@ public final class ReserveInventory {
             && logistics.world.countMatching(stack -> GliderSwap.isGlider(stack) && LogisticsInventory.healthy(stack)) == 0) {
             needs.add(stack -> GliderSwap.isGlider(stack) && LogisticsInventory.healthy(stack));
         }
+        int carriedWear = 0;
+        for (int i = 0; i < logistics.world.client().player.getInventory().size(); i++) {
+            ItemStack stack = logistics.world.client().player.getInventory().getStack(i);
+            if (GliderSwap.isGlider(stack) && FlightPlan.remaining(stack) > 16) carriedWear += FlightPlan.remaining(stack);
+        }
+        if (carriedWear < logistics.requiredFlightWear) {
+            needs.add(stack -> GliderSwap.isGlider(stack) && FlightPlan.remaining(stack) > 16);
+        }
         for (EquipmentSlot slot : ARMOR) {
             ItemStack worn = logistics.world.client().player.getEquippedStack(slot);
             if ((worn.isEmpty() || worn.getDamage() > 0 || GliderSwap.isGlider(worn))

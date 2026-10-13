@@ -27,7 +27,7 @@ public final class LogisticsOperations {
     private LogisticsOperations() {}
 
     public static Node unless(String fact, BooleanSupplier present, Node operation) {
-        return new Selector(fact, guard(fact, present), operation);
+        return new Selector(fact, guard(fact, present), operation).propagateFailures();
     }
 
     public static Node guard(String fact, BooleanSupplier present) {
