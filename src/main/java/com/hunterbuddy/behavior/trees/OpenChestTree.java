@@ -54,7 +54,7 @@ public final class OpenChestTree {
         Node close = new Timeout(100, new WithLease(Set.of(Resource.SCREEN), LeasePolicy.WAIT, new CloseScreen(inventory)));
         return new TaskScope(new Timeout(12_000, new Sequence("open-chest",
             new SetValue<>(TARGET, ctx -> target),
-            GoToTree.build(TARGET, target, 3, world, baritone, outputs),
+            GoToTree.build(TARGET, target, 2, world, baritone, outputs),
             new Flow(inventory, open, transfer, close))));
     }
 

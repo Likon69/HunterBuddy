@@ -1,7 +1,7 @@
 package com.hunterbuddy.behavior.trees;
 
 import baritone.api.pathing.goals.Goal;
-import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.pathing.goals.GoalNear;
 import com.hunterbuddy.behavior.core.Decorator;
 import com.hunterbuddy.behavior.core.Failure;
 import com.hunterbuddy.behavior.core.FailureCode;
@@ -55,7 +55,7 @@ public final class GoToTree {
     public static Node build(Key<TargetPoint> targetKey, TargetPoint target, double radius, WorldReader world,
                              BaritoneBridge baritone, Outputs outputs) {
         Node path = new Sequence("baritone-reach",
-            new SetValue<>(GOAL, ctx -> new GoalBlock(BlockPos.ofFloored(target.x(), target.y(), target.z()))),
+            new SetValue<>(GOAL, ctx -> new GoalNear(BlockPos.ofFloored(target.x(), target.y(), target.z()), Math.max(1, (int) Math.floor(radius)))),
             new Retry(3, 20, new Budget("baritone", 3,
                 new ProgressGuard(sensors -> -Conditions.distance(sensors, target), 1, 240,
                     new Timeout(2_400, new WithLease(Set.of(Resource.BARITONE, Resource.MINING), LeasePolicy.WAIT,

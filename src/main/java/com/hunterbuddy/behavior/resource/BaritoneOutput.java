@@ -1,7 +1,7 @@
 package com.hunterbuddy.behavior.resource;
 
 import baritone.api.Settings;
-import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.utils.interfaces.IGoalRenderPos;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.BaritoneSnapshot;
 import java.util.ArrayList;
@@ -47,7 +47,7 @@ public final class BaritoneOutput {
         if (stage != Stage.IDLE) throw new IllegalStateException("Baritone goal still owns its lease");
         lease = current;
         intent = desired;
-        if (desired.goal() instanceof GoalBlock block) lastGoal = new BlockPos(block.x, block.y, block.z);
+        if (desired.goal() instanceof IGoalRenderPos goal) lastGoal = goal.getGoalPos();
         this.events = Objects.requireNonNull(events);
         settings = bridge.settings();
         saved = new Saved(settings.allowBreak.value, settings.allowPlace.value,
