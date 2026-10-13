@@ -35,6 +35,14 @@ public final class TickContext {
     private String pluginOwner;
     private BotStats botStats;
     private Hook executedHook;
+    private Consumer<String> checkpointHandler = owner -> {};
+
+    void checkpointHandler(Consumer<String> handler) { checkpointHandler = Objects.requireNonNull(handler); }
+
+    public void checkpoint(String owner) {
+        if (owner == null || !owner.startsWith("bot:")) throw new IllegalArgumentException("checkpoint needs a bot owner");
+        checkpointHandler.accept(owner);
+    }
 
     public TickContext(Clock clock, Blackboard blackboard, Leases leases, Trace trace, ProgressPolicy policy) {
         this.clock = Objects.requireNonNull(clock);

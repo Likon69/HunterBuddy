@@ -25,6 +25,7 @@ public final class ClickSlot extends Action {
 
     public ClickSlot(Supplier<InventoryTransaction> transaction, InventoryBridge inventory) {
         super("click-slot");
+        limit(100);
         this.transaction = Objects.requireNonNull(transaction);
         this.inventory = Objects.requireNonNull(inventory);
     }
@@ -38,6 +39,7 @@ public final class ClickSlot extends Action {
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (ticket == null) {
+            if (!com.hunterbuddy.util.QuietClicks.readyOrSettle()) return new Running("settling inventory clicks");
             lease = ctx.leases().holder(Resource.INVENTORY).filter(holder -> holder.owner().equals(ctx.owner())).orElseThrow();
             try {
                 ticket = inventory.click(transaction.get(), lease, ctx.nowMs() - ctx.clock().frozenMs(),

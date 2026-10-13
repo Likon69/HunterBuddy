@@ -298,6 +298,29 @@ public final class TreeJava extends Module {
 
     public void flightLab(String scenario) { startLive(new FlightTask(scenario, baritone)); }
 
+    public void inventoryLab(String scenario) {
+        if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
+        if (!Set.of("echest", "shulker", "armor elytra", "armor chestplate").contains(scenario)) throw new IllegalArgumentException("unknown inventory lab");
+        List<BlockPos> positions = new ArrayList<>();
+        if (!scenario.startsWith("armor")) {
+            for (int radius = 1; radius <= 2; radius++) {
+                for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++) {
+                    if (Math.max(Math.abs(x), Math.abs(z)) != radius) continue;
+                    BlockPos pos = world.feet().add(x, 0, z);
+                    if (world.loaded(pos) && world.state(pos).isReplaceable() && !world.cleared(pos.down())
+                        && com.hunterbuddy.modules.regear.util.PlacementUtils.canPlace(pos, true)
+                        && com.hunterbuddy.modules.regear.util.PlacementUtils.resolvePlaceHit(pos,
+                            com.hunterbuddy.modules.regear.util.PlacementUtils.DEFAULT_REACH) != null) positions.add(pos);
+                }
+            }
+            if (positions.size() < (scenario.equals("shulker") ? 2 : 1)) throw new IllegalStateException("no reachable temporary equipment positions nearby");
+        }
+        BlockPos chest = positions.isEmpty() ? world.feet() : positions.getFirst();
+        BlockPos shulker = positions.size() > 1 ? positions.get(1) : chest;
+        startLive(new com.hunterbuddy.behavior.lab.InventoryTask(scenario, chest, shulker,
+            mc.player.getMainHandStack().copy(), baritone));
+    }
+
     private String resumeRefusal(Sensors sensors) {
         LiveWorldBot live = engine.liveBot();
         String refused = world.refusal(live != null ? live.resources() : Set.of(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());

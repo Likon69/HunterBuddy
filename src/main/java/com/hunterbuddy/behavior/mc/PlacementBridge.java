@@ -41,13 +41,22 @@ public final class PlacementBridge {
     }
 
     public NodeResult place(TickContext ctx, BlockPos pos, Predicate<ItemStack> filter, boolean strict) {
+        return place(ctx, pos, filter, strict, false);
+    }
+
+    public NodeResult placeTemporary(TickContext ctx, BlockPos pos, Predicate<ItemStack> filter) {
+        return place(ctx, pos, stack -> filter.test(stack) && (stack.isOf(net.minecraft.item.Items.ENDER_CHEST)
+            || ShulkerSignature.isShulker(stack)), true, true);
+    }
+
+    private NodeResult place(TickContext ctx, BlockPos pos, Predicate<ItemStack> filter, boolean strict, boolean temporary) {
         for (Resource resource : new Resource[]{Resource.SLOT, Resource.LOOK, Resource.INTERACT}) {
             if (ctx.leases().holder(resource).filter(lease -> lease.state() == LeaseState.GRANTED && lease.owner().equals(ctx.owner())).isEmpty()) {
                 throw new IllegalStateException("placement without " + resource + " lease");
             }
         }
         if (!world.inBounds(pos) || !world.loaded(pos)) return new Failure(FailureCode.UNREACHABLE, "placement outside loaded world");
-        int slot = world.findSlot(stack -> filter.test(stack) && consumables.placement(stack));
+        int slot = world.findSlot(stack -> filter.test(stack) && (temporary || consumables.placement(stack)));
         if (slot < 0) return new Failure(FailureCode.MISSING_ITEM, "No hotbar block outside reserves; reserve=25 enderChestsMin=2");
         if (!PlacementUtils.canPlace(pos, strict)) return new Running("waiting for free placement space");
         var hit = PlacementUtils.resolvePlaceHit(pos, PlacementUtils.DEFAULT_REACH);
@@ -62,7 +71,7 @@ public final class PlacementBridge {
             || !outputs.slotSettled(slot)) return new Running("aligning visible placement look and slot");
         if (outputs.nativeTick() - emittedAt < 4) return new Running("placement cadence=4");
         ItemStack stack = world.client().player.getInventory().getStack(slot);
-        if (!filter.test(stack) || !consumables.placement(stack)) return new Failure(FailureCode.MISSING_ITEM, "reserve=25");
+        if (!filter.test(stack) || !temporary && !consumables.placement(stack)) return new Failure(FailureCode.MISSING_ITEM, "reserve=25");
         emittedAt = outputs.nativeTick();
         receipt = new Receipt(world.identity(), pos.toImmutable(), ((BlockItem) stack.getItem()).getBlock());
         return PlacementUtils.placeBlock(pos, new FindItemResult(slot, stack.getCount()), false, true, strict)

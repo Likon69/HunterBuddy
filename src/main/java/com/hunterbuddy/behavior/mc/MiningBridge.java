@@ -31,6 +31,22 @@ public final class MiningBridge {
     private volatile Job job;
     private boolean clicking;
     private boolean foreign;
+    private BlockPos toolPos;
+    private int heldTool = -1;
+    private final java.util.Map<BlockPos, WorldIdentity> temporaryChests = new java.util.HashMap<>();
+
+    public void trackTemporaryChest(BlockPos pos) { temporaryChests.put(pos.toImmutable(), world.identity()); }
+    public void forgetTemporaryChest(BlockPos pos) { temporaryChests.remove(pos); }
+
+    public void holdTool(BlockPos pos, int slot) {
+        toolPos = pos.toImmutable();
+        heldTool = slot;
+    }
+
+    public void releaseTool() {
+        toolPos = null;
+        heldTool = -1;
+    }
 
     public MiningBridge(WorldReader world, BaritoneBridge baritone, BooleanSupplier ownBaritone) {
         this.world = Objects.requireNonNull(world);
@@ -78,6 +94,7 @@ public final class MiningBridge {
     }
 
     public int bestTool(BlockPos pos) {
+        if (pos.equals(toolPos)) return heldTool;
         int faster = BreakMath.fasterThanHeld(world.client().player, world.state(pos));
         return faster < 0 ? world.client().player.getInventory().getSelectedSlot() : faster;
     }
@@ -128,6 +145,8 @@ public final class MiningBridge {
     }
 
     public void worldLost() {
+        releaseTool();
+        temporaryChests.clear();
         releaseClick();
         job = null;
         foreign = false;
@@ -145,6 +164,13 @@ public final class MiningBridge {
 
     @EventHandler
     private void onSend(PacketEvent.Send event) {
+        if (event.packet instanceof PlayerActionC2SPacket action
+            && action.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK
+            && world.available() && world.identity().equals(temporaryChests.get(action.getPos()))
+            && !InventoryLayout.silkPickaxe(world.client().player.getInventory().getStack(com.hunterbuddy.util.ServerSlot.get().slot()))) {
+            event.cancel();
+            return;
+        }
         if (!ownBaritone.getAsBoolean() && event.packet instanceof PlayerActionC2SPacket action
             && action.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK
             && (job == null || !job.pos.equals(action.getPos()))) foreign = true;

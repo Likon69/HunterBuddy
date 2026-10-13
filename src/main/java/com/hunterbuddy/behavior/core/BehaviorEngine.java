@@ -106,6 +106,7 @@ public final class BehaviorEngine {
         allSinks.add(ring);
         Trace trace = new Trace(allSinks.toArray(TraceSink[]::new));
         ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(), trace, ProgressPolicy.DEFAULT);
+        ctx.checkpointHandler(owner -> { if (owner.equals(botOwner)) persist(); });
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });

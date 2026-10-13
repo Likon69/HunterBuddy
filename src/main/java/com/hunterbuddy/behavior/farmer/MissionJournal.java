@@ -58,10 +58,23 @@ public final class MissionJournal {
     }
 
     public void milestone(TickContext ctx, String label) {
-        ctx.bb().set(ctx.owner(), MILESTONE, label);
+        milestone(ctx, ctx.owner(), label);
+    }
+
+    public void milestone(TickContext ctx, String owner, String label) {
+        ctx.bb().set(owner, MILESTONE, label);
+        ctx.checkpoint(owner);
     }
 
     public String milestone(TickContext ctx) {
         return ctx.bb().get(ctx.owner(), MILESTONE).orElse("");
+    }
+
+    public void equipment(TickContext ctx, String name, String state) {
+        ctx.bb().set(ctx.owner(), new Key<>("farmer-equipment-" + name, String.class, Scope.WORLD, true), state);
+    }
+
+    public String equipment(TickContext ctx, String name) {
+        return ctx.bb().get(ctx.owner(), new Key<>("farmer-equipment-" + name, String.class, Scope.WORLD, true)).orElse("");
     }
 }

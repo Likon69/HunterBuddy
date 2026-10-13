@@ -76,7 +76,7 @@ public final class WorldReader {
         return available() && LivingEntity.canGlideWith(client.player.getEquippedStack(EquipmentSlot.CHEST), EquipmentSlot.CHEST);
     }
 
-    MinecraftClient client() {
+    public MinecraftClient client() {
         return client;
     }
 

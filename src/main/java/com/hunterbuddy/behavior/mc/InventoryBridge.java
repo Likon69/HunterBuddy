@@ -24,6 +24,9 @@ import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.s2c.play.SetCursorItemS2CPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.GenericContainerScreenHandler;
+import net.minecraft.screen.ShulkerBoxScreenHandler;
+import net.minecraft.network.packet.s2c.play.SetPlayerInventoryS2CPacket;
+import java.util.List;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
@@ -38,6 +41,10 @@ public final class InventoryBridge {
     private final Consumer<String> alert;
     private ScreenHandler handler;
     private Screen screen;
+    private BlockPos opened;
+    private net.minecraft.block.Block requestedBlock;
+    private final ItemStack[] playerReceipts = new ItemStack[41];
+    private long playerVersion;
     private volatile WorldIdentity identity;
     private volatile long epoch;
     private BlockPos requested;
@@ -58,13 +65,18 @@ public final class InventoryBridge {
         require(lease, Resource.SCREEN);
         require(lease, Resource.INTERACT);
         require(lease, Resource.LOOK);
-        if (isOurs()) return true;
+        if (isOurs() && container()) return pos.equals(opened);
+        if (isOurs() && !transactionPending()) forgetScreen();
         if (quarantine != null || !world.available() || world.client().currentScreen != null || !world.loaded(pos)) return false;
         if (requested != null) return false;
+        net.minecraft.block.Block block = world.state(pos).getBlock();
+        if (!(block instanceof net.minecraft.block.ChestBlock) && !(block instanceof net.minecraft.block.ShulkerBoxBlock)
+            && block != net.minecraft.block.Blocks.ENDER_CHEST) return false;
         if (!(world.client().crosshairTarget instanceof BlockHitResult hit) || !hit.getBlockPos().equals(pos)
             || world.client().player.getEyePos().squaredDistanceTo(hit.getPos()) > 4.5 * 4.5) return false;
         identity = world.identity();
         requested = pos.toImmutable();
+        requestedBlock = block;
         requestedAt = ticks.getAsLong();
         emission = Emission.OWN;
         try {
@@ -81,15 +93,15 @@ public final class InventoryBridge {
     }
 
     public boolean ready() {
-        return isOurs() && handler.syncId > 0;
+        return isOurs() && (handler.syncId > 0 || handler == world.client().player.playerScreenHandler);
     }
 
     public InventoryTransaction firstTransfer() {
-        if (!ready() || !(handler instanceof GenericContainerScreenHandler container)) {
+        if (!ready() || !container()) {
             throw new IllegalStateException("owned chest is not synchronized");
         }
         for (Slot from : handler.slots) {
-            if (from.inventory != container.getInventory() || from.getStack().isEmpty() || !from.canTakeItems(world.client().player)) continue;
+            if (from.inventory == world.client().player.getInventory() || from.getStack().isEmpty() || !from.canTakeItems(world.client().player)) continue;
             for (Slot to : handler.slots) {
                 if (to.inventory != world.client().player.getInventory() || to.getIndex() < 0 || to.getIndex() > 8 || !to.getStack().isEmpty()) continue;
                 return new InventoryTransaction(handler.syncId, from.id, to.id, item(from.getStack()), from.getStack().getCount(), SlotActionType.SWAP);
@@ -107,14 +119,15 @@ public final class InventoryBridge {
     }
 
     public InventoryTransaction firstDeposit(Predicate<ItemStack> filter) {
-        if (!ready() || !(handler instanceof GenericContainerScreenHandler container)) {
+        if (!ready() || !container()) {
             throw new IllegalStateException("owned chest is not synchronized");
         }
         for (Slot from : handler.slots) {
             if (from.inventory != world.client().player.getInventory() || from.getStack().isEmpty()
                 || !filter.test(from.getStack()) || !from.canTakeItems(world.client().player)) continue;
+            if (!depositAllowed(from)) throw new IllegalStateException("deposit would enter the reserve of 25 obsidian");
             for (Slot to : handler.slots) {
-                if (to.inventory != container.getInventory() || !to.getStack().isEmpty() || !to.canInsert(from.getStack())) continue;
+                if (to.inventory == world.client().player.getInventory() || !to.canInsert(from.getStack()) || capacity(to, from.getStack()) == 0) continue;
                 return new InventoryTransaction(handler.syncId, from.id, to.id, item(from.getStack()), from.getStack().getCount(), SlotActionType.QUICK_MOVE);
             }
         }
@@ -124,6 +137,7 @@ public final class InventoryBridge {
     public Ticket click(InventoryTransaction transaction, Lease lease, long nowMs, Consumer<String> confirmed) {
         require(lease, Resource.INVENTORY);
         require(lease, Resource.SCREEN);
+        if (!com.hunterbuddy.util.QuietClicks.readyOrSettle()) throw new IllegalStateException("inventory clicks need settling");
         if (!ready() || quarantine != null || !handler.getCursorStack().isEmpty()) throw new IllegalStateException("inventory authority or empty cursor required");
         if (ticket != null && !ticket.finished()) throw new IllegalStateException("inventory transaction already pending");
         if (handler.syncId != transaction.syncId() || transaction.fromSlot() >= handler.slots.size() || transaction.toSlot() >= handler.slots.size()) {
@@ -135,14 +149,17 @@ public final class InventoryBridge {
             throw new IllegalStateException("source item changed");
         }
         if (transaction.action() == SlotActionType.SWAP && (to.inventory != world.client().player.getInventory()
-            || to.getIndex() < 0 || to.getIndex() > 8 || !to.getStack().isEmpty() || !to.canInsert(from.getStack()))) {
-            throw new IllegalStateException("SWAP requires an empty hotbar destination");
+            || to.getIndex() < 0 || to.getIndex() > 8 || !to.canInsert(from.getStack()) || !from.canInsert(to.getStack()))) {
+            throw new IllegalStateException("SWAP requires a hotbar destination");
         }
-        if (transaction.action() == SlotActionType.QUICK_MOVE && from.inventory != world.client().player.getInventory()) {
-            throw new IllegalStateException("QUICK_MOVE deposits only from the player inventory");
+        if (transaction.action() == SlotActionType.QUICK_MOVE && !container()) {
+            throw new IllegalStateException("QUICK_MOVE requires a container");
         }
+        if (transaction.action() == SlotActionType.QUICK_MOVE && !depositAllowed(from)) throw new IllegalStateException("deposit would enter the reserve of 25 obsidian");
         epoch++;
         ticket = new Ticket(transaction, lease, nowMs, handler.getRevision(), Objects.requireNonNull(confirmed));
+        ticket.before = handler.slots.stream().map(slot -> slot.getStack().copy()).toList();
+        ticket.received = new java.util.HashMap<>();
         emit(transaction.fromSlot(), transaction.action() == SlotActionType.SWAP ? to.getIndex() : 0, transaction.action());
         return ticket;
     }
@@ -161,7 +178,7 @@ public final class InventoryBridge {
     public boolean close() {
         if (!isOurs()) return false;
         if (quarantine != null || !handler.getCursorStack().isEmpty() || ticket != null && !ticket.finished()) return false;
-        world.client().player.closeHandledScreen();
+        if (handler != world.client().player.playerScreenHandler) world.client().player.closeHandledScreen();
         forgetScreen();
         return true;
     }
@@ -181,6 +198,7 @@ public final class InventoryBridge {
             return true;
         }
         if (ticket.transaction.action() != SlotActionType.PICKUP && handler.getCursorStack().isEmpty()) {
+            if (!ticket.serverConfirmed) return false;
             ticket.stage = Stage.RELEASED;
             return true;
         }
@@ -193,10 +211,12 @@ public final class InventoryBridge {
             Slot from = handler.slots.get(ticket.transaction.fromSlot());
             if (handler.getCursorStack().isEmpty()) return false;
             if (!matches(handler.getCursorStack(), ticket.transaction.expectedItemId(), ticket.transaction.expectedCount())
+                || !ItemStack.areEqual(handler.getCursorStack(), ticket.before.get(ticket.transaction.fromSlot()))
                 || !from.getStack().isEmpty() || !from.canInsert(handler.getCursorStack())) {
                 quarantine("cursor cannot be returned safely");
                 return true;
             }
+            if (!com.hunterbuddy.util.QuietClicks.readyOrSettle()) return false;
             ticket.emittedReturn = true;
             ticket.cursor = null;
             emit(from.id, 0, SlotActionType.PICKUP);
@@ -242,6 +262,7 @@ public final class InventoryBridge {
     }
 
     public void worldLost() {
+        java.util.Arrays.fill(playerReceipts, null);
         if (ticket != null && !ticket.finished()) quarantine("session ended during an inventory transaction");
         forgetScreen();
         synchronized (cursors) { cursors.clear(); }
@@ -261,16 +282,20 @@ public final class InventoryBridge {
 
     private void forgetScreen() {
         handler = null;
+        opened = null;
         screen = null;
         requested = null;
     }
 
     private void claim() {
         if (requested == null || !world.available() || world.legacyRegear() || !identity.equals(world.identity())) return;
+        if (!world.loaded(requested) || world.state(requested).getBlock() != requestedBlock) return;
         ScreenHandler candidate = world.client().player.currentScreenHandler;
-        if (candidate instanceof GenericContainerScreenHandler && candidate.syncId > 0 && world.client().currentScreen instanceof HandledScreen<?>) {
+        if ((requestedBlock instanceof net.minecraft.block.ShulkerBoxBlock) != (candidate instanceof ShulkerBoxScreenHandler)) return;
+        if ((candidate instanceof GenericContainerScreenHandler || candidate instanceof ShulkerBoxScreenHandler) && candidate.syncId > 0 && world.client().currentScreen instanceof HandledScreen<?>) {
             handler = candidate;
             screen = world.client().currentScreen;
+            opened = requested;
             requested = null;
         }
     }
@@ -278,6 +303,7 @@ public final class InventoryBridge {
     @EventHandler
     private void inventory(InventoryEvent event) {
         claim();
+        observeContents(event.packet.syncId(), event.packet.contents());
         if (!receiptAuthority() || event.packet.syncId() != ticket.transaction.syncId() || event.packet.revision() <= ticket.revision) return;
         for (int slot = 0; slot < event.packet.contents().size(); slot++) acceptSlot(slot, event.packet.contents().get(slot));
         acceptCursor(StackValue.of(event.packet.cursorStack()));
@@ -285,18 +311,43 @@ public final class InventoryBridge {
 
     @EventHandler
     private void slot(ContainerSlotUpdateEvent event) {
+        observeSlot(event.packet.getSyncId(), event.packet.getSlot(), event.packet.getStack());
         if (receiptAuthority() && event.packet.getSyncId() == ticket.transaction.syncId() && event.packet.getRevision() > ticket.revision) {
             acceptSlot(event.packet.getSlot(), event.packet.getStack());
         }
     }
 
     private boolean receiptAuthority() {
-        return ticket != null && world.available() && identity != null && identity.equals(world.identity());
+        return ticket != null && isOurs();
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
     private void receive(PacketEvent.Receive event) {
-        if (event.isCancelled() || !(event.packet instanceof SetCursorItemS2CPacket packet)) return;
+        if (event.isCancelled() || !world.available() || event.connection != world.client().getNetworkHandler().getConnection()) return;
+        if (event.packet instanceof SetPlayerInventoryS2CPacket update) {
+            WorldIdentity capturedWorld = world.identity();
+            long capturedEpoch = epoch;
+            ItemStack capturedStack = update.contents().copy();
+            world.client().execute(() -> {
+                if (world.available() && capturedWorld.equals(world.identity())) {
+                    observePlayer(update.slot(), capturedStack);
+                    if (receiptAuthority() && epoch == capturedEpoch && handler.syncId == 0) {
+                        for (Slot slot : handler.slots) if (slot.inventory == world.client().player.getInventory() && slot.getIndex() == update.slot()) acceptSlot(slot.id, capturedStack);
+                    }
+                }
+            });
+        }
+        if (event.packet instanceof net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket equipment
+            && equipment.getEntityId() == world.client().player.getId()) {
+            WorldIdentity equipmentWorld = world.identity();
+            for (var pair : equipment.getEquipmentList()) if (pair.getFirst() == net.minecraft.entity.EquipmentSlot.CHEST) {
+                ItemStack chestStack = pair.getSecond().copy();
+                world.client().execute(() -> {
+                    if (world.available() && equipmentWorld.equals(world.identity())) observePlayer(38, chestStack);
+                });
+            }
+        }
+        if (!(event.packet instanceof SetCursorItemS2CPacket packet)) return;
         WorldIdentity captured = identity;
         if (captured == null) return;
         synchronized (cursors) {
@@ -324,8 +375,8 @@ public final class InventoryBridge {
     }
 
     private void acceptSlot(int slot, ItemStack stack) {
-        if (slot == ticket.transaction.fromSlot()) ticket.sourceEmpty = stack.isEmpty();
-        if (slot == ticket.transaction.toSlot()) ticket.destination = matches(stack, ticket.transaction.expectedItemId(), ticket.transaction.expectedCount());
+        if (ticket == null || ticket.stage != Stage.SENT && ticket.stage != Stage.RETURNING) return;
+        ticket.received.put(slot, stack.copy());
         confirm();
     }
 
@@ -336,19 +387,149 @@ public final class InventoryBridge {
     }
 
     private void confirm() {
-        if (ticket.stage != Stage.SENT || !ticket.sourceEmpty) return;
-        boolean received = switch (ticket.transaction.action()) {
-            case SWAP -> ticket.destination;
-            case QUICK_MOVE -> true;
-            default -> ticket.cursor != null && ticket.cursor.id.equals(ticket.transaction.expectedItemId()) && ticket.cursor.count == ticket.transaction.expectedCount();
-        };
+        if (ticket.serverConfirmed || ticket.stage != Stage.SENT && ticket.stage != Stage.RETURNING) return;
+        InventoryTransaction tx = ticket.transaction;
+        ItemStack source = ticket.received.get(tx.fromSlot());
+        if (source == null) return;
+        ItemStack before = ticket.before.get(tx.fromSlot());
+        boolean received = false;
+        if (tx.action() == SlotActionType.SWAP) {
+            ItemStack destination = ticket.received.get(tx.toSlot());
+            received = destination != null && ItemStack.areEqual(destination, before)
+                && ItemStack.areEqual(source, ticket.before.get(tx.toSlot()));
+        } else if (tx.action() == SlotActionType.QUICK_MOVE) {
+            int remaining = source.isEmpty() ? 0 : ItemStack.areItemsAndComponentsEqual(source, before) ? source.getCount() : before.getCount();
+            int moved = before.getCount() - remaining;
+            int gained = 0;
+            boolean fromPlayer = handler.slots.get(tx.fromSlot()).inventory == world.client().player.getInventory();
+            for (Slot slot : handler.slots) {
+                if ((slot.inventory == world.client().player.getInventory()) == fromPlayer) continue;
+                ItemStack next = ticket.received.get(slot.id);
+                if (next == null) continue;
+                ItemStack previous = ticket.before.get(slot.id);
+                gained += matchingCount(next, before) - matchingCount(previous, before);
+            }
+            received = moved > 0 && gained == moved;
+        } else {
+            received = source.isEmpty() && ticket.cursor != null && ticket.cursor.id.equals(tx.expectedItemId())
+                && ticket.cursor.count == tx.expectedCount();
+        }
         if (received) {
-            ticket.stage = Stage.CONFIRMED;
+            if (ticket.stage == Stage.SENT) ticket.stage = Stage.CONFIRMED;
             ticket.serverConfirmed = true;
-            ticket.confirmed.accept("TRANSACTION_CONFIRMED syncId=" + ticket.transaction.syncId() + " from=" + ticket.transaction.fromSlot() + " to=" + ticket.transaction.toSlot());
+            ticket.confirmed.accept("TRANSACTION_CONFIRMED syncId=" + tx.syncId() + " from=" + tx.fromSlot() + " to=" + tx.toSlot());
         }
     }
 
+    private static int matchingCount(ItemStack stack, ItemStack expected) {
+        return !stack.isEmpty() && ItemStack.areItemsAndComponentsEqual(stack, expected) ? stack.getCount() : 0;
+    }
+
+    private static int capacity(Slot slot, ItemStack stack) {
+        ItemStack present = slot.getStack();
+        return present.isEmpty() ? slot.getMaxItemCount(stack)
+            : ItemStack.areItemsAndComponentsEqual(present, stack) ? Math.max(0, slot.getMaxItemCount(stack) - present.getCount()) : 0;
+    }
+
+    private boolean depositAllowed(Slot from) {
+        if (from.inventory != world.client().player.getInventory() || !from.getStack().isOf(net.minecraft.item.Items.OBSIDIAN)) return true;
+        int capacity = 0;
+        for (Slot to : handler.slots) if (to.inventory != from.inventory && to.canInsert(from.getStack())) capacity += capacity(to, from.getStack());
+        return Math.min(from.getStack().getCount(), capacity) <= Math.max(0, world.count(net.minecraft.item.Items.OBSIDIAN) - 25);
+    }
+
+    public boolean container() {
+        return ready() && (handler instanceof GenericContainerScreenHandler || handler instanceof ShulkerBoxScreenHandler);
+    }
+
+    public boolean at(BlockPos pos) { return container() && pos.equals(opened); }
+
+    public boolean enderChest() {
+        return container() && opened != null && world.loaded(opened) && world.state(opened).isOf(net.minecraft.block.Blocks.ENDER_CHEST);
+    }
+
+    public List<ItemStack> containerContents() {
+        if (!container()) throw new IllegalStateException("owned container required");
+        return handler.slots.stream().filter(slot -> slot.inventory != world.client().player.getInventory()).map(slot -> slot.getStack().copy()).toList();
+    }
+
+    public boolean claimPlayer(Lease lease) {
+        require(lease, Resource.INVENTORY);
+        if (!world.available() || quarantine != null || world.client().currentScreen != null
+            || world.client().player.currentScreenHandler != world.client().player.playerScreenHandler) return false;
+        handler = world.client().player.playerScreenHandler;
+        screen = null;
+        identity = world.identity();
+        opened = null;
+        return true;
+    }
+
+    public InventoryTransaction playerSwap(int fromIndex, int hotbar) {
+        if (!ready() || handler != world.client().player.playerScreenHandler) throw new IllegalStateException("owned player inventory required");
+        Slot from = playerSlot(fromIndex);
+        Slot to = playerSlot(hotbar);
+        return new InventoryTransaction(0, from.id, to.id, item(from.getStack()), from.getStack().getCount(), SlotActionType.SWAP);
+    }
+
+    private Slot playerSlot(int index) {
+        return handler.slots.stream().filter(slot -> slot.inventory == world.client().player.getInventory() && slot.getIndex() == index).findFirst().orElseThrow();
+    }
+
+    public InventoryTransaction takeStack(int containerSlot, ItemStack expected) {
+        if (!container() || containerSlot < 0 || containerSlot >= containerContents().size()) throw new IllegalStateException("container slot missing");
+        Slot from = handler.slots.get(containerSlot);
+        if (!ItemStack.areEqual(from.getStack(), expected)) throw new IllegalStateException("precise stack changed");
+        Slot free = handler.slots.stream().filter(slot -> slot.inventory == world.client().player.getInventory()
+            && slot.getIndex() < 36 && slot.getStack().isEmpty()).findFirst().orElseThrow(() -> new IllegalStateException("free player slot required"));
+        return new InventoryTransaction(handler.syncId, from.id, free.id, item(expected), expected.getCount(), SlotActionType.QUICK_MOVE);
+    }
+
+    public InventoryTransaction takeShulker(ShulkerSignature signature) {
+        if (!enderChest()) throw new IllegalStateException("owned ender chest required");
+        List<ItemStack> contents = containerContents();
+        for (int i = 0; i < contents.size(); i++) if (signature.matches(contents.get(i))) return takeStack(i, contents.get(i));
+        throw new IllegalStateException("expected shulker absent from ender chest");
+    }
+
+    public InventoryTransaction storeShulker(ShulkerSignature signature) {
+        if (!enderChest()) throw new IllegalStateException("owned ender chest required");
+        return firstDeposit(signature::matches);
+    }
+
+    public void observePlayer() {
+        if (!world.available()) return;
+        for (int i = 0; i < playerReceipts.length; i++) playerReceipts[i] = world.client().player.getInventory().getStack(i).copy();
+    }
+
+    public long playerVersion() { return playerVersion; }
+
+    public int confirmedCount(Predicate<ItemStack> filter) {
+        int count = 0;
+        for (int i = 0; i < 36; i++) if (playerReceipts[i] != null && filter.test(playerReceipts[i])) count += playerReceipts[i].getCount();
+        return count;
+    }
+
+    public boolean confirmedChest(ItemStack stack) {
+        return playerReceipts[38] != null && ItemStack.areEqual(stack, playerReceipts[38]);
+    }
+
+    private void observePlayer(int index, ItemStack stack) {
+        if (index < 0 || index >= playerReceipts.length) return;
+        playerReceipts[index] = stack.copy();
+        playerVersion++;
+    }
+
+    private void observeSlot(int syncId, int index, ItemStack stack) {
+        if (!world.available()) return;
+        ScreenHandler current = world.client().player.currentScreenHandler;
+        if (current.syncId != syncId || index < 0 || index >= current.slots.size()) return;
+        Slot slot = current.slots.get(index);
+        if (slot.inventory == world.client().player.getInventory()) observePlayer(slot.getIndex(), stack);
+    }
+
+    private void observeContents(int syncId, List<ItemStack> contents) {
+        for (int i = 0; i < contents.size(); i++) observeSlot(syncId, i, contents.get(i));
+    }
     private static void require(Lease lease, Resource resource) {
         if (lease == null || lease.state() != LeaseState.GRANTED || !lease.resources().contains(resource)) {
             throw new IllegalStateException("inventory action without " + resource + " lease");
@@ -360,7 +541,7 @@ public final class InventoryBridge {
     }
 
     private static boolean matches(ItemStack stack, String id, int count) {
-        return !stack.isEmpty() && stack.getCount() == count && item(stack).equals(id);
+        return stack.getCount() == count && item(stack).equals(id);
     }
 
     public static final class Ticket {
@@ -370,8 +551,9 @@ public final class InventoryBridge {
         private final int revision;
         private final Consumer<String> confirmed;
         private Stage stage = Stage.SENT;
-        private boolean sourceEmpty;
-        private boolean destination;
+        private List<ItemStack> before;
+        private java.util.Map<Integer, ItemStack> received;
+
         private StackValue cursor;
         private long revokeAt;
         private boolean emittedReturn;
