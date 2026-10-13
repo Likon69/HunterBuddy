@@ -47,7 +47,7 @@ public final class BaritoneGoTo extends Action {
     }
 
     private Key<Integer> attempts(TickContext ctx) {
-        return new Key<>("baritone-starts/" + target(ctx), Integer.class, Scope.OWNER, false);
+        return new Key<>("baritone-starts/" + target(ctx), Integer.class, Scope.TASK, false);
     }
 
     @Override

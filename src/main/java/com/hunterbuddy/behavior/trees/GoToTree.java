@@ -39,6 +39,7 @@ import com.hunterbuddy.behavior.probes.FindBlocks;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
+import java.util.List;
 import java.util.Set;
 import net.minecraft.block.FluidBlock;
 import net.minecraft.util.math.BlockPos;
@@ -48,6 +49,7 @@ public final class GoToTree {
     private static final Key<BlockPos> FRONT = new Key<>("goto-front", BlockPos.class, Scope.TASK, false);
     private static final Key<BlockScan> FRONT_SCAN = new Key<>("goto-front-scan", BlockScan.class, Scope.TASK, false);
     private static final Key<BlockPos> BLOCK = new Key<>("goto-block", BlockPos.class, Scope.TASK, false);
+    private static final List<String> BUDGETS = List.of("baritone", "walk", "break-front", "pillar");
 
     private GoToTree() {
     }
@@ -135,9 +137,9 @@ public final class GoToTree {
 
         @Override
         protected NodeResult onTick(TickContext ctx) {
-            ctx.bb().set(ctx.owner(), TickContext.CURRENT_TARGET, target.toString());
             ctx.goalDistance(target.toString(), Conditions.distance(ctx.sensors(), target));
             NodeResult result = child().execute(ctx);
+            if (result instanceof Success) for (String budget : BUDGETS) ctx.budgets().reset(ctx.owner(), budget);
             return result instanceof Failure ? fail(FailureCode.UNREACHABLE, "all options spent") : result;
         }
     }
