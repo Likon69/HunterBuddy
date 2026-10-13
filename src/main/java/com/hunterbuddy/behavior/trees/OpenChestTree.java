@@ -13,6 +13,7 @@ import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.InventoryBridge;
+import com.hunterbuddy.behavior.mc.InventoryTransaction;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.nodes.ClickSlot;
 import com.hunterbuddy.behavior.nodes.CloseScreen;
@@ -28,6 +29,7 @@ import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
+import java.util.function.Supplier;
 import net.minecraft.util.math.BlockPos;
 
 public final class OpenChestTree {
@@ -37,13 +39,18 @@ public final class OpenChestTree {
     }
 
     public static Node build(BlockPos pos, WorldReader world, BaritoneBridge baritone, Outputs outputs) {
+        return build(pos, world, baritone, outputs, outputs.inventory()::firstTransfer);
+    }
+
+    public static Node build(BlockPos pos, WorldReader world, BaritoneBridge baritone, Outputs outputs,
+                             Supplier<InventoryTransaction> transaction) {
         TargetPoint target = new TargetPoint(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
         InventoryBridge inventory = outputs.inventory();
         Node open = new Timeout(100, new WithLease(Set.of(Resource.LOOK, Resource.INTERACT, Resource.SCREEN), LeasePolicy.WAIT,
             new Sequence("open-owned-screen", new LookAt(TARGET, 90, world, outputs),
                 new OpenContainer(pos, inventory), new WaitScreen(inventory))));
         Node transfer = new Timeout(100, new WithLease(Set.of(Resource.INVENTORY), LeasePolicy.WAIT,
-            new ClickSlot(inventory::firstTransfer, inventory)));
+            new ClickSlot(transaction, inventory)));
         Node close = new Timeout(100, new WithLease(Set.of(Resource.SCREEN), LeasePolicy.WAIT, new CloseScreen(inventory)));
         return new TaskScope(new Timeout(12_000, new Sequence("open-chest",
             new SetValue<>(TARGET, ctx -> target),

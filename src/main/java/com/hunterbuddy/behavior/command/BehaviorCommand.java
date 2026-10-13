@@ -25,10 +25,16 @@ public final class BehaviorCommand extends Command {
         builder.then(literal("start").then(literal("lab").executes(context -> control(() -> {
             module().startLab();
             info("Started lab (simulated).");
+        }))).then(literal("farmerbuddy").executes(context -> control(() -> {
+            module().startBot("farmerbuddy");
+            info("Started farmerbuddy.");
         }))));
         builder.then(literal("switch").then(literal("lab").executes(context -> control(() -> {
             module().switchLab();
             info("Switch to lab requested.");
+        }))).then(literal("farmerbuddy").executes(context -> control(() -> {
+            module().switchBot("farmerbuddy");
+            info("Switch to farmerbuddy requested.");
         }))));
         builder.then(literal("stop").executes(context -> control(() ->
             module().stopEngine(ExitReason.STOPPED, "Stopped by .bt stop"))));

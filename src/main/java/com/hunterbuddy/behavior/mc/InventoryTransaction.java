@@ -11,8 +11,8 @@ public record InventoryTransaction(int syncId, int fromSlot, int toSlot, String 
         if (syncId <= 0 || fromSlot < 0 || toSlot < 0 || expectedItemId.isBlank() || expectedCount <= 0) {
             throw new IllegalArgumentException("invalid inventory transaction");
         }
-        if (action != SlotActionType.SWAP && action != SlotActionType.PICKUP) {
-            throw new IllegalArgumentException("only validated SWAP and PICKUP transactions are supported");
+        if (action != SlotActionType.SWAP && action != SlotActionType.PICKUP && action != SlotActionType.QUICK_MOVE) {
+            throw new IllegalArgumentException("only validated SWAP, PICKUP and QUICK_MOVE transactions are supported");
         }
     }
 }

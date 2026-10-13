@@ -10,6 +10,7 @@ import java.util.Deque;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import meteordevelopment.meteorclient.events.packets.ContainerSlotUpdateEvent;
 import meteordevelopment.meteorclient.events.packets.InventoryEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -97,6 +98,21 @@ public final class InventoryBridge {
         throw new IllegalStateException("chest needs an item and an empty player hotbar slot");
     }
 
+    public InventoryTransaction firstDeposit(Predicate<ItemStack> filter) {
+        if (!ready() || !(handler instanceof GenericContainerScreenHandler container)) {
+            throw new IllegalStateException("owned chest is not synchronized");
+        }
+        for (Slot from : handler.slots) {
+            if (from.inventory != world.client().player.getInventory() || from.getStack().isEmpty()
+                || !filter.test(from.getStack()) || !from.canTakeItems(world.client().player)) continue;
+            for (Slot to : handler.slots) {
+                if (to.inventory != container.getInventory() || !to.getStack().isEmpty() || !to.canInsert(from.getStack())) continue;
+                return new InventoryTransaction(handler.syncId, from.id, to.id, item(from.getStack()), from.getStack().getCount(), SlotActionType.QUICK_MOVE);
+            }
+        }
+        throw new IllegalStateException("chest has no free space for a deposit");
+    }
+
     public Ticket click(InventoryTransaction transaction, Lease lease, long nowMs, Consumer<String> confirmed) {
         require(lease, Resource.INVENTORY);
         require(lease, Resource.SCREEN);
@@ -113,6 +129,9 @@ public final class InventoryBridge {
         if (transaction.action() == SlotActionType.SWAP && (to.inventory != world.client().player.getInventory()
             || to.getIndex() < 0 || to.getIndex() > 8 || !to.getStack().isEmpty() || !to.canInsert(from.getStack()))) {
             throw new IllegalStateException("SWAP requires an empty hotbar destination");
+        }
+        if (transaction.action() == SlotActionType.QUICK_MOVE && from.inventory != world.client().player.getInventory()) {
+            throw new IllegalStateException("QUICK_MOVE deposits only from the player inventory");
         }
         epoch++;
         ticket = new Ticket(transaction, lease, nowMs, handler.getRevision(), Objects.requireNonNull(confirmed));
@@ -153,7 +172,7 @@ public final class InventoryBridge {
             quarantine("inventory handler or player authority changed");
             return true;
         }
-        if (ticket.transaction.action() == SlotActionType.SWAP && handler.getCursorStack().isEmpty()) {
+        if (ticket.transaction.action() != SlotActionType.PICKUP && handler.getCursorStack().isEmpty()) {
             ticket.stage = Stage.RELEASED;
             return true;
         }
@@ -310,8 +329,11 @@ public final class InventoryBridge {
 
     private void confirm() {
         if (ticket.stage != Stage.SENT || !ticket.sourceEmpty) return;
-        boolean received = ticket.transaction.action() == SlotActionType.SWAP ? ticket.destination
-            : ticket.cursor != null && ticket.cursor.id.equals(ticket.transaction.expectedItemId()) && ticket.cursor.count == ticket.transaction.expectedCount();
+        boolean received = switch (ticket.transaction.action()) {
+            case SWAP -> ticket.destination;
+            case QUICK_MOVE -> true;
+            default -> ticket.cursor != null && ticket.cursor.id.equals(ticket.transaction.expectedItemId()) && ticket.cursor.count == ticket.transaction.expectedCount();
+        };
         if (received) {
             ticket.stage = Stage.CONFIRMED;
             ticket.serverConfirmed = true;

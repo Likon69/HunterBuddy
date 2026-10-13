@@ -9,6 +9,7 @@ import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.hooks.TreeHooks;
+import com.hunterbuddy.behavior.bot.LiveWorldBot;
 import com.hunterbuddy.behavior.lab.LabBot;
 import com.hunterbuddy.behavior.lab.LiveLabBot;
 import com.hunterbuddy.behavior.lab.SimulatedSensors;
@@ -154,7 +155,9 @@ public final class BehaviorEngine {
 
     private void checkBot(Bot next) {
         Objects.requireNonNull(next);
-        if (!(next instanceof LabBot) && !(next instanceof LiveLabBot)) throw new IllegalArgumentException("Only LabBot scenarios are available");
+        if (!(next instanceof LiveLabBot) && !bots.names().contains(next.name())) {
+            throw new IllegalArgumentException("Bot not registered: " + next.name());
+        }
     }
 
     private void install(Bot next, String reason) {
@@ -594,8 +597,12 @@ public final class BehaviorEngine {
         return ctx.leases();
     }
 
-    public LiveLabBot liveLab() {
-        return bot instanceof LiveLabBot lab ? lab : null;
+    public LiveWorldBot liveBot() {
+        return bot instanceof LiveWorldBot live ? live : null;
+    }
+
+    public String botName() {
+        return bot == null ? "none" : bot.name();
     }
 
     public void fault(RuntimeException failure) {

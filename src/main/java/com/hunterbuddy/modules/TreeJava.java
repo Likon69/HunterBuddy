@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.behavior.bot.LiveWorldBot;
 import com.hunterbuddy.behavior.core.BehaviorEngine;
 import com.hunterbuddy.behavior.core.Clock;
 import com.hunterbuddy.behavior.core.EngineSnapshot;
@@ -8,6 +9,8 @@ import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.RootState;
 import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TargetPoint;
+import com.hunterbuddy.behavior.farmer.FarmerBuddyBot;
+import com.hunterbuddy.behavior.farmer.FarmerSettings;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
 import com.hunterbuddy.behavior.lab.FlightTask;
@@ -57,6 +60,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -76,6 +80,7 @@ public final class TreeJava extends Module {
     private final ServerFacts serverFacts = new ServerFacts();
     private final BaritoneBridge baritone = new BaritoneBridge();
     private final LabSettings labSettings = new LabSettings(LabScenario.WORK, ignored -> scenarioChanged());
+    private final FarmerSettings farmerSettings = new FarmerSettings();
     private final Setting<Boolean> hud = general.add(new BoolSetting.Builder()
         .name("hud").description("Show the registered TreeJava behavior HUD.").defaultValue(true).build());
     private final Setting<Boolean> fullTraceLog = general.add(new BoolSetting.Builder()
@@ -100,12 +105,14 @@ public final class TreeJava extends Module {
     private final Map<Hook, Setting<GateMode>> routineSelection = new EnumMap<>(Hook.class);
     private final Map<String, Setting<Boolean>> pluginSelection = new java.util.LinkedHashMap<>();
     private LabTask requestedTask;
+    private String requestedBot;
 
     public TreeJava() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "TreeJava", "Behavior tree laboratory: live movement, mining, placement and simulated scenarios.");
         runInMainMenu = true;
         autoSubscribe = false;
         engine.bots().register("lab", () -> new LabBot(labSettings));
+        engine.bots().register("farmerbuddy", () -> new FarmerBuddyBot(farmerSettings, world, baritone, engine.outputs()));
         for (String bot : engine.bots().names()) engine.bots().create(bot).onRegister(settings.createGroup("Bot: " + bot));
         engine.outputs().connect(new MovementOutput(baritone), new LookOutput(mc), new SlotOutput(mc), serverFacts::tick);
         engine.outputs().connectBaritone(new BaritoneOutput(baritone, engine.leases(), consumables, serverFacts::tick));
@@ -126,7 +133,7 @@ public final class TreeJava extends Module {
                 .name("routine").description("Select the legacy gate routine for this hook.").defaultValue(GateMode.GATE)
                 .onChanged(mode -> engine.selectRoutine(slot, mode == GateMode.NONE ? "none" : name)).build()));
         }
-        for (var plugin : List.of(new StatsPlugin(engine::stats), new PlayerWatchPlugin(labSettings::pauseOnPlayer), alerts)) {
+        for (var plugin : List.of(new StatsPlugin(engine::stats), new PlayerWatchPlugin(this::pauseOnPlayer), alerts)) {
             String name = plugin.name();
             SettingGroup group = settings.createGroup("Plugin: " + name);
             engine.plugins().register(plugin, group);
@@ -147,12 +154,18 @@ public final class TreeJava extends Module {
     @Override
     public void onActivate() {
         try {
-            jsonl.session("lab");
-            engine.bindWorld(requestedTask == null ? "simulated" : world.storageKey());
-            if (requestedTask == null) engine.startBot(engine.bots().create("lab"));
-            else {
+            jsonl.session(requestedBot == null ? "lab" : requestedBot);
+            if (requestedTask != null) {
+                engine.bindWorld(world.storageKey());
                 requireLive(requestedTask);
                 engine.startBot(new LiveLabBot(labSettings, requestedTask, world, engine.outputs()));
+            } else if (requestedBot != null) {
+                requireLiveBot(requestedBot);
+                engine.bindWorld(world.storageKey());
+                engine.startBot(engine.bots().create(requestedBot));
+            } else {
+                engine.bindWorld("simulated");
+                engine.startBot(engine.bots().create("lab"));
             }
         } catch (RuntimeException ex) {
             error("%s", ex.getMessage());
@@ -177,6 +190,45 @@ public final class TreeJava extends Module {
     public void switchLab() {
         if (!isActive()) throw new IllegalStateException("TreeJava is not active");
         engine.switchBot(engine.bots().create("lab"));
+    }
+
+    public void startBot(String name) {
+        Objects.requireNonNull(name);
+        if (name.equals("lab")) { startLab(); return; }
+        if (!engine.bots().names().contains(name)) throw new IllegalArgumentException("unknown bot: " + name);
+        if (isActive()) throw new IllegalStateException("TreeJava is already active; use .bt switch " + name);
+        requireLiveBot(name);
+        requestedBot = name;
+        try {
+            enable();
+        } finally {
+            requestedBot = null;
+        }
+        if (!isActive() || engine.snapshot().state() == RootState.STOPPED) {
+            disable();
+            throw new IllegalStateException("Bot " + name + " failed to start; see stop report");
+        }
+    }
+
+    public void switchBot(String name) {
+        if (name.equals("lab")) { switchLab(); return; }
+        if (!isActive()) throw new IllegalStateException("TreeJava is not active");
+        if (!engine.bots().names().contains(name)) throw new IllegalArgumentException("unknown bot: " + name);
+        requireLiveBot(name);
+        engine.switchBot(engine.bots().create(name), world.storageKey());
+    }
+
+    private void requireLiveBot(String name) {
+        String refusal = world.refusal(Set.of(Resource.MOVEMENT, Resource.MINING, Resource.INVENTORY),
+            baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
+        if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
+        if (refusal == null) refusal = mining.refusal();
+        if (refusal == null && name.equals("farmerbuddy")) refusal = farmerSettings.refusal(world.feet());
+        if (refusal != null) throw new IllegalStateException(refusal);
+    }
+
+    private boolean pauseOnPlayer() {
+        return engine.botName().equals("farmerbuddy") ? farmerSettings.pauseOnPlayer() : labSettings.pauseOnPlayer();
     }
 
     public void selectScenario(LabScenario next) {
@@ -224,14 +276,14 @@ public final class TreeJava extends Module {
     public void flightLab(String scenario) { startLive(new FlightTask(scenario, baritone)); }
 
     private String resumeRefusal(Sensors sensors) {
-        LiveLabBot live = engine.liveLab();
-        String refused = world.refusal(live == null ? Set.of() : live.resources(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
+        LiveWorldBot live = engine.liveBot();
+        String refused = world.refusal(live != null ? live.resources() : Set.of(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
         if (refused != null) return refused;
         if (sensors.eating()) return "AutoEatSync eating";
         if (sensors.combatTarget()) return "KillAuraPlus combat target";
         if (sensors.regearRunning() || sensors.regearPending()) return "AutoFlyingRegear running or pending";
         if (sensors.mlepMining() && !mining.ownsMining()) return "HMine foreign mining";
-        if (labSettings.pauseOnPlayer() && sensors.playersVisible() > 0) return "another player visible";
+        if (pauseOnPlayer() && sensors.playersVisible() > 0) return "another player visible";
         if (engine.outputs().foreignMovement()) return "foreign forced movement";
         return null;
     }
@@ -279,7 +331,7 @@ public final class TreeJava extends Module {
             engine.advanceNativeOutputs();
             messages.flush();
             if (!isActive()) return;
-            LiveLabBot live = engine.liveLab();
+            LiveWorldBot live = engine.liveBot();
             if (live == null) engine.tick();
             else if (!world.available()) engine.disconnected();
             else if (engine.suspended()) {
@@ -287,11 +339,11 @@ public final class TreeJava extends Module {
                 if (!captured.inQueue() && !engine.worldKey().equals(world.storageKey())) stopEngine(ExitReason.WORLD_CHANGED, "Reconnected into another server or dimension");
                 else engine.tickCaptured(() -> captured, serverFacts::samplesValid);
             }
-            else if (!live.identity().equals(world.identity())) stopEngine(ExitReason.WORLD_CHANGED, "Live laboratory world or player changed");
+            else if (!live.identity().equals(world.identity())) stopEngine(ExitReason.WORLD_CHANGED, "Live world or player changed");
             else {
                 String refusal = world.refusal(live.resources(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
                 if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
-                if (refusal != null) stopEngine(ExitReason.STOPPED, "Live lab refused: " + refusal);
+                if (refusal != null) stopEngine(ExitReason.STOPPED, "Live refused: " + refusal);
                 else engine.tickCaptured(mcSensors::capture, serverFacts::samplesValid);
             }
         } catch (RuntimeException ex) {
@@ -362,7 +414,7 @@ public final class TreeJava extends Module {
 
     public void tickPost() {
         if (!isActive() || !world.available() || engine.suspended()) return;
-        LiveLabBot live = engine.liveLab();
+        LiveWorldBot live = engine.liveBot();
         if (live == null || !live.identity().equals(world.identity())) return;
         if (world.legacyRegear()) { flight.cancel(); return; }
         engine.tickPost();

@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.bot.Bot;
 import com.hunterbuddy.behavior.bot.BotConfig;
 import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotStatus;
+import com.hunterbuddy.behavior.bot.LiveWorldBot;
 import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.StopReport;
@@ -26,7 +27,7 @@ import java.util.Objects;
 import java.util.Set;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 
-public final class LiveLabBot implements Bot {
+public final class LiveLabBot implements Bot, LiveWorldBot {
     private final LabSettings settings;
     private final LabTask task;
     private final WorldReader world;
@@ -109,6 +110,7 @@ public final class LiveLabBot implements Bot {
         return new BotStatus(stage == Stage.UNREACHABLE ? task.name() + " unreachable" : task.name(), task.target(), completed);
     }
 
+    @Override
     public WorldIdentity identity() {
         return identity;
     }
@@ -122,6 +124,7 @@ public final class LiveLabBot implements Bot {
         if (stage != Stage.COMPLETE) stage = Stage.RUNNING;
     }
 
+    @Override
     public Set<Resource> resources() {
         return task.resources();
     }
