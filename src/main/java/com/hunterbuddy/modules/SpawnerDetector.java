@@ -4492,7 +4492,7 @@ public class SpawnerDetector extends Module {
     private void shipwreckExitColumn(boolean atPlayer) {
         int x = atPlayer ? mc.player.getBlockX() : autoColumn.x();
         int z = atPlayer ? mc.player.getBlockZ() : autoColumn.z();
-        int top = Math.max(mc.player.getBlockY() + 1, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z));
+        int top = Math.max(mc.player.getBlockY() + 1, surfaceTopY(x, z));
         autoExitShaft = new ExitShaft(x, z, Math.min(mc.player.getBlockY(), autoSite.center.getY() + 1), top,
             mc.player.isTouchingWater() || autoColumn.water(), false, null);
         autoExitShaftForeign = false;
@@ -4703,8 +4703,7 @@ public class SpawnerDetector extends Module {
     }
 
     private boolean shipwreckChestInReach() {
-        return isContainerPresent(autoSite.center)
-            && mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(autoSite.center)) <= 4.2 * 4.2;
+        return isContainerPresent(autoSite.center) && mc.player.canInteractWithBlockAt(autoSite.center, -0.5);
     }
 
     private BlockPos findShipwreckSideSpot() {
@@ -8126,17 +8125,20 @@ public class SpawnerDetector extends Module {
                 autoRoomSubStateStartMs = System.currentTimeMillis();
                 autoRoomOpenAttempts = 0;
                 double distSq = mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(target));
-                autoRoomSubState = distSq > 4.2 * 4.2 ? 1 : 2;
+                autoRoomSubState = (isShipwreck() ? !mc.player.canInteractWithBlockAt(target, 0.0) : distSq > 4.2 * 4.2) ? 1 : 2;
             }
             case 1 -> {
                 double distSq = mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(target));
-                if (distSq <= 4.2 * 4.2) {
+                if (isShipwreck() ? mc.player.canInteractWithBlockAt(target, 0.0) : distSq <= 4.2 * 4.2) {
                     releaseAllAutoKeys();
                     autoRoomPillarTarget = null;
                     autoRoomPillarPhase = 0;
                     autoRoomSubState = 2;
                 } else if (tickRoomContainerPillar(target)) {
                     return;
+                } else if (isShipwreck()) {
+                    releaseAllAutoKeys();
+                    enterState(AutoState.WALK, "shipwreck chest out of reach, back to the column");
                 } else {
                     approachBlock(target);
                 }
@@ -8218,11 +8220,29 @@ public class SpawnerDetector extends Module {
             double moved = autoRoomBreakAnchor == null ? 0.0
                 : Math.hypot(mc.player.getX() - autoRoomBreakAnchor.x, mc.player.getZ() - autoRoomBreakAnchor.z);
 
-            if (!autoRoomBreakRepositioning && (moved > 1.0 || distSq > 4.4 * 4.4)) {
+            if (!autoRoomBreakRepositioning && !isShipwreck() && (moved > 1.0 || distSq > 4.4 * 4.4)) {
                 autoRoomBreakRepositioning = true;
                 Utils.setPressed(mc.options.attackKey, false);
                 mc.interactionManager.cancelBlockBreaking();
                 autoLog("ROOM", target, String.format("pushed away moved=%.2f dist=%.2f, repositioning", moved, Math.sqrt(distSq)));
+            }
+
+            if (System.currentTimeMillis() - autoRoomBreakStartMs > 20_000L) {
+                Utils.setPressed(mc.options.attackKey, false);
+                autoRoomBreakRepositioning = false;
+                autoRoomContainerFails++;
+                if (autoRoomContainerFails >= 2) {
+                    autoRoomIndex++;
+                    autoRoomContainerFails = 0;
+                    autoRoomPillarTarget = null;
+                    autoRoomPillarPhase = 0;
+                    if (isShipwreck()) autoShipwreckChestOutcome = "break attempts";
+                    autoLog("ROOM", target, "container skipped after 2 failed breaks");
+                } else {
+                    autoLog("ROOM", target, "break failed, retry");
+                }
+                autoRoomSubState = 0;
+                return;
             }
 
             if (autoRoomBreakRepositioning) {
@@ -8240,24 +8260,6 @@ public class SpawnerDetector extends Module {
                     return;
                 }
             }
-        }
-
-        if (System.currentTimeMillis() - autoRoomBreakStartMs > 20_000L) {
-            Utils.setPressed(mc.options.attackKey, false);
-            autoRoomBreakRepositioning = false;
-            autoRoomContainerFails++;
-            if (autoRoomContainerFails >= 2) {
-                autoRoomIndex++;
-                autoRoomContainerFails = 0;
-                autoRoomPillarTarget = null;
-                autoRoomPillarPhase = 0;
-                if (isShipwreck()) autoShipwreckChestOutcome = "break attempts";
-                autoLog("ROOM", target, "container skipped after 2 failed breaks");
-            } else {
-                autoLog("ROOM", target, "break failed, retry");
-            }
-            autoRoomSubState = 0;
-            return;
         }
 
         autoMineTick("ROOM", target, false);
@@ -11991,7 +11993,7 @@ public class SpawnerDetector extends Module {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radiusSq) continue;
                 int x = cx + dx, z = cz + dz;
-                int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                int topY = surfaceTopY(x, z);
                 if (topY > maxTakeoffY) continue;
                 int groundY = topY;
 
@@ -12615,9 +12617,24 @@ public class SpawnerDetector extends Module {
         return true;
     }
 
+    private int surfaceTopY(int x, int z) {
+        int top = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+        int ceiling = mc.world.getTopYInclusive() - 32;
+        if (top <= ceiling) return top;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int y = ceiling;
+        while (y > mc.world.getBottomY()) {
+            cursor.set(x, y, z);
+            BlockState state = mc.world.getBlockState(cursor);
+            if (!state.getFluidState().isEmpty() || !state.getCollisionShape(mc.world, cursor).isEmpty()) break;
+            y--;
+        }
+        return y + 1;
+    }
+
     private boolean isTrueSkyHere() {
         BlockPos feet = mc.player.getBlockPos();
-        return mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, feet.getX(), feet.getZ()) <= feet.getY() + 1;
+        return surfaceTopY(feet.getX(), feet.getZ()) <= feet.getY() + 1;
     }
 
     private void failSelfAscendDirection(String reason) {
@@ -12769,7 +12786,7 @@ public class SpawnerDetector extends Module {
                 double distSq = dx * dx + dz * dz;
                 if (distSq > 256 || distSq >= bestDistSq) continue;
                 int x = cx + dx, z = cz + dz;
-                int topY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                int topY = surfaceTopY(x, z);
                 if (topY > maxTakeoffY) continue;
                 int groundY = topY;
                 BlockPos candidate = new BlockPos(x, groundY, z);
