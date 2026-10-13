@@ -40,6 +40,10 @@ public final class PersistentStore {
         return submit(() -> read(path(world, owner), true));
     }
 
+    public CompletableFuture<Map<Key<?>, Object>> loadKnowledge(String world, String owner) {
+        return submit(() -> read(path(world, owner), false));
+    }
+
     public CompletableFuture<Void> save(String world, String owner, Map<Key<?>, Object> values) {
         Map<Key<?>, Object> snapshot = Map.copyOf(values);
         return submit(() -> { write(path(world, owner), snapshot); return null; });
@@ -71,7 +75,7 @@ public final class PersistentStore {
 
     private Map<Key<?>, Object> read(Path path, boolean expire) throws IOException {
         if (!Files.exists(path)) return Map.of();
-        if (Files.size(path) > 1_048_576) { error = "store exceeds 1 MiB: " + path.getFileName(); return Map.of(); }
+        if (Files.size(path) > sizeLimit(path)) throw new IOException("store exceeds size limit: " + path.getFileName());
         try {
             StoreEntry entry = gson.fromJson(Files.readString(path, StandardCharsets.UTF_8), StoreEntry.class);
             long age = System.currentTimeMillis() - entry.writtenAt();
@@ -103,7 +107,7 @@ public final class PersistentStore {
         }
         if (values.size() > 4_096) throw new IOException("too many durable entries");
         String data = gson.toJson(new StoreEntry(StoreEntry.SCHEMA, System.currentTimeMillis(), values));
-        if (data.getBytes(StandardCharsets.UTF_8).length > 1_048_576) throw new IOException("store exceeds 1 MiB");
+        if (data.getBytes(StandardCharsets.UTF_8).length > sizeLimit(path)) throw new IOException("store exceeds size limit");
         Files.createDirectories(path.getParent());
         Path temporary = Files.createTempFile(path.getParent(), path.getFileName().toString(), ".tmp");
         try {
@@ -113,6 +117,10 @@ public final class PersistentStore {
     }
 
     private Path path(String world, String owner) { return directory.resolve(hash(world)).resolve(safe(owner) + ".json"); }
+
+    private long sizeLimit(Path path) {
+        return path.getFileName().toString().equals("bot-world-knowledge.json") ? 67_108_864 : 1_048_576;
+    }
 
     private static String safe(String value) {
         if (value == null || !value.matches("[A-Za-z0-9_:-]+")) throw new IllegalArgumentException("invalid store name");

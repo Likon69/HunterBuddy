@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import meteordevelopment.meteorclient.events.entity.player.StartBreakingBlockEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.settings.Setting;
@@ -36,10 +37,14 @@ public final class MiningBridge {
     private final java.util.Map<BlockPos, WorldIdentity> temporaryChests = new java.util.HashMap<>();
     private final java.util.Map<BlockPos, WorldIdentity> shelters = new java.util.HashMap<>();
     private BlockPos exit;
-    private java.util.function.Predicate<BlockPos> breakRule;
+    private Predicate<BlockPos> breakRule;
     private final java.util.Map<BlockPos, WorldIdentity> temporaryBlocks = new java.util.HashMap<>();
 
-    public void breakRule(java.util.function.Predicate<BlockPos> rule) { breakRule = rule; }
+    public void breakRule(Predicate<BlockPos> rule) { breakRule = rule; }
+
+    public Predicate<BlockPos> breakRule() {
+        return breakRule;
+    }
     public void trackTemporaryBlock(BlockPos pos) { temporaryBlocks.put(pos.toImmutable(), world.identity()); }
     public void forgetTemporaryBlock(BlockPos pos) { temporaryBlocks.remove(pos); }
     private boolean outsideBreakRule(BlockPos pos) {

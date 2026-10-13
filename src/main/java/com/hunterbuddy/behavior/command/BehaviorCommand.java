@@ -57,7 +57,11 @@ public final class BehaviorCommand extends Command {
         builder.then(literal("outputs").executes(context -> control(() ->
             module().outputStatus().forEach(line -> info("%s", line)))));
         builder.then(literal("farmer").then(literal("zone").executes(context -> control(() ->
-            module().farmerZoneStatus().forEach(line -> info("%s", line))))));
+            module().farmerZoneStatus().forEach(line -> info("%s", line)))))
+            .then(literal("survey").executes(context -> control(() -> {
+                module().farmerSurvey();
+                info("Prospection de la zone de l'étape FarmerBuddy courante demandée.");
+            }))));
         LiteralArgumentBuilder<CommandSource> lab = literal("lab");
         lab.then(literal("flyto").then(argument("x", IntegerArgumentType.integer())
             .then(argument("z", IntegerArgumentType.integer()).executes(context -> control(() -> {

@@ -22,6 +22,16 @@ public final class FarmerZone {
         return hull;
     }
 
+    public boolean sameFootprint(FarmerZone other) {
+        if (other == null || hull.size() != other.hull.size()) return false;
+        for (int i = 0; i < hull.size(); i++) {
+            BlockPos a = hull.get(i);
+            BlockPos b = other.hull.get(i);
+            if (a.getX() != b.getX() || a.getZ() != b.getZ()) return false;
+        }
+        return true;
+    }
+
     public double area() {
         double sum = 0;
         for (int i = 0; i < hull.size(); i++) {

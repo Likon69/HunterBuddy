@@ -8,11 +8,13 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.mc.FlightMeasurement;
+import com.hunterbuddy.behavior.mc.FlightBiomes;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 
 public final class FlightScope extends Decorator {
     private final FlightPlan plan;
     private FlightMeasurement measurement;
+    private FlightBiomes biomes;
     private boolean initialized;
 
     public FlightScope(FlightPlan plan, Node child) {
@@ -36,12 +38,15 @@ public final class FlightScope extends Decorator {
                 plan.outputs.inventory().observePlayer();
                 measurement = new FlightMeasurement(plan);
                 measurement.reset(ctx);
+                biomes = new FlightBiomes(plan.world, ctx);
                 initialized = true;
             }
             if (!plan.worldKey.equals(plan.world.storageKey())) {
                 return fail(FailureCode.REFUSED, "flight belongs to another world or dimension");
             }
             measurement.sample(ctx);
+            biomes.sample(ctx);
+            plan.observer.accept(ctx);
             if (!plan.returning && ctx.sensors().gliding() && plan.totalDurability() <= plan.returnWear() + 16) {
                 String reason = "untouchable return elytra durability reserve reached";
                 rememberFailure(ctx, reason);
@@ -75,6 +80,7 @@ public final class FlightScope extends Decorator {
         if (initialized && plan.world.available() && plan.worldKey.equals(plan.world.storageKey())) {
             measurement.sample(ctx);
             plan.performance.save(ctx);
+            biomes.save(ctx);
         }
     }
 }

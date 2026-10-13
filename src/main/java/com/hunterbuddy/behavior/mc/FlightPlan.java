@@ -10,6 +10,7 @@ import com.hunterbuddy.util.Rockets;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
@@ -21,7 +22,7 @@ public final class FlightPlan {
     public final Outputs outputs;
     private final Supplier<BlockPos> destinationSource;
     private final Supplier<BlockPos> homeSource;
-    public final boolean returning;
+    public boolean returning;
     public FlightPerformance performance;
     public BlockPos destination;
     public BlockPos home;
@@ -30,6 +31,8 @@ public final class FlightPlan {
     public double altitude;
     public double bestDistance = Double.POSITIVE_INFINITY;
     public long improvedAt;
+    public boolean cruiseThrough;
+    public Consumer<TickContext> observer = ctx -> {};
     public final Set<BlockPos> failedLandings = new HashSet<>();
 
     public FlightPlan(Supplier<BlockPos> destination, Supplier<BlockPos> home, boolean returning,
@@ -83,6 +86,14 @@ public final class FlightPlan {
         return Math.hypot(point.getX() + 0.5 - world.client().player.getX(), point.getZ() + 0.5 - world.client().player.getZ());
     }
 
+    public void beginReturn(TickContext ctx) {
+        returning = true;
+        destination = home;
+        bestDistance = distance(home);
+        improvedAt = ctx.tick();
+        cruiseThrough = false;
+    }
+
     public int estimatedRockets(double metres) {
         return 2 + (int) Math.ceil(performance.rocketsPerKm() * metres / 1000);
     }
@@ -133,11 +144,12 @@ public final class FlightPlan {
     }
 
     public boolean nearDestination() {
-        return distance(destination) <= 96 && world.loaded(destination);
+        return !cruiseThrough && distance(destination) <= 96 && world.loaded(destination);
     }
 
     public boolean atDestination() {
-        return world.client().player.isOnGround() && distance(destination) <= 12 && FlightTerrain.landing(world.feet(), world);
+        return !cruiseThrough && world.client().player.isOnGround() && distance(destination) <= 12
+            && FlightTerrain.landing(world.feet(), world);
     }
 
     public boolean maintenanceNeeded() {

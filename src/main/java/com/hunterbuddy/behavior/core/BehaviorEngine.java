@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.bot.Bot;
 import com.hunterbuddy.behavior.bot.BotContext;
 import com.hunterbuddy.behavior.bot.BotRegistry;
 import com.hunterbuddy.behavior.bot.BotStats;
+import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
@@ -87,6 +88,9 @@ public final class BehaviorEngine {
     private PersistentStore store;
     private String worldKey = "simulated";
     private CompletableFuture<Map<Key<?>, Object>> memoryLoad;
+    private CompletableFuture<Map<Key<?>, Object>> knowledgeLoad;
+    private Map<Key<?>, Object> savedKnowledge = Map.of();
+    private String savedKnowledgeWorld;
     private CompletableFuture<BotStats.Snapshot> statsLoad;
     private final SessionRoutine session;
     private long saveAt;
@@ -106,7 +110,10 @@ public final class BehaviorEngine {
         allSinks.add(ring);
         Trace trace = new Trace(allSinks.toArray(TraceSink[]::new));
         ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(), trace, ProgressPolicy.DEFAULT);
-        ctx.checkpointHandler(owner -> { if (owner.equals(botOwner)) persist(); });
+        ctx.checkpointHandler(owner -> {
+            if (owner.equals(botOwner)) persist();
+            if (owner.equals(WorldKnowledge.OWNER)) persistKnowledge();
+        });
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
         hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
@@ -188,6 +195,7 @@ public final class BehaviorEngine {
         stats.startSession();
         if (store != null) {
             memoryLoad = store.load(worldKey, context.owner());
+            knowledgeLoad = store.loadKnowledge(worldKey, WorldKnowledge.OWNER);
             statsLoad = statsRestored.contains(next.name()) ? null : statsReads.computeIfAbsent(next.name(), store::loadStats);
             loadingAt = -1;
         }
@@ -403,6 +411,10 @@ public final class BehaviorEngine {
     public String worldKey() { return worldKey; }
     public boolean suspended() { return root.state() == RootState.SUSPENDED; }
 
+    public Map<Key<?>, Object> durableMemory(String owner) {
+        return ctx.bb().durable(owner);
+    }
+
     public void disconnected() {
         if (suspended() || bot == null || !running()) return;
         if (!bot.config().resumeAfterReconnect()) { stopBot(ExitReason.DISCONNECTED, "Game session ended"); return; }
@@ -428,7 +440,8 @@ public final class BehaviorEngine {
     }
 
     private boolean loadMemory() {
-        if (memoryLoad != null && !memoryLoad.isDone() || statsLoad != null && !statsLoad.isDone()) {
+        if (memoryLoad != null && !memoryLoad.isDone() || statsLoad != null && !statsLoad.isDone()
+            || knowledgeLoad != null && !knowledgeLoad.isDone()) {
             if (loadingAt < 0) loadingAt = clock.nowMs();
             if (clock.nowMs() - loadingAt >= 5_000) stopNow(ExitReason.STOPPED, "Persistent store loading exceeded 5 seconds");
             return false;
@@ -436,6 +449,10 @@ public final class BehaviorEngine {
         if (memoryLoad != null) {
             ctx.bb().loadDurable(botOwner, memoryLoad.exceptionally(ex -> Map.of()).join());
             memoryLoad = null;
+        }
+        if (knowledgeLoad != null) {
+            ctx.bb().loadDurable(WorldKnowledge.OWNER, knowledgeLoad.exceptionally(ex -> Map.of()).join());
+            knowledgeLoad = null;
         }
         if (statsLoad != null) {
             BotStats.Snapshot stored = statsLoad.exceptionally(ex -> BotStats.EMPTY).join();
@@ -448,6 +465,7 @@ public final class BehaviorEngine {
 
     private void persist() {
         if (store == null || bot == null || stats == null) return;
+        persistKnowledge();
         String owner = "bot:" + bot.name();
         Map<Key<?>, Object> memory = new LinkedHashMap<>(ctx.bb().durable(owner));
         Map<Key<?>, Object> current = Map.copyOf(memory);
@@ -468,6 +486,15 @@ public final class BehaviorEngine {
             return null;
         });
         saveAt = clock.tick();
+    }
+
+    private void persistKnowledge() {
+        if (store == null || knowledgeLoad != null) return;
+        Map<Key<?>, Object> memory = ctx.bb().durable(WorldKnowledge.OWNER);
+        if (memory.isEmpty() || worldKey.equals(savedKnowledgeWorld) && memory.equals(savedKnowledge)) return;
+        store.save(worldKey, WorldKnowledge.OWNER, memory);
+        savedKnowledge = memory;
+        savedKnowledgeWorld = worldKey;
     }
 
     public EngineSnapshot snapshot() {

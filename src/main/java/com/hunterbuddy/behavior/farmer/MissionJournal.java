@@ -26,7 +26,11 @@ public final class MissionJournal {
     }
 
     public int currentStep(TickContext ctx) {
-        return ctx.bb().get(ctx.owner(), STEP).orElse(0);
+        return currentStep(ctx, ctx.owner());
+    }
+
+    public int currentStep(TickContext ctx, String owner) {
+        return ctx.bb().get(owner, STEP).orElse(0);
     }
 
     public void currentStep(TickContext ctx, int stepIndex) {

@@ -37,6 +37,10 @@ public final class FlyToTree {
     public static Node build(Supplier<BlockPos> destination, Supplier<BlockPos> home, boolean returning,
                              WorldReader world, BaritoneBridge baritone, Outputs outputs) {
         FlightPlan plan = new FlightPlan(destination, home, returning, world, baritone, outputs);
+        return build(plan);
+    }
+
+    public static Node build(FlightPlan plan) {
         Node attempt = LogisticsOperations.unless("destination already reached", plan::atDestination, flight(plan));
         Node journey = new Retry(3, 0, attempt).on(FailureCode.NO_OPTION, FailureCode.UNREACHABLE,
             FailureCode.NOT_CONFIRMED, FailureCode.NO_PROGRESS);
