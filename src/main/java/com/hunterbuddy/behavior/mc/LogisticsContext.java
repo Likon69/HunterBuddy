@@ -10,6 +10,7 @@ import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.resource.Outputs;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
@@ -38,6 +39,7 @@ public final class LogisticsContext {
     public int requiredFlightWear;
     private WorldIdentity identity;
     public String equipmentPrefix = "logistics";
+    public BooleanSupplier evacuationRequested = () -> false;
 
     public LogisticsContext(Supplier<FarmerProfile> profiles, Supplier<FarmerZone> zones, boolean store,
                             BooleanSupplier regear, BooleanSupplier exitTop, IntSupplier step, WorldReader world,
@@ -60,11 +62,6 @@ public final class LogisticsContext {
         identity = world.identity();
         equipment.clear();
         if (facts == null || facts.departure != null) {
-            String legacy = mission.equipment(ctx, "logistics-session");
-            if (!legacy.isEmpty() && !com.google.gson.JsonParser.parseString(legacy).getAsJsonObject()
-                .get("complete").getAsBoolean()) {
-                throw new IllegalStateException("ancien journal logistique actif : vérifier le matériel avant de relancer");
-            }
             profile = profiles.get();
             if (profile == null) throw new IllegalStateException("logistics profile missing");
             facts = new LogisticsFacts();
@@ -75,6 +72,9 @@ public final class LogisticsContext {
             facts.exitTop = exitTop.getAsBoolean();
             facts.step = step.getAsInt();
             facts.zone = zones.get().corners().stream().map(LogisticsFacts::coordinates).toList();
+            for (String role : List.of("chest", "material", "divers", "reserve")) {
+                mission.equipment(ctx, equipmentName(role), "");
+            }
             save(ctx, "logistics requested");
         } else {
             if (facts.store != store) throw new IllegalStateException("reprendre l'activité logistique déjà journalisée");
@@ -101,7 +101,7 @@ public final class LogisticsContext {
         if (facts.site == null) return;
         equipment.clear();
         restoreEquipment(ctx, "chest");
-        for (String role : java.util.List.of("material", "divers", "reserve")) {
+        for (String role : List.of("material", "divers", "reserve")) {
             if (!cycle(role).signature.isEmpty()) restoreEquipment(ctx, role);
         }
         identity = world.identity();

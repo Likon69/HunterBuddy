@@ -1,0 +1,39 @@
+package com.hunterbuddy.behavior.nodes;
+
+import com.hunterbuddy.behavior.core.Decorator;
+import com.hunterbuddy.behavior.core.ExitReason;
+import com.hunterbuddy.behavior.core.Failure;
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.Success;
+import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.mc.FarmerMissionContext;
+
+public final class FarmerSiteResult extends Decorator {
+    private final FarmerMissionContext mission;
+
+    public FarmerSiteResult(FarmerMissionContext mission, Node child) {
+        super("site-result-or-confirmed-change", child);
+        this.mission = mission;
+    }
+
+    @Override
+    protected NodeResult onTick(TickContext ctx) {
+        NodeResult result = child().execute(ctx);
+        if (!(result instanceof Failure failure)) return result;
+        if (failure.code() == FailureCode.NOT_CONFIRMED || failure.code() == FailureCode.REFUSED
+            || failure.code() == FailureCode.FAULT) {
+            ctx.stopBot(ExitReason.FAILED, failure.reason());
+            return result;
+        }
+        if (mission.unfinishedMine()) return result;
+        if (mission.selected != null) {
+            mission.selected.unavailable("inaccessible", failure.reason());
+            mission.knowledge.save(ctx);
+        }
+        mission.facts.changeRequested = true;
+        mission.save(ctx, "changement de site : " + failure.reason());
+        return Success.INSTANCE;
+    }
+}

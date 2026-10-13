@@ -31,20 +31,26 @@ public final class StoreTree {
                              BaritoneBridge baritone, Outputs outputs, MissionJournal journal) {
         LogisticsContext logistics = new LogisticsContext(profile, zone, true, regear, exitTop,
             step, world, baritone, outputs, journal);
+        return build(logistics);
+    }
+
+    public static Node build(LogisticsContext logistics) {
         return new TaskScope(new LogisticsRun(logistics, new Sequence("rangement",
             new InventoryMilestone("charger-faits-logistiques", logistics::initialize), LogisticsSiteTree.build(logistics),
             LogisticsOperations.unless("ender chest revenu ou en ramassage", () -> logistics.returned("chest")
-                || logistics.equipment("chest").breakRequested() && world.cleared(logistics.facts.chest()),
+                || logistics.equipment("chest").breakRequested() && logistics.world.cleared(logistics.facts.chest()),
                 TrackedEquipmentTree.place(logistics, "chest")),
             LogisticsOperations.pendingTransfer(logistics), material(logistics, "material"), material(logistics, "divers"),
-            LogisticsOperations.unless("regear non dû", () -> !logistics.facts.regear, RegearTree.protectedCycle(logistics)),
+            LogisticsOperations.unless("regear non dû", () -> !logistics.facts.regear
+                || logistics.evacuationRequested.getAsBoolean() && logistics.cycle("reserve").signature.isEmpty(),
+                RegearTree.protectedCycle(logistics)),
             LogisticsFinishTree.build(logistics))));
     }
 
     private static Node material(LogisticsContext logistics, String role) {
         return LogisticsOperations.unless("aucun objet " + role, () -> logistics.cycle(role).signature.isEmpty()
-            && logistics.world.countMatching(role.equals("material")
-                ? LogisticsInventory.accepted(logistics.profile) : LogisticsInventory.miscellaneous(logistics.profile)) == 0,
+            && (logistics.evacuationRequested.getAsBoolean() || logistics.world.countMatching(role.equals("material")
+                ? LogisticsInventory.accepted(logistics.profile) : LogisticsInventory.miscellaneous(logistics.profile)) == 0),
             new RepeatShulkerCycle(logistics, role, ShulkerCycleTree.build(logistics, role,
                 () -> MaterialWorkTree.build(logistics, role))));
     }

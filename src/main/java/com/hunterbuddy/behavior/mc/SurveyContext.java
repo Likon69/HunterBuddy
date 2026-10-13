@@ -14,6 +14,8 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import net.minecraft.util.math.BlockPos;
 
 public final class SurveyContext {
@@ -37,6 +39,10 @@ public final class SurveyContext {
     public SurveyRoute route;
     public MaterialSite selected;
     public String result = "prospection incomplète";
+    public boolean missionMode;
+    public boolean interrupted;
+    public BooleanSupplier returnRequested = () -> false;
+    public Predicate<MaterialSite> eligible = site -> true;
 
     public SurveyContext(WorldReader world, BaritoneBridge baritone, Outputs outputs, FarmerCatalog catalog,
                          FarmerZoneLookup lookup, List<FarmerStepConfig> steps,
@@ -53,7 +59,7 @@ public final class SurveyContext {
     }
 
     public MaterialSite best() {
-        return SiteSelection.best(memory, zone, world.feet(), System.currentTimeMillis());
+        return SiteSelection.best(memory, zone, world.feet(), System.currentTimeMillis(), eligible);
     }
 
     public String coverageReport() {

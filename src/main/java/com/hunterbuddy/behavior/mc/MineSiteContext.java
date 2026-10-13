@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.block.FallingBlock;
 import net.minecraft.util.math.BlockPos;
@@ -45,6 +46,7 @@ public final class MineSiteContext {
     public BlockPos nextFeet;
     public MineDropReceipt receipt;
     public String failure = "";
+    public BooleanSupplier retreatRequested = () -> false;
     private boolean breathing;
     public BlockPos breathingPoint;
 
@@ -70,6 +72,9 @@ public final class MineSiteContext {
     }
 
     public boolean finished() {
+        if (facts.pending == null && retreatRequested.getAsBoolean() && facts.outcome.isEmpty()) {
+            facts.outcome = "repli de mission demandé avant une nouvelle casse";
+        }
         return facts.mined >= MaterialSite.SHULKER_BLOCKS || !facts.outcome.isEmpty();
     }
 

@@ -33,6 +33,7 @@ public final class InitializeSurvey extends Action {
         startedAt = ctx.tick();
         survey.selected = null;
         survey.coverage = null;
+        survey.interrupted = false;
     }
 
     @Override
@@ -56,7 +57,7 @@ public final class InitializeSurvey extends Action {
     }
 
     private void resolve(TickContext ctx) {
-        ctx.bb().loadDurable("bot:farmerbuddy", survey.mission.join());
+        if (!survey.missionMode) ctx.bb().loadDurable("bot:farmerbuddy", survey.mission.join());
         int current = new MissionJournal(FarmerSettings.MAX_STEPS).currentStep(ctx, "bot:farmerbuddy");
         survey.step = survey.steps.stream().filter(FarmerStepConfig::enabled)
             .filter(step -> step.index() >= current).findFirst()

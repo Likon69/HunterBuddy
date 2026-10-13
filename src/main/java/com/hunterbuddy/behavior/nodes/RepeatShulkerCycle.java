@@ -29,7 +29,8 @@ public final class RepeatShulkerCycle extends Decorator {
         ShulkerCycleFacts cycle = logistics.cycle(role);
         Predicate<ItemStack> filter = role.equals("material")
             ? LogisticsInventory.accepted(logistics.profile) : LogisticsInventory.miscellaneous(logistics.profile);
-        if (!cycle.unavailable.isEmpty() || logistics.world.countMatching(filter) == 0) return result;
+        if (logistics.evacuationRequested.getAsBoolean() || !cycle.unavailable.isEmpty()
+            || logistics.world.countMatching(filter) == 0) return result;
         if (!logistics.stored(role)) throw new IllegalStateException("repeating a shulker cycle without a storage receipt");
         ShulkerCycleFacts next = new ShulkerCycleFacts();
         if (role.equals("material")) logistics.facts.material = next;

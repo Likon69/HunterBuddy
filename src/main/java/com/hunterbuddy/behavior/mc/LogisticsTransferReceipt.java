@@ -94,6 +94,7 @@ public final class LogisticsTransferReceipt {
     public static void observeEnderChest(TickContext ctx, LogisticsContext logistics) {
         List<ItemStack> contents = logistics.outputs.inventory().containerContents();
         logistics.facts.enderContents = LogisticsInventory.encode(contents, logistics.world);
+        logistics.mission.equipment(ctx, "mission-ender-contents", logistics.facts.enderContents);
         List<ShulkerSignature> signatures = contents.stream().filter(ShulkerSignature::isShulker)
             .map(stack -> ShulkerSignature.of(stack, logistics.world)).toList();
         logistics.mission.carried(ctx, logistics.facts.step,

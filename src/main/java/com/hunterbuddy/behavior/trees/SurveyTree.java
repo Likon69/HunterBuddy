@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.mc.FlightPlan;
+import com.hunterbuddy.behavior.mc.SiteArrival;
 import com.hunterbuddy.behavior.mc.SurveyContext;
 import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Deferred;
@@ -15,11 +16,12 @@ import com.hunterbuddy.behavior.nodes.Retry;
 import com.hunterbuddy.behavior.nodes.Selector;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.SiteAccess;
-import com.hunterbuddy.behavior.nodes.StopBot;
 import com.hunterbuddy.behavior.nodes.SteadyFlight;
+import com.hunterbuddy.behavior.nodes.StopBot;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.SurveyScope;
 import com.hunterbuddy.behavior.nodes.TaskScope;
+import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.VerifySite;
 import com.hunterbuddy.behavior.nodes.WithLease;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
@@ -46,8 +48,8 @@ public final class SurveyTree {
         FlightPlan hold = new FlightPlan(survey.world::feet, () -> survey.home, false,
             survey.world, survey.baritone, survey.outputs);
         return new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT,
-            new SteadyFlight(hold, new Sequence("resolve-zone-and-observe-local-chunks",
-                new InitializeSurvey(survey), new ObserveSurvey(survey))));
+            new SteadyFlight(hold, new Timeout(4800, new Sequence("resolve-zone-and-observe-local-chunks",
+                new InitializeSurvey(survey), new ObserveSurvey(survey)))));
     }
 
     private static Node flight(SurveyContext survey) {
@@ -71,14 +73,19 @@ public final class SurveyTree {
             new Guard(new Condition("sufficient measured site found", sensors -> survey.selected != null),
                 new Sequence("reach-and-verify-site-before-mining",
                     new Deferred("access-selected-site", () -> new SiteAccess(survey,
-                        GroundTravel.build(survey.selected.seed().up(), 3, survey.baritone, survey.outputs))),
-                    new Deferred("verify-selected-site", () -> new VerifySite(survey.world, survey.zone, survey.profile,
-                        survey.knowledge, survey.memory, () -> survey.selected, survey.verifiedSite)),
-                    StopBot.withReason(ExitReason.COMPLETED, ctx -> "Site " + survey.profile.label() + " vérifié à "
-                        + survey.selected.seed().toShortString() + ": au moins " + survey.selected.quantity + " blocs; "
-                        + survey.coverageReport()))),
+                        GroundTravel.build(SiteArrival.stand(survey.selected, survey.profile, survey.world), 3,
+                            survey.baritone, survey.outputs))),
+                    new Deferred("verify-selected-site", () -> new Timeout(2400,
+                        new VerifySite(survey.world, survey.zone, survey.profile,
+                            survey.knowledge, survey.memory, () -> survey.selected, survey.verifiedSite))),
+                    new Deferred("report-verified-site", () -> survey.missionMode ? new Succeed()
+                        : StopBot.withReason(ExitReason.COMPLETED, ctx -> "Site " + survey.profile.label() + " vérifié à "
+                            + survey.selected.seed().toShortString() + ": au moins " + survey.selected.quantity + " blocs; "
+                            + survey.coverageReport())))),
             new Guard(new Condition("no sufficient site selected", sensors -> survey.selected == null),
-                new Sequence("return-and-report-coverage", home(survey), StopBot.withReason(ctx -> survey.result))));
+                new Sequence("return-and-report-coverage", home(survey),
+                    new Deferred("report-survey-outcome", () -> survey.missionMode && survey.interrupted
+                        ? new Succeed() : StopBot.withReason(ctx -> survey.result)))));
     }
 
     private static Node home(SurveyContext survey) {

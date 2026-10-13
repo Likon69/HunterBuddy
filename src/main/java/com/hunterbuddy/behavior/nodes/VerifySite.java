@@ -18,6 +18,7 @@ import com.hunterbuddy.behavior.farmer.MaterialSite;
 import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.farmer.ZoneKnowledge;
 import com.hunterbuddy.behavior.mc.PatchMeasurement;
+import com.hunterbuddy.behavior.mc.SiteArrival;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.mc.ZoneCoverage;
 import java.util.HashSet;
@@ -63,7 +64,7 @@ public final class VerifySite extends Action {
         BlockPos seed = site.seed();
         if (ctx.sensors().gliding() || !ctx.sensors().onGround()
             || !zone.contains(ctx.sensors().x(), ctx.sensors().z())
-            || world.feet().getSquaredDistance(seed) > 256
+            || SiteArrival.distanceSquared(site, profile, world) > 256
             || !zone.containsWithMargin(seed.getX() + 0.5, seed.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)) {
             return unavailable(ctx, "inaccessible", "site must be checked on the ground inside the current zone");
         }

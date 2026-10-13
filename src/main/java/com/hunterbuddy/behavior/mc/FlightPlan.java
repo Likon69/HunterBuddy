@@ -131,6 +131,10 @@ public final class FlightPlan {
     }
 
     public int totalDurability() {
+        return totalDurability(world);
+    }
+
+    public static int totalDurability(WorldReader world) {
         int total = 0;
         for (int i = 0; i < world.client().player.getInventory().size(); i++) {
             ItemStack stack = world.client().player.getInventory().getStack(i);

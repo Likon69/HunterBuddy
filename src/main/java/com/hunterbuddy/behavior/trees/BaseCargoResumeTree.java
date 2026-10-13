@@ -17,6 +17,7 @@ public final class BaseCargoResumeTree {
         return LogisticsOperations.unless("aucun objet de base transporté", () -> visit.facts.cargo.isEmpty(),
             new Selector("destination-de-l'objet-identifié",
                 send(visit, "livraison", () -> visit.position(visit.facts.delivery), "livrer"),
+                send(visit, "surplus-matériau", () -> visit.position(visit.facts.returns), "retour-surplus"),
                 send(visit, "divers-contenu", () -> visit.position(visit.facts.returns), "retour-divers"),
                 send(visit, "réserve-usée", () -> visit.position(visit.facts.returns), "retour-réserve"),
                 send(visit, "réserve-préparée", () -> visit.logistics.facts.chest(), "ranger-réserve"),

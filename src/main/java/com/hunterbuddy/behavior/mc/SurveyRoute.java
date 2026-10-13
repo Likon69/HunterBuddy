@@ -74,6 +74,13 @@ public final class SurveyRoute {
     public void observe(TickContext ctx, FlightPlan plan) {
         if (finished) return;
         survey.scanner.tick(ctx);
+        if (survey.missionMode && survey.returnRequested.getAsBoolean()) {
+            survey.interrupted = true;
+            survey.selected = null;
+            survey.result = "prospection interrompue pour repli de mission";
+            finish(plan, survey.home, ctx);
+            return;
+        }
         MaterialSite site = survey.best();
         if (site != null) {
             survey.selected = site;
@@ -140,11 +147,23 @@ public final class SurveyRoute {
         int required = reserve + (int) Math.ceil(plan.estimatedRockets(distance) * 1.5);
         if (survey.world.countMatching(Rockets::isPlain) < required) {
             survey.result = "prospection incomplète: réserve de retour atteinte; " + survey.coverageReport();
+            if (survey.missionMode) {
+                survey.interrupted = true;
+                survey.selected = null;
+                finish(plan, survey.home, ctx);
+                return;
+            }
             throw new IllegalStateException(survey.result);
         }
         double wear = plan.performance.durabilityPerKm() * (distance + back) / 1000 * 1.5;
         if (plan.totalDurability() < 16 + Math.ceil(wear)) {
             survey.result = "prospection incomplète: durabilité réservée au retour; " + survey.coverageReport();
+            if (survey.missionMode) {
+                survey.interrupted = true;
+                survey.selected = null;
+                finish(plan, survey.home, ctx);
+                return;
+            }
             throw new IllegalStateException(survey.result);
         }
         plan.destination = target;

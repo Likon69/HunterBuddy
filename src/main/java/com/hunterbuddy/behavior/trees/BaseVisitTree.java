@@ -60,6 +60,7 @@ public final class BaseVisitTree {
             LogisticsOperations.unless("ramassage ender chest à terminer", () -> visit.logistics.equipment("chest").breakRequested(),
                 new Sequence("livraisons-et-ravitaillement",
                     BaseOperations.pending(visit), LogisticsOperations.pendingTransfer(visit.logistics),
+                    BasePackTree.resumeMaterial(visit),
                     BaseCargoResumeTree.build(visit), BaseOperations.ender(visit),
                     new ChooseShulker(visit.logistics, "reserve"),
                     new InventoryMilestone("rôles-base-identifiés", ctx -> {
@@ -71,9 +72,11 @@ public final class BaseVisitTree {
                         }
                         visit.save(ctx, "rôles réserve et divers identifiés par contenu et journal");
                     }), ContainerTree.close(visit.logistics.outputs),
-                    BaseDeliveryTree.build(visit), BaseMiscTree.build(visit),
+                    BaseDeliveryTree.build(visit), BaseSurplusTree.build(visit), BaseMiscTree.build(visit),
                     new InventoryMilestone("mesurer-budget-de-départ", ctx -> BaseStockPlan.measure(ctx, visit)),
                     BaseFuelTree.recoverStock(visit), BaseEmptyShulkersTree.build(visit),
+                    BasePackTree.build(visit), BaseDeliveryTree.build(visit), BaseSurplusTree.build(visit), BaseMiscTree.build(visit),
+                    BaseEmptyShulkersTree.build(visit),
                     BaseReserveTree.build(visit), BaseFuelTree.build(visit))),
             new Deferred("retour-au-matériel-base", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,
                 visit.logistics.baritone, visit.logistics.outputs)),

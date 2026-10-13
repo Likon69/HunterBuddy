@@ -60,7 +60,7 @@ public final class BaseVisitContext {
             logistics.facts.dimension = logistics.world.identity().dimensionKey();
             logistics.facts.step = facts.step;
             logistics.facts.zone = logistics.zones.get().corners().stream().map(LogisticsFacts::coordinates).toList();
-            for (String role : List.of("chest", "divers", "reserve")) {
+            for (String role : List.of("chest", "material", "divers", "reserve")) {
                 logistics.mission.equipment(ctx, logistics.equipmentName(role), "");
                 logistics.forget(role);
             }
@@ -122,6 +122,10 @@ public final class BaseVisitContext {
     public void observe(TickContext ctx) {
         current = ctx;
         LogisticsTransferReceipt.observeEnderChest(ctx, logistics);
+    }
+
+    public long delivered() {
+        return logistics.mission.delivered(current, facts.step);
     }
 
     public int fullSlot() {

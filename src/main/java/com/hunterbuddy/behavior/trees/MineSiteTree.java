@@ -20,6 +20,7 @@ import com.hunterbuddy.behavior.nodes.ResumeMineWork;
 import com.hunterbuddy.behavior.nodes.Selector;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.TaskScope;
+import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.TryMiningChoice;
 import com.hunterbuddy.behavior.nodes.VerifySite;
 import net.minecraft.util.math.BlockPos;
@@ -52,8 +53,8 @@ public final class MineSiteTree {
             LogisticsOperations.unless("connected patch already verified", () -> !mine.patch.isEmpty(),
                 new Deferred("refresh-proof-from-carved-access", () -> new Sequence("reach-and-reverify-access",
                     GroundTravel.build(BlockPos.fromLong(mine.facts.stairs.getLast()), 0, mine.baritone, mine.outputs),
-                    new VerifySite(mine.world, mine.zone, mine.profile, mine.knowledge,
-                        mine.knowledge.zone(mine.zone, mine.profile), () -> mine.site, verified)))),
+                    new Timeout(2400, new VerifySite(mine.world, mine.zone, mine.profile, mine.knowledge,
+                        mine.knowledge.zone(mine.zone, mine.profile), () -> mine.site, verified))))),
             new InventoryMilestone("load-verified-material-members", ctx -> {
                 if (mine.patch.isEmpty()) for (Long position : mine.site.blocks) mine.patch.add(BlockPos.fromLong(position));
             }));
@@ -62,7 +63,7 @@ public final class MineSiteTree {
     private static Node surface(MineSiteContext mine) {
         return new Sequence("surface-slices-from-the-top", measure(mine),
             new RepeatUntil("mine-highest-connected-slice", mine::finished, 1800,
-                new Sequence("choose-reach-break-and-pick-up", new ChooseSurfaceBlock(mine),
+                new Sequence("choose-reach-break-and-pick-up", new Timeout(2400, new ChooseSurfaceBlock(mine)),
                     LogisticsOperations.unless("surface work finished", mine::finished,
                         new TryMiningChoice(mine, () -> mine.target,
                             new Deferred("mine-selected-surface-block", () -> MineBlockTree.build(mine, mine.target, true, mine.stand))
