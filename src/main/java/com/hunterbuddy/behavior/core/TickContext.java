@@ -35,6 +35,7 @@ public final class TickContext {
     private String pluginOwner;
     private BotStats botStats;
     private Hook executedHook;
+    private int landingDepth;
     private Consumer<String> checkpointHandler = owner -> {};
 
     void checkpointHandler(Consumer<String> handler) { checkpointHandler = Objects.requireNonNull(handler); }
@@ -74,12 +75,16 @@ public final class TickContext {
     Node enter(Node node) {
         Node previous = current;
         current = node;
+        if (node instanceof com.hunterbuddy.behavior.nodes.Landing) landingDepth++;
         return previous;
     }
 
     void leave(Node previous) {
+        if (current instanceof com.hunterbuddy.behavior.nodes.Landing) landingDepth--;
         current = previous;
     }
+
+    public boolean landing() { return landingDepth > 0; }
 
     void executed(Hook hook) {
         executedHook = hook;

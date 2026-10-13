@@ -2,10 +2,23 @@ package com.hunterbuddy.behavior.nodes;
 
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
-import com.hunterbuddy.behavior.core.*;
+import com.hunterbuddy.behavior.core.Action;
+import com.hunterbuddy.behavior.core.ExitReason;
+import com.hunterbuddy.behavior.core.Failure;
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.Key;
+import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.Running;
+import com.hunterbuddy.behavior.core.Scope;
+import com.hunterbuddy.behavior.core.Success;
+import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
-import com.hunterbuddy.behavior.mc.*;
-import com.hunterbuddy.behavior.resource.*;
+import com.hunterbuddy.behavior.mc.BaritoneBridge;
+import com.hunterbuddy.behavior.mc.WorldReader;
+import com.hunterbuddy.behavior.resource.LeasePolicy;
+import com.hunterbuddy.behavior.resource.Outputs;
+import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Comparator;
 import java.util.function.Predicate;
 import net.minecraft.entity.ItemEntity;
@@ -36,8 +49,8 @@ public final class PickupItem extends Action {
         this.outputs = outputs;
         this.journal = journal;
         goal = new Key<>("pickup-goal-" + label, Goal.class, Scope.OWNER, false);
-        travel = new Timeout(300, new WithLease(java.util.Set.of(Resource.BARITONE), LeasePolicy.WAIT,
-            new BaritoneGoTo(goal, () -> false, false, baritone, outputs)));
+        travel = new TaskScope(new Timeout(300, new WithLease(java.util.Set.of(Resource.BARITONE), LeasePolicy.WAIT,
+            new BaritoneGoTo(goal, () -> false, false, baritone, outputs))));
         limit(400);
     }
 

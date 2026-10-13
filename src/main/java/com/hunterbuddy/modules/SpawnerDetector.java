@@ -9743,7 +9743,7 @@ public class SpawnerDetector extends Module {
         Utils.setPressed(mc.options.forwardKey, true);
         Utils.setPressed(mc.options.sprintKey, false);
         Utils.setPressed(mc.options.jumpKey, target.getY() > feet.getY() || mc.player.horizontalCollision);
-        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && target.getY() < feet.getY());
+        Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && !mc.player.isOnGround() && target.getY() < feet.getY());
     }
 
     private void removeTunnelTrailFrom(int index) {

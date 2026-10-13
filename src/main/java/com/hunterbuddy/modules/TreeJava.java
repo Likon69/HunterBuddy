@@ -11,8 +11,10 @@ import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.farmer.FarmerBuddyBot;
 import com.hunterbuddy.behavior.farmer.FarmerCatalog;
+import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerSettings;
 import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
+import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.FarmerZoneReport;
 import com.hunterbuddy.behavior.hooks.Hook;
@@ -24,6 +26,7 @@ import com.hunterbuddy.behavior.lab.LabScenario;
 import com.hunterbuddy.behavior.lab.LabTask;
 import com.hunterbuddy.behavior.lab.LiveLabBot;
 import com.hunterbuddy.behavior.lab.LookTask;
+import com.hunterbuddy.behavior.lab.LogisticsTask;
 import com.hunterbuddy.behavior.lab.OpenTask;
 import com.hunterbuddy.behavior.lab.PillarTask;
 import com.hunterbuddy.behavior.lab.PlaceTask;
@@ -33,6 +36,7 @@ import com.hunterbuddy.behavior.mc.BehaviorEvents;
 import com.hunterbuddy.behavior.mc.BehaviorMessages;
 import com.hunterbuddy.behavior.mc.FlightBridge;
 import com.hunterbuddy.behavior.mc.InventoryBridge;
+import com.hunterbuddy.behavior.mc.InventoryLayout;
 import com.hunterbuddy.behavior.mc.LabSettings;
 import com.hunterbuddy.behavior.mc.McSensors;
 import com.hunterbuddy.behavior.mc.MiningBridge;
@@ -236,7 +240,8 @@ public final class TreeJava extends Module {
         String refusal = world.refusal(Set.of(Resource.MOVEMENT, Resource.MINING, Resource.INVENTORY),
             baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
         if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
-        if (refusal == null) refusal = mining.refusal();
+        if (refusal == null) refusal = name.equals("farmerbuddy") ? mining.temporaryRefusal() : mining.refusal();
+        if (refusal == null && name.equals("farmerbuddy") && world.countMatching(com.hunterbuddy.behavior.mc.InventoryLayout::silkPickaxe) == 0) refusal = "pioche Toucher de soie absente de l'inventaire";
         if (refusal == null && name.equals("farmerbuddy")) {
             AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
             if (regear != null && regear.isActive()) refusal = "FarmerBuddy fait son propre regear";
@@ -297,6 +302,21 @@ public final class TreeJava extends Module {
     }
 
     public void flightLab(String scenario) { startLive(new FlightTask(scenario, baritone)); }
+
+    public void logisticsLab(String scenario, String profileKey) {
+        if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
+        FarmerProfile profile = farmerCatalog.profile(profileKey)
+            .orElseThrow(() -> new IllegalArgumentException("unknown profile: " + profileKey));
+        String refusal = mining.temporaryRefusal();
+        if (refusal != null) throw new IllegalStateException(refusal);
+        if (world.countMatching(InventoryLayout::silkPickaxe) == 0) {
+            throw new IllegalStateException("pioche Toucher de soie absente");
+        }
+        BlockPos center = world.feet();
+        FarmerZone zone = FarmerZone.build(List.of(
+            center.add(-32, 0, -32), center.add(32, 0, -32), center.add(32, 0, 32), center.add(-32, 0, 32)));
+        startLive(new LogisticsTask(scenario, profile, zone, baritone));
+    }
 
     public void inventoryLab(String scenario) {
         if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");

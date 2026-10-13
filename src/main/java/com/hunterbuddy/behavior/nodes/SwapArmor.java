@@ -1,9 +1,16 @@
 package com.hunterbuddy.behavior.nodes;
 
-import com.hunterbuddy.behavior.core.*;
+import com.hunterbuddy.behavior.core.Action;
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.Running;
+import com.hunterbuddy.behavior.core.Sensors;
+import com.hunterbuddy.behavior.core.Success;
+import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
-import com.hunterbuddy.behavior.mc.*;
-import com.hunterbuddy.behavior.resource.*;
+import com.hunterbuddy.behavior.mc.WorldReader;
+import com.hunterbuddy.behavior.resource.Outputs;
+import com.hunterbuddy.behavior.resource.SlotIntent;
 import com.hunterbuddy.util.GliderSwap;
 import net.minecraft.component.EnchantmentEffectComponentTypes;
 import net.minecraft.enchantment.EnchantmentHelper;
@@ -47,6 +54,7 @@ public final class SwapArmor extends Action {
         outputs.slot(ctx.owner(), new SlotIntent(slot, true));
         if (ctx.sensors().selectedSlot() != slot || ctx.sensors().serverSlot() != slot || !outputs.slotSettled(slot)) return new Running("selecting chest equipment");
         expected = world.client().player.getInventory().getStack(slot).copy();
+        if (expected.getCount() != 1) return fail(FailureCode.REFUSED, "equip a single armor item: stacked armor can drop the worn item");
         outputs.inventory().observePlayer();
         version = outputs.inventory().playerVersion();
         GliderSwap.swapSilently(Hand.MAIN_HAND);

@@ -71,7 +71,11 @@ public final class MissionJournal {
     }
 
     public void equipment(TickContext ctx, String name, String state) {
-        ctx.bb().set(ctx.owner(), new Key<>("farmer-equipment-" + name, String.class, Scope.WORLD, true), state);
+        equipment(ctx, ctx.owner(), name, state);
+    }
+
+    public void equipment(TickContext ctx, String owner, String name, String state) {
+        ctx.bb().set(owner, new Key<>("farmer-equipment-" + name, String.class, Scope.WORLD, true), state);
     }
 
     public String equipment(TickContext ctx, String name) {

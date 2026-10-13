@@ -21,15 +21,19 @@ import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
+import com.hunterbuddy.behavior.mc.InventoryLayout;
+import com.hunterbuddy.behavior.mc.LogisticsInventory;
+import com.hunterbuddy.behavior.mc.ProtectionRegistry;
+import com.hunterbuddy.behavior.mc.ShulkerSignature;
 import com.hunterbuddy.behavior.mc.WorldIdentity;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.mc.XaeroWaypoints;
-import com.hunterbuddy.behavior.nodes.Budget;
 import com.hunterbuddy.behavior.nodes.BreakBlock;
+import com.hunterbuddy.behavior.nodes.Budget;
 import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Guard;
-import com.hunterbuddy.behavior.nodes.SetValue;
 import com.hunterbuddy.behavior.nodes.Sequence;
+import com.hunterbuddy.behavior.nodes.SetValue;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.UtilityOption;
 import com.hunterbuddy.behavior.nodes.UtilitySelector;
@@ -41,6 +45,8 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.routine.DeathPolicy;
 import com.hunterbuddy.behavior.trees.GoToTree;
+import com.hunterbuddy.behavior.trees.RegearTree;
+import com.hunterbuddy.behavior.trees.StoreTree;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -52,6 +58,7 @@ import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import net.minecraft.block.BlockState;
+import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 
 public final class FarmerBuddyBot implements Bot, LiveWorldBot {
@@ -72,6 +79,8 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     private String currentTarget = "idle";
     private String statusLine = "idle";
     private FarmerProfile activeProfile;
+    private FarmerZone miningZone;
+    private boolean regearAvailable = true;
 
     public FarmerBuddyBot(FarmerSettings settings, FarmerCatalog catalog, WorldReader world, BaritoneBridge baritone,
                           Outputs outputs, XaeroWaypoints waypoints) {
@@ -135,11 +144,13 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     public void onResume(BotContext context) {
         requireContext(context);
         identity = world.identity();
+        outputs.mining().breakRule(pos -> miningZone != null && miningZone.contains(pos.getX() + 0.5, pos.getZ() + 0.5));
     }
 
     @Override
     public void onStop(StopReport report) {
         Objects.requireNonNull(report);
+        outputs.mining().breakRule(null);
     }
 
     @Override
@@ -154,7 +165,7 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
 
     @Override
     public Set<Resource> resources() {
-        return Set.of(Resource.MOVEMENT, Resource.MINING);
+        return Set.of(Resource.MOVEMENT, Resource.MINING, Resource.INVENTORY, Resource.INTERACT);
     }
 
     private List<FarmerStepConfig> enabledSteps() {
@@ -177,7 +188,8 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
 
     private Node buildCycle() {
         Node resolveProfile = new ResolveProfile();
-        Predicate<BlockState> mineFilter = state -> !state.isAir() && activeProfile != null && activeProfile.blocks().contains(state.getBlock());
+        Predicate<BlockState> mineFilter = state -> !state.isAir() && activeProfile != null &&
+            activeProfile.blocks().contains(state.getBlock());
 
         Node mineCycle = new Sequence("farmer-mine",
             new ParseTarget(),
@@ -207,6 +219,11 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         Node nextStepCycle = new NextStep();
 
         Node task = new UtilitySelector("farmer-task",
+            new UtilityOption(StoreTree.build(() -> activeProfile, this::logisticsZone, () -> activeProfile != null && regearAvailable
+                && LogisticsInventory.needsRegear(world, activeProfile),
+                () -> activeStepIndex, world, baritone, outputs, journal), this::storeScore, ctx -> "ranger"),
+            new UtilityOption(RegearTree.build(() -> activeProfile, this::logisticsZone, () -> activeStepIndex, world, baritone,
+                outputs, journal), this::regearScore, ctx -> "regear"),
             UtilityOption.withCandidates(mineCycle, this::mineScore, candidates, candidateScore, id),
             new UtilityOption(nextStepCycle, this::nextStepScore, ctx -> "next-step"));
 
@@ -218,9 +235,43 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     }
 
     private double mineScore(TickContext ctx) {
+        if (LogisticsMemory.active(ctx, journal)) return 0;
+        int free = 0;
+        for (int slot = 0; slot < 36; slot++) if (world.client().player.getInventory().getStack(slot).isEmpty()) free++;
+        if (free <= 2) return 0;
+        if (activeProfile != null && LogisticsInventory.profileTools(world, activeProfile) == 0) return 0;
         FarmerStepConfig step = currentStep(ctx);
         if (step == null) return 0;
         return delivered(ctx, step) >= step.shulkerTarget() ? 0 : 0.5;
+    }
+
+    private int activeStepIndex;
+    private FarmerZone logisticsZone() {
+        FarmerStepConfig step = enabledSteps().stream().filter(candidate -> candidate.index() - 1 ==
+            activeStepIndex).findFirst().orElseThrow();
+        FarmerZoneLookup.Resolved resolved = zoneLookup.resolve(step.name());
+        if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
+        return resolved.zone();
+    }
+
+    private double storeScore(TickContext ctx) {
+        if (LogisticsMemory.active(ctx, journal)) return new LogisticsMemory(journal, ctx.owner()).load(ctx).store ? 2 : 0;
+        if (activeProfile == null) return 0;
+        LogisticsFacts previous = new LogisticsMemory(journal, ctx.owner()).load(ctx);
+        if (previous != null && previous.departure != null && previous.profile.equals(activeProfile.key())
+            && (!previous.material.unavailable.isEmpty() || !previous.divers.unavailable.isEmpty())) return 0;
+        if (world.countMatching(LogisticsInventory.accepted(activeProfile)) +
+            world.countMatching(LogisticsInventory.miscellaneous(activeProfile)) == 0) return 0;
+        int free = 0;
+        for (int slot = 0; slot < 36; slot++) if (world.client().player.getInventory().getStack(slot).isEmpty()) free++;
+        return world.countMatching(LogisticsInventory.accepted(activeProfile)) >= 27 * 64 || free <= 2 ? 1 : 0;
+    }
+
+    private double regearScore(TickContext ctx) {
+        if (LogisticsMemory.active(ctx, journal)) return new LogisticsMemory(journal, ctx.owner()).load(ctx).store ? 0 : 2;
+        String reserve = journal.equipment(ctx, "reserve-status");
+        return activeProfile != null && LogisticsInventory.needsRegear(world, activeProfile) && (reserve.isEmpty() ||
+            reserve.equals("ready")) ? 0.9 : 0;
     }
 
     private double nextStepScore(TickContext ctx) {
@@ -286,6 +337,35 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             Optional<FarmerProfile> profile = catalog.profile(step.profile());
             if (profile.isEmpty()) return fail(FailureCode.REFUSED, "unknown catalog profile: " + step.profile());
             activeProfile = profile.get();
+            FarmerZoneLookup.Resolved zone = zoneLookup.resolve(step.name());
+            miningZone = zone.ok() ? zone.zone() : null;
+            outputs.mining().breakRule(pos -> miningZone != null && miningZone.contains(pos.getX() + 0.5, pos.getZ() + 0.5));
+            String reserve = journal.equipment(ctx, "reserve-status");
+            regearAvailable = reserve.isEmpty() || reserve.equals("ready");
+            String reserveSignature = journal.equipment(ctx, "logistics-reserve");
+            if (!reserveSignature.isEmpty()) {
+                List<String> missing = LogisticsInventory.missing(world, activeProfile, ShulkerSignature.decode(reserveSignature,
+                    world).contents());
+                regearAvailable = regearAvailable && missing.isEmpty();
+                if (!missing.isEmpty()) {
+                    String detail = "réserve incomplète: " + String.join(", ", missing);
+                    if (!detail.equals(journal.equipment(ctx, "reserve-status"))) {
+                        journal.equipment(ctx, "reserve-status", detail);
+                        journal.milestone(ctx, detail);
+                    }
+                }
+            }
+            ProtectionRegistry.restore(ctx, journal, outputs.mining());
+            activeStepIndex = step.index() - 1;
+            String refusal = outputs.mining().temporaryRefusal();
+            if (refusal == null && world.countMatching(InventoryLayout::silkPickaxe) == 0) refusal =
+                "pioche Toucher de soie absente de l'inventaire";
+            if (refusal == null && world.count(Items.ENDER_CHEST) == 0 && !LogisticsMemory.active(ctx, journal)) refusal =
+                "ender chest absent de l'inventaire";
+            if (refusal != null) {
+                ctx.stopBot(ExitReason.FAILED, refusal);
+                return fail(FailureCode.MISSING_ITEM, refusal);
+            }
             return Success.INSTANCE;
         }
     }

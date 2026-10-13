@@ -23,7 +23,8 @@ public final class OpenContainer extends Action {
 
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
-        if (inventory.ready()) return Success.INSTANCE;
+        if (inventory.at(pos)) return Success.INSTANCE;
+        if (inventory.container()) return fail(FailureCode.REFUSED, "another owned container must be closed before opening this position");
         if (ctx.sensors().screenOpen() && !ctx.sensors().screenOurs()) return fail(FailureCode.REFUSED, "player owns the screen");
         boolean sent = inventory.open(pos, ctx.leases().holder(Resource.SCREEN).filter(lease -> lease.owner().equals(ctx.owner())).orElseThrow());
         return sent ? Success.INSTANCE : new Running("waiting to open container");

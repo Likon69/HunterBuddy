@@ -1,0 +1,38 @@
+package com.hunterbuddy.behavior.trees;
+
+import baritone.api.pathing.goals.Goal;
+import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.pathing.goals.GoalNear;
+import baritone.api.pathing.goals.GoalXZ;
+import com.hunterbuddy.behavior.core.Key;
+import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.Scope;
+import com.hunterbuddy.behavior.mc.BaritoneBridge;
+import com.hunterbuddy.behavior.nodes.BaritoneGoTo;
+import com.hunterbuddy.behavior.nodes.Sequence;
+import com.hunterbuddy.behavior.nodes.SetValue;
+import com.hunterbuddy.behavior.nodes.TaskScope;
+import com.hunterbuddy.behavior.nodes.Timeout;
+import com.hunterbuddy.behavior.nodes.WithLease;
+import com.hunterbuddy.behavior.resource.LeasePolicy;
+import com.hunterbuddy.behavior.resource.Outputs;
+import com.hunterbuddy.behavior.resource.Resource;
+import java.util.Set;
+import net.minecraft.util.math.BlockPos;
+
+public final class GroundTravel {
+    private GroundTravel() {}
+    public static Node build(BlockPos pos, int radius, BaritoneBridge bridge, Outputs outputs) {
+        return goal(radius == 0 ? new GoalBlock(pos) : new GoalNear(pos, radius), bridge, outputs);
+    }
+
+    public static Node horizontal(BlockPos pos, BaritoneBridge bridge, Outputs outputs) {
+        return goal(new GoalXZ(pos.getX(), pos.getZ()), bridge, outputs);
+    }
+
+    private static Node goal(Goal goal, BaritoneBridge bridge, Outputs outputs) {
+        Key<Goal> key = new Key<>("logistics-ground-goal", Goal.class, Scope.OWNER, false);
+        return new TaskScope(new Timeout(2_400, new Sequence("ground-logistics", new SetValue<>(key, ctx -> goal),
+            new WithLease(Set.of(Resource.BARITONE), LeasePolicy.WAIT, new BaritoneGoTo(key, () -> false, false, bridge, outputs)))));
+    }
+}

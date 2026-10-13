@@ -1,10 +1,18 @@
 package com.hunterbuddy.behavior.nodes;
 
-import com.hunterbuddy.behavior.core.*;
+import com.hunterbuddy.behavior.core.Action;
+import com.hunterbuddy.behavior.core.Clock;
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.Running;
+import com.hunterbuddy.behavior.core.Success;
+import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
-import com.hunterbuddy.behavior.mc.*;
-import com.hunterbuddy.behavior.resource.*;
-import com.hunterbuddy.util.QuietClicks;
+import com.hunterbuddy.behavior.mc.InventoryBridge;
+import com.hunterbuddy.behavior.mc.InventoryLayout;
+import com.hunterbuddy.behavior.resource.Lease;
+import com.hunterbuddy.behavior.resource.Leases;
+import com.hunterbuddy.behavior.resource.Resource;
 import java.util.function.Predicate;
 import net.minecraft.item.ItemStack;
 
@@ -68,7 +76,7 @@ public final class PrepareInventory extends Action {
             }
         }
         if (from < 0) return fail(FailureCode.MISSING_ITEM, "required item missing");
-        if (!QuietClicks.readyOrSettle()) return new Running("settling player inventory");
+        if (!inventory.readyForClick(lease)) return new Running("settling player inventory");
         if (++attempts > 18) return fail(FailureCode.BUDGET, "layout click budget exhausted");
         String owner = ctx.owner();
         ticket = inventory.click(inventory.playerSwap(from, to), lease, ctx.nowMs() - ctx.clock().frozenMs(),

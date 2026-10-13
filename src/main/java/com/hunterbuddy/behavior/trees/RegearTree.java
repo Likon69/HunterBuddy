@@ -1,0 +1,42 @@
+package com.hunterbuddy.behavior.trees;
+
+import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.FarmerProfile;
+import com.hunterbuddy.behavior.farmer.FarmerZone;
+import com.hunterbuddy.behavior.farmer.MissionJournal;
+import com.hunterbuddy.behavior.mc.BaritoneBridge;
+import com.hunterbuddy.behavior.mc.LogisticsContext;
+import com.hunterbuddy.behavior.mc.WorldReader;
+import com.hunterbuddy.behavior.nodes.InventoryMilestone;
+import com.hunterbuddy.behavior.nodes.LogisticsRun;
+import com.hunterbuddy.behavior.nodes.Sequence;
+import com.hunterbuddy.behavior.nodes.TaskScope;
+import com.hunterbuddy.behavior.resource.Outputs;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+
+public final class RegearTree {
+    private RegearTree() {}
+
+    public static Node build(Supplier<FarmerProfile> profile, Supplier<FarmerZone> zone, IntSupplier step,
+                             WorldReader world, BaritoneBridge baritone, Outputs outputs, MissionJournal journal) {
+        return build(profile, zone, () -> false, step, world, baritone, outputs, journal);
+    }
+
+    public static Node build(Supplier<FarmerProfile> profile, Supplier<FarmerZone> zone, BooleanSupplier exitTop,
+                             IntSupplier step, WorldReader world, BaritoneBridge baritone, Outputs outputs, MissionJournal journal) {
+        LogisticsContext logistics = new LogisticsContext(profile, zone, false, () -> true, exitTop,
+            step, world, baritone, outputs, journal);
+        return new TaskScope(new LogisticsRun(logistics, new Sequence("regear",
+            new InventoryMilestone("charger-faits-logistiques", logistics::initialize), LogisticsSiteTree.build(logistics),
+            LogisticsOperations.unless("ender chest revenu ou en ramassage", () -> logistics.returned("chest")
+                || logistics.equipment("chest").breakRequested() && world.cleared(logistics.facts.chest()),
+                TrackedEquipmentTree.place(logistics, "chest")),
+            LogisticsOperations.pendingTransfer(logistics), protectedCycle(logistics), LogisticsFinishTree.build(logistics))));
+    }
+
+    public static Node protectedCycle(LogisticsContext logistics) {
+        return ShulkerCycleTree.build(logistics, "reserve", () -> ReserveWorkTree.build(logistics));
+    }
+}

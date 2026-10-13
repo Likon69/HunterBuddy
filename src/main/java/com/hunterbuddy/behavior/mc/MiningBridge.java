@@ -34,6 +34,33 @@ public final class MiningBridge {
     private BlockPos toolPos;
     private int heldTool = -1;
     private final java.util.Map<BlockPos, WorldIdentity> temporaryChests = new java.util.HashMap<>();
+    private final java.util.Map<BlockPos, WorldIdentity> shelters = new java.util.HashMap<>();
+    private BlockPos exit;
+    private java.util.function.Predicate<BlockPos> breakRule;
+    private final java.util.Map<BlockPos, WorldIdentity> temporaryBlocks = new java.util.HashMap<>();
+
+    public void breakRule(java.util.function.Predicate<BlockPos> rule) { breakRule = rule; }
+    public void trackTemporaryBlock(BlockPos pos) { temporaryBlocks.put(pos.toImmutable(), world.identity()); }
+    public void forgetTemporaryBlock(BlockPos pos) { temporaryBlocks.remove(pos); }
+    private boolean outsideBreakRule(BlockPos pos) {
+        return breakRule != null && !breakRule.test(pos) && !world.identity().equals(temporaryBlocks.get(pos));
+    }
+
+    public void protectShelter(BlockPos center) { shelters.put(center.toImmutable(), world.identity()); }
+    public void allowExit(BlockPos pos) { exit = pos.toImmutable(); }
+    public void releaseExit() { exit = null; }
+    private boolean protectedPosition(BlockPos pos) {
+        if (pos.equals(exit)) return false;
+        for (var entry : shelters.entrySet()) {
+            if (!entry.getValue().equals(world.identity())) continue;
+            BlockPos center = entry.getKey();
+            int x = Math.abs(pos.getX() - center.getX());
+            int z = Math.abs(pos.getZ() - center.getZ());
+            int y = pos.getY() - center.getY();
+            if (x <= 2 && z <= 2 && (y == -1 || y >= 0 && y <= 1 && Math.max(x, z) == 2)) return true;
+        }
+        return false;
+    }
 
     public void trackTemporaryChest(BlockPos pos) { temporaryChests.put(pos.toImmutable(), world.identity()); }
     public void forgetTemporaryChest(BlockPos pos) { temporaryChests.remove(pos); }
@@ -71,6 +98,14 @@ public final class MiningBridge {
         return rotate != null && Boolean.TRUE.equals(rotate.get()) ? "HMine rotate must be off for visible LOOK" : null;
     }
 
+    public String temporaryRefusal() {
+        String refusal = refusal();
+        if (refusal != null) return refusal;
+        Setting<?> setting = mine().settings.get("leave-to-vanilla");
+        return setting != null && setting.get() instanceof List<?> blocks && blocks.contains(net.minecraft.block.Blocks.ENDER_CHEST)
+            ? null : "add minecraft:ender_chest to HMine leave-to-vanilla";
+    }
+
     public boolean ownsMining() {
         HMine mine = mine();
         if (mine == null || !mine.isMining()) foreign = false;
@@ -79,7 +114,7 @@ public final class MiningBridge {
     }
 
     public boolean protectedBlock(BlockPos pos) {
-        return baritone.settings().blocksToDisallowBreaking.value.contains(world.state(pos).getBlock());
+        return outsideBreakRule(pos) || protectedPosition(pos) || baritone.settings().blocksToDisallowBreaking.value.contains(world.state(pos).getBlock());
     }
 
     public boolean vanilla(BlockPos pos) {
@@ -147,6 +182,10 @@ public final class MiningBridge {
     public void worldLost() {
         releaseTool();
         temporaryChests.clear();
+        shelters.clear();
+        exit = null;
+        breakRule = null;
+        temporaryBlocks.clear();
         releaseClick();
         job = null;
         foreign = false;
@@ -164,6 +203,9 @@ public final class MiningBridge {
 
     @EventHandler
     private void onSend(PacketEvent.Send event) {
+        if (event.packet instanceof PlayerActionC2SPacket protectedAction && world.available()
+            && (protectedAction.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || protectedAction.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)
+            && (ownBaritone.getAsBoolean() || ownsMining()) && (protectedPosition(protectedAction.getPos()) || outsideBreakRule(protectedAction.getPos()))) { event.cancel(); return; }
         if (event.packet instanceof PlayerActionC2SPacket action
             && action.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK
             && world.available() && world.identity().equals(temporaryChests.get(action.getPos()))

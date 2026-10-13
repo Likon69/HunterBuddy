@@ -54,6 +54,18 @@ public final class InventoryBridge {
     private String quarantine;
     private long suspendedAt = -1;
     private final Deque<CursorReceipt> cursors = new ArrayDeque<>();
+    private Lease quietLease;
+    private long quietAt = -1;
+
+    public boolean readyForClick(Lease lease) {
+        require(lease, Resource.INVENTORY);
+        if (!world.available()) return false;
+        if (quietLease == lease && quietAt == ticks.getAsLong()) return true;
+        if (!com.hunterbuddy.util.QuietClicks.readyOrSettle()) return false;
+        quietLease = lease;
+        quietAt = ticks.getAsLong();
+        return true;
+    }
 
     public InventoryBridge(WorldReader world, LongSupplier ticks, Consumer<String> alert) {
         this.world = Objects.requireNonNull(world);
@@ -137,7 +149,7 @@ public final class InventoryBridge {
     public Ticket click(InventoryTransaction transaction, Lease lease, long nowMs, Consumer<String> confirmed) {
         require(lease, Resource.INVENTORY);
         require(lease, Resource.SCREEN);
-        if (!com.hunterbuddy.util.QuietClicks.readyOrSettle()) throw new IllegalStateException("inventory clicks need settling");
+        if (!readyForClick(lease)) throw new IllegalStateException("inventory clicks need settling");
         if (!ready() || quarantine != null || !handler.getCursorStack().isEmpty()) throw new IllegalStateException("inventory authority or empty cursor required");
         if (ticket != null && !ticket.finished()) throw new IllegalStateException("inventory transaction already pending");
         if (handler.syncId != transaction.syncId() || transaction.fromSlot() >= handler.slots.size() || transaction.toSlot() >= handler.slots.size()) {
@@ -149,7 +161,8 @@ public final class InventoryBridge {
             throw new IllegalStateException("source item changed");
         }
         if (transaction.action() == SlotActionType.SWAP && (to.inventory != world.client().player.getInventory()
-            || to.getIndex() < 0 || to.getIndex() > 8 || !to.canInsert(from.getStack()) || !from.canInsert(to.getStack()))) {
+            || to.getIndex() < 0 || to.getIndex() > 8 || !to.canInsert(from.getStack()) || !from.canInsert(to.getStack())
+            || from.getStack().getCount() > to.getMaxItemCount(from.getStack()) || to.getStack().getCount() > from.getMaxItemCount(to.getStack()))) {
             throw new IllegalStateException("SWAP requires a hotbar destination");
         }
         if (transaction.action() == SlotActionType.QUICK_MOVE && !container()) {
@@ -193,6 +206,7 @@ public final class InventoryBridge {
     }
 
     private boolean restoreCursor() {
+        if (ticket.transaction.action() != SlotActionType.PICKUP && ticket.serverConfirmed) { ticket.stage = Stage.RELEASED; return true; }
         if (!isOurs()) {
             quarantine("inventory handler or player authority changed");
             return true;
@@ -262,6 +276,8 @@ public final class InventoryBridge {
     }
 
     public void worldLost() {
+        quietLease = null;
+        quietAt = -1;
         java.util.Arrays.fill(playerReceipts, null);
         if (ticket != null && !ticket.finished()) quarantine("session ended during an inventory transaction");
         forgetScreen();
@@ -360,7 +376,8 @@ public final class InventoryBridge {
     private void send(PacketEvent.Send event) {
         if (requested != null && emission != Emission.OWN && event.packet instanceof PlayerInteractBlockC2SPacket) requested = null;
         if (event.packet instanceof ClickSlotC2SPacket click && emission != Emission.OWN) {
-            if (ticket != null && click.syncId() == ticket.transaction.syncId() && !ticket.finished()) quarantine("another actor clicked the inventory");
+            if (ticket != null && click.syncId() == ticket.transaction.syncId() && !ticket.finished()
+                && (!ticket.serverConfirmed || ticket.transaction.action() == SlotActionType.PICKUP)) quarantine("another actor clicked the inventory");
             if (handler != null && click.syncId() == handler.syncId) forgetScreen();
         }
     }
@@ -511,6 +528,28 @@ public final class InventoryBridge {
 
     public boolean confirmedChest(ItemStack stack) {
         return playerReceipts[38] != null && ItemStack.areEqual(stack, playerReceipts[38]);
+    }
+
+    public boolean confirmedPlayerSlot(int index, ItemStack stack) {
+        return index >= 0 && index < playerReceipts.length && playerReceipts[index] != null && ItemStack.areEqual(stack, playerReceipts[index]);
+    }
+
+    public boolean containerCapacity(java.util.function.Predicate<ItemStack> filter) {
+        if (!container()) return false;
+        for (Slot from : handler.slots) if (from.inventory == world.client().player.getInventory() && !from.getStack().isEmpty() && filter.test(from.getStack())) {
+            for (Slot to : handler.slots) if (to.inventory != from.inventory && to.canInsert(from.getStack()) && capacity(to, from.getStack()) > 0) return true;
+        }
+        return false;
+    }
+
+    public ItemStack sourceStack(InventoryTransaction transaction) {
+        if (!ready() || handler.syncId != transaction.syncId()) throw new IllegalStateException("transaction source handler changed");
+        return handler.slots.get(transaction.fromSlot()).getStack().copy();
+    }
+
+    public boolean playerSource(InventoryTransaction transaction) {
+        if (!ready() || handler.syncId != transaction.syncId()) throw new IllegalStateException("transaction source handler changed");
+        return handler.slots.get(transaction.fromSlot()).inventory == world.client().player.getInventory();
     }
 
     private void observePlayer(int index, ItemStack stack) {

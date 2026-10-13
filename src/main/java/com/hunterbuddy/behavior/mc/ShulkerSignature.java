@@ -32,6 +32,18 @@ public final class ShulkerSignature {
         return new ShulkerSignature(Registries.ITEM.getId(stack.getItem()).toString(), stack.getOrDefault(DataComponentTypes.CONTAINER, ContainerComponent.DEFAULT), world);
     }
 
+    public static ShulkerSignature decode(String encoded, WorldReader world) {
+        com.google.gson.JsonObject data = com.google.gson.JsonParser.parseString(encoded).getAsJsonObject();
+        return new ShulkerSignature(data.get("item").getAsString(), ContainerComponent.CODEC.parse(
+            world.client().world.getRegistryManager().getOps(JsonOps.INSTANCE), data.get("contents")).getOrThrow(), world);
+    }
+
+    public List<ItemStack> contents() {
+        net.minecraft.util.collection.DefaultedList<ItemStack> result = net.minecraft.util.collection.DefaultedList.ofSize(27, ItemStack.EMPTY);
+        contents.copyTo(result);
+        return List.copyOf(result);
+    }
+
     public ShulkerSignature withContents(List<ItemStack> stacks, WorldReader world) {
         if (stacks.size() != 27) throw new IllegalArgumentException("27 confirmed shulker slots required");
         return new ShulkerSignature(item, ContainerComponent.fromStacks(stacks), world);
@@ -43,6 +55,7 @@ public final class ShulkerSignature {
     }
 
     public boolean empty() { return contents.streamNonEmpty().findAny().isEmpty(); }
+    public boolean same(ShulkerSignature other) { return item.equals(other.item) && contents.equals(other.contents); }
     public boolean matchesContents(List<ItemStack> stacks) { return stacks.size() == 27 && contents.equals(ContainerComponent.fromStacks(stacks)); }
     public boolean matchesBlock(net.minecraft.block.BlockState state) {
         return state.getBlock() instanceof ShulkerBoxBlock && Registries.ITEM.getId(state.getBlock().asItem()).toString().equals(item);

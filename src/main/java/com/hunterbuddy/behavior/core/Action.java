@@ -25,6 +25,7 @@ public abstract class Action extends Node {
 
     @Override
     protected final NodeResult onTick(TickContext ctx) {
+        if (this instanceof RocketAction && ctx.landing()) return fail(FailureCode.REFUSED, "rocket emission under Landing is forbidden");
         if (!allowed) return fail(FailureCode.LOOP, "action start budget exceeded");
         if (ticks++ >= limitTicks) return fail(FailureCode.TIMEOUT, "action limit=" + limitTicks);
         return onActionTick(ctx);

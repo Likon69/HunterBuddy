@@ -39,8 +39,8 @@ public final class ClickSlot extends Action {
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (ticket == null) {
-            if (!com.hunterbuddy.util.QuietClicks.readyOrSettle()) return new Running("settling inventory clicks");
             lease = ctx.leases().holder(Resource.INVENTORY).filter(holder -> holder.owner().equals(ctx.owner())).orElseThrow();
+            if (!inventory.readyForClick(lease)) return new Running("settling inventory clicks");
             try {
                 ticket = inventory.click(transaction.get(), lease, ctx.nowMs() - ctx.clock().frozenMs(),
                     detail -> ctx.event(this, Kind.PROGRESS, null, "TRANSACTION_CONFIRMED", detail));

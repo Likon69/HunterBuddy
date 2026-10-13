@@ -1,10 +1,26 @@
 package com.hunterbuddy.behavior.trees;
 
-import com.hunterbuddy.behavior.core.*;
+import com.hunterbuddy.behavior.core.Key;
+import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
-import com.hunterbuddy.behavior.mc.*;
-import com.hunterbuddy.behavior.nodes.*;
-import com.hunterbuddy.behavior.resource.*;
+import com.hunterbuddy.behavior.mc.BaritoneBridge;
+import com.hunterbuddy.behavior.mc.InventoryLayout;
+import com.hunterbuddy.behavior.mc.TemporaryEquipment;
+import com.hunterbuddy.behavior.mc.WorldReader;
+import com.hunterbuddy.behavior.nodes.BreakEquipment;
+import com.hunterbuddy.behavior.nodes.If;
+import com.hunterbuddy.behavior.nodes.InventoryMilestone;
+import com.hunterbuddy.behavior.nodes.PickupItem;
+import com.hunterbuddy.behavior.nodes.PlaceEquipment;
+import com.hunterbuddy.behavior.nodes.PrepareInventory;
+import com.hunterbuddy.behavior.nodes.Sequence;
+import com.hunterbuddy.behavior.nodes.SetValue;
+import com.hunterbuddy.behavior.nodes.Timeout;
+import com.hunterbuddy.behavior.nodes.WithLease;
+import com.hunterbuddy.behavior.resource.LeasePolicy;
+import com.hunterbuddy.behavior.resource.Outputs;
+import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Set;
 import net.minecraft.util.math.BlockPos;
 
@@ -24,6 +40,7 @@ public final class EquipmentTree {
                 equipment.enderChest() ? "ender-chest" : "shulker", world, baritone, outputs, journal),
             new InventoryMilestone("equipment-picked-up", ctx -> {
                 equipment.pickedUp(ctx);
+                outputs.mining().forgetTemporaryBlock(equipment.pos());
                 if (equipment.enderChest()) outputs.mining().forgetTemporaryChest(equipment.pos());
             })));
     }

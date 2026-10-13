@@ -34,6 +34,11 @@ public final class Blackboard {
         tasks.computeIfAbsent(owner, ignored -> new ArrayDeque<>()).push(new HashMap<>());
     }
 
+    public int taskDepth(String owner) {
+        Deque<Map<Key<?>, Object>> stack = tasks.get(owner);
+        return stack == null ? 0 : stack.size();
+    }
+
     public void closeTask(String owner) {
         Deque<Map<Key<?>, Object>> stack = tasks.get(owner);
         if (stack == null || stack.isEmpty()) throw new IllegalStateException("no TASK for " + owner);

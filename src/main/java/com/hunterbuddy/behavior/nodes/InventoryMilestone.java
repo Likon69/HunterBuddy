@@ -1,6 +1,10 @@
 package com.hunterbuddy.behavior.nodes;
 
-import com.hunterbuddy.behavior.core.*;
+import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.core.NodeResult;
+import com.hunterbuddy.behavior.core.Success;
+import com.hunterbuddy.behavior.core.TickContext;
 import java.util.function.Consumer;
 
 public final class InventoryMilestone extends Node {
