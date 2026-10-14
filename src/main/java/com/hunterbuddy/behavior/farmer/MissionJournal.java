@@ -80,10 +80,6 @@ public final class MissionJournal {
         ctx.checkpoint(this.owner == null ? owner : this.owner);
     }
 
-    public String milestone(TickContext ctx) {
-        return ctx.bb().get(owner(ctx), MILESTONE).orElse("");
-    }
-
     public void equipment(TickContext ctx, String name, String state) {
         equipment(ctx, owner(ctx), name, state);
     }

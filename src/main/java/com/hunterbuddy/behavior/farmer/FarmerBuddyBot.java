@@ -321,9 +321,10 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             return;
         }
         statusLine = String.format(Locale.ROOT,
-            "step=%d zone=%s profile=%s hint=%s delivered=%d/%d carried=%d activity=%s rockets=%d elytra=%.0f%%",
+            "step=%d zone=%s profile=%s hint=%s delivered=%d/%d carried=%d filling=%d activity=%s rockets=%d elytra=%.0f%%",
             step.index(), settings.zone(), step.profile(), step.hint().isBlank() ? "none" : step.hint(), delivered(ctx, step), step.shulkerTarget(),
-            journal.carried(ctx, step.index() - 1), currentTarget, ctx.sensors().rockets(), world.elytraDurabilityFraction() * 100);
+            journal.carried(ctx, step.index() - 1), journal.inProgress(ctx, step.index() - 1), currentTarget, ctx.sensors().rockets(),
+            world.elytraDurabilityFraction() * 100);
     }
 
     private final class StatusTracker extends Decorator {
