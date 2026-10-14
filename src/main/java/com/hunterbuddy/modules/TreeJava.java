@@ -17,6 +17,8 @@ import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.FarmerZoneReport;
+import com.hunterbuddy.behavior.farmer.MissionJournal;
+import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.lab.BaseVisitTask;
 import com.hunterbuddy.behavior.lab.BreakColumnTask;
@@ -143,6 +145,7 @@ public final class TreeJava extends Module {
         engine.outputs().connectInventory(inventory);
         engine.outputs().connectFlight(flight, new ElytraOutput(baritone, world));
         engine.persistence(store, new ResumeGate(world, this::resumeRefusal));
+        engine.registerSharedOwner(WorldKnowledge.OWNER);
         engine.gates().connect(mining::ownsMining, engine.outputs()::ownBaritone);
         mcSensors.screenOwner(inventory::isOurs);
         engine.flightKeeper(new KeepFlying(world, baritone, engine.outputs()));
@@ -266,7 +269,8 @@ public final class TreeJava extends Module {
 
     public void farmerReset() {
         if (!world.available()) throw new IllegalStateException("Minecraft world is unavailable");
-        engine.resetFarmerMission(world.storageKey());
+        String owner = "bot:farmerbuddy";
+        engine.editDurableMemory(world.storageKey(), owner, ctx -> MissionJournal.clear(ctx, owner));
     }
 
     public void selectScenario(LabScenario next) {
@@ -386,11 +390,11 @@ public final class TreeJava extends Module {
         LiveWorldBot live = engine.liveBot();
         String refused = world.refusal(live != null ? live.resources() : Set.of(), baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
         if (refused != null) return refused;
-        if (sensors.eating()) return "AutoEatSync eating";
-        if (sensors.combatTarget()) return "KillAuraPlus combat target";
+        if (!sensors.gliding() && sensors.eating()) return "AutoEatSync eating";
+        if (!sensors.gliding() && sensors.combatTarget()) return "KillAuraPlus combat target";
         if (sensors.regearRunning() || sensors.regearPending()) return "AutoFlyingRegear running or pending";
-        if (sensors.mlepMining() && !mining.ownsMining()) return "HMine foreign mining";
-        if (pauseOnPlayer() && sensors.playersVisible() > 0) return "another player visible";
+        if (!sensors.gliding() && sensors.mlepMining() && !mining.ownsMining()) return "HMine foreign mining";
+        if (!sensors.gliding() && pauseOnPlayer() && sensors.playersVisible() > 0) return "another player visible";
         if (engine.outputs().foreignMovement()) return "foreign forced movement";
         return null;
     }

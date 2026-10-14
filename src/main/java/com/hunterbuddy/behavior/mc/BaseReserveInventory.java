@@ -18,13 +18,11 @@ public final class BaseReserveInventory {
             return false;
         }
         List<ItemStack> contents = ShulkerSignature.of(stack, visit.logistics.world).contents();
-        ReserveInventory reserve = new ReserveInventory(visit.logistics);
         return contents.stream().anyMatch(item -> LogisticsInventory.tool(item, visit.logistics.profile)
                 && item.getDamage() == 0)
             && contents.stream().anyMatch(item -> InventoryLayout.silkPickaxe(item) && item.getDamage() == 0)
             && contents.stream().filter(item -> item.contains(DataComponentTypes.FOOD)).mapToInt(ItemStack::getCount).sum() >= 16
-            && contents.stream().anyMatch(item -> GliderSwap.isGlider(item) && item.getDamage() == 0 && FlightPlan.remaining(item) > 16)
-            && ReserveInventory.ARMOR.stream().allMatch(slot -> contents.stream().anyMatch(item -> reserve.freshArmor(item, slot)));
+            && contents.stream().anyMatch(item -> GliderSwap.isGlider(item) && item.getDamage() == 0 && FlightPlan.remaining(item) > 16);
     }
 
     public int carriedWear() {

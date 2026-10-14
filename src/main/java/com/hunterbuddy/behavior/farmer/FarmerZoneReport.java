@@ -9,6 +9,7 @@ import net.minecraft.util.math.BlockPos;
 
 public final class FarmerZoneReport {
     private static final int SCAN_RADIUS = 16;
+    private static final int SCAN_HEIGHT = 32;
 
     private FarmerZoneReport() {
     }
@@ -41,8 +42,8 @@ public final class FarmerZoneReport {
         long accepted = 0;
         long refused = 0;
         BlockPos center = world.feet();
-        int bottom = world.bottomY();
-        int top = world.topY();
+        int bottom = Math.max(world.bottomY(), center.getY() - SCAN_HEIGHT);
+        int top = Math.min(world.topY(), center.getY() + SCAN_HEIGHT);
         for (int dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
             for (int dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
                 int x = center.getX() + dx;

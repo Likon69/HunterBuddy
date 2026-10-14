@@ -8,7 +8,6 @@ public final class TraceReasons {
     public static final String RESTART = "restart";
     public static final String STARTED = "started";
     public static final String SWITCHED = "switched";
-    public static final String FLEE = "flee";
     public static final String REFUSED = "refused";
     public static final String PAUSED = "paused";
     public static final String RESUMED = "resumed";

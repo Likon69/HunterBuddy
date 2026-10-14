@@ -6,8 +6,6 @@ import com.hunterbuddy.behavior.bot.BotRegistry;
 import com.hunterbuddy.behavior.bot.BotStats;
 import com.hunterbuddy.behavior.bot.BotStatus;
 import com.hunterbuddy.behavior.bot.LiveWorldBot;
-import com.hunterbuddy.behavior.farmer.MissionJournal;
-import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.hooks.Contributor;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
@@ -22,6 +20,7 @@ import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.UtilitySelector;
 import com.hunterbuddy.behavior.persist.PersistentStore;
+import com.hunterbuddy.behavior.persist.SharedMemoryStore;
 import com.hunterbuddy.behavior.plugin.PluginRegistry;
 import com.hunterbuddy.behavior.resource.Leases;
 import com.hunterbuddy.behavior.resource.LegacyGates;
@@ -90,9 +89,7 @@ public final class BehaviorEngine {
     private PersistentStore store;
     private String worldKey = "simulated";
     private CompletableFuture<Map<Key<?>, Object>> memoryLoad;
-    private CompletableFuture<Map<Key<?>, Object>> knowledgeLoad;
-    private Map<Key<?>, Object> savedKnowledge = Map.of();
-    private String savedKnowledgeWorld;
+    private final SharedMemoryStore sharedMemory = new SharedMemoryStore();
     private CompletableFuture<BotStats.Snapshot> statsLoad;
     private final SessionRoutine session;
     private long saveAt;
@@ -114,8 +111,8 @@ public final class BehaviorEngine {
         ctx = new TickContext(clock, new Blackboard(), new ResourceArbiter(), trace, ProgressPolicy.DEFAULT);
         ctx.checkpointHandler(owner -> {
             if (owner.equals(botOwner)) persist();
-            if (owner.equals(WorldKnowledge.OWNER)) persistKnowledge();
-            if (store != null && owner.equals("bot:farmerbuddy") && !owner.equals(botOwner)) {
+            if (sharedMemory.contains(owner)) sharedMemory.save(owner, store, worldKey, ctx.bb());
+            if (store != null && owner.startsWith("bot:") && !owner.equals(botOwner) && !sharedMemory.contains(owner)) {
                 checkpoint.incrementAndGet();
                 store.save(worldKey, owner, ctx.bb().durable(owner));
             }
@@ -201,7 +198,7 @@ public final class BehaviorEngine {
         stats.startSession();
         if (store != null) {
             memoryLoad = store.load(worldKey, context.owner());
-            knowledgeLoad = store.loadKnowledge(worldKey, WorldKnowledge.OWNER);
+            sharedMemory.load(store, worldKey);
             statsLoad = statsRestored.contains(next.name()) ? null : statsReads.computeIfAbsent(next.name(), store::loadStats);
             loadingAt = -1;
         }
@@ -430,16 +427,19 @@ public final class BehaviorEngine {
         return ctx.bb().durable(owner);
     }
 
-    public void resetFarmerMission(String key) {
-        if ((running() || suspended()) && botName().equals("farmerbuddy")) {
-            throw new IllegalStateException("Stop FarmerBuddy before resetting its mission");
+    public void editDurableMemory(String key, String owner, Consumer<TickContext> update) {
+        Objects.requireNonNull(key);
+        Objects.requireNonNull(owner);
+        Objects.requireNonNull(update);
+        if ((running() || suspended()) && owner.equals(botOwner)) {
+            throw new IllegalStateException("Stop the bot before editing its durable memory");
         }
-        Map<Key<?>, Object> memory = store == null ? Map.of() : store.load(key, "bot:farmerbuddy").join();
+        Map<Key<?>, Object> memory = store == null ? Map.of() : store.load(key, owner).join();
         ctx.bb().world(key);
         try {
-            ctx.bb().loadDurable("bot:farmerbuddy", memory);
-            MissionJournal.clear(ctx, "bot:farmerbuddy");
-            if (store != null) store.save(key, "bot:farmerbuddy", ctx.bb().durable("bot:farmerbuddy")).join();
+            ctx.bb().loadDurable(owner, memory);
+            update.accept(ctx);
+            if (store != null) store.save(key, owner, ctx.bb().durable(owner)).join();
         } finally {
             ctx.bb().world(worldKey);
         }
@@ -475,7 +475,7 @@ public final class BehaviorEngine {
 
     private boolean loadMemory() {
         if (memoryLoad != null && !memoryLoad.isDone() || statsLoad != null && !statsLoad.isDone()
-            || knowledgeLoad != null && !knowledgeLoad.isDone()) {
+            || sharedMemory.loading()) {
             if (loadingAt < 0) loadingAt = clock.nowMs();
             if (clock.nowMs() - loadingAt >= 5_000) stopNow(ExitReason.STOPPED, "Persistent store loading exceeded 5 seconds");
             return false;
@@ -484,10 +484,7 @@ public final class BehaviorEngine {
             ctx.bb().loadDurable(botOwner, memoryLoad.exceptionally(ex -> Map.of()).join());
             memoryLoad = null;
         }
-        if (knowledgeLoad != null) {
-            ctx.bb().loadDurable(WorldKnowledge.OWNER, knowledgeLoad.exceptionally(ex -> Map.of()).join());
-            knowledgeLoad = null;
-        }
+        sharedMemory.restore(ctx.bb());
         if (statsLoad != null) {
             BotStats.Snapshot stored = statsLoad.exceptionally(ex -> BotStats.EMPTY).join();
             stats.mergeCumulative(stored.cumulative());
@@ -499,7 +496,7 @@ public final class BehaviorEngine {
 
     private void persist() {
         if (store == null || bot == null || stats == null) return;
-        persistKnowledge();
+        sharedMemory.save(store, worldKey, ctx.bb());
         String owner = "bot:" + bot.name();
         Map<Key<?>, Object> memory = new LinkedHashMap<>(ctx.bb().durable(owner));
         Map<Key<?>, Object> current = Map.copyOf(memory);
@@ -522,15 +519,6 @@ public final class BehaviorEngine {
         saveAt = clock.tick();
     }
 
-    private void persistKnowledge() {
-        if (store == null || knowledgeLoad != null) return;
-        Map<Key<?>, Object> memory = ctx.bb().durable(WorldKnowledge.OWNER);
-        if (memory.isEmpty() || worldKey.equals(savedKnowledgeWorld) && memory.equals(savedKnowledge)) return;
-        store.save(worldKey, WorldKnowledge.OWNER, memory);
-        savedKnowledge = memory;
-        savedKnowledgeWorld = worldKey;
-    }
-
     public EngineSnapshot snapshot() {
         Node tree = root.pausedNode() != null ? root.pausedNode() : recovery.active() ? recovery : hooks.build();
         Node active = deepest(tree);
@@ -544,7 +532,7 @@ public final class BehaviorEngine {
             ctx.leases().snapshot().size(), ctx.evidenceSequence() - evidenceBaseline, tickMs,
             events.subList(Math.max(0, events.size() - 5), events.size()), root.stopReport().orElse(null),
             routines.stream().map(this::routineState).toList(), stats == null ? BotStats.EMPTY : stats.snapshot(), root.pauseCause(),
-            ctx.gates().status(), ctx.outputs().status(), scoreLines);
+            ctx.gates().status(), ctx.outputs().alerts(), scoreLines);
     }
 
     private RoutineStatus routineState(Routine routine) {
@@ -566,6 +554,11 @@ public final class BehaviorEngine {
         statsRestored.addAll(statsByBot.keySet());
         statsLoad = null;
         persist();
+    }
+
+    public void registerSharedOwner(String owner) {
+        if (bot != null) throw new IllegalStateException("register shared memory owners before starting");
+        sharedMemory.register(owner);
     }
 
     public void registerRoutine(Routine routine) {

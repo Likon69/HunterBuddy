@@ -3,9 +3,6 @@ package com.hunterbuddy.behavior.plugin;
 import com.hunterbuddy.behavior.core.StopReport;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.hooks.HookEntry;
-import com.hunterbuddy.behavior.trace.Kind;
-import com.hunterbuddy.behavior.trace.TraceEvent;
-import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -48,9 +45,4 @@ public final class AlertPlugin implements Plugin {
 
     @Override
     public List<HookEntry> entries(PluginContext context) { return List.of(); }
-
-    @Override
-    public void observe(TraceEvent event) {
-        if (event.kind() == Kind.GATE && event.reason().equals(TraceReasons.FLEE)) notify("Combat gate: " + event.detail());
-    }
 }

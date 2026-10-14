@@ -247,9 +247,12 @@ public final class TreeRoot {
             return;
         }
         HookEntry gate = session == null ? hooks.entries().stream().filter(entry -> entry.node() instanceof GateWait)
+            .filter(entry -> !sensors.gliding() || entry.hook() == Hook.REGEAR)
             .filter(entry -> entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null) : session;
-        if (gate != null || !ctx.gates().active().isEmpty()) {
-            pause(gate, sensors);
+        List<GateOwner> activeGates = ctx.gates().active().stream()
+            .filter(owner -> !sensors.gliding() || owner.hook() == Hook.REGEAR).toList();
+        if (gate != null || !activeGates.isEmpty()) {
+            pause(gate, sensors, activeGates);
             return;
         }
         if (state == RootState.PAUSED && !resume()) return;
@@ -316,8 +319,8 @@ public final class TreeRoot {
             && entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null);
     }
 
-    private void pause(HookEntry entry, Sensors sensors) {
-        String cause = entry != null ? entry.owner() : ctx.gates().active().getFirst().name();
+    private void pause(HookEntry entry, Sensors sensors, List<GateOwner> activeGates) {
+        String cause = entry != null ? entry.owner() : activeGates.getFirst().name();
         if (state != RootState.PAUSED) {
             hooks.build().suspend(ctx);
             recovery.suspend(ctx);
@@ -328,9 +331,9 @@ public final class TreeRoot {
             pauseLimited = false;
         }
         if (pauseEntry != entry && pauseEntry != null) pauseEntry.guard().halt(ctx, ExitReason.PREEMPTED);
-        if (!heldGates.equals(ctx.gates().active()) || borrowed != ctx.gates().borrowedBaritone()) {
+        if (!heldGates.equals(activeGates) || borrowed != ctx.gates().borrowedBaritone()) {
             ctx.leases().park();
-            heldGates = ctx.gates().active();
+            heldGates = activeGates;
             ctx.leases().gates(heldGates);
             ctx.outputs().suspend(ctx.gates().borrowedBaritone());
             borrowed = ctx.gates().borrowedBaritone();

@@ -99,6 +99,10 @@ public final class TickContext {
         botStats = stats;
     }
 
+    public void targetCompleted(boolean success) {
+        if (botStats != null) botStats.targetCompleted(success);
+    }
+
     public NodeResult executeMonitor(Node node) {
         monitorDepth++;
         try {

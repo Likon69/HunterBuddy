@@ -20,6 +20,7 @@ public final class ProgressGuard extends Decorator {
     private final int window;
     private int inactive;
     private String activeKey;
+    private boolean retained;
     private Function<TickContext, String> target = ctx -> path();
 
     public ProgressGuard(ProgressSensor sensor, double minGain, int windowTicks, Node child) {
@@ -33,8 +34,12 @@ public final class ProgressGuard extends Decorator {
     @Override
     protected void onStart(TickContext ctx) {
         String key = Objects.requireNonNull(target.apply(ctx));
-        if (!key.equals(activeKey)) inactive = 0;
+        if (!retained || !key.equals(activeKey)) {
+            inactive = 0;
+            ctx.bb().remove(ctx.owner(), new Key<>("progress-best/" + key, Double.class, Scope.OWNER, false));
+        }
         activeKey = key;
+        retained = false;
     }
 
     public ProgressGuard keyedBy(Function<TickContext, String> target) {
@@ -64,7 +69,14 @@ public final class ProgressGuard extends Decorator {
     }
 
     @Override
+    protected void onStop(TickContext ctx, ExitReason reason) {
+        retained = reason == ExitReason.PAUSED || reason == ExitReason.PREEMPTED;
+    }
+
+    @Override
     protected void onReset() {
         inactive = 0;
+        activeKey = null;
+        retained = false;
     }
 }

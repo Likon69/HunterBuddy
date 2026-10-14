@@ -210,6 +210,10 @@ public final class BaritoneOutput {
         }
     }
 
+    public String alertStatus() {
+        return stage == Stage.REVOKING ? status() : null;
+    }
+
     public String status() {
         if (stage == Stage.BORROWED) return "BARITONE waiting for legacy handoff";
         return stage == Stage.IDLE ? null : "BARITONE " + lease.owner() + " " + stage + " " + intent.goal();

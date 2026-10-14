@@ -59,7 +59,11 @@ public abstract class CoreRoutine implements Routine {
     protected abstract String readyDetail();
 
     protected final HookEntry entry(Condition condition, Node node) {
-        return new HookEntry(slot, "core:" + name, contributor, 0, new Guard(condition, node), true, node);
+        return entry(condition, node, true);
+    }
+
+    protected final HookEntry entry(Condition condition, Node node, boolean flightAware) {
+        return new HookEntry(slot, "core:" + name, contributor, 0, new Guard(condition, node), flightAware, node);
     }
 
     @Override

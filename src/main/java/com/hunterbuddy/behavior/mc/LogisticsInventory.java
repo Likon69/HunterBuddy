@@ -18,14 +18,21 @@ import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.collection.DefaultedList;
 
 public final class LogisticsInventory {
+    public static final double TOOL_WEAR_THRESHOLD = 0.02;
+    public static final double ELYTRA_WEAR_THRESHOLD = 0.05;
     private LogisticsInventory() {}
 
     public static boolean healthy(ItemStack stack) {
-        return !stack.isEmpty() && (!stack.isDamageable() || remaining(stack) > 0.05);
+        return !stack.isEmpty() && (!stack.isDamageable()
+            || remaining(stack) > (anyTool(stack) ? TOOL_WEAR_THRESHOLD : ELYTRA_WEAR_THRESHOLD));
     }
 
     public static double remaining(ItemStack stack) {
         return stack.getMaxDamage() == 0 ? 1 : 1.0 - (double) stack.getDamage() / stack.getMaxDamage();
+    }
+
+    public static boolean wornTool(ItemStack stack) {
+        return anyTool(stack) && !stack.isIn(ItemTags.SWORDS) && remaining(stack) <= TOOL_WEAR_THRESHOLD;
     }
 
     public static boolean tool(ItemStack stack, FarmerProfile profile) {
@@ -57,16 +64,6 @@ public final class LogisticsInventory {
         return switch (component.slot()) {
             case HEAD, CHEST, LEGS, FEET -> component.slot();
             default -> null;
-        };
-    }
-
-    public static int armorIndex(EquipmentSlot slot) {
-        return switch (slot) {
-            case FEET -> 36;
-            case LEGS -> 37;
-            case CHEST -> 38;
-            case HEAD -> 39;
-            default -> throw new IllegalArgumentException("armor slot required");
         };
     }
 
@@ -173,26 +170,14 @@ public final class LogisticsInventory {
             stack.contains(DataComponentTypes.FOOD))) missing.add("food");
         if (world.countMatching(GliderSwap::isGlider) > 0 && world.countMatching(stack -> GliderSwap.isGlider(stack) && healthy(stack)) == 0
             && reserve.stream().noneMatch(stack -> GliderSwap.isGlider(stack) && healthy(stack))) missing.add("replacement elytra");
-        for (EquipmentSlot slot : List.of(EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD)) {
-            ItemStack worn = world.client().player.getEquippedStack(slot);
-            if ((worn.isEmpty() || worn.getDamage() > 0 || GliderSwap.isGlider(worn))
-                && world.countMatching(stack -> armorSlot(stack) == slot && stack.getDamage() == 0 && !GliderSwap.isGlider(stack)) == 0
-                && reserve.stream().noneMatch(stack -> armorSlot(stack) == slot && stack.getDamage() == 0 &&
-                    !GliderSwap.isGlider(stack))) missing.add("armor " + slot.getName());
-        }
         return List.copyOf(missing);
     }
 
     public static boolean needsRegear(WorldReader world, FarmerProfile profile) {
         if (profileTools(world, profile) == 0 || world.countMatching(stack -> InventoryLayout.silkPickaxe(stack) && healthy(stack)) == 0
             || world.countMatching(stack -> stack.contains(DataComponentTypes.FOOD)) < 16) return true;
-        if (world.countMatching(stack -> anyTool(stack) && remaining(stack) <= 0.05 || armorSlot(stack) != null &&
-            !GliderSwap.isGlider(stack) && stack.getDamage() > 0) > 0) return true;
-        if (world.countMatching(GliderSwap::isGlider) > 0 && world.countMatching(stack -> GliderSwap.isGlider(stack) && healthy(stack))
-            == 0) return true;
-        return List.of(EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD).stream()
-            .anyMatch(slot -> world.client().player.getEquippedStack(slot).isEmpty() ||
-                world.client().player.getEquippedStack(slot).getDamage() > 0 ||
-                GliderSwap.isGlider(world.client().player.getEquippedStack(slot)));
+        if (world.countMatching(LogisticsInventory::wornTool) > 0) return true;
+        return world.countMatching(GliderSwap::isGlider) > 0
+            && world.countMatching(stack -> GliderSwap.isGlider(stack) && healthy(stack)) == 0;
     }
 }

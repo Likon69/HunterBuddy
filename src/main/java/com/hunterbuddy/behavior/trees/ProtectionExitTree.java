@@ -13,6 +13,7 @@ import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.PickupItem;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.SetValue;
+import com.hunterbuddy.behavior.nodes.ShelterExitFallback;
 import com.hunterbuddy.behavior.nodes.SwapArmor;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.WaitUntil;
@@ -32,9 +33,12 @@ public final class ProtectionExitTree {
     public static Node build(LogisticsContext logistics) {
         return new Sequence("shelter-exit",
             new InventoryMilestone("choose-shelter-exit-from-current-mission", ctx -> {
-                if (!logistics.facts.exitBreaking) logistics.facts.exitTop = logistics.topExitRequested();
+                if (!logistics.facts.exitBreaking && !logistics.facts.groundExitRequired) {
+                    logistics.facts.exitTop = logistics.topExitRequested();
+                }
                 logistics.save(ctx, "shelter exit selected from current mission state");
-            }), new Deferred("chosen-shelter-exit", () -> logistics.facts.exitTop ? top(logistics) : ground(logistics)),
+            }), new Deferred("chosen-shelter-exit", () -> logistics.facts.exitTop
+                ? new ShelterExitFallback(logistics, top(logistics), ground(logistics)) : ground(logistics)),
             new InventoryMilestone("exit-confirmed", ctx -> {
                 logistics.facts.departure = LogisticsFacts.coordinates(logistics.world.feet());
                 logistics.outputs.mining().releaseExit();

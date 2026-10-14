@@ -56,6 +56,7 @@ public final class ReactiveSelector extends Composite {
             NodeResult result = guard.execute(ctx);
             if (hookRoot && guard.hook() == Hook.BOT && !(result instanceof Failure)) endIdleWait(ctx);
             if (result instanceof Running) return result;
+            if (hookRoot && guard.hook() == Hook.BOT) ctx.targetCompleted(!(result instanceof Failure));
             selected = -1;
             if (!(result instanceof Failure)) {
                 successfulHook = guard.hook();

@@ -21,9 +21,7 @@ public final class ReserveWorkTree {
     public static Node build(LogisticsContext logistics) {
         ReserveInventory reserve = new ReserveInventory(logistics);
         return new Sequence("regear-under-protection",
-            new InventoryMilestone("refresh-armor-binding-state", ctx -> logistics.facts.armorBlocked = false),
             DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::beforeReplacement),
-            ContainerTree.close(logistics.outputs), EquipReserveArmorTree.build(logistics),
             DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::used),
             new RepeatUntil("take-equip-and-recheck-reserve-needs", () -> reserve.neededSlot() < 0 || !reserve.room(), 72,
                 new Sequence("replace-one-reserve-item",
@@ -32,7 +30,7 @@ public final class ReserveWorkTree {
                         if (slot < 0) throw new IllegalStateException("reserve equipment source changed");
                         ItemStack expected = logistics.outputs.inventory().containerContents().get(slot).copy();
                         return logistics.outputs.inventory().takeStack(slot, expected);
-                    }), ContainerTree.close(logistics.outputs), EquipReserveArmorTree.build(logistics),
+                    }),
                     DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::used))),
             DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::used),
             new InventoryMilestone("reserve-verified", ctx -> {
@@ -43,9 +41,9 @@ public final class ReserveWorkTree {
                     missing.add("usable elytra durability");
                 }
                 boolean blocked = !reserve.room() && reserve.neededSlot() >= 0
-                    || logistics.world.countMatching(reserve::used) > 0 || logistics.facts.armorBlocked;
+                    || logistics.world.countMatching(reserve::used) > 0;
                 String status = !missing.isEmpty() ? "reserve incomplete: " + String.join(", ", missing)
-                    : blocked ? "reserve available but inventory space or armor exchange is blocked" : "ready";
+                    : blocked ? "reserve available but inventory space is blocked" : "ready";
                 logistics.facts.baseRequested = blocked || !missing.isEmpty();
                 if (logistics.facts.baseRequested) logistics.facts.incomplete = status;
                 else logistics.facts.incomplete = "";

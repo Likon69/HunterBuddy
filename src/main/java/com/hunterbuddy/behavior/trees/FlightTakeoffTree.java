@@ -7,6 +7,7 @@ import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.FlightTerrain;
+import com.hunterbuddy.behavior.nodes.AfterEating;
 import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.FireRocket;
@@ -19,6 +20,7 @@ import com.hunterbuddy.behavior.nodes.SelectSlot;
 import com.hunterbuddy.behavior.nodes.Selector;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.SetValue;
+import com.hunterbuddy.behavior.nodes.SteadyFlight;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.WaitUntil;
@@ -56,9 +58,7 @@ public final class FlightTakeoffTree {
                     LogisticsOperations.unless("redeployment needs no boost", () -> !plan.world.client().player.isGliding()
                         || plan.outputs.flight().landing() || plan.nearDestination()
                         || Math.hypot(plan.world.client().player.getVelocity().x, plan.world.client().player.getVelocity().z) >= 1.2,
-                        new Timeout(100, new WithLease(Set.of(Resource.SLOT, Resource.ROCKETS, Resource.INTERACT), LeasePolicy.WAIT,
-                            new Sequence("boost-after-redeployment", new SetValue<>(ROCKET, ctx -> plan.world.findSlot(Rockets::isPlain)),
-                                new SelectSlot(Rockets::isPlain, true, plan.world, plan.outputs), new FireRocket(ROCKET, plan.outputs))))))),
+                        boost(plan)))),
             new Guard(new Condition("already gliding", sensors -> sensors.gliding()), new Succeed()),
             new If(new Condition("water escape", sensors -> sensors.inWater() || sensors.submerged()),
                 ExitWaterTree.build(plan.world, plan.baritone, plan.outputs)),
@@ -82,5 +82,13 @@ public final class FlightTakeoffTree {
                         new WaitUntil(new Condition("Baritone finished before takeoff", sensors -> !plan.nativeMovement()), 100),
                         new RecordFailedTakeoff(plan, TakeoffTree.build(plan.world, plan.outputs))),
                     FlightLaunchPreparationTree.build(plan)))))));
+    }
+
+    private static Node boost(FlightPlan plan) {
+        Node rocket = new Timeout(100, new WithLease(Set.of(Resource.SLOT, Resource.ROCKETS, Resource.INTERACT), LeasePolicy.WAIT,
+            new Sequence("boost-after-redeployment", new SetValue<>(ROCKET, ctx -> plan.world.findSlot(Rockets::isPlain)),
+                new SelectSlot(Rockets::isPlain, true, plan.world, plan.outputs), new FireRocket(ROCKET, plan.outputs))));
+        return new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT,
+            new SteadyFlight(plan, new AfterEating(rocket)));
     }
 }

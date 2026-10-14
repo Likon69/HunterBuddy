@@ -307,6 +307,10 @@ public final class InventoryBridge {
         synchronized (cursors) { cursors.clear(); }
     }
 
+    public String alertStatus() {
+        return quarantine != null || ticket != null && ticket.stage == Stage.RETURNING ? status() : null;
+    }
+
     public String status() {
         if (quarantine != null) return "INVENTORY QUARANTINED: " + quarantine;
         return ticket == null ? "INVENTORY idle" : "INVENTORY " + ticket.stage + " syncId=" + ticket.transaction.syncId();
@@ -647,10 +651,6 @@ public final class InventoryBridge {
             if (stack != null && filter.test(stack)) count += stack.getCount();
         }
         return count;
-    }
-
-    public boolean confirmedPlayerSlot(int index, ItemStack stack) {
-        return index >= 0 && index < playerReceipts.length && playerReceipts[index] != null && ItemStack.areEqual(stack, playerReceipts[index]);
     }
 
     public boolean containerCapacity(java.util.function.Predicate<ItemStack> filter) {

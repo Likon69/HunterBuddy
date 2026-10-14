@@ -1,7 +1,6 @@
 package com.hunterbuddy.behavior.nodes;
 
 import com.hunterbuddy.behavior.core.Action;
-import com.hunterbuddy.behavior.core.Clock;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
@@ -11,8 +10,8 @@ import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.mc.InventoryBridge;
 import com.hunterbuddy.behavior.mc.InventoryLayout;
 import com.hunterbuddy.behavior.resource.Lease;
-import com.hunterbuddy.behavior.resource.Leases;
 import com.hunterbuddy.behavior.resource.Resource;
+import java.util.Objects;
 import java.util.function.Predicate;
 import net.minecraft.item.ItemStack;
 
@@ -25,16 +24,12 @@ public final class PrepareInventory extends Action {
     private InventoryBridge.Ticket ticket;
     private int attempts;
 
-    public PrepareInventory(InventoryLayout layout, InventoryBridge inventory, MissionJournal journal) {
-        this(layout, inventory, journal, null, -1);
-    }
-
     public PrepareInventory(InventoryLayout layout, InventoryBridge inventory, MissionJournal journal, Predicate<ItemStack> held, int target) {
         super("prepare-inventory");
         this.layout = layout;
         this.inventory = inventory;
         this.journal = journal;
-        this.held = held;
+        this.held = Objects.requireNonNull(held);
         this.target = target;
         limit(400);
     }
@@ -53,28 +48,9 @@ public final class PrepareInventory extends Action {
             ticket = null;
         }
         if (!inventory.claimPlayer(lease)) return fail(FailureCode.PREEMPTED, "player inventory unavailable or foreign screen");
-        int from = -1;
-        int to = -1;
-        if (held != null) {
-            if (held.test(layout.stack(target))) return Success.INSTANCE;
-            from = layout.find(held, 0);
-            to = target;
-        } else {
-            for (int i = 0; i < layout.size(); i++) {
-                if (layout.filter(i).test(layout.stack(i))) continue;
-                from = layout.find(layout.filter(i), i + 1);
-                if (from < 0) return fail(FailureCode.MISSING_ITEM, "hotbar requirement missing slot=" + i);
-                to = i;
-                break;
-            }
-            if (to < 0) {
-                if (layout.stack(8).isEmpty()) return Success.INSTANCE;
-                int empty = layout.find(ItemStack::isEmpty, layout.size());
-                if (empty < 0) return fail(FailureCode.MISSING_ITEM, "inventory needs a free storage slot");
-                from = empty;
-                to = 8;
-            }
-        }
+        if (held.test(layout.stack(target))) return Success.INSTANCE;
+        int from = layout.find(held, 0);
+        int to = target;
         if (from < 0) return fail(FailureCode.MISSING_ITEM, "required item missing");
         if (!inventory.readyForClick(lease)) return new Running("settling player inventory");
         if (++attempts > 18) return fail(FailureCode.BUDGET, "layout click budget exhausted");

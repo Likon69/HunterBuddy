@@ -42,6 +42,10 @@ public final class ResumeGate {
         String blocked = refusal.apply(sensors);
         if (blocked != null) return waitFor(blocked);
         if (sensors.serverLagging() || !world.loadedRadiusOne()) return waitFor("server lag or neighboring chunks not loaded");
+        if (sensors.gliding()) {
+            cause = "ok";
+            return new Decision(State.READY, cause);
+        }
         TargetPoint point = new TargetPoint(sensors.x(), sensors.y(), sensors.z());
         if (anchor == null || anchor.distance(point.x(), point.y(), point.z()) > 0.1 || setbacks != sensors.setbacks()) {
             anchor = point;

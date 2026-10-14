@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.InventoryLayout;
+import com.hunterbuddy.behavior.nodes.AfterEating;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.FlightEquipmentSwap;
 import com.hunterbuddy.behavior.nodes.Sequence;
@@ -51,9 +52,10 @@ public final class FlightEquipmentTree {
     }
 
     private static Node steady(FlightPlan plan, Node operation) {
+        Node waiting = new AfterEating(operation);
         return plan.world.client().player.isGliding()
-            ? new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT, new SteadyFlight(plan, operation))
-            : operation;
+            ? new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT, new SteadyFlight(plan, waiting))
+            : waiting;
     }
 
     private static ItemStack chestplate(FlightPlan plan) {

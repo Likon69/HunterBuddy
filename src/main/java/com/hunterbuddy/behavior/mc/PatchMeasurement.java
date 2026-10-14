@@ -14,6 +14,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 public final class PatchMeasurement {
+    private static final int MAX_BLOCKS = 8 * MaterialSite.SHULKER_BLOCKS;
     private final WorldReader world;
     private final FarmerZone zone;
     private final FarmerProfile profile;
@@ -36,7 +37,7 @@ public final class PatchMeasurement {
 
     public boolean step() {
         BlockPos point = frontier.pollFirst();
-        if (point == null || sufficient()) return true;
+        if (point == null || count >= MAX_BLOCKS) return true;
         if (!inside(point)) return done();
         if (!world.loaded(point)) {
             unloaded = true;
@@ -44,9 +45,14 @@ public final class PatchMeasurement {
         }
         if (!matches(point) || !measured.add(point.asLong())) return done();
         count++;
-        members.add(point.asLong());
-        if ((entry == null || profile.strategy().equals("layer") && point.getY() > entry.getY()) && zone.containsWithMargin(point.getX() + 0.5, point.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)
-            && exposed(point, world)) entry = point;
+        boolean recorded = members.size() < MaterialSite.SHULKER_BLOCKS;
+        if (recorded) members.add(point.asLong());
+        if ((entry == null || recorded && profile.strategy().equals("layer") && point.getY() > entry.getY())
+            && zone.containsWithMargin(point.getX() + 0.5, point.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)
+            && exposed(point, world)) {
+            entry = point;
+            members.add(point.asLong());
+        }
         for (Direction direction : Direction.values()) {
             BlockPos neighbor = point.offset(direction);
             if (inside(neighbor) && !measured.contains(neighbor.asLong()) && queued.add(neighbor.asLong())) frontier.add(neighbor);
@@ -67,11 +73,11 @@ public final class PatchMeasurement {
     }
 
     public boolean done() {
-        return frontier.isEmpty() || sufficient();
+        return frontier.isEmpty() || count >= MAX_BLOCKS;
     }
 
     public boolean complete() {
-        return frontier.isEmpty() && !unloaded;
+        return frontier.isEmpty() && !unloaded && count < MAX_BLOCKS;
     }
 
     public int count() {

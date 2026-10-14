@@ -41,14 +41,16 @@ public final class BotStats {
 
     public void observe(TraceEvent event) {
         String metric = switch (event.kind()) {
-            case SUCCESS -> event.hook() == Hook.BOT && event.nodePath().matches("root/BOT/[^/]+/[^/]+") ? "targetsSucceeded" : null;
-            case FAILURE -> event.hook() == Hook.BOT && event.nodePath().matches("root/BOT/[^/]+/[^/]+") ? "targetsFailed" : null;
             case PROGRESS -> event.reason().equals(TraceReasons.TRANSACTION_CONFIRMED) ? "transactions" : null;
             case RECOVERY -> event.reason().equals(TraceReasons.SAFE_IDLE) ? "safeIdle" : event.reason().equals(TraceReasons.ENTER) ? "recovery." + event.detail() : null;
             case BOT -> event.reason().equals(TraceReasons.RECONNECTED) ? "reconnects" : event.reason().equals(TraceReasons.RESTART) ? "restarts" : null;
             default -> null;
         };
         if (metric != null) add(metric, 1);
+    }
+
+    public void targetCompleted(boolean success) {
+        add(success ? "targetsSucceeded" : "targetsFailed", 1);
     }
 
     public void sampleTime(long activeMs, Hook hook) {

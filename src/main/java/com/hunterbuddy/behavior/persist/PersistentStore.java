@@ -37,11 +37,7 @@ public final class PersistentStore {
     public PersistentStore(Path directory) { this.directory = Objects.requireNonNull(directory); }
 
     public CompletableFuture<Map<Key<?>, Object>> load(String world, String owner) {
-        return submit(() -> read(path(world, owner), true));
-    }
-
-    public CompletableFuture<Map<Key<?>, Object>> loadKnowledge(String world, String owner) {
-        return submit(() -> read(path(world, owner), false));
+        return submit(() -> read(path(world, owner)));
     }
 
     public CompletableFuture<Void> save(String world, String owner, Map<Key<?>, Object> values) {
@@ -50,7 +46,7 @@ public final class PersistentStore {
     }
 
     public CompletableFuture<BotStats.Snapshot> loadStats(String bot) {
-        return submit(() -> (BotStats.Snapshot) read(directory.resolve("stats-" + safe(bot) + ".json"), false).getOrDefault(STATS, BotStats.EMPTY));
+        return submit(() -> (BotStats.Snapshot) read(directory.resolve("stats-" + safe(bot) + ".json")).getOrDefault(STATS, BotStats.EMPTY));
     }
 
     public CompletableFuture<Void> saveStats(String bot, BotStats.Snapshot snapshot) {
@@ -73,13 +69,12 @@ public final class PersistentStore {
         return result;
     }
 
-    private Map<Key<?>, Object> read(Path path, boolean expire) throws IOException {
+    private Map<Key<?>, Object> read(Path path) throws IOException {
         if (!Files.exists(path)) return Map.of();
         if (Files.size(path) > sizeLimit(path)) throw new IOException("store exceeds size limit: " + path.getFileName());
         try {
             StoreEntry entry = gson.fromJson(Files.readString(path, StandardCharsets.UTF_8), StoreEntry.class);
-            long age = System.currentTimeMillis() - entry.writtenAt();
-            if (entry.schema() != StoreEntry.SCHEMA || expire && (age < 0 || age > StoreEntry.TTL_MS) || entry.values().size() > 4_096) return Map.of();
+            if (entry.schema() != StoreEntry.SCHEMA || entry.values().size() > 4_096) return Map.of();
             Map<Key<?>, Object> values = new LinkedHashMap<>();
             for (var value : entry.values().entrySet()) {
                 Class<?> type = TYPES.get(value.getValue().type());
@@ -106,7 +101,7 @@ public final class PersistentStore {
             values.put(key.scope().name() + "/" + key.name(), new StoreEntry.Value(type, key.scope().name(), gson.toJson(entry.getValue())));
         }
         if (values.size() > 4_096) throw new IOException("too many durable entries");
-        String data = gson.toJson(new StoreEntry(StoreEntry.SCHEMA, System.currentTimeMillis(), values));
+        String data = gson.toJson(new StoreEntry(StoreEntry.SCHEMA, values));
         if (data.getBytes(StandardCharsets.UTF_8).length > sizeLimit(path)) throw new IOException("store exceeds size limit");
         Files.createDirectories(path.getParent());
         Path temporary = Files.createTempFile(path.getParent(), path.getFileName().toString(), ".tmp");

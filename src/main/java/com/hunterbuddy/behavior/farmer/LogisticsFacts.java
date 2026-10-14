@@ -10,7 +10,7 @@ public final class LogisticsFacts {
     public boolean store;
     public boolean regear;
     public boolean exitTop;
-    public boolean armorBlocked;
+    public boolean groundExitRequired;
     public boolean baseRequested;
     public int step;
     public String materialSite = "";

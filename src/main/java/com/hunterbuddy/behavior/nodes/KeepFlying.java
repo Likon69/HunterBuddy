@@ -126,8 +126,10 @@ public final class KeepFlying extends Composite {
                 float yaw = ctx.sensors().yaw();
                 if (target != null) {
                     LookIntent desired = Conditions.towards(world.eyes(), new TargetPoint(target.getX() + 0.5, ctx.sensors().y(), target.getZ() + 0.5));
-                    yaw += Math.clamp(Conditions.wrap(desired.yaw() - yaw), -30, 30);
+                    yaw = desired.yaw();
                 }
+                yaw = ctx.sensors().yaw() + Math.clamp(Conditions.wrap(
+                    FlightTerrain.heading(world, ctx.sensors(), yaw) - ctx.sensors().yaw()), -30, 30);
                 outputs.look(ctx.owner(), new LookIntent(yaw, 5));
                 outputs.movement(ctx.owner(), new MovementIntent(true, false, false, false, false, false, false));
             }

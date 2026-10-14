@@ -61,6 +61,7 @@ public final class Cruise extends RocketAction {
         if (plan.speed(sensors) < 0.6 && sensors.y() > desired - 12) pitch = 25;
         plan.outputs.look(ctx.owner(), FlightTerrain.rotation(sensors, yaw, pitch));
         plan.outputs.movement(ctx.owner(), new MovementIntent(false, false, false, false, false, false, false));
+        if (sensors.eating()) return new Running("cruising while waiting for the meal to finish before boosting");
         int count = plan.world.countMatching(Rockets::isPlain);
         if (rocketPending) {
             if (plan.outputs.inventory().confirmedTotal(Rockets::isPlain) < beforeRocket

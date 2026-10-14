@@ -222,6 +222,15 @@ public final class Outputs {
         if (slotOutput != null) slotOutput.discard();
     }
 
+    public List<String> alerts() {
+        List<String> lines = new ArrayList<>();
+        String inventoryAlert = inventory == null ? null : inventory.alertStatus();
+        String baritoneAlert = baritoneOutput == null ? null : baritoneOutput.alertStatus();
+        if (inventoryAlert != null) lines.add(inventoryAlert);
+        if (baritoneAlert != null) lines.add(baritoneAlert);
+        return List.copyOf(lines);
+    }
+
     public List<String> status() {
         List<String> lines = new ArrayList<>();
         if (inventory != null) lines.add(inventory.status());

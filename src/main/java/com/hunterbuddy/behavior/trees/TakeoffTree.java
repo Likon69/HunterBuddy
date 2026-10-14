@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.nodes.Budget;
 import com.hunterbuddy.behavior.nodes.Condition;
+import com.hunterbuddy.behavior.nodes.ResetBudget;
 import com.hunterbuddy.behavior.nodes.SelectSlot;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.SetValue;
@@ -24,10 +25,12 @@ public final class TakeoffTree {
     private TakeoffTree() { }
 
     public static Node build(WorldReader world, Outputs outputs) {
-        return new Budget("takeoff", 2, new Timeout(600, new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK, Resource.ROCKETS), LeasePolicy.WAIT,
+        return new Sequence("takeoff-with-failure-budget", new Budget("takeoff", 2,
+            new Timeout(600, new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK, Resource.ROCKETS), LeasePolicy.WAIT,
             new Sequence("takeoff", new WaitUntil(new Condition("elytra equipped", sensors -> world.elytraEquipped()), 100),
                 new SetValue<>(ROCKET, ctx -> world.findSlot(Rockets::isPlain)),
                 new SelectSlot(Rockets::isPlain, true, world, outputs), new TakeoffElytra(ROCKET, world, outputs),
-                new Condition("gliding", sensors -> sensors.gliding()))))).keyedBy(ctx -> world.feet().toString());
+                new Condition("gliding", sensors -> sensors.gliding()))))).keyedBy(ctx -> world.feet().toString()),
+            new ResetBudget("takeoff"));
     }
 }
