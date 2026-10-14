@@ -33,6 +33,8 @@ public final class SurveyRoute {
     }
 
     public BlockPos initial() {
+        BlockPos hint = unverifiedHint();
+        if (hint != null) return hint;
         MaterialSite site = survey.best();
         if (site != null) return site.seed();
         return waypoints.isEmpty() ? survey.home : waypoints.peekFirst();
@@ -46,9 +48,11 @@ public final class SurveyRoute {
             if (survey.memory.state(ZoneCoverage.key(chunk.x, chunk.z)) == CoverageState.VERIFIED) continue;
             strips.computeIfAbsent(Math.floorDiv(chunk.x - min, spacing), ignored -> new ArrayList<>()).add(chunk);
         }
-        BlockPos anchor = survey.knowledge.biomeHints(survey.profile, survey.world.feet(), 8).stream()
+        BlockPos hint = unverifiedHint();
+        BlockPos anchor = hint != null ? hint : survey.knowledge.biomeHints(survey.profile, survey.world.feet(), 8).stream()
             .filter(pos -> survey.coverage.intersects(pos.x, pos.z)).findFirst()
             .map(pos -> point(pos.x, pos.z)).orElse(survey.world.feet());
+        if (hint != null) waypoints.add(hint);
         List<List<ChunkPos>> ordered = new ArrayList<>(strips.values());
         int max = survey.coverage.chunks().stream().mapToInt(pos -> pos.x).max().orElse(min);
         if (Math.abs((anchor.getX() >> 4) - max) < Math.abs((anchor.getX() >> 4) - min)) Collections.reverse(ordered);
@@ -67,6 +71,12 @@ public final class SurveyRoute {
             if (last.z != first.z) waypoints.add(point(x, last.z));
             reverse = !reverse;
         }
+    }
+
+    private BlockPos unverifiedHint() {
+        BlockPos hint = survey.siteHint;
+        return hint != null && survey.memory.state(ZoneCoverage.key(hint.getX() >> 4, hint.getZ() >> 4)) != CoverageState.VERIFIED
+            ? hint : null;
     }
 
     private BlockPos point(int x, int z) {

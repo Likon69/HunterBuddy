@@ -43,7 +43,7 @@ public final class ResolveBaseVisitLab extends Action {
                 || lab.settings.emptyShulkersChest().equals(BlockPos.ORIGIN) || lab.settings.resupplyChest().equals(BlockPos.ORIGIN)) {
                 throw new IllegalStateException("configure all four base chest roles before visiting");
             }
-            FarmerZoneLookup.Resolved resolved = lab.lookup.resolve(step.name());
+            FarmerZoneLookup.Resolved resolved = lab.lookup.resolve(step.hint());
             if (!resolved.ok()) {
                 throw new IllegalStateException(resolved.refusal());
             }

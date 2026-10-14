@@ -20,8 +20,9 @@ public final class FarmerZoneReport {
             lines.add("FarmerBuddy: no enabled step configured");
             return lines;
         }
-        lines.add("Step " + step.index() + " '" + step.name() + "' profile=" + step.profile());
-        FarmerZoneLookup.Resolved resolved = lookup.resolve(step.name());
+        lines.add("Step " + step.index() + " zone=" + lookup.zoneName() + " profile=" + step.profile()
+            + " hint=" + (step.hint().isBlank() ? "none" : step.hint()));
+        FarmerZoneLookup.Resolved resolved = lookup.resolve(step.hint());
         if (!resolved.ok()) {
             lines.add("Zone refused: " + resolved.refusal());
             return lines;

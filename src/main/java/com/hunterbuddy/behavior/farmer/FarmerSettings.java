@@ -15,6 +15,7 @@ public final class FarmerSettings {
     public static final int ACTIVITY_TIMEOUT_TICKS = 144_000;
     public static final int MAX_STEPS = 8;
     private final List<StepSettings> steps = new ArrayList<>(MAX_STEPS);
+    private Setting<String> zone;
     private Setting<BlockPos> emptyShulkersChest;
     private Setting<BlockPos> resupplyChest;
     private Setting<BlockPos> returnChest;
@@ -29,6 +30,9 @@ public final class FarmerSettings {
         if (stepGroups.size() != MAX_STEPS) throw new IllegalArgumentException("expected " + MAX_STEPS + " step groups");
         registered = true;
         for (int i = 0; i < MAX_STEPS; i++) steps.add(new StepSettings(i + 1, stepGroups.get(i)));
+        zone = baseGroup.add(new StringSetting.Builder()
+            .name("zone").description("Common name of the four Xaero waypoints bounding the mission work zone.")
+            .defaultValue("zone").build());
         emptyShulkersChest = baseGroup.add(new BlockPosSetting.Builder()
             .name("empty-shulkers-chest").description("Base chest holding empty shulkers FarmerBuddy picks up.")
             .defaultValue(BlockPos.ORIGIN).build());
@@ -39,7 +43,7 @@ public final class FarmerSettings {
             .name("return-chest").description("Base chest where the worn-out reserve and misc shulkers are dropped off.")
             .defaultValue(BlockPos.ORIGIN).build());
         flightRadius = baseGroup.add(new IntSetting.Builder()
-            .name("flight-radius").description("Maximum distance in blocks between the base and a step's zone.")
+            .name("flight-radius").description("Maximum distance in blocks between the base and the mission work zone.")
             .defaultValue(3_000).min(100).max(20_000).sliderRange(500, 6_000).build());
         playerWaitMinutes = baseGroup.add(new IntSetting.Builder()
             .name("player-wait-minutes").description("Minutes FarmerBuddy waits at base when another player occupies its zone.")
@@ -50,6 +54,10 @@ public final class FarmerSettings {
         List<FarmerStepConfig> snapshot = new ArrayList<>(steps.size());
         for (StepSettings step : steps) snapshot.add(step.snapshot());
         return List.copyOf(snapshot);
+    }
+
+    public String zone() {
+        return zone.get();
     }
 
     public BlockPos emptyShulkersChest() {
@@ -78,10 +86,10 @@ public final class FarmerSettings {
 
     public String refusal(FarmerCatalog catalog) {
         if (catalog.error() != null) return catalog.error();
+        if (zone().isBlank()) return "FarmerBuddy needs a work zone name";
         List<FarmerStepConfig> enabled = steps().stream().filter(FarmerStepConfig::enabled).toList();
         if (enabled.isEmpty()) return "FarmerBuddy needs at least one enabled step";
         for (FarmerStepConfig step : enabled) {
-            if (step.name().isBlank()) return "Step " + step.index() + " needs a zone name";
             if (catalog.profile(step.profile()).isEmpty()) return "Step " + step.index() + " has an unknown catalog profile: " + step.profile() + " (known: " + String.join(", ", catalog.keys()) + ")";
             if (step.deliveryChest().equals(BlockPos.ORIGIN)) return "Step " + step.index() + " needs a delivery chest";
         }
@@ -94,7 +102,7 @@ public final class FarmerSettings {
     private static final class StepSettings {
         private final int index;
         private final Setting<Boolean> enabled;
-        private final Setting<String> name;
+        private final Setting<String> hint;
         private final Setting<String> profile;
         private final Setting<Integer> shulkerTarget;
         private final Setting<BlockPos> deliveryChest;
@@ -103,8 +111,8 @@ public final class FarmerSettings {
             this.index = index;
             enabled = group.add(new BoolSetting.Builder()
                 .name("enabled").description("Enable step " + index + " of the mission.").defaultValue(false).build());
-            name = group.add(new StringSetting.Builder()
-                .name("name").description("Zone name; matches the Xaero waypoints '<name> zone' and the optional site hint '<name>'.")
+            hint = group.add(new StringSetting.Builder()
+                .name("hint").description("Optional Xaero waypoint name indicating where to search for this step's material inside the work zone.")
                 .defaultValue("").build());
             profile = group.add(new StringSetting.Builder()
                 .name("profile").description("Catalog profile key mined for this step (see catalog.json).")
@@ -118,7 +126,7 @@ public final class FarmerSettings {
         }
 
         private FarmerStepConfig snapshot() {
-            return new FarmerStepConfig(index, enabled.get(), name.get(), profile.get(), shulkerTarget.get(), deliveryChest.get());
+            return new FarmerStepConfig(index, enabled.get(), hint.get(), profile.get(), shulkerTarget.get(), deliveryChest.get());
         }
     }
 }

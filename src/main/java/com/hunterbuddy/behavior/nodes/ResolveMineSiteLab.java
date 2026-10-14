@@ -40,7 +40,7 @@ public final class ResolveMineSiteLab extends Action {
             FarmerStepConfig step = lab.steps.stream().filter(FarmerStepConfig::enabled).filter(s -> s.index() >= current)
                 .findFirst().orElseThrow(() -> new IllegalStateException("no enabled current FarmerBuddy step"));
             FarmerProfile profile = lab.catalog.profile(step.profile()).orElseThrow(() -> new IllegalStateException("unknown profile"));
-            FarmerZoneLookup.Resolved resolved = lab.lookup.resolve(step.name());
+            FarmerZoneLookup.Resolved resolved = lab.lookup.resolve(step.hint());
             if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
             WorldKnowledge knowledge = WorldKnowledge.load(ctx);
             ZoneKnowledge memory = knowledge.zone(resolved.zone(), profile);
@@ -50,7 +50,7 @@ public final class ResolveMineSiteLab extends Action {
                 : SiteSelection.bestVerified(memory, resolved.zone(), lab.world.feet(), System.currentTimeMillis());
             if (site == null) throw new IllegalStateException("no verified site for this step; run .bt farmer survey first");
             lab.mine = new MineSiteContext(site, profile, () -> {
-                FarmerZoneLookup.Resolved zone = lab.lookup.resolve(step.name());
+                FarmerZoneLookup.Resolved zone = lab.lookup.resolve(step.hint());
                 if (!zone.ok()) throw new IllegalStateException(zone.refusal());
                 return zone.zone();
             }, lab.world, lab.baritone, lab.outputs, journal);

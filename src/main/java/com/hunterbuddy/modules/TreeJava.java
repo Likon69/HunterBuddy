@@ -100,7 +100,7 @@ public final class TreeJava extends Module {
     private final FarmerSettings farmerSettings = new FarmerSettings();
     private final FarmerCatalog farmerCatalog = FarmerCatalog.load();
     private final XaeroWaypoints farmerWaypoints = new XaeroWaypoints(world);
-    private final FarmerZoneLookup farmerZoneLookup = new FarmerZoneLookup(farmerWaypoints);
+    private final FarmerZoneLookup farmerZoneLookup = new FarmerZoneLookup(farmerWaypoints, farmerSettings::zone);
     private final Setting<Boolean> hud = general.add(new BoolSetting.Builder()
         .name("hud").description("Show the registered TreeJava behavior HUD.").defaultValue(true).build());
     private final Setting<Boolean> fullTraceLog = general.add(new BoolSetting.Builder()

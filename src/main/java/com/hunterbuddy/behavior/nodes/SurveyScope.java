@@ -28,7 +28,7 @@ public final class SurveyScope extends Decorator {
     protected NodeResult onTick(TickContext ctx) {
         if (!survey.worldKey.equals(survey.world.storageKey())) return fail(FailureCode.REFUSED, "survey world or dimension changed");
         if (survey.zone != null && survey.step != null) {
-            FarmerZoneLookup.Resolved current = survey.lookup.resolve(survey.step.name());
+            FarmerZoneLookup.Resolved current = survey.lookup.resolve(survey.step.hint());
             if (!current.ok()) {
                 survey.result = "Invalid Xaero zone: " + current.refusal();
                 return fail(FailureCode.REFUSED, survey.result);

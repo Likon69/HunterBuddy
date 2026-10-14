@@ -32,6 +32,7 @@ public final class InitializeSurvey extends Action {
     protected void onActionStart(TickContext ctx) {
         startedAt = ctx.tick();
         survey.selected = null;
+        survey.siteHint = null;
         survey.coverage = null;
         survey.interrupted = false;
     }
@@ -64,9 +65,10 @@ public final class InitializeSurvey extends Action {
             .orElseThrow(() -> new IllegalStateException("no enabled current FarmerBuddy step"));
         survey.profile = survey.catalog.profile(survey.step.profile())
             .orElseThrow(() -> new IllegalStateException("unknown catalog profile: " + survey.step.profile()));
-        FarmerZoneLookup.Resolved resolved = survey.lookup.resolve(survey.step.name());
+        FarmerZoneLookup.Resolved resolved = survey.lookup.resolve(survey.step.hint());
         if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
         survey.zone = resolved.zone();
+        survey.siteHint = resolved.siteHint();
         survey.knowledge = WorldKnowledge.load(ctx);
         survey.memory = survey.knowledge.zone(survey.zone, survey.profile);
         long cutoff = System.currentTimeMillis() - 86_400_000L;

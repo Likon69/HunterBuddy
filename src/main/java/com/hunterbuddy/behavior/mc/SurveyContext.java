@@ -32,6 +32,7 @@ public final class SurveyContext {
     public FarmerStepConfig step;
     public FarmerProfile profile;
     public FarmerZone zone;
+    public BlockPos siteHint;
     public WorldKnowledge knowledge;
     public ZoneKnowledge memory;
     public ZoneCoverage coverage;

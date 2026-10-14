@@ -86,7 +86,7 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         this.outputs = Objects.requireNonNull(outputs);
         journal = new MissionJournal(FarmerSettings.MAX_STEPS);
         mission = new FarmerMissionContext(settings, catalog, world, baritone, outputs,
-            new FarmerZoneLookup(Objects.requireNonNull(waypoints)), journal);
+            new FarmerZoneLookup(Objects.requireNonNull(waypoints), settings::zone), journal);
         identity = world.identity();
     }
 
@@ -321,8 +321,8 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             return;
         }
         statusLine = String.format(Locale.ROOT,
-            "step=%d name=%s profile=%s delivered=%d/%d carried=%d activity=%s rockets=%d elytra=%.0f%%",
-            step.index(), step.name(), step.profile(), delivered(ctx, step), step.shulkerTarget(),
+            "step=%d zone=%s profile=%s hint=%s delivered=%d/%d carried=%d activity=%s rockets=%d elytra=%.0f%%",
+            step.index(), settings.zone(), step.profile(), step.hint().isBlank() ? "none" : step.hint(), delivered(ctx, step), step.shulkerTarget(),
             journal.carried(ctx, step.index() - 1), currentTarget, ctx.sensors().rockets(), world.elytraDurabilityFraction() * 100);
     }
 

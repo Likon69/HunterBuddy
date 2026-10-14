@@ -76,7 +76,7 @@ public final class FarmerMissionContext {
         } else if (unfinishedMine() && mineFacts().zone != null && !mineFacts().zone.isEmpty()) {
             zone = FarmerZone.restore(mineFacts().zone.stream().map(LogisticsFacts::position).toList());
         } else {
-            FarmerZoneLookup.Resolved resolved = lookup.resolve(step.name());
+            FarmerZoneLookup.Resolved resolved = lookup.resolve(step.hint());
             if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
             zone = resolved.zone();
         }
