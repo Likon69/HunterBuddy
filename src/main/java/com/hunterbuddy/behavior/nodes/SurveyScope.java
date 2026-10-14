@@ -22,6 +22,7 @@ public final class SurveyScope extends Decorator {
     protected void onStart(TickContext ctx) {
         survey.zone = null;
         survey.step = null;
+        survey.budgetRefused = false;
     }
 
     @Override
@@ -41,6 +42,7 @@ public final class SurveyScope extends Decorator {
         }
         NodeResult result = child().execute(ctx);
         if (result instanceof Failure failure) {
+            survey.budgetRefused = failure.code() == FailureCode.BUDGET;
             survey.result = failure.reason() + (survey.coverage == null ? "" : "; " + survey.coverageReport())
                 + "; absence of material has not been established";
         }

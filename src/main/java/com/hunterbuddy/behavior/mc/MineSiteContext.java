@@ -99,7 +99,10 @@ public final class MineSiteContext {
         if (facts.broken) return;
         if (!outputs.mining().confirmed(point)) throw new OperationFailure(FailureCode.NOT_CONFIRMED, "server break receipt is missing");
         facts.broken = true;
-        if (facts.material) facts.mined++;
+        if (facts.material) {
+            facts.mined++;
+            site.started = true;
+        }
         else facts.excavated++;
         patch.remove(point);
         for (Direction direction : Direction.values()) {

@@ -72,6 +72,10 @@ public final class TreeHooks {
     }
 
     public boolean applyPendingChanges(TickContext ctx) {
+        return applyPendingChanges(ctx, false);
+    }
+
+    public boolean applyPendingChanges(TickContext ctx, boolean strict) {
         if (pending.isEmpty()) return false;
         List<HookEntry> next = new ArrayList<>(entries);
         List<Consumer<List<HookEntry>>> changes = List.copyOf(pending);
@@ -81,8 +85,9 @@ public final class TreeHooks {
         try {
             validateCandidate(next);
         } catch (IllegalArgumentException ex) {
-            rejected.accept(ex.getMessage());
             ctx.event(root, Kind.HOOK, null, TraceReasons.REFUSED, ex.getMessage());
+            if (strict) throw ex;
+            rejected.accept(ex.getMessage());
             return false;
         }
         Set<Node> retained = Collections.newSetFromMap(new IdentityHashMap<>());

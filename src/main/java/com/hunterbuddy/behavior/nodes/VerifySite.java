@@ -91,11 +91,12 @@ public final class VerifySite extends Action {
             reported = count;
         }
         if (!measurement.done()) return new Running("site verification blocks=" + count);
-        if (!measurement.sufficient()) {
+        int required = site.started ? 1 : MaterialSite.SHULKER_BLOCKS;
+        if (count < required) {
             site.quantity = count;
             String status = measurement.complete() ? "exhausted" : "inaccessible";
             String reason = measurement.complete() ? "only " + count + " connected accessible blocks remain"
-                : "1728 connected blocks cannot be confirmed in loaded chunks";
+                : required + " connected blocks cannot be confirmed in loaded chunks";
             return unavailable(ctx, status, reason);
         }
         site.quantity = count;

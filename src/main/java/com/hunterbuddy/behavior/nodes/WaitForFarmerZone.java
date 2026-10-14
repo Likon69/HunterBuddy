@@ -19,6 +19,11 @@ public final class WaitForFarmerZone extends Node {
 
     @Override
     protected void onStart(TickContext ctx) {
+        if (mission.facts.waitUntil <= 0) {
+            mission.facts.baseRequested = false;
+            mission.facts.waitUntil = System.currentTimeMillis() + mission.settings.playerWaitMillis();
+            mission.save(ctx, "waiting again at the supplied base without another visit");
+        }
         provedAt = ctx.nowMs() - PROOF_INTERVAL_MS;
     }
 

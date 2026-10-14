@@ -26,13 +26,13 @@ public final class ReconcileBaseTransfer extends Node {
         if (!visit.logistics.outputs.inventory().at(visit.position(facts.position))) {
             throw new IllegalStateException("wrong chest for reconciling the base transfer");
         }
-        boolean playerUnchanged = LogisticsInventory.equal(LogisticsInventory.decode(facts.receipt.player, 36,
+        boolean playerUnchanged = LogisticsInventory.playerUnchanged(LogisticsInventory.decode(facts.receipt.player, 36,
             visit.logistics.world), LogisticsInventory.player(visit.logistics.world));
         boolean containerUnchanged = LogisticsInventory.equal(LogisticsInventory.decode(facts.receipt.contents, facts.size,
             visit.logistics.world), visit.logistics.outputs.inventory().containerContents());
         if (playerUnchanged && containerUnchanged) {
             facts.receipt.pending = false;
-            visit.save(ctx, "transfer not applied: both inventories unchanged");
+            visit.save(ctx, "transfer not applied: container unchanged and player totals conserved allowing meals");
         } else {
             BaseTransferReceipt.accept(ctx, visit);
         }

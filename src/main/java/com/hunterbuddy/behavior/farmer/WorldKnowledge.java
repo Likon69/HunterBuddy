@@ -13,6 +13,7 @@ import net.minecraft.util.math.ChunkPos;
 
 public final class WorldKnowledge {
     public static final String OWNER = "bot:world-knowledge";
+    private static final int MAX_BIOMES = 200_000;
     private static final Gson GSON = new Gson();
     private static final Key<String> DATA = new Key<>("world-knowledge", String.class, Scope.WORLD, true);
     private static final Key<WorldKnowledge> CACHE = new Key<>("knowledge-cache", WorldKnowledge.class, Scope.WORLD, false);
@@ -30,6 +31,7 @@ public final class WorldKnowledge {
         if (result == null || result.biomes == null || result.zones == null) {
             throw new IllegalStateException("invalid saved world knowledge");
         }
+        result.orderBiomes();
         ctx.bb().set(OWNER, CACHE, result);
         return result;
     }
@@ -48,7 +50,6 @@ public final class WorldKnowledge {
     }
 
     public void saveNow(TickContext ctx) {
-        pruneBiomes();
         ctx.bb().set(OWNER, DATA, GSON.toJson(this));
         ctx.checkpoint(OWNER);
         savedAt = ctx.nowMs();
@@ -57,21 +58,31 @@ public final class WorldKnowledge {
     public void biomeBounds(BlockPos home, int radius) {
         biomeBase = LogisticsFacts.coordinates(home);
         biomeRadius = radius;
-        pruneBiomes();
     }
 
-    public boolean acceptsBiome(ChunkPos chunk) {
+    private boolean acceptsBiome(ChunkPos chunk) {
         return biomeBase == null || Math.hypot(chunk.getCenterX() - biomeBase[0],
             chunk.getCenterZ() - biomeBase[2]) <= biomeRadius;
     }
 
-    private void pruneBiomes() {
-        biomes.keySet().removeIf(key -> !acceptsBiome(chunk(key)));
+    public void observeBiome(String key, BiomeObservation observation) {
+        biomes.remove(key);
+        biomes.put(key, observation);
+        if (biomes.size() > MAX_BIOMES) biomes.remove(biomes.keySet().iterator().next());
+    }
+
+    private void orderBiomes() {
+        Map<String, BiomeObservation> ordered = new LinkedHashMap<>();
+        biomes.entrySet().stream().sorted(Comparator.comparingLong(entry -> entry.getValue().observedAt()))
+            .skip(Math.max(0, biomes.size() - MAX_BIOMES))
+            .forEach(entry -> ordered.put(entry.getKey(), entry.getValue()));
+        biomes = ordered;
     }
 
     public List<ChunkPos> biomeHints(FarmerProfile profile, BlockPos from, int limit) {
         if (limit < 1 || profile.biomes().isEmpty()) return List.of();
         return biomes.entrySet().stream().filter(entry -> profile.biomes().contains(entry.getValue().biome()))
+            .filter(entry -> acceptsBiome(chunk(entry.getKey())))
             .sorted(Comparator.comparingLong((Map.Entry<String, BiomeObservation> entry) -> entry.getValue().observedAt()).reversed())
             .limit(128).map(entry -> chunk(entry.getKey()))
             .sorted(Comparator.comparingDouble(pos -> Math.hypot(pos.getCenterX() - from.getX(), pos.getCenterZ() - from.getZ())))

@@ -122,14 +122,31 @@ public final class LogisticsInventory {
         return List.copyOf(contents);
     }
 
-    public static boolean balanced(List<ItemStack> beforePlayer, List<ItemStack> beforeContainer, List<ItemStack> player,
-        List<ItemStack> container) {
+    public static boolean playerUnchanged(List<ItemStack> before, List<ItemStack> after) {
+        return playerConserved(before, after, ItemStack.EMPTY, 0);
+    }
+
+    private static boolean playerConserved(List<ItemStack> before, List<ItemStack> after, ItemStack transferred, int change) {
+        List<ItemStack> previous = before.stream().map(LogisticsInventory::undamaged).toList();
+        List<ItemStack> next = after.stream().map(LogisticsInventory::undamaged).toList();
+        ItemStack moved = undamaged(transferred);
         List<ItemStack> kinds = new ArrayList<>();
-        for (List<ItemStack> stacks : List.of(beforePlayer, beforeContainer, player, container)) for (ItemStack stack : stacks)
+        for (List<ItemStack> stacks : List.of(previous, next)) for (ItemStack stack : stacks)
             if (!stack.isEmpty() && kinds.stream().noneMatch(kind -> ItemStack.areItemsAndComponentsEqual(kind, stack))) kinds.add(stack);
-        for (ItemStack kind : kinds) if (count(beforePlayer, kind) + count(beforeContainer, kind) != count(player, kind) +
-            count(container, kind)) return false;
+        if (!moved.isEmpty() && kinds.stream().noneMatch(kind -> ItemStack.areItemsAndComponentsEqual(kind, moved))) kinds.add(moved);
+        for (ItemStack kind : kinds) {
+            int expected = ItemStack.areItemsAndComponentsEqual(kind, moved) ? change : 0;
+            int actual = count(next, kind) - count(previous, kind);
+            if (kind.contains(DataComponentTypes.FOOD) ? actual > expected : actual != expected) return false;
+        }
         return true;
+    }
+
+    private static ItemStack undamaged(ItemStack stack) {
+        if (!stack.isDamageable() || stack.getDamage() == 0) return stack;
+        ItemStack repaired = stack.copy();
+        repaired.setDamage(0);
+        return repaired;
     }
 
     private static int count(List<ItemStack> stacks, ItemStack kind) {
@@ -144,20 +161,17 @@ public final class LogisticsInventory {
 
     public static boolean authorizedTransfer(List<ItemStack> beforePlayer, List<ItemStack> beforeContainer, List<ItemStack> player,
         List<ItemStack> container, ItemStack expected, boolean deposit) {
-        if (!balanced(beforePlayer, beforeContainer, player, container)) return false;
-        for (int group = 0; group < 2; group++) {
-            List<ItemStack> before = group == 0 ? beforePlayer : beforeContainer;
-            List<ItemStack> after = group == 0 ? player : container;
-            for (int i = 0; i < before.size(); i++) {
-                ItemStack old = before.get(i);
-                ItemStack next = after.get(i);
-                if (!ItemStack.areEqual(old, next) && (!old.isEmpty() && !ItemStack.areItemsAndComponentsEqual(old, expected)
-                    || !next.isEmpty() && !ItemStack.areItemsAndComponentsEqual(next, expected))) return false;
-            }
+        if (beforeContainer.size() != container.size()) return false;
+        for (int i = 0; i < beforeContainer.size(); i++) {
+            ItemStack old = beforeContainer.get(i);
+            ItemStack next = container.get(i);
+            if (!ItemStack.areEqual(old, next) && (!old.isEmpty() && !ItemStack.areItemsAndComponentsEqual(old, expected)
+                || !next.isEmpty() && !ItemStack.areItemsAndComponentsEqual(next, expected))) return false;
         }
         int moved = count(container, expected) - count(beforeContainer, expected);
         if (!deposit) moved = -moved;
-        return moved > 0 && moved <= expected.getCount();
+        return moved > 0 && moved <= expected.getCount()
+            && playerConserved(beforePlayer, player, expected, deposit ? -moved : moved);
     }
 
     public static List<String> missing(WorldReader world, FarmerProfile profile, List<ItemStack> reserve) {

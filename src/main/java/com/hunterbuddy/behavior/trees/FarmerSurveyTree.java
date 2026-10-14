@@ -26,7 +26,7 @@ public final class FarmerSurveyTree {
             new InventoryMilestone("mission-survey-confirmed", ctx -> {
                 mission.select(ctx, survey.interrupted ? mission.best() : survey.selected);
                 if (survey.interrupted) {
-                    mission.facts.baseRequested = mission.fuelDue() || mission.selected == null;
+                    mission.facts.baseRequested = survey.budgetRefused || mission.fuelDue() || mission.selected == null;
                     mission.facts.waitAtBase = mission.selected == null && mission.occupiedOnly();
                     mission.save(ctx, "survey interrupted; next site or base resupply selected");
                 }

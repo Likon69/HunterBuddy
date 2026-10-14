@@ -87,7 +87,7 @@ public final class FlightPlan {
             && world.countMatching(GliderSwap::isChestPiece) == 0) {
             throw new OperationFailure(FailureCode.MISSING_ITEM, "chestplate missing for landing");
         }
-        if (new InventoryLayout(world).freeSlot() < 0) {
+        if (!returning && new InventoryLayout(world).freeSlot() < 0) {
             throw new OperationFailure(FailureCode.MISSING_ITEM, "flight needs a free inventory slot; nothing will be discarded");
         }
     }

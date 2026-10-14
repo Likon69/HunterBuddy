@@ -28,6 +28,7 @@ public final class TreeRoot {
     private StopReport stopReport;
     private HookEntry pauseEntry;
     private List<GateOwner> heldGates = List.of();
+    private boolean pauseStopsBot;
     private String pauseCause = "none";
     private long pauseStarted;
     private long pauseFrozen;
@@ -250,7 +251,8 @@ public final class TreeRoot {
             .filter(entry -> !sensors.gliding() || entry.hook() == Hook.REGEAR)
             .filter(entry -> entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null) : session;
         List<GateOwner> activeGates = ctx.gates().active().stream()
-            .filter(owner -> !sensors.gliding() || owner.hook() == Hook.REGEAR).toList();
+            .filter(owner -> !sensors.gliding() || owner.hook() == Hook.REGEAR)
+            .filter(owner -> !gateCoolingDown(owner.hook())).toList();
         if (gate != null || !activeGates.isEmpty()) {
             pause(gate, sensors, activeGates);
             return;
@@ -314,6 +316,13 @@ public final class TreeRoot {
         return readyEntry(hook) != null;
     }
 
+    private boolean gateCoolingDown(Hook hook) {
+        return hooks.entries().stream().anyMatch(entry -> entry.hook() == hook && entry.node() instanceof GateWait
+            && (!entry.guard().cooledDown(ctx.tick()) || hooks.entries().stream().anyMatch(other ->
+                other.hook() == Hook.BOT_PRE && other.owner().equals(entry.owner())
+                    && (other.guard().active() || other.guard().suspended()))));
+    }
+
     private HookEntry readyEntry(Hook hook) {
         return hooks.entries().stream().filter(entry -> entry.hook() == hook
             && entry.guard().cooledDown(ctx.tick()) && entry.guard().eligible(ctx)).findFirst().orElse(null);
@@ -341,6 +350,8 @@ public final class TreeRoot {
         }
         if (!cause.equals(pauseCause)) ctx.event(hooks.build(), Kind.GATE, null, TraceReasons.PAUSED, "cause=" + cause);
         pauseEntry = entry;
+        pauseStopsBot = entry != null && entry.hook() != Hook.SURVIVAL && entry.hook() != Hook.COMBAT
+            || activeGates.stream().anyMatch(gate -> gate.hook() != Hook.SURVIVAL && gate.hook() != Hook.COMBAT);
         pauseCause = cause;
         state = RootState.PAUSED;
         ctx.monitor().sample(ctx.clock(), sensors, false);
@@ -349,7 +360,8 @@ public final class TreeRoot {
     }
 
     private void limitPause() {
-        if (!pauseLimited && ctx.nowMs() - pauseStarted - (ctx.clock().frozenMs() - pauseFrozen) >= GatePolicy.LEGACY.pauseLimitMs()) {
+        if (pauseStopsBot && !pauseLimited
+            && ctx.nowMs() - pauseStarted - (ctx.clock().frozenMs() - pauseFrozen) >= GatePolicy.LEGACY.pauseLimitMs()) {
             pauseLimited = true;
             String detail = "Paused by " + pauseCause + " for " + GatePolicy.LEGACY.pauseLimitMs() / 60_000 + " min";
             ctx.event(hooks.build(), Kind.GATE, null, TraceReasons.OVERDUE, detail);

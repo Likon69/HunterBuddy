@@ -63,13 +63,13 @@ public final class ChunkMaterialScan {
         BlockPos point = new BlockPos(x, y, z);
         if (!zone.contains(x + 0.5, z + 0.5) || measured.contains(point.asLong())
             || !profile.blocks().contains(world.state(point).getBlock())) return false;
+        boolean exposed = PatchMeasurement.exposed(point, world);
+        if (!exposed && profile.strategy().equals("layer")) return false;
         for (Direction direction : Direction.values()) {
             BlockPos neighbor = point.offset(direction);
             if (world.inBounds(neighbor) && zone.contains(neighbor.getX() + 0.5, neighbor.getZ() + 0.5)
                 && !world.loaded(neighbor)) uncertain = true;
         }
-        boolean exposed = PatchMeasurement.exposed(point, world);
-        if (!exposed && profile.strategy().equals("layer")) uncertain = true;
         if (world.hardness(point) >= 0 && exposed && !MineGeometry.lavaAdjacent(world, point)) {
             patch = new PatchMeasurement(point, world, zone, profile, measured);
         }

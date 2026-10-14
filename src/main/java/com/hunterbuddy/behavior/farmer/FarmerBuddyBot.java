@@ -11,6 +11,7 @@ import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.ProgressPolicy;
+import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.StopReport;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TargetPoint;
@@ -20,6 +21,7 @@ import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.FarmerMissionContext;
+import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.InventoryLayout;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
@@ -47,6 +49,7 @@ import com.hunterbuddy.behavior.trees.FarmerSurveyTree;
 import com.hunterbuddy.behavior.trees.GroundTravel;
 import com.hunterbuddy.behavior.trees.RegearTree;
 import com.hunterbuddy.behavior.trees.StoreTree;
+import com.hunterbuddy.util.Rockets;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -147,7 +150,7 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
 
     @Override
     public BotConfig config() {
-        return new BotConfig(false, DeathPolicy.STOP, true, ProgressPolicy.DEFAULT, 1_200);
+        return new BotConfig(DeathPolicy.STOP, true, ProgressPolicy.DEFAULT, 1_200);
     }
 
     @Override
@@ -301,7 +304,23 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     }
 
     private double waitScore(TickContext ctx) {
-        return !busy() && mission.facts.waitUntil > 0 ? 3 : 0;
+        return !busy() && (mission.facts.waitUntil > 0 || canWaitAtBase(ctx)) ? 3 : 0;
+    }
+
+    private boolean canWaitAtBase(TickContext ctx) {
+        if (!mission.facts.waitAtBase || !world.client().player.isOnGround() || !regearAvailable
+            || mission.fuelDue() || LogisticsInventory.needsRegear(world, activeProfile)
+            || mission.storageUnavailable() || mission.stock().isEmpty() || mission.capacity() == 0
+            || journal.carried(ctx, mission.step.index() - 1) > 0
+            || world.countMatching(LogisticsInventory.accepted(activeProfile)) > 0
+            || world.countMatching(LogisticsInventory.miscellaneous(activeProfile)) > 0) return false;
+        if (Math.hypot(world.client().player.getX() - mission.step.deliveryChest().getX(),
+            world.client().player.getZ() - mission.step.deliveryChest().getZ()) > 32) return false;
+        BaseVisitFacts visit = mission.baseFacts();
+        return visit != null && visit.recoveredAt != null && visit.world.equals(world.storageKey())
+            && visit.step == mission.step.index() - 1 && visit.profile.equals(activeProfile.key())
+            && world.countMatching(Rockets::isPlain) >= visit.rocketBudget
+            && FlightPlan.totalDurability(world) >= visit.wearBudget;
     }
 
     private double nextStepScore(TickContext ctx) {
@@ -347,8 +366,14 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     }
 
     private final class ResolveProfile extends Node {
+        private long waypointStarted;
         private ResolveProfile() {
             super("resolve-profile");
+        }
+
+        @Override
+        protected void onStart(TickContext ctx) {
+            waypointStarted = ctx.nowMs();
         }
 
         @Override
@@ -359,7 +384,10 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             if (profile.isEmpty()) return fail(FailureCode.REFUSED, "unknown catalog profile: " + step.profile());
             activeProfile = profile.get();
             try {
-                mission.resolve(ctx, step, activeProfile);
+                if (!mission.resolve(ctx, step, activeProfile)) {
+                    if (ctx.nowMs() - waypointStarted < 30_000) return new Running("waiting for the four zone waypoints to load");
+                    throw new IllegalStateException("Zone waypoints unavailable after 30 seconds: " + mission.lookup.resolve(step.hint()).refusal());
+                }
                 String reserve = journal.equipment(ctx, "reserve-status");
                 regearAvailable = reserve.isEmpty() || reserve.equals("ready");
                 String signature = journal.equipment(ctx, "logistics-reserve");
@@ -396,8 +424,8 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             journal.milestone(ctx, "step-" + step.index() + "-complete");
             FarmerStepConfig next = enabledSteps().stream().filter(candidate -> candidate.index() > step.index()).findFirst().orElse(null);
             if (next == null) {
-                journal.reset(ctx);
-                ctx.stopBot(ExitReason.COMPLETED, "FarmerBuddy mission complete: step " + step.index() + " was the last one");
+                ctx.stopBot(ExitReason.COMPLETED, "FarmerBuddy mission complete: step " + step.index()
+                    + " was the last one. Use .bt farmer reset to start a new mission.");
                 return Success.INSTANCE;
             }
             journal.currentStep(ctx, next.index());

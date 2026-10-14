@@ -69,7 +69,7 @@ public final class TransferItems extends Action {
             if (!ticket.confirmed()) return new Running("waiting for source and destination receipts");
             if (confirmed != null) confirmed.accept(ctx);
             transfers++;
-            ctx.progress(new ProgressEvidence(EvidenceKind.MILESTONE, transfers, label));
+            ctx.progress(new ProgressEvidence(EvidenceKind.TRANSACTION_CONFIRMED, 1, label));
             inventory.release(lease);
             ticket = null;
             if (deposit == null) return Success.INSTANCE;

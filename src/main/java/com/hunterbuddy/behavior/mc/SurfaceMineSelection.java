@@ -15,9 +15,7 @@ public final class SurfaceMineSelection {
             .sorted(Comparator.<BlockPos>comparingInt(BlockPos::getY).reversed()
                 .thenComparingDouble(point -> point.getSquaredDistance(mine.world.feet()))).toList();
         if (points.isEmpty()) return false;
-        int highest = points.getFirst().getY();
         for (BlockPos point : points) {
-            if (point.getY() != highest) break;
             if (mine.rejected.contains(point)) continue;
             if (!MineGeometry.clear(mine.world, point.up()) || MineGeometry.fallingAbove(mine.world, point)
                 || !MineGeometry.floor(mine.world, point.down())) continue;

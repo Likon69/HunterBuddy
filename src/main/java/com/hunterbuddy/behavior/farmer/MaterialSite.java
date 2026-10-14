@@ -17,6 +17,7 @@ public final class MaterialSite {
     public String status = "observed";
     public String reason = "";
     public boolean lowerBound;
+    public boolean started;
     public List<Long> blocks = new ArrayList<>();
 
     public MaterialSite(BlockPos seed, int quantity, boolean lowerBound, long now) {
@@ -34,7 +35,7 @@ public final class MaterialSite {
     }
 
     public boolean usable() {
-        return quantity >= SHULKER_BLOCKS && (status.equals("observed") || status.equals("verified"));
+        return quantity >= (started ? 1 : SHULKER_BLOCKS) && (status.equals("observed") || status.equals("verified"));
     }
 
     public boolean flightAvoided() {

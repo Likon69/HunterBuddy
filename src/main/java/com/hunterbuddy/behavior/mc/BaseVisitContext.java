@@ -85,9 +85,6 @@ public final class BaseVisitContext {
         if (logistics.facts.site == null && logistics.world.count(Items.ENDER_CHEST) == 0) {
             throw new IllegalStateException("ender chest missing before base visit");
         }
-        if (logistics.layout.freeSlot() < 0) {
-            throw new IllegalStateException("no free slot, no item will be discarded");
-        }
         BaseStockPlan.measure(ctx, this);
     }
 

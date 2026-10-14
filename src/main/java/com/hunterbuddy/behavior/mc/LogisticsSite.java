@@ -32,10 +32,17 @@ public final class LogisticsSite {
     public static BlockPos choose(WorldReader world, FarmerZone zone, int attempt) {
         BlockPos feet = world.feet();
         if (attempt == 0 && inside(feet, zone) && dry(feet, world)) return feet;
+        if (attempt == 0 && world.state(feet.down()).getBlock() instanceof FallingBlock
+            && MineGeometry.floor(world, feet.down()) && inside(feet.up(), zone)
+            && world.inBounds(feet.up(3))) return feet.up();
         for (int radius = 0; radius <= 16; radius++) for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++) {
             if (Math.max(Math.abs(x), Math.abs(z)) != radius) continue;
             BlockPos point = world.surface(feet.getX() + x, feet.getZ() + z);
-            if (point != null && inside(point, zone) && dry(point, world) && attempt-- <= 0) return point;
+            if (point == null) continue;
+            boolean flat = dry(point, world);
+            boolean falling = world.state(point.down()).getBlock() instanceof FallingBlock && MineGeometry.floor(world, point.down());
+            if (falling) point = point.up();
+            if ((flat || falling) && inside(point, zone) && world.inBounds(point.up(2)) && attempt-- <= 0) return point;
         }
         List<BlockPos> corners = zone.corners();
         int cx = (int) Math.round(corners.stream().mapToInt(BlockPos::getX).average().orElseThrow());

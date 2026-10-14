@@ -13,7 +13,6 @@ import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.FarmerSiteResult;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.Sequence;
-import com.hunterbuddy.behavior.nodes.SiteAccess;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.VerifySite;
@@ -27,9 +26,7 @@ public final class FarmerSiteTree {
         if (!mission.unfinishedMine() && !FarmerFlightBudget.canReach(mission.tick, mission.selected.seed(),
             mission.step.deliveryChest(), mission.world, mission.outputs)) {
             return new InventoryMilestone("insufficient-site-change-budget-return-to-base", ctx -> {
-                mission.facts.siteActive = false;
-                mission.facts.baseRequested = true;
-                mission.save(ctx, "restocking before reaching the next site, return reserve preserved");
+                FarmerFlightBudget.requestBase(ctx, mission, "restocking before reaching the next site, return reserve preserved");
             });
         }
         mission.facts.siteActive = true;
@@ -84,12 +81,12 @@ public final class FarmerSiteTree {
                 double distance = Math.hypot(mission.world.feet().getX() - mission.selected.x,
                     mission.world.feet().getZ() - mission.selected.z);
                 if (mission.world.client().player.isOnGround() && distance <= 64) return new Succeed();
-                return new SiteAccess(() -> mission.selected, mission.knowledge, true,
-                    FlyToTree.build(() -> mission.selected.seed(), () -> mission.step.deliveryChest(), false,
-                        mission.world, mission.baritone, mission.outputs));
+                return FlyToTree.build(() -> mission.selected.seed(), () -> mission.step.deliveryChest(), false,
+                    mission.world, mission.baritone, mission.outputs);
             }),
             new Deferred("reach-chosen-site-support", () -> {
-                mission.arrivalStand = SiteArrival.stand(mission.selected, mission.profile, mission.zone, mission.world);
+                mission.arrivalStand = SiteArrival.stand(mission.selected, mission.profile, mission.zone, mission.world,
+                    mission.mineFacts());
                 return GroundTravel.build(mission.arrivalStand, 0, mission.baritone, mission.outputs);
             }),
             new Timeout(2400, new VerifySite(mission.world, mission.zone, mission.profile, mission.knowledge,

@@ -71,7 +71,8 @@ public final class ServerFacts {
         if (localId < 0 || event.connection != connection) return;
         if (event.packet instanceof ItemPickupAnimationS2CPacket pickup && pickup.getCollectorEntityId() == localId) {
             pickups.addAndGet(Math.max(0, pickup.getStackAmount()));
-        } else if (event.packet instanceof EntityDamageS2CPacket damage && damage.entityId() == localId) {
+        } else if (event.packet instanceof EntityDamageS2CPacket damage && damage.entityId() == localId
+            && damage.sourceCauseId() >= 0 && damage.sourceCauseId() != localId) {
             attacker.set(damage.sourceCauseId());
             hurtAt.set(clientTick + 1);
             hurt.set(true);

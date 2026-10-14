@@ -42,10 +42,10 @@ public final class SurveyTree {
             point -> survey.zone != null && survey.zone.contains(point.getX() + 0.5, point.getZ() + 0.5),
             new Selector("survey-with-return-reserve-fallback", attempts,
             new Deferred("yield-after-survey-attempts", () -> survey.missionMode
-                && (survey.coverage == null || !survey.coverage.complete() || survey.temporarilyUnavailable())
+                && (survey.budgetRefused || survey.coverage == null || !survey.coverage.complete() || survey.temporarilyUnavailable())
                 ? new InventoryMilestone("yield-incomplete-survey-to-mission", ctx -> {
                     survey.selected = survey.memory == null ? null : survey.best();
-                    survey.interrupted = survey.returnRequested.getAsBoolean() || survey.temporarilyUnavailable();
+                    survey.interrupted = survey.budgetRefused || survey.returnRequested.getAsBoolean() || survey.temporarilyUnavailable();
                 })
                 : new Sequence("return-after-survey", home(survey),
                     StopBot.withReason(ExitReason.FAILED, ctx -> survey.result))))));

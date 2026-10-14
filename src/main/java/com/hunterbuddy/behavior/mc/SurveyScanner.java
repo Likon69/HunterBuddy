@@ -90,6 +90,7 @@ public final class SurveyScanner {
             if (previous != null) {
                 site.flightAvoidedUntil = previous.flightAvoidedUntil;
                 site.shelterId = previous.shelterId;
+                site.started = previous.started;
             }
             if (previous == null || !previous.status.equals("inaccessible")) memory.sites.put(key, site);
         }

@@ -1,6 +1,9 @@
 package com.hunterbuddy.behavior.mc;
 
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.FarmerCatalog;
+import com.hunterbuddy.behavior.farmer.FarmerProfile;
+import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.util.Rockets;
@@ -37,6 +40,16 @@ public final class BaseStockPlan {
     }
 
     public static void empties(TickContext ctx, BaseVisitContext visit) {
+        FarmerProfile profile = visit.logistics.profile;
+        long remaining = Math.max(0, visit.facts.target - visit.logistics.mission.delivered(ctx, visit.facts.step));
+        if (remaining == 0) {
+            FarmerStepConfig next = visit.settings.steps().stream().filter(FarmerStepConfig::enabled)
+                .filter(step -> step.index() > visit.facts.step + 1).findFirst().orElse(null);
+            if (next != null) {
+                profile = FarmerCatalog.load().profile(next.profile()).orElseThrow();
+                remaining = Math.max(0, next.shulkerTarget() - visit.logistics.mission.delivered(ctx, next.index() - 1));
+            }
+        }
         List<ItemStack> contents = visit.enderContents();
         int partials = 0;
         int other = 0;
@@ -46,14 +59,14 @@ public final class BaseStockPlan {
             if (Rockets.isPlain(stack)) continue;
             if (ShulkerSignature.isShulker(stack)) {
                 ShulkerSignature signature = ShulkerSignature.of(stack, visit.logistics.world);
-                if (LogisticsInventory.pure(signature, visit.logistics.profile)) {
+                if (LogisticsInventory.pure(signature, profile)) {
                     if (!signature.empty()) partials++;
                     continue;
                 }
             }
             other++;
         }
-        long remaining = Math.max(0, visit.facts.target - visit.logistics.mission.delivered(ctx, visit.facts.step) - partials);
+        remaining = Math.max(0, remaining - partials);
         long rocketSlots = contents.stream().filter(Rockets::isPlain).count();
         int capacity = Math.max(0, 27 - 2 - (int) rocketSlots - partials - other);
         visit.facts.emptyTarget = (int) Math.min(remaining, capacity);

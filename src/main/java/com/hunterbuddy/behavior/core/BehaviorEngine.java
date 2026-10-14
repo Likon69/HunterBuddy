@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -65,6 +66,7 @@ public final class BehaviorEngine {
     private TreeRoot root;
     private final RestartBudget restarts = new RestartBudget();
     private final Consumer<String> alerts;
+    private Consumer<String> botSession = name -> {};
     private List<ReactiveSelector> recoveryGroups = List.of();
     private final List<Routine> routines;
     private final Map<Hook, Routine> selectedRoutines = new EnumMap<>(Hook.class);
@@ -89,6 +91,7 @@ public final class BehaviorEngine {
     private PersistentStore store;
     private String worldKey = "simulated";
     private CompletableFuture<Map<Key<?>, Object>> memoryLoad;
+    private boolean memoryReadFailed;
     private final SharedMemoryStore sharedMemory = new SharedMemoryStore();
     private CompletableFuture<BotStats.Snapshot> statsLoad;
     private final SessionRoutine session;
@@ -119,13 +122,13 @@ public final class BehaviorEngine {
         });
         ctx.bb().world(sensors.dimensionKey());
         ctx.begin(sensors);
-        hooks = new TreeHooks(message -> { throw new IllegalArgumentException(message); });
+        hooks = new TreeHooks(message -> alerts.accept("Hook change refused: " + message));
         plugins = new PluginRegistry(ctx, hooks, alerts);
         trace.add(plugins);
         routineContext = new RoutineContext(ctx,
             () -> botContext == null ? DeathPolicy.STOP : botContext.config().deathPolicy());
         for (Routine routine : routines) routine.entries(routineContext).forEach(hooks::insert);
-        hooks.applyPendingChanges(ctx);
+        hooks.applyPendingChanges(ctx, true);
         recovery = new Recovery(new Fail(FailureCode.NO_OPTION, "no simulated alternative"), new Succeed(), alerts, restarts);
         root = new TreeRoot(ctx, hooks, recovery);
     }
@@ -172,6 +175,8 @@ public final class BehaviorEngine {
     }
 
     private void install(Bot next, String reason) {
+        botSession.accept(next.name());
+        memoryReadFailed = false;
         stats = null;
         ctx.botStats(null);
         BotContext context = new BotContext(ctx, "bot:" + next.name(), next.config());
@@ -188,7 +193,7 @@ public final class BehaviorEngine {
         recoveryGroups = List.copyOf(groups);
         hooks.recovery(nextRecovery);
         mainEntries.forEach(hooks::insert);
-        hooks.applyPendingChanges(ctx);
+        hooks.applyPendingChanges(ctx, true);
         plugins.applyPendingCleanup();
         recovery = nextRecovery;
         root = new TreeRoot(ctx, hooks, recovery);
@@ -405,6 +410,11 @@ public final class BehaviorEngine {
         session.connect(gate);
     }
 
+    public void botSession(Consumer<String> session) {
+        if (bot != null) throw new IllegalStateException("connect bot sessions before starting");
+        botSession = Objects.requireNonNull(session);
+    }
+
     public void bindWorld(String key) {
         if (running() && !worldKey.equals(key)) throw new IllegalStateException("world must be stopped before rebinding");
         worldKey = Objects.requireNonNull(key);
@@ -434,12 +444,14 @@ public final class BehaviorEngine {
         if ((running() || suspended()) && owner.equals(botOwner)) {
             throw new IllegalStateException("Stop the bot before editing its durable memory");
         }
-        Map<Key<?>, Object> memory = store == null ? Map.of() : store.load(key, owner).join();
+        Map<Key<?>, Object> memory = store == null ? Map.of() : store.load(key, owner).exceptionally(ex -> Map.of()).join();
         ctx.bb().world(key);
         try {
+            ctx.bb().clear(owner, Scope.OWNER);
+            ctx.bb().clear(owner, Scope.WORLD);
             ctx.bb().loadDurable(owner, memory);
             update.accept(ctx);
-            if (store != null) store.save(key, owner, ctx.bb().durable(owner)).join();
+            if (store != null) store.overwrite(key, owner, ctx.bb().durable(owner)).join();
         } finally {
             ctx.bb().world(worldKey);
         }
@@ -481,10 +493,17 @@ public final class BehaviorEngine {
             return false;
         }
         if (memoryLoad != null) {
-            ctx.bb().loadDurable(botOwner, memoryLoad.exceptionally(ex -> Map.of()).join());
+            try {
+                ctx.bb().loadDurable(botOwner, memoryLoad.join());
+            } catch (CompletionException ex) {
+                memoryReadFailed = true;
+                memoryLoad = null;
+                stopNow(ExitReason.FAILED, "Bot memory unavailable: " + ex.getCause().getMessage());
+                return false;
+            }
             memoryLoad = null;
         }
-        sharedMemory.restore(ctx.bb());
+        sharedMemory.restore(ctx.bb(), alerts);
         if (statsLoad != null) {
             BotStats.Snapshot stored = statsLoad.exceptionally(ex -> BotStats.EMPTY).join();
             stats.mergeCumulative(stored.cumulative());
@@ -497,6 +516,7 @@ public final class BehaviorEngine {
     private void persist() {
         if (store == null || bot == null || stats == null) return;
         sharedMemory.save(store, worldKey, ctx.bb());
+        if (memoryReadFailed) return;
         String owner = "bot:" + bot.name();
         Map<Key<?>, Object> memory = new LinkedHashMap<>(ctx.bb().durable(owner));
         Map<Key<?>, Object> current = Map.copyOf(memory);
@@ -504,7 +524,7 @@ public final class BehaviorEngine {
         String key = worldKey;
         String name = bot.name();
         long sequence = checkpoint.incrementAndGet();
-        CompletableFuture<Map<Key<?>, Object>> worldRead = memoryLoad == null ? CompletableFuture.completedFuture(Map.of()) : memoryLoad.exceptionally(ex -> Map.of());
+        CompletableFuture<Map<Key<?>, Object>> worldRead = memoryLoad == null ? CompletableFuture.completedFuture(Map.of()) : memoryLoad;
         CompletableFuture<BotStats.Snapshot> totals = statsLoad == null ? CompletableFuture.completedFuture(BotStats.EMPTY) : statsLoad.exceptionally(ex -> BotStats.EMPTY);
         worldRead.thenCombine(totals, (loaded, previous) -> {
             if (checkpoint.get() != sequence) return null;
@@ -570,7 +590,7 @@ public final class BehaviorEngine {
             entry.guard().availableWhen(() -> selectedRoutines.get(routine.slot()) == routine);
             hooks.insert(entry);
         });
-        hooks.applyPendingChanges(ctx);
+        hooks.applyPendingChanges(ctx, true);
     }
 
     public void selectRoutine(Hook slot, String name) {
@@ -630,7 +650,7 @@ public final class BehaviorEngine {
         }
         Routine routine = new FlightKeeperRoutine(keepFlying);
         routine.entries(routineContext).forEach(hooks::insert);
-        hooks.applyPendingChanges(ctx);
+        hooks.applyPendingChanges(ctx, true);
         routines.add(routine);
     }
 

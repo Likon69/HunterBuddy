@@ -20,6 +20,8 @@ public final class MineLayerTree {
     public static Node build(MineSiteContext mine) {
         return new Sequence("staircase-layer-galleries",
             new PlanStaircase(mine),
+            new Deferred("reach-recorded-staircase-bottom", () -> GroundTravel.withoutBreaking(
+                BlockPos.fromLong(mine.facts.stairs.getLast()), mine.baritone, mine.outputs)),
             new RepeatUntil("dig-and-traverse-staircase", () -> mine.steps.isEmpty() || mine.finished(), 384, stairStep(mine)),
             MineSiteTree.measure(mine),
             new RepeatUntil("mine-connected-layer-galleries", mine::finished, 1800,

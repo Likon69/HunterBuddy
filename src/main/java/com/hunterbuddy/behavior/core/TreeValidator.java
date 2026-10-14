@@ -5,12 +5,15 @@ import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.Landing;
+import com.hunterbuddy.behavior.nodes.Parallel;
 import com.hunterbuddy.behavior.nodes.ProgressGuard;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.nodes.WalkTowards;
 import com.hunterbuddy.behavior.nodes.WithLease;
+import com.hunterbuddy.behavior.resource.Resource;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
@@ -63,6 +66,14 @@ public final class TreeValidator {
         if (node instanceof Action && !bounded) throw new IllegalArgumentException("Action without Timeout/ProgressGuard: " + node.name());
         if (node instanceof WalkTowards && !progressBounded) throw new IllegalArgumentException("WalkTowards without ProgressGuard");
         if (node instanceof WithLease lease && lease.resources().isEmpty()) throw new IllegalArgumentException("empty WithLease");
+        if (node instanceof Parallel) {
+            Set<Resource> claimed = EnumSet.noneOf(Resource.class);
+            for (Node child : node.children()) {
+                Set<Resource> resources = leasedResources(child, Collections.newSetFromMap(new IdentityHashMap<>()));
+                if (!Collections.disjoint(claimed, resources)) throw new IllegalArgumentException("conflicting Parallel resources: " + node.name());
+                claimed.addAll(resources);
+            }
+        }
         if (node instanceof ReactiveSelector && node.children().stream().anyMatch(child -> !(child instanceof Guard))) {
             throw new IllegalArgumentException("ReactiveSelector child without Guard");
         }
@@ -75,6 +86,14 @@ public final class TreeValidator {
     private static boolean containsLease(Node node) {
         Set<Node> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         return containsLease(node, visited);
+    }
+
+    private static Set<Resource> leasedResources(Node node, Set<Node> visited) {
+        if (!visited.add(node)) throw new IllegalArgumentException("double parent or cycle: " + node.name());
+        Set<Resource> resources = EnumSet.noneOf(Resource.class);
+        if (node instanceof WithLease lease) resources.addAll(lease.resources());
+        for (Node child : node.children()) resources.addAll(leasedResources(child, visited));
+        return resources;
     }
 
     private static boolean containsLease(Node node, Set<Node> visited) {

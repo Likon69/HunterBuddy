@@ -15,20 +15,30 @@ import java.util.function.Predicate;
 public final class GateWait extends Node {
     private final Predicate<TickContext> busy;
     private final long limitMs;
+    private final boolean stopOnTimeout;
     private long started;
     private long frozen;
+    private boolean retained;
 
     public GateWait(String name, Predicate<TickContext> busy, long limitMs) {
+        this(name, busy, limitMs, true);
+    }
+
+    public GateWait(String name, Predicate<TickContext> busy, long limitMs, boolean stopOnTimeout) {
         super(name);
         if (limitMs < 1) throw new IllegalArgumentException("invalid gate wait bound");
         this.busy = Objects.requireNonNull(busy);
         this.limitMs = limitMs;
+        this.stopOnTimeout = stopOnTimeout;
     }
 
     @Override
     protected void onStart(TickContext ctx) {
-        started = ctx.nowMs();
-        frozen = ctx.clock().frozenMs();
+        if (!retained) {
+            started = ctx.nowMs();
+            frozen = ctx.clock().frozenMs();
+        }
+        retained = false;
     }
 
     @Override
@@ -37,9 +47,19 @@ public final class GateWait extends Node {
         if (ctx.nowMs() - started - (ctx.clock().frozenMs() - frozen) >= limitMs) {
             String reason = name() + " still active after " + limitMs / 1_000 + "s";
             ctx.event(this, Kind.GATE, null, TraceReasons.OVERDUE, reason);
-            ctx.stopBot(ExitReason.STOPPED, reason);
+            if (stopOnTimeout) ctx.stopBot(ExitReason.STOPPED, reason);
             return fail(FailureCode.TIMEOUT, reason);
         }
         return new Running(name() + " owns its resources");
+    }
+
+    @Override
+    protected void onStop(TickContext ctx, ExitReason reason) {
+        retained = !stopOnTimeout && (reason == ExitReason.PREEMPTED || reason == ExitReason.PAUSED);
+    }
+
+    @Override
+    protected void onReset() {
+        retained = false;
     }
 }

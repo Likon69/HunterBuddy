@@ -17,13 +17,13 @@ public final class BaseInventorySpaceTree {
             new Sequence("free-player-slots-before-base-packing",
                 new RepeatUntil("three-free-slots-confirmed", () -> freeSlots(visit) >= 3, 72,
                     new Deferred("deposit-carried-material-or-miscellaneous", () -> {
-                        boolean material = visit.logistics.world.countMatching(LogisticsInventory.accepted(visit.logistics.profile)) > 0;
+                        boolean miscellaneous = visit.logistics.world.countMatching(LogisticsInventory.miscellaneous(visit.logistics.profile)) > 0;
                         return new Sequence("deposit-one-loose-stack",
                             BaseOperations.open(visit, () -> visit.position(visit.facts.returns)),
                             BaseOperations.transfer(visit, () -> visit.position(visit.facts.returns),
-                                "free-inventory-slot", () -> visit.logistics.outputs.inventory().firstDeposit(material
-                                    ? LogisticsInventory.accepted(visit.logistics.profile)
-                                    : LogisticsInventory.miscellaneous(visit.logistics.profile), FailureCode.MISSION_STOP)));
+                                "free-inventory-slot", () -> visit.logistics.outputs.inventory().firstDeposit(miscellaneous
+                                    ? LogisticsInventory.miscellaneous(visit.logistics.profile)
+                                    : LogisticsInventory.accepted(visit.logistics.profile), FailureCode.MISSION_STOP)));
                     })), ContainerTree.close(visit.logistics.outputs), BaseOperations.ender(visit)));
     }
 

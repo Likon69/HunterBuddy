@@ -8,6 +8,12 @@ import net.minecraft.util.math.BlockPos;
 public final class FarmerFlightBudget {
     private FarmerFlightBudget() {}
 
+    public static void requestBase(TickContext ctx, FarmerMissionContext mission, String reason) {
+        mission.facts.baseRequested = true;
+        if (!mission.unfinishedMine()) mission.facts.siteActive = false;
+        mission.save(ctx, reason);
+    }
+
     public static boolean returnDue(TickContext ctx, BlockPos home, WorldReader world, Outputs outputs) {
         FlightPerformance performance = FlightPerformance.load(ctx);
         double distance = Math.hypot(world.feet().getX() - home.getX(), world.feet().getZ() - home.getZ());

@@ -21,6 +21,7 @@ public final class ProgressGuard extends Decorator {
     private int inactive;
     private String activeKey;
     private boolean retained;
+    private boolean retainOnSuccess;
     private Function<TickContext, String> target = ctx -> path();
 
     public ProgressGuard(ProgressSensor sensor, double minGain, int windowTicks, Node child) {
@@ -48,6 +49,12 @@ public final class ProgressGuard extends Decorator {
         return this;
     }
 
+    ProgressGuard retainOnSuccess() {
+        if (active()) throw new IllegalStateException("cannot configure an active ProgressGuard");
+        retainOnSuccess = true;
+        return this;
+    }
+
     @Override
     protected NodeResult onTick(TickContext ctx) {
         double value = sensor.value(ctx.sensors());
@@ -70,7 +77,8 @@ public final class ProgressGuard extends Decorator {
 
     @Override
     protected void onStop(TickContext ctx, ExitReason reason) {
-        retained = reason == ExitReason.PAUSED || reason == ExitReason.PREEMPTED;
+        retained = reason == ExitReason.PAUSED || reason == ExitReason.PREEMPTED
+            || retainOnSuccess && reason == ExitReason.COMPLETED;
     }
 
     @Override

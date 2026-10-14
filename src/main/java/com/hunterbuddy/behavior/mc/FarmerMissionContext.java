@@ -60,7 +60,7 @@ public final class FarmerMissionContext {
         memory = new FarmerMissionMemory(journal);
     }
 
-    public void resolve(TickContext ctx, FarmerStepConfig current, FarmerProfile material) {
+    public boolean resolve(TickContext ctx, FarmerStepConfig current, FarmerProfile material) {
         tick = ctx;
         step = current;
         profile = material;
@@ -77,7 +77,13 @@ public final class FarmerMissionContext {
             zone = FarmerZone.restore(mineFacts().zone.stream().map(LogisticsFacts::position).toList());
         } else {
             FarmerZoneLookup.Resolved resolved = lookup.resolve(step.hint());
-            if (!resolved.ok()) throw new IllegalStateException(resolved.refusal());
+            if (!resolved.ok()) {
+                if (lookup.waitingForWaypoints()) {
+                    zone = null;
+                    return false;
+                }
+                throw new IllegalStateException(resolved.refusal());
+            }
             zone = resolved.zone();
         }
         knowledge = WorldKnowledge.load(ctx);
@@ -112,6 +118,7 @@ public final class FarmerMissionContext {
         ProtectionRegistry.restore(ctx, journal, outputs.mining());
         outputs.mining().breakRule(baseActive() ? pos -> false
             : pos -> zone.contains(pos.getX() + 0.5, pos.getZ() + 0.5));
+        return true;
     }
 
     public MineSiteFacts mineFacts() {
@@ -142,17 +149,23 @@ public final class FarmerMissionContext {
         return savedField;
     }
 
-    public boolean baseActive() {
+    public BaseVisitFacts baseFacts() {
         String data = journal.equipment(tick, "base-visit-facts");
         if (!data.equals(baseData)) {
             savedBase = new BaseVisitMemory(journal).load(tick);
             baseData = data;
         }
-        return savedBase != null && savedBase.recoveredAt == null;
+        return savedBase;
+    }
+
+    public boolean baseActive() {
+        BaseVisitFacts base = baseFacts();
+        return base != null && base.recoveredAt == null;
     }
 
     public boolean players() {
-        return !visiblePlayers().isEmpty();
+        return visiblePlayers().stream().anyMatch(player -> Math.hypot(player.getX() - world.client().player.getX(),
+            player.getZ() - world.client().player.getZ()) <= 96);
     }
 
     private List<? extends PlayerEntity> visiblePlayers() {
@@ -247,7 +260,7 @@ public final class FarmerMissionContext {
     }
 
     public boolean retreatDue() {
-        return siteOccupied() || facts.changeRequested || fuelDue() || freeSlots() <= 2
+        return siteOccupied() || facts.changeRequested || facts.baseRequested || fuelDue() || freeSlots() <= 2
             || world.countMatching(LogisticsInventory.accepted(profile)) >= MaterialSite.SHULKER_BLOCKS
             || LogisticsInventory.needsRegear(world, profile);
     }

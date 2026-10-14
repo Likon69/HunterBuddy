@@ -55,7 +55,11 @@ public final class MineSiteTree {
                     GroundTravel.build(BlockPos.fromLong(mine.facts.stairs.getLast()), 0, mine.baritone, mine.outputs),
                     new Timeout(2400, new VerifySite(mine.world, mine.zone, mine.profile, mine.knowledge,
                         mine.knowledge.zone(mine.zone, mine.profile), () -> mine.site,
-                        () -> BlockPos.fromLong(mine.facts.stairs.getLast()), verified))))),
+                        () -> BlockPos.fromLong(mine.facts.stairs.getLast()), verified)),
+                    new InventoryMilestone("refresh-remaining-material-estimate", ctx -> {
+                        mine.facts.estimatedQuantity = mine.site.quantity + mine.facts.mined;
+                        mine.save(ctx, "remaining connected material estimate refreshed");
+                    })))),
             new InventoryMilestone("load-verified-material-members", ctx -> {
                 if (mine.patch.isEmpty()) for (Long position : mine.site.blocks) mine.patch.add(BlockPos.fromLong(position));
             }));

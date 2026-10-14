@@ -20,6 +20,11 @@ public final class FarmerZoneLookup {
         return zoneName.get();
     }
 
+    public boolean waitingForWaypoints() {
+        String name = zoneName();
+        return name != null && !name.isBlank() && waypoints.named(name).size() < 4;
+    }
+
     public Resolved resolve(String hint) {
         String name = zoneName();
         if (name == null || name.isBlank()) return Resolved.refused("work zone name is empty");

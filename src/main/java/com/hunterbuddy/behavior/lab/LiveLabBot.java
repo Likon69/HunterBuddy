@@ -86,7 +86,7 @@ public final class LiveLabBot implements Bot, LiveWorldBot {
 
     @Override
     public BotConfig config() {
-        return new BotConfig(false, LabBot.CONFIG.deathPolicy(), settings.resumeAfterReconnect(), LabBot.CONFIG.progress(), LabBot.CONFIG.defaultActionLimitTicks());
+        return new BotConfig(LabBot.CONFIG.deathPolicy(), settings.resumeAfterReconnect(), LabBot.CONFIG.progress(), LabBot.CONFIG.defaultActionLimitTicks());
     }
 
     @Override

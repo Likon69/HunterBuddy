@@ -41,7 +41,6 @@ public final class BotStats {
 
     public void observe(TraceEvent event) {
         String metric = switch (event.kind()) {
-            case PROGRESS -> event.reason().equals(TraceReasons.TRANSACTION_CONFIRMED) ? "transactions" : null;
             case RECOVERY -> event.reason().equals(TraceReasons.SAFE_IDLE) ? "safeIdle" : event.reason().equals(TraceReasons.ENTER) ? "recovery." + event.detail() : null;
             case BOT -> event.reason().equals(TraceReasons.RECONNECTED) ? "reconnects" : event.reason().equals(TraceReasons.RESTART) ? "restarts" : null;
             default -> null;
@@ -71,6 +70,7 @@ public final class BotStats {
         Objects.requireNonNull(evidence);
         session.evidence(evidence);
         cumulative.evidence(evidence);
+        if (evidence.kind() == EvidenceKind.TRANSACTION_CONFIRMED) add("transactions", 1);
     }
 
     public void stopped(ExitReason reason) {

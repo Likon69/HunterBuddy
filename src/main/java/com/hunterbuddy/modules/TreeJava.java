@@ -82,6 +82,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.ProvidedStringSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -115,6 +116,17 @@ public final class TreeJava extends Module {
     private final JsonlSink jsonl = new JsonlSink(MeteorClient.FOLDER.toPath().resolve("hunterbuddy/bt"));
     private final BehaviorEngine engine = new BehaviorEngine(new Clock(), alerts::stopped,
         alerts::notify, new LogSink(HunterBuddyAddon.LOG::info, fullTraceLog::get), jsonl);
+    private final Setting<String> selectedBot = general.add(new ProvidedStringSetting.Builder()
+        .name("bot").description("Registered bot started when TreeJava is activated.").defaultValue("lab")
+        .supplier(() -> engine.bots().names().toArray(String[]::new))
+        .onChanged(name -> {
+            if (!isActive()) return;
+            try {
+                switchBot(name);
+            } catch (RuntimeException ex) {
+                error("%s", ex.getMessage());
+            }
+        }).build());
     private final McSensors mcSensors = new McSensors(mc, world, serverFacts, baritone, engine.leases());
     private final ConsumablePolicy consumables = new ConsumablePolicy(world, baritone, rocketReserve::get);
     private final MiningBridge mining = new MiningBridge(world, baritone, engine.outputs()::ownBaritone);
@@ -133,6 +145,7 @@ public final class TreeJava extends Module {
         autoSubscribe = false;
         engine.bots().register("lab", () -> new LabBot(labSettings));
         engine.bots().register("farmerbuddy", () -> new FarmerBuddyBot(farmerSettings, farmerCatalog, world, baritone, engine.outputs(), farmerWaypoints));
+        engine.botSession(jsonl::session);
         List<SettingGroup> farmerStepGroups = new ArrayList<>();
         for (int i = 1; i <= FarmerSettings.MAX_STEPS; i++) farmerStepGroups.add(settings.createGroup("FarmerBuddy: step " + i));
         farmerSettings.register(farmerStepGroups, settings.createGroup("FarmerBuddy: base"));
@@ -150,7 +163,7 @@ public final class TreeJava extends Module {
         mcSensors.screenOwner(inventory::isOurs);
         engine.flightKeeper(new KeepFlying(world, baritone, engine.outputs()));
         engine.registerRoutine(new GateSurvivalRoutine());
-        engine.registerRoutine(new GateCombatRoutine());
+        engine.registerRoutine(new GateCombatRoutine(world, baritone, engine.outputs()));
         engine.registerRoutine(new GateRegearRoutine());
         for (var routine : engine.routines()) routine.onRegister(settings.createGroup("Routine: " + routine.name()));
         for (Hook slot : List.of(Hook.SURVIVAL, Hook.COMBAT, Hook.REGEAR)) {
@@ -180,18 +193,16 @@ public final class TreeJava extends Module {
     @Override
     public void onActivate() {
         try {
-            jsonl.session(requestedBot == null ? "lab" : requestedBot);
             if (requestedTask != null) {
                 engine.bindWorld(world.storageKey());
                 requireLive(requestedTask);
                 engine.startBot(new LiveLabBot(labSettings, requestedTask, world, engine.outputs()));
-            } else if (requestedBot != null) {
-                requireLiveBot(requestedBot);
-                engine.bindWorld(world.storageKey());
-                engine.startBot(engine.bots().create(requestedBot));
             } else {
-                engine.bindWorld("simulated");
-                engine.startBot(engine.bots().create("lab"));
+                String name = requestedBot == null ? selectedBot.get() : requestedBot;
+                if (!engine.bots().names().contains(name)) throw new IllegalArgumentException("unknown bot: " + name);
+                if (!name.equals("lab")) requireLiveBot(name);
+                engine.bindWorld(name.equals("lab") ? "simulated" : world.storageKey());
+                engine.startBot(engine.bots().create(name));
             }
         } catch (RuntimeException ex) {
             error("%s", ex.getMessage());
@@ -206,7 +217,12 @@ public final class TreeJava extends Module {
 
     public void startLab() {
         if (isActive()) throw new IllegalStateException("TreeJava is already active; use .bt switch lab");
-        enable();
+        requestedBot = "lab";
+        try {
+            enable();
+        } finally {
+            requestedBot = null;
+        }
         if (!isActive() || engine.snapshot().state() == RootState.STOPPED) {
             disable();
             throw new IllegalStateException("TreeJava failed to start; see stop report");
@@ -275,7 +291,7 @@ public final class TreeJava extends Module {
 
     public void selectScenario(LabScenario next) {
         labSettings.selectScenario(next);
-        if (!isActive()) enable();
+        if (!isActive()) startLab();
     }
 
     public void walkTo(double x, double y, double z) {

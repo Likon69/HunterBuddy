@@ -13,10 +13,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
@@ -33,6 +35,7 @@ public final class PersistentStore {
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(128), task -> { Thread thread = new Thread(task, "TreeJava store"); thread.setDaemon(true); return thread; });
     private volatile String error;
+    private final Set<Path> unreadable = new HashSet<>();
 
     public PersistentStore(Path directory) { this.directory = Objects.requireNonNull(directory); }
 
@@ -42,7 +45,12 @@ public final class PersistentStore {
 
     public CompletableFuture<Void> save(String world, String owner, Map<Key<?>, Object> values) {
         Map<Key<?>, Object> snapshot = Map.copyOf(values);
-        return submit(() -> { write(path(world, owner), snapshot); return null; });
+        return submit(() -> { write(path(world, owner), snapshot, false); return null; });
+    }
+
+    public CompletableFuture<Void> overwrite(String world, String owner, Map<Key<?>, Object> values) {
+        Map<Key<?>, Object> snapshot = Map.copyOf(values);
+        return submit(() -> { write(path(world, owner), snapshot, true); return null; });
     }
 
     public CompletableFuture<BotStats.Snapshot> loadStats(String bot) {
@@ -50,7 +58,7 @@ public final class PersistentStore {
     }
 
     public CompletableFuture<Void> saveStats(String bot, BotStats.Snapshot snapshot) {
-        return submit(() -> { write(directory.resolve("stats-" + safe(bot) + ".json"), Map.of(STATS, snapshot)); return null; });
+        return submit(() -> { write(directory.resolve("stats-" + safe(bot) + ".json"), Map.of(STATS, snapshot), false); return null; });
     }
 
     public String status() { return "Store queued=" + worker.getQueue().size() + (error == null ? "" : " error=" + error); }
@@ -70,11 +78,16 @@ public final class PersistentStore {
     }
 
     private Map<Key<?>, Object> read(Path path) throws IOException {
-        if (!Files.exists(path)) return Map.of();
-        if (Files.size(path) > sizeLimit(path)) throw new IOException("store exceeds size limit: " + path.getFileName());
         try {
+            if (Files.notExists(path)) {
+                unreadable.remove(path);
+                return Map.of();
+            }
+            if (Files.size(path) > sizeLimit(path)) throw new IOException("store exceeds size limit");
             StoreEntry entry = gson.fromJson(Files.readString(path, StandardCharsets.UTF_8), StoreEntry.class);
-            if (entry.schema() != StoreEntry.SCHEMA || entry.values().size() > 4_096) return Map.of();
+            if (entry == null || entry.values() == null) throw new IOException("invalid store structure");
+            if (entry.schema() != StoreEntry.SCHEMA) throw new IOException("unsupported store schema " + entry.schema());
+            if (entry.values().size() > 4_096) throw new IOException("too many durable entries");
             Map<Key<?>, Object> values = new LinkedHashMap<>();
             for (var value : entry.values().entrySet()) {
                 Class<?> type = TYPES.get(value.getValue().type());
@@ -84,14 +97,16 @@ public final class PersistentStore {
                 String prefix = scope.name() + "/";
                 if (decoded != null && value.getKey().startsWith(prefix)) values.put(new Key<>(value.getKey().substring(prefix.length()), type, scope, true), decoded);
             }
+            unreadable.remove(path);
             return Map.copyOf(values);
-        } catch (RuntimeException ex) {
-            error = "ignored invalid store " + path.getFileName() + ": " + ex.getClass().getSimpleName();
-            return Map.of();
+        } catch (IOException | RuntimeException ex) {
+            unreadable.add(path);
+            throw new IOException("Cannot read " + path.getFileName() + ": " + Objects.toString(ex.getMessage(), ex.getClass().getSimpleName()), ex);
         }
     }
 
-    private void write(Path path, Map<Key<?>, Object> snapshot) throws IOException {
+    private void write(Path path, Map<Key<?>, Object> snapshot, boolean overwrite) throws IOException {
+        if (!overwrite && unreadable.contains(path)) throw new IOException("Unreadable store is protected: " + path.getFileName());
         Map<String, StoreEntry.Value> values = new LinkedHashMap<>();
         for (var entry : snapshot.entrySet()) {
             Key<?> key = entry.getKey();
@@ -108,6 +123,7 @@ public final class PersistentStore {
         try {
             Files.writeString(temporary, data, StandardCharsets.UTF_8);
             Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            if (overwrite) unreadable.remove(path);
         } finally { Files.deleteIfExists(temporary); }
     }
 

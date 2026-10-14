@@ -18,7 +18,7 @@ public final class RepeatWhileProgress extends Decorator {
 
     private RepeatWhileProgress(ProgressGuard progress) {
         super("repeat-while-progress", progress);
-        this.progress = progress;
+        this.progress = progress.retainOnSuccess();
     }
 
     public RepeatWhileProgress keyedBy(Function<TickContext, String> target) {

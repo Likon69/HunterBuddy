@@ -50,7 +50,7 @@ public final class ClickSlot extends Action {
             }
         }
         if (ticket.confirmed()) {
-            ctx.progress(new ProgressEvidence(EvidenceKind.MILESTONE, 1, "inventory transaction confirmed"));
+            ctx.progress(new ProgressEvidence(EvidenceKind.TRANSACTION_CONFIRMED, 1, "inventory transaction confirmed"));
             return Success.INSTANCE;
         }
         if (ticket.failed()) return fail(FailureCode.PREEMPTED, inventory.status());

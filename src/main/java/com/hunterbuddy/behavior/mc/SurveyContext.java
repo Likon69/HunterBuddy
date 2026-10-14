@@ -43,6 +43,7 @@ public final class SurveyContext {
     public String result = "incomplete survey";
     public boolean missionMode;
     public boolean interrupted;
+    public boolean budgetRefused;
     public BooleanSupplier returnRequested = () -> false;
     public Predicate<MaterialSite> eligible = site -> true;
 

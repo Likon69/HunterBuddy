@@ -17,6 +17,7 @@ import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.TaskScope;
 import java.util.List;
+import net.minecraft.util.math.BlockPos;
 
 public final class BaseVisitTree {
     private BaseVisitTree() {}
@@ -49,10 +50,18 @@ public final class BaseVisitTree {
                 }
                 return Math.hypot(visit.logistics.world.client().player.getX() - visit.logistics.facts.origin().getX(),
                     visit.logistics.world.client().player.getZ() - visit.logistics.facts.origin().getZ()) <= 12;
-            }, new Deferred("fly-to-base", () -> FlyToTree.build(
-                () -> visit.logistics.facts.site == null ? visit.position(visit.facts.delivery) : visit.logistics.facts.origin(),
-                () -> visit.position(visit.facts.delivery), true, visit.logistics.world,
-                visit.logistics.baritone, visit.logistics.outputs))),
+            }, new Deferred("reach-base", () -> {
+                BlockPos delivery = visit.position(visit.facts.delivery);
+                BlockPos destination = visit.logistics.facts.site == null ? delivery : visit.logistics.facts.origin();
+                if (visit.logistics.world.client().player.isOnGround() && Math.hypot(
+                    visit.logistics.world.client().player.getX() - delivery.getX(),
+                    visit.logistics.world.client().player.getZ() - delivery.getZ()) <= 32) {
+                    return GroundTravel.build(destination, visit.logistics.facts.site == null ? 2 : 0,
+                        visit.logistics.baritone, visit.logistics.outputs);
+                }
+                return FlyToTree.build(() -> destination, () -> delivery, true, visit.logistics.world,
+                    visit.logistics.baritone, visit.logistics.outputs);
+            })),
             LogisticsOperations.unless("base equipment location tracked", () -> visit.logistics.facts.site != null,
                 new InventoryMilestone("base-reached-location-selected", ctx -> {
                     visit.logistics.facts.site = LogisticsFacts.coordinates(

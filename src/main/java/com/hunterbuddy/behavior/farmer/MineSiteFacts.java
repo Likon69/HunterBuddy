@@ -21,6 +21,7 @@ public final class MineSiteFacts {
     public List<Long> blocks = new ArrayList<>();
     public Set<Long> supports = new HashSet<>();
     public int mined;
+    public int estimatedQuantity;
     public int excavated;
     public Set<Long> lostBlocks = new HashSet<>();
     public Long pending;

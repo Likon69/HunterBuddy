@@ -49,9 +49,9 @@ public final class ReconcileLogisticsTransfer extends Node {
         List<ItemStack> beforePlayer = LogisticsInventory.decode(transfer.player, 36, logistics.world);
         List<ItemStack> beforeContainer = LogisticsInventory.decode(transfer.contents, 27, logistics.world);
         List<ItemStack> player = LogisticsInventory.player(logistics.world);
-        if (LogisticsInventory.equal(beforePlayer, player) && LogisticsInventory.equal(beforeContainer, actual)) {
+        if (LogisticsInventory.playerUnchanged(beforePlayer, player) && LogisticsInventory.equal(beforeContainer, actual)) {
             transfer.pending = false;
-            logistics.save(ctx, "transfer not applied: both inventories unchanged");
+            logistics.save(ctx, "transfer not applied: container unchanged and player totals conserved allowing meals");
             return Success.INSTANCE;
         }
         ItemStack stack = LogisticsInventory.decode(transfer.stack, 1, logistics.world).getFirst();

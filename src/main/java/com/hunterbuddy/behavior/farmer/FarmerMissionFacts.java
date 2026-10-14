@@ -19,4 +19,5 @@ public final class FarmerMissionFacts {
     public long waitUntil;
     public boolean waitAtBase;
     public Map<Long, Long> occupied = new LinkedHashMap<>();
+    public Map<Long, Integer> siteFailures = new LinkedHashMap<>();
 }

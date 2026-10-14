@@ -92,15 +92,6 @@ public final class MissionJournal {
         return ctx.bb().get(owner(ctx), new Key<>("farmer-equipment-" + name, String.class, Scope.WORLD, true)).orElse("");
     }
 
-    public void reset(TickContext ctx) {
-        reset(ctx, owner(ctx));
-    }
-
-    public static void reset(TickContext ctx, String owner) {
-        clear(ctx, owner);
-        ctx.checkpoint(owner);
-    }
-
     public static void clear(TickContext ctx, String owner) {
         ctx.bb().durable(owner).keySet().stream().filter(key -> key.name().startsWith("farmer-"))
             .toList().forEach(key -> ctx.bb().remove(owner, key));

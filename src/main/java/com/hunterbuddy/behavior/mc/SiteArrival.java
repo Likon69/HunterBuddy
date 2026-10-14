@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.MaterialSite;
+import com.hunterbuddy.behavior.farmer.MineSiteFacts;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.Heightmap;
 
@@ -11,6 +12,15 @@ public final class SiteArrival {
     private SiteArrival() {}
 
     public static BlockPos stand(MaterialSite site, FarmerProfile profile, FarmerZone zone, WorldReader world) {
+        return stand(site, profile, zone, world, null);
+    }
+
+    public static BlockPos stand(MaterialSite site, FarmerProfile profile, FarmerZone zone, WorldReader world, MineSiteFacts saved) {
+        if (profile.strategy().equals("layer") && site.started && belongsTo(saved, site, profile, world)) {
+            BlockPos entrance = BlockPos.fromLong(saved.entrance);
+            return zone.containsWithMargin(entrance.getX() + 0.5, entrance.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)
+                && practical(entrance, world) ? entrance : null;
+        }
         boolean layer = profile.strategy().equals("layer");
         BlockPos origin = site.seed().up();
         BlockPos best = null;
@@ -39,6 +49,11 @@ public final class SiteArrival {
             }
         }
         return best;
+    }
+
+    public static boolean belongsTo(MineSiteFacts saved, MaterialSite site, FarmerProfile profile, WorldReader world) {
+        return saved != null && saved.world.equals(world.storageKey()) && saved.profile.equals(profile.key())
+            && (saved.site == site.shelterId || saved.site == site.seed().asLong());
     }
 
     private static boolean practical(BlockPos point, WorldReader world) {
