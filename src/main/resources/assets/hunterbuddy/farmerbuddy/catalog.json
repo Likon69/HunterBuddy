@@ -2,7 +2,7 @@
   "profiles": [
     {
       "key": "sand",
-      "label": "Sable",
+      "label": "Sand",
       "blocks": ["minecraft:sand"],
       "acceptedItems": ["minecraft:sand"],
       "tool": "shovel",
@@ -11,7 +11,7 @@
     },
     {
       "key": "red_sand",
-      "label": "Sable rouge",
+      "label": "Red sand",
       "blocks": ["minecraft:red_sand"],
       "acceptedItems": ["minecraft:red_sand"],
       "tool": "shovel",
@@ -20,7 +20,7 @@
     },
     {
       "key": "gravel",
-      "label": "Gravier",
+      "label": "Gravel",
       "blocks": ["minecraft:gravel"],
       "acceptedItems": ["minecraft:gravel"],
       "tool": "shovel",
@@ -29,7 +29,7 @@
     },
     {
       "key": "dirt",
-      "label": "Terre",
+      "label": "Dirt",
       "blocks": ["minecraft:dirt", "minecraft:grass_block", "minecraft:coarse_dirt"],
       "acceptedItems": ["minecraft:dirt"],
       "tool": "shovel",
