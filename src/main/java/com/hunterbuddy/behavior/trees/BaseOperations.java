@@ -61,9 +61,14 @@ public final class BaseOperations {
 
     public static Node transfer(BaseVisitContext visit, Supplier<BlockPos> position, String purpose,
                                 Supplier<InventoryTransaction> transaction) {
-        return new Deferred("transfert-base-" + purpose, () -> {
+        return transfer(visit, position, purpose, transaction, 120);
+    }
+
+    public static Node transfer(BaseVisitContext visit, Supplier<BlockPos> position, String purpose,
+                                Supplier<InventoryTransaction> transaction, int timeout) {
+        return new Deferred("base-transfer-" + purpose, () -> {
             BaseTransferReceipt receipt = new BaseTransferReceipt(visit, position.get(), purpose);
-            return new Timeout(120, new WithLease(Set.of(Resource.INVENTORY), LeasePolicy.WAIT,
+            return new Timeout(timeout, new WithLease(Set.of(Resource.INVENTORY), LeasePolicy.WAIT,
                 new TransferItems(visit.logistics.outputs.inventory(), () -> {
                     try {
                         return transaction.get();

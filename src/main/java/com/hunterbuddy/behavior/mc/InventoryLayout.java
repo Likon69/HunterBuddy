@@ -5,10 +5,13 @@ import com.hunterbuddy.util.Rockets;
 import java.util.List;
 import java.util.function.Predicate;
 import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ItemEnchantmentsComponent;
 import net.minecraft.enchantment.Enchantments;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.registry.tag.TagKey;
 
 public final class InventoryLayout {
     private final WorldReader world;
@@ -21,7 +24,7 @@ public final class InventoryLayout {
 
     public InventoryLayout(WorldReader world, FarmerProfile profile) {
         this.world = world;
-        net.minecraft.registry.tag.TagKey<net.minecraft.item.Item> toolTag = switch (profile.tool()) {
+        TagKey<Item> toolTag = switch (profile.tool()) {
             case "shovel" -> ItemTags.SHOVELS;
             case "axe" -> ItemTags.AXES;
             default -> ItemTags.PICKAXES;
@@ -35,7 +38,7 @@ public final class InventoryLayout {
 
     public static boolean silkPickaxe(ItemStack stack) {
         return !stack.isEmpty() && stack.isIn(ItemTags.PICKAXES) && !stack.willBreakNextUse()
-            && stack.getOrDefault(DataComponentTypes.ENCHANTMENTS, net.minecraft.component.type.ItemEnchantmentsComponent.DEFAULT)
+            && stack.getOrDefault(DataComponentTypes.ENCHANTMENTS, ItemEnchantmentsComponent.DEFAULT)
                 .getEnchantmentEntries().stream().anyMatch(entry -> entry.getKey().matchesKey(Enchantments.SILK_TOUCH) && entry.getIntValue() > 0);
     }
 

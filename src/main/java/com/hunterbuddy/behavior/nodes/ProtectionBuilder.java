@@ -15,14 +15,18 @@ import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.LogisticsFacts;
 import com.hunterbuddy.behavior.farmer.LogisticsMemory;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
+import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.InventoryLayout;
+import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.mc.LogisticsSite;
+import com.hunterbuddy.behavior.mc.MineGeometry;
 import com.hunterbuddy.behavior.mc.ProtectionRegistry;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.resource.LeasePolicy;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.trees.EquipmentTree;
+import com.hunterbuddy.behavior.trees.GroundTravel;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.block.FallingBlock;
@@ -30,24 +34,29 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 
 public final class ProtectionBuilder extends Node {
     private final LogisticsFacts state;
     private final LogisticsMemory journal;
     private final WorldReader world;
+    private final BaritoneBridge baritone;
     private final Outputs outputs;
     private final boolean floorOnly;
     private Node child;
     private boolean preparing;
+    private boolean traveling;
     private final FarmerProfile profile;
     private final MissionJournal mission;
 
-    public ProtectionBuilder(LogisticsFacts state, LogisticsMemory journal, WorldReader world, Outputs outputs, boolean floorOnly,
+    public ProtectionBuilder(LogisticsFacts state, LogisticsMemory journal, WorldReader world, BaritoneBridge baritone, Outputs outputs, boolean floorOnly,
         FarmerProfile profile, MissionJournal mission) {
         super(floorOnly ? "logistics-floor" : "logistics-protection");
         this.state = state;
         this.journal = journal;
         this.world = world;
+        this.baritone = baritone;
         this.outputs = outputs;
         this.floorOnly = floorOnly;
         this.profile = profile;
@@ -63,6 +72,7 @@ public final class ProtectionBuilder extends Node {
     protected void onStart(TickContext ctx) {
         child = null;
         preparing = false;
+        traveling = false;
         ProtectionRegistry.remember(ctx, mission, outputs.mining(), state.origin());
     }
 
@@ -104,7 +114,16 @@ public final class ProtectionBuilder extends Node {
             journal.save(ctx, state, "protection existing at=" + pos.toShortString());
             return new Running("using existing solid protection");
         }
+        if (child == null && world.client().player.getBoundingBox().intersects(new Box(pos))) {
+            BlockPos stand = safeStanding(pos);
+            if (stand == null) return fail(FailureCode.UNREACHABLE, "no safe neighboring support outside the protection placement cell");
+            child = GroundTravel.build(stand, 0, baritone, outputs);
+            traveling = true;
+            TreeValidator.validate(child);
+            TreeValidator.bind(child, path() + "/vacate-placement-cell", ctx.owner(), hook());
+        }
         if (child == null) {
+            if (world.countMatching(this::block) == 0) return fail(FailureCode.BUDGET, "shelter blocks exhausted above the obsidian reserve");
             if (!world.state(pos).isReplaceable()) return fail(FailureCode.UNREACHABLE, "protection space needs excavation");
             if (world.findSlot(this::block) < 0) {
                 child = EquipmentTree.prepareHeld(new InventoryLayout(world, profile), this::block, 5, outputs, mission);
@@ -126,12 +145,33 @@ public final class ProtectionBuilder extends Node {
         }
         NodeResult result = child.execute(ctx);
         if (result instanceof Failure) return result;
+        if (traveling && result instanceof Success) {
+            traveling = false;
+            child = null;
+            return new Running("protection placement cell vacated on safe support");
+        }
         if (preparing && result instanceof Success) {
             preparing = false;
             child = null;
             return new Running("protection block ready");
         }
         return result instanceof Success ? confirmed(ctx, pos) : result;
+    }
+
+    private BlockPos safeStanding(BlockPos target) {
+        BlockPos best = null;
+        double distance = Double.POSITIVE_INFINITY;
+        for (int x = -2; x <= 2; x++) for (int z = -2; z <= 2; z++) for (int y = -1; y <= 1; y++) {
+            BlockPos feet = target.add(x, y, z);
+            if (feet.equals(target) || feet.up().equals(target) || !MineGeometry.standing(world, feet)
+                || !world.state(feet).getFluidState().isEmpty()
+                || !state.activeZone().containsWithMargin(feet.getX() + 0.5, feet.getZ() + 0.5, 3)) continue;
+            Vec3d eyes = Vec3d.ofBottomCenter(feet).add(0, world.client().player.getStandingEyeHeight(), 0);
+            if (eyes.squaredDistanceTo(Vec3d.ofCenter(target)) > 4.5 * 4.5) continue;
+            double score = feet.getSquaredDistance(world.feet());
+            if (score < distance) { distance = score; best = feet; }
+        }
+        return best;
     }
 
     private boolean recorded(BlockPos pos) {
@@ -144,9 +184,7 @@ public final class ProtectionBuilder extends Node {
     }
 
     private boolean block(ItemStack stack) {
-        return world.count(Items.OBSIDIAN) > 25 ? stack.isOf(Items.OBSIDIAN)
-            : stack.isOf(Items.COBBLESTONE) || stack.isOf(Items.COBBLED_DEEPSLATE) || stack.isOf(Items.NETHERRACK) ||
-                stack.isOf(Items.DIRT) || stack.isOf(Items.STONE);
+        return world.count(Items.OBSIDIAN) > 25 ? stack.isOf(Items.OBSIDIAN) : LogisticsInventory.shelterBlock(stack);
     }
 
     private NodeResult confirmed(TickContext ctx, BlockPos pos) {

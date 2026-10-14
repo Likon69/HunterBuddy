@@ -80,12 +80,12 @@ public final class BaseVisitTree {
                         }
                         visit.save(ctx, "rôles réserve et divers identifiés par contenu et journal");
                     }), ContainerTree.close(visit.logistics.outputs),
-                    BasePackTree.build(visit),
+                    BaseDeliveryTree.build(visit), BasePackTree.build(visit),
                     BaseDeliveryTree.build(visit), BaseSurplusTree.build(visit), BaseMiscTree.build(visit),
                     new InventoryMilestone("mesurer-budget-de-départ", ctx -> BaseStockPlan.measure(ctx, visit)),
                     BaseFuelTree.recoverStock(visit),
                     BaseEmptyShulkersTree.build(visit),
-                    BaseReserveTree.build(visit), BaseFuelTree.build(visit))),
+                    BaseReserveTree.build(visit), BaseShelterStockTree.build(visit), BaseFuelTree.build(visit))),
             new Deferred("retour-au-matériel-base", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,
                 visit.logistics.baritone, visit.logistics.outputs)),
             TrackedEquipmentTree.recover(visit.logistics, "chest"));

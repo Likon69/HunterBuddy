@@ -10,6 +10,8 @@ public final class LogisticsFacts {
     public boolean store;
     public boolean regear;
     public boolean exitTop;
+    public boolean armorBlocked;
+    public boolean baseRequested;
     public int step;
     public int[] site;
     public int[] departure;

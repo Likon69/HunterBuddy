@@ -239,6 +239,13 @@ public final class FarmerMissionContext {
         return new FlightBudget(FlightPerformance.load(tick), outputs.flight().minimumRockets()).returnWear(distance);
     }
 
+    public boolean flightAfterField() {
+        long remaining = Math.max(1, step.shulkerTarget() - journal.delivered(tick, step.index() - 1));
+        return players() || fuelDue() || facts.baseRequested || facts.changeRequested
+            || selected == null || !selected.usable() || !eligible(selected)
+            || capacity() == 0 || journal.carried(tick, step.index() - 1) >= remaining;
+    }
+
     public boolean retreatDue() {
         return siteOccupied() || facts.changeRequested || fuelDue() || freeSlots() <= 2
             || world.countMatching(LogisticsInventory.accepted(profile)) >= MaterialSite.SHULKER_BLOCKS

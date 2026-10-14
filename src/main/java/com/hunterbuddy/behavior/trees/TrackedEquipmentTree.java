@@ -30,6 +30,7 @@ public final class TrackedEquipmentTree {
             LogisticsOperations.guard("bloc suivi présent " + role, () -> logistics.placed(role)),
             new ConfirmEquipmentPlacement(logistics, role),
             new Deferred("poser-" + role, () -> new Sequence("préparer-et-poser-" + role,
+                role.equals("chest") ? LogisticsOperations.prepare(logistics, InventoryLayout::silkPickaxe, 1) : new Succeed(),
                 LogisticsOperations.prepare(logistics, logistics.equipment(role).filter(), role.equals("chest") ? 4 : 8),
                 EquipmentTree.place(logistics.equipment(role), logistics.world, logistics.outputs)))).propagateFailures();
     }

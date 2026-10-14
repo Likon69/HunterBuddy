@@ -80,8 +80,7 @@ public final class BaseCargoTree {
                     BaseOperations.transfer(visit, target, purpose, () -> {
                         ItemStack expected = BaseOperations.cargo(visit);
                         return visit.logistics.outputs.inventory().firstDeposit(
-                            stack -> ItemStack.areEqual(stack, expected), target.get().equals(visit.position(visit.facts.delivery))
-                                ? FailureCode.MISSION_STOP : FailureCode.NO_OPTION);
+                            stack -> ItemStack.areEqual(stack, expected), FailureCode.MISSION_STOP);
                     })), ContainerTree.close(visit.logistics.outputs)));
     }
 }

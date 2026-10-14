@@ -35,7 +35,8 @@ public final class EquipReserveArmorTree {
                 if (!logistics.world.client().player.isCreative() && EnchantmentHelper.hasAnyEnchantmentsWith(
                     worn, EnchantmentEffectComponentTypes.PREVENT_ARMOR_CHANGE)) {
                     return new InventoryMilestone("armure-liée", ctx -> {
-                        logistics.facts.incomplete = "armure liée " + slot.getName();
+                        logistics.facts.armorBlocked = true;
+                        logistics.facts.incomplete = "armor bound by Curse of Binding: " + slot.getName();
                         logistics.save(ctx, logistics.facts.incomplete);
                     });
                 }

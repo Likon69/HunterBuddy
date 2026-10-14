@@ -1,9 +1,10 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
-import com.hunterbuddy.behavior.mc.ShulkerSignature;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
+import com.hunterbuddy.behavior.mc.ShulkerSignature;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.RepeatUntil;
 import com.hunterbuddy.behavior.nodes.Sequence;
@@ -17,6 +18,14 @@ public final class BaseMiscTree {
         return new Sequence("vider-shulker-divers-au-retour", BaseOperations.ender(visit),
             LogisticsOperations.unless("divers absent ou vide", () -> empty(visit),
                 new Sequence("cycle-divers-base", ContainerTree.close(visit.logistics.outputs),
+                    new InventoryMilestone("start-or-resume-miscellaneous-unloading", ctx -> {
+                        if (visit.logistics.stored("divers")) {
+                            visit.logistics.facts.divers = new ShulkerCycleFacts();
+                            visit.logistics.forget("divers");
+                            visit.logistics.mission.equipment(ctx, visit.logistics.equipmentName("divers"), "");
+                            visit.save(ctx, "miscellaneous unloading cycle reset after packing");
+                        }
+                    }),
                     ShulkerCycleTree.build(visit.logistics, "divers", () -> unload(visit), false))),
             ContainerTree.close(visit.logistics.outputs),
             new InventoryMilestone("divers-vidés-confirmés", ctx -> visit.save(ctx, "divers vidés au coffre retour")));

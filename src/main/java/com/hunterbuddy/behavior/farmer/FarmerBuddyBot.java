@@ -30,6 +30,7 @@ import com.hunterbuddy.behavior.mc.XaeroWaypoints;
 import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.Fail;
+import com.hunterbuddy.behavior.nodes.FieldLogisticsResult;
 import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.Sequence;
@@ -208,18 +209,18 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
         store = new Deferred("ranger-et-regear-sous-la-même-protection", () -> {
             recoveryOnSite = false;
             LogisticsContext logistics = new LogisticsContext(() -> activeProfile, () -> mission.zone, true,
-                () -> regearAvailable && LogisticsInventory.needsRegear(world, activeProfile), () -> false,
+                () -> regearAvailable && LogisticsInventory.needsRegear(world, activeProfile), mission::flightAfterField,
                 () -> mission.step.index() - 1, world, baritone, outputs, journal);
             logistics.evacuationRequested = () -> mission.players() || mission.fuelDue();
             logistics.requiredFlightWear = mission.returnWear();
-            return StoreTree.build(logistics);
+            return new FieldLogisticsResult(mission, logistics, StoreTree.build(logistics));
         }).resumable();
         regear = new Deferred("field-regear", () -> {
             recoveryOnSite = false;
             LogisticsContext logistics = new LogisticsContext(() -> activeProfile, () -> mission.zone, false,
-                () -> true, () -> false, () -> mission.step.index() - 1, world, baritone, outputs, journal);
+                () -> true, mission::flightAfterField, () -> mission.step.index() - 1, world, baritone, outputs, journal);
             logistics.requiredFlightWear = mission.returnWear();
-            return RegearTree.build(logistics);
+            return new FieldLogisticsResult(mission, logistics, RegearTree.build(logistics));
         }).resumable();
         return new Sequence("cerveau-de-mission",
             new ResolveProfile(),

@@ -9,6 +9,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.Heightmap;
 
 public final class LogisticsSite {
+    public static final int MAX_ATTEMPTS = 128;
     private LogisticsSite() {}
     public static boolean inside(BlockPos center, FarmerZone zone) {
         return List.of(center.add(-2, 0, -2), center.add(-2, 0, 2), center.add(2, 0, -2), center.add(2, 0, 2), center.north(3)).stream()

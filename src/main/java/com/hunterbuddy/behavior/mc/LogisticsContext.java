@@ -69,7 +69,6 @@ public final class LogisticsContext {
             facts.dimension = identity.dimensionKey();
             facts.store = store;
             facts.regear = regear.getAsBoolean();
-            facts.exitTop = exitTop.getAsBoolean();
             facts.step = step.getAsInt();
             facts.zone = zones.get().corners().stream().map(LogisticsFacts::coordinates).toList();
             for (String role : List.of("chest", "material", "divers", "reserve")) {
@@ -182,6 +181,15 @@ public final class LogisticsContext {
             throw new IllegalStateException("stored " + role + " differs from the actual ender chest");
         }
         return true;
+    }
+
+    public boolean finishing() {
+        return facts.site != null && (equipment("chest").breakRequested() || returned("chest"));
+    }
+
+    public boolean topExitRequested() {
+        return exitTop.getAsBoolean() || evacuationRequested.getAsBoolean() || facts.baseRequested
+            || !facts.material.unavailable.isEmpty() || !facts.divers.unavailable.isEmpty();
     }
 
     public boolean protectedSite() {

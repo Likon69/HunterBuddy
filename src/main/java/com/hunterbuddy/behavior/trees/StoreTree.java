@@ -36,14 +36,14 @@ public final class StoreTree {
 
     public static Node build(LogisticsContext logistics) {
         return new TaskScope(new LogisticsRun(logistics, new Sequence("rangement",
-            new InventoryMilestone("charger-faits-logistiques", logistics::initialize), LogisticsSiteTree.build(logistics),
-            LogisticsOperations.unless("ender chest revenu ou en ramassage", () -> logistics.returned("chest")
-                || logistics.equipment("chest").breakRequested() && logistics.world.cleared(logistics.facts.chest()),
-                TrackedEquipmentTree.place(logistics, "chest")),
-            LogisticsOperations.pendingTransfer(logistics), material(logistics, "material"), material(logistics, "divers"),
-            LogisticsOperations.unless("regear non dû", () -> !logistics.facts.regear
-                || logistics.evacuationRequested.getAsBoolean() && logistics.cycle("reserve").signature.isEmpty(),
-                RegearTree.protectedCycle(logistics)),
+            new InventoryMilestone("load-logistics-facts", logistics::initialize),
+            LogisticsOperations.unless("ender chest recovery already started", logistics::finishing,
+                new Sequence("prepare-and-work-field-storage", LogisticsSiteTree.build(logistics),
+                    TrackedEquipmentTree.place(logistics, "chest"),
+                    LogisticsOperations.pendingTransfer(logistics), material(logistics, "material"), material(logistics, "divers"),
+                    LogisticsOperations.unless("regear is not due", () -> !logistics.facts.regear
+                        || logistics.evacuationRequested.getAsBoolean() && logistics.cycle("reserve").signature.isEmpty(),
+                        RegearTree.protectedCycle(logistics)))),
             LogisticsFinishTree.build(logistics))));
     }
 

@@ -31,7 +31,10 @@ public final class ProtectionExitTree {
 
     public static Node build(LogisticsContext logistics) {
         return new Sequence("sortie-de-protection",
-            new Deferred("choisir-sortie", () -> logistics.facts.exitTop ? top(logistics) : ground(logistics)),
+            new InventoryMilestone("choose-shelter-exit-from-current-mission", ctx -> {
+                if (!logistics.facts.exitBreaking) logistics.facts.exitTop = logistics.topExitRequested();
+                logistics.save(ctx, "shelter exit selected from current mission state");
+            }), new Deferred("chosen-shelter-exit", () -> logistics.facts.exitTop ? top(logistics) : ground(logistics)),
             new InventoryMilestone("sortie-confirmée", ctx -> {
                 logistics.facts.departure = LogisticsFacts.coordinates(logistics.world.feet());
                 logistics.outputs.mining().releaseExit();

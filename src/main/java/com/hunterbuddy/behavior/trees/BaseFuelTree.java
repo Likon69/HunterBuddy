@@ -42,19 +42,23 @@ public final class BaseFuelTree {
 
     private static Node take(BaseVisitContext visit, Supplier<BlockPos> source, String purpose) {
         return new Sequence("prendre-une-pile-de-fusées",
-            new InventoryMilestone("place-pour-fusées", ctx -> {
-                if (LogisticsInventory.player(visit.logistics.world).stream().filter(ItemStack::isEmpty).count() < 3) {
-                    throw new IllegalStateException("inventaire sans place pour les fusées, "
-                        + "le ramassage de l'ender chest et le slot libre");
-                }
-            }), BaseOperations.transfer(visit, source, purpose, () -> {
+            BaseOperations.transfer(visit, source, purpose, () -> {
                 List<ItemStack> contents = visit.logistics.outputs.inventory().containerContents();
-                for (int i = 0; i < contents.size(); i++) {
-                    if (Rockets.isPlain(contents.get(i))) {
-                        return visit.logistics.outputs.inventory().takeStack(i, contents.get(i));
+                int needed = visit.facts.rocketBudget - visit.logistics.world.countMatching(Rockets::isPlain);
+                long free = LogisticsInventory.player(visit.logistics.world).stream().filter(ItemStack::isEmpty).count();
+                for (int pass = 0; pass < 2; pass++) {
+                    for (int i = 0; i < contents.size(); i++) {
+                        if (!Rockets.isPlain(contents.get(i))) continue;
+                        boolean merge = visit.logistics.outputs.inventory().mergesWithoutNewSlot(contents.get(i), needed);
+                        if (pass == 0 && merge || pass == 1 && free >= 3) {
+                            return visit.logistics.outputs.inventory().takeStackUpTo(i, contents.get(i), needed);
+                        }
                     }
                 }
+                if (contents.stream().anyMatch(Rockets::isPlain)) {
+                    throw new OperationFailure(FailureCode.BUDGET, "rocket stock needs space while preserving ender chest pickup and the free slot");
+                }
                 throw new OperationFailure(FailureCode.MISSION_STOP, "base has no plain rockets in the supply chest");
-            }));
+            }, 1200));
     }
 }

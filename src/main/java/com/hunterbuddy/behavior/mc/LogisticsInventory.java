@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.google.gson.JsonParser;
 import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.util.GliderSwap;
 import com.hunterbuddy.util.Rockets;
@@ -38,6 +39,11 @@ public final class LogisticsInventory {
     public static boolean anyTool(ItemStack stack) {
         return stack.isIn(ItemTags.PICKAXES) || stack.isIn(ItemTags.SHOVELS) || stack.isIn(ItemTags.AXES) || stack.isIn(ItemTags.HOES)
             || stack.isIn(ItemTags.SWORDS);
+    }
+
+    public static boolean shelterBlock(ItemStack stack) {
+        return stack.isOf(Items.COBBLESTONE) || stack.isOf(Items.COBBLED_DEEPSLATE)
+            || stack.isOf(Items.NETHERRACK) || stack.isOf(Items.DIRT) || stack.isOf(Items.STONE);
     }
 
     public static boolean protection(ItemStack stack) {
@@ -113,7 +119,7 @@ public final class LogisticsInventory {
     public static List<ItemStack> decode(String encoded, int size, WorldReader world) {
         ContainerComponent component =
             ContainerComponent.CODEC.parse(world.client().world.getRegistryManager().getOps(JsonOps.INSTANCE),
-            com.google.gson.JsonParser.parseString(encoded)).getOrThrow();
+            JsonParser.parseString(encoded)).getOrThrow();
         DefaultedList<ItemStack> contents = DefaultedList.ofSize(size, ItemStack.EMPTY);
         component.copyTo(contents);
         return List.copyOf(contents);
@@ -160,19 +166,19 @@ public final class LogisticsInventory {
     public static List<String> missing(WorldReader world, FarmerProfile profile, List<ItemStack> reserve) {
         List<String> missing = new ArrayList<>();
         if (profileTools(world, profile) == 0 && reserve.stream().noneMatch(stack -> tool(stack, profile) && healthy(stack)))
-            missing.add("outil " + profile.tool());
+            missing.add("tool " + profile.tool());
         if (world.countMatching(stack -> InventoryLayout.silkPickaxe(stack) && healthy(stack)) == 0 && reserve.stream().noneMatch(stack
-            -> InventoryLayout.silkPickaxe(stack) && healthy(stack))) missing.add("pioche Toucher de soie");
+            -> InventoryLayout.silkPickaxe(stack) && healthy(stack))) missing.add("Silk Touch pickaxe");
         if (world.countMatching(stack -> stack.contains(DataComponentTypes.FOOD)) < 16 && reserve.stream().noneMatch(stack ->
-            stack.contains(DataComponentTypes.FOOD))) missing.add("nourriture");
+            stack.contains(DataComponentTypes.FOOD))) missing.add("food");
         if (world.countMatching(GliderSwap::isGlider) > 0 && world.countMatching(stack -> GliderSwap.isGlider(stack) && healthy(stack)) == 0
-            && reserve.stream().noneMatch(stack -> GliderSwap.isGlider(stack) && healthy(stack))) missing.add("élytres de rechange");
+            && reserve.stream().noneMatch(stack -> GliderSwap.isGlider(stack) && healthy(stack))) missing.add("replacement elytra");
         for (EquipmentSlot slot : List.of(EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD)) {
             ItemStack worn = world.client().player.getEquippedStack(slot);
             if ((worn.isEmpty() || worn.getDamage() > 0 || GliderSwap.isGlider(worn))
                 && world.countMatching(stack -> armorSlot(stack) == slot && stack.getDamage() == 0 && !GliderSwap.isGlider(stack)) == 0
                 && reserve.stream().noneMatch(stack -> armorSlot(stack) == slot && stack.getDamage() == 0 &&
-                    !GliderSwap.isGlider(stack))) missing.add("armure " + slot.getName());
+                    !GliderSwap.isGlider(stack))) missing.add("armor " + slot.getName());
         }
         return List.copyOf(missing);
     }

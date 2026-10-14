@@ -6,8 +6,10 @@ import com.hunterbuddy.behavior.resource.GatePolicy;
 import com.hunterbuddy.behavior.resource.Lease;
 import com.hunterbuddy.behavior.resource.LeaseState;
 import com.hunterbuddy.behavior.resource.Resource;
+import com.hunterbuddy.util.QuietClicks;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.util.ArrayDeque;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
@@ -171,6 +173,11 @@ public final class InventoryBridge {
             || from.getStack().getCount() > to.getMaxItemCount(from.getStack()) || to.getStack().getCount() > from.getMaxItemCount(to.getStack()))) {
             throw new IllegalStateException("SWAP requires a hotbar destination");
         }
+        if (transaction.transferCount() > 0 && (!container()
+            || from.inventory == world.client().player.getInventory() || to.inventory != world.client().player.getInventory()
+            || !to.canInsert(from.getStack()) || capacity(to, from.getStack()) < transaction.transferCount())) {
+            throw new IllegalStateException("bounded pickup requires a container source and enough player stack capacity");
+        }
         if (transaction.action() == SlotActionType.QUICK_MOVE && !container()) {
             throw new IllegalStateException("QUICK_MOVE requires a container");
         }
@@ -216,6 +223,11 @@ public final class InventoryBridge {
     }
 
     private boolean restoreCursor() {
+        if (ticket.transaction.transferCount() > 0) {
+            if (ticket.serverConfirmed) { ticket.stage = Stage.RELEASED; return true; }
+            if (!isOurs()) { quarantine("bounded pickup lost its inventory authority"); return true; }
+            return false;
+        }
         if (ticket.transaction.action() != SlotActionType.PICKUP && ticket.serverConfirmed) { ticket.stage = Stage.RELEASED; return true; }
         if (!isOurs()) {
             quarantine("inventory handler or player authority changed");
@@ -275,6 +287,7 @@ public final class InventoryBridge {
                     && receipt.connection == world.client().getNetworkHandler().getConnection()) acceptCursor(receipt.stack);
             }
         }
+        advanceBoundedPickup();
         if (ticket != null && ticket.stage == Stage.RETURNING) {
             if (!restoreCursor() && ticks.getAsLong() - ticket.revokeAt >= GatePolicy.LEGACY.inventoryGraceTicks()) quarantine("cursor return not confirmed within 20 ticks");
         }
@@ -416,6 +429,10 @@ public final class InventoryBridge {
     private void confirm() {
         if (ticket.serverConfirmed || ticket.stage != Stage.SENT && ticket.stage != Stage.RETURNING) return;
         InventoryTransaction tx = ticket.transaction;
+        if (tx.transferCount() > 0) {
+            confirmBoundedPickup();
+            return;
+        }
         ItemStack source = ticket.received.get(tx.fromSlot());
         if (source == null) return;
         ItemStack before = ticket.before.get(tx.fromSlot());
@@ -446,6 +463,48 @@ public final class InventoryBridge {
             ticket.serverConfirmed = true;
             ticket.confirmed.accept("TRANSACTION_CONFIRMED syncId=" + tx.syncId() + " from=" + tx.fromSlot() + " to=" + tx.toSlot());
         }
+    }
+
+    private void confirmBoundedPickup() {
+        InventoryTransaction tx = ticket.transaction;
+        ItemStack before = ticket.before.get(tx.fromSlot());
+        ItemStack source = ticket.received.get(tx.fromSlot());
+        ItemStack destination = ticket.received.get(tx.toSlot());
+        int destinationBefore = matchingCount(ticket.before.get(tx.toSlot()), before);
+        if (ticket.partialReturning) {
+            if (source == null || destination == null || ticket.cursor == null || ticket.cursor.count != 0
+                || matchingCount(source, before) != before.getCount() - ticket.partialMoved
+                || matchingCount(destination, before) != destinationBefore + ticket.partialMoved) return;
+            if (ticket.stage == Stage.SENT) ticket.stage = Stage.CONFIRMED;
+            ticket.serverConfirmed = true;
+            ticket.confirmed.accept("BOUNDED_TRANSACTION_CONFIRMED syncId=" + tx.syncId() + " moved=" + ticket.partialMoved);
+            return;
+        }
+        int moved = ticket.partialStarted ? ticket.partialMoved + 1 : 0;
+        if (ticket.cursor == null || !ticket.cursor.id.equals(tx.expectedItemId())
+            || ticket.cursor.count != before.getCount() - moved) return;
+        if (!ticket.partialStarted && (source == null || !source.isEmpty())) return;
+        if (ticket.partialStarted && (destination == null
+            || matchingCount(destination, before) != destinationBefore + moved)) return;
+        ticket.partialMoved = moved;
+        ticket.partialReady = true;
+    }
+
+    private void advanceBoundedPickup() {
+        if (ticket == null || ticket.transaction.transferCount() == 0 || !ticket.partialReady
+            || ticket.serverConfirmed || !isOurs()
+            || ticket.stage != Stage.SENT && ticket.stage != Stage.RETURNING) return;
+        if (ticket.stage == Stage.RETURNING ? !QuietClicks.readyOrSettle() : !readyForClick(ticket.lease)) return;
+        InventoryTransaction tx = ticket.transaction;
+        boolean returning = ticket.stage == Stage.RETURNING || ticket.partialMoved >= tx.transferCount();
+        ticket.partialReady = false;
+        ticket.partialStarted = true;
+        ticket.partialReturning = returning;
+        ItemStack destination = ticket.received.get(tx.toSlot());
+        ticket.received.clear();
+        if (returning) ticket.received.put(tx.toSlot(), destination == null ? ticket.before.get(tx.toSlot()) : destination);
+        ticket.cursor = null;
+        emit(returning ? tx.fromSlot() : tx.toSlot(), returning ? 0 : 1, SlotActionType.PICKUP);
     }
 
     private static int matchingCount(ItemStack stack, ItemStack expected) {
@@ -509,6 +568,37 @@ public final class InventoryBridge {
         Slot free = handler.slots.stream().filter(slot -> slot.inventory == world.client().player.getInventory()
             && slot.getIndex() < 36 && slot.getStack().isEmpty()).findFirst().orElseThrow(() -> new IllegalStateException("free player slot required"));
         return new InventoryTransaction(handler.syncId, from.id, free.id, item(expected), expected.getCount(), SlotActionType.QUICK_MOVE);
+    }
+
+    public boolean mergesWithoutNewSlot(ItemStack expected, int maximum) {
+        if (!container()) return false;
+        int count = Math.min(expected.getCount(), maximum);
+        if (count < 1) return false;
+        int total = 0;
+        for (Slot slot : handler.slots) {
+            if (slot.inventory != world.client().player.getInventory() || slot.getIndex() >= 36
+                || slot.getStack().isEmpty() || !slot.canInsert(expected)) continue;
+            int available = capacity(slot, expected);
+            if (count < expected.getCount() && available >= count) return true;
+            total += available;
+        }
+        return count == expected.getCount() && total >= count;
+    }
+
+    public InventoryTransaction takeStackUpTo(int containerSlot, ItemStack expected, int maximum) {
+        if (maximum < 1) throw new IllegalArgumentException("positive stock transfer required");
+        if (expected.getCount() <= maximum) return takeStack(containerSlot, expected);
+        if (!container() || containerSlot < 0 || containerSlot >= containerContents().size()) {
+            throw new IllegalStateException("stock container slot missing");
+        }
+        Slot from = handler.slots.get(containerSlot);
+        if (!ItemStack.areEqual(from.getStack(), expected)) throw new IllegalStateException("stock source changed");
+        Slot destination = handler.slots.stream().filter(slot -> slot.inventory == world.client().player.getInventory()
+            && slot.getIndex() < 36 && slot.canInsert(expected) && capacity(slot, expected) >= maximum)
+            .min(Comparator.comparingInt(slot -> slot.getStack().isEmpty() ? 1 : 0))
+            .orElseThrow(() -> new OperationFailure(FailureCode.NO_OPTION, "player has no space for shelter stock"));
+        return new InventoryTransaction(handler.syncId, from.id, destination.id, item(expected), expected.getCount(),
+            SlotActionType.PICKUP, maximum);
     }
 
     public InventoryTransaction takeStackToHotbar(int containerSlot, ItemStack expected, int hotbar) {
@@ -626,6 +716,10 @@ public final class InventoryBridge {
         private long revokeAt;
         private boolean emittedReturn;
         private boolean serverConfirmed;
+        private boolean partialStarted;
+        private boolean partialReady;
+        private boolean partialReturning;
+        private int partialMoved;
 
         private Ticket(InventoryTransaction transaction, Lease lease, long startedMs, int revision, Consumer<String> confirmed) {
             this.transaction = transaction;
@@ -638,7 +732,7 @@ public final class InventoryBridge {
         public boolean confirmed() { return serverConfirmed; }
         public void delay(long ms) { startedMs += ms; }
         public boolean failed() { return stage == Stage.QUARANTINED || stage == Stage.RETURNING || stage == Stage.RELEASED; }
-        public boolean expired(long nowMs) { return stage == Stage.SENT && nowMs - startedMs >= 3_000; }
+        public boolean expired(long nowMs) { return stage == Stage.SENT && nowMs - startedMs >= 3_000L * (transaction.transferCount() == 0 ? 1 : transaction.transferCount() + 2); }
         private boolean finished() { return stage == Stage.RELEASED || stage == Stage.QUARANTINED; }
     }
 

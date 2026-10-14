@@ -22,10 +22,10 @@ public final class LogisticsSiteTree {
                 new Deferred("préparer-emplacement", () -> new PrepareLogisticsSite(
                     logistics.facts, logistics.world, logistics.baritone, logistics.outputs)),
                 new Deferred("construire-sol-central", () -> new ProtectionBuilder(logistics.facts, logistics.memory,
-                    logistics.world, logistics.outputs, true, logistics.profile, logistics.mission)),
+                    logistics.world, logistics.baritone, logistics.outputs, true, logistics.profile, logistics.mission)),
                 new Deferred("rejoindre-centre", () ->
                     GroundTravel.build(logistics.facts.origin(), 0, logistics.baritone, logistics.outputs)),
                 new Deferred("construire-protection", () -> new ProtectionBuilder(logistics.facts, logistics.memory,
-                    logistics.world, logistics.outputs, false, logistics.profile, logistics.mission)))));
+                    logistics.world, logistics.baritone, logistics.outputs, false, logistics.profile, logistics.mission)))));
     }
 }

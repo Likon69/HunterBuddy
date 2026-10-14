@@ -53,11 +53,21 @@ public final class ReserveInventory {
         return slot != null && stack.getDamage() > 0 && contents.stream().anyMatch(item -> freshArmor(item, slot));
     }
 
+    public boolean room() {
+        return LogisticsInventory.player(logistics.world).stream().filter(ItemStack::isEmpty).count() >= 2;
+    }
+
     public int neededSlot() {
         List<ItemStack> contents = logistics.outputs.inventory().containerContents();
-        long free = LogisticsInventory.player(logistics.world).stream().filter(ItemStack::isEmpty).count();
-        if (free <= 2) return -1;
         List<Predicate<ItemStack>> needs = new ArrayList<>();
+        for (EquipmentSlot slot : ARMOR) {
+            ItemStack worn = logistics.world.client().player.getEquippedStack(slot);
+            if ((worn.isEmpty() || worn.getDamage() > 0 || GliderSwap.isGlider(worn))
+                && logistics.world.countMatching(stack -> freshArmor(stack, slot)) == 0) {
+                needs.add(stack -> freshArmor(stack, slot));
+            }
+        }
+
         if (LogisticsInventory.profileTools(logistics.world, logistics.profile) == 0) {
             needs.add(stack -> LogisticsInventory.tool(stack, logistics.profile) && LogisticsInventory.healthy(stack));
         }
@@ -71,20 +81,9 @@ public final class ReserveInventory {
             && logistics.world.countMatching(stack -> GliderSwap.isGlider(stack) && LogisticsInventory.healthy(stack)) == 0) {
             needs.add(stack -> GliderSwap.isGlider(stack) && LogisticsInventory.healthy(stack));
         }
-        int carriedWear = 0;
-        for (int i = 0; i < logistics.world.client().player.getInventory().size(); i++) {
-            ItemStack stack = logistics.world.client().player.getInventory().getStack(i);
-            if (GliderSwap.isGlider(stack) && FlightPlan.remaining(stack) > 16) carriedWear += FlightPlan.remaining(stack);
-        }
+        int carriedWear = FlightPlan.totalDurability(logistics.world);
         if (carriedWear < logistics.requiredFlightWear) {
             needs.add(stack -> GliderSwap.isGlider(stack) && FlightPlan.remaining(stack) > 16);
-        }
-        for (EquipmentSlot slot : ARMOR) {
-            ItemStack worn = logistics.world.client().player.getEquippedStack(slot);
-            if ((worn.isEmpty() || worn.getDamage() > 0 || GliderSwap.isGlider(worn))
-                && logistics.world.countMatching(stack -> freshArmor(stack, slot)) == 0) {
-                needs.add(stack -> freshArmor(stack, slot));
-            }
         }
         for (Predicate<ItemStack> need : needs) {
             for (int i = 0; i < contents.size(); i++) if (need.test(contents.get(i))) return i;
