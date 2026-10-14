@@ -13,13 +13,16 @@ import com.hunterbuddy.behavior.resource.LookIntent;
 import com.hunterbuddy.behavior.resource.MovementIntent;
 import com.hunterbuddy.behavior.resource.Outputs;
 import java.util.Objects;
+import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 
 public final class PillarUp extends Action {
     private final ToDoubleFunction<TickContext> targetY;
     private final WorldReader world;
     private final Outputs outputs;
+    private final Predicate<ItemStack> block;
     private BlockPos base;
     private double provenY;
     private Stage stage;
@@ -30,10 +33,20 @@ public final class PillarUp extends Action {
     }
 
     public PillarUp(ToDoubleFunction<TickContext> targetY, WorldReader world, Outputs outputs) {
+        this(targetY, world, outputs, outputs.placement()::pillarItem);
+    }
+
+    public PillarUp(double targetY, WorldReader world, Outputs outputs, Predicate<ItemStack> block) {
+        this(ctx -> targetY, world, outputs, block);
+        if (!Double.isFinite(targetY)) throw new IllegalArgumentException("invalid pillar height");
+    }
+
+    private PillarUp(ToDoubleFunction<TickContext> targetY, WorldReader world, Outputs outputs, Predicate<ItemStack> block) {
         super("pillar-up");
         this.targetY = Objects.requireNonNull(targetY);
         this.world = Objects.requireNonNull(world);
         this.outputs = Objects.requireNonNull(outputs);
+        this.block = Objects.requireNonNull(block);
         limit(1_800);
     }
 
@@ -68,7 +81,7 @@ public final class PillarUp extends Action {
             stage = Stage.READY;
         }
         if (stage == Stage.READY && sensors.y() >= target && sensors.onGround() && ctx.monitor().samplesValid(ctx.tick())) return Success.INSTANCE;
-        if (world.findSlot(outputs.placement()::pillarItem) < 0) return fail(FailureCode.MISSING_ITEM, "pillar reserve=25; no usable throwaway block");
+        if (world.findSlot(block) < 0) return fail(FailureCode.MISSING_ITEM, "pillar reserve=25; no usable throwaway block");
         if (stage == Stage.READY && sensors.onGround()) {
             base = world.feet();
             if (!world.state(base).isReplaceable()) return fail(FailureCode.REFUSED, "pillar starts from a full block surface");
@@ -78,7 +91,7 @@ public final class PillarUp extends Action {
         if (!world.cleared(base.up()) || !world.cleared(base.up(2))) return fail(FailureCode.UNREACHABLE, "pillar headroom is blocked");
         outputs.movement(ctx.owner(), new MovementIntent(false, false, false, false, true, false, false));
         if (sensors.y() < base.getY() + 1 || !world.state(base).isReplaceable()) return new Running("pillar jump above placement");
-        NodeResult placed = outputs.placement().place(ctx, base, stack -> outputs.placement().pillarItem(stack), false);
+        NodeResult placed = outputs.placement().place(ctx, base, block, false);
         if (placed instanceof Success) stage = Stage.CONFIRMING;
         return placed instanceof Success ? new Running("pillar block emitted; waiting for landing") : placed;
     }

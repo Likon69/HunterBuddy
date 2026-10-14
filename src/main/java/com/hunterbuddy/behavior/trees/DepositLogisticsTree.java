@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.nodes.RepeatUntil;
 import com.hunterbuddy.behavior.nodes.Sequence;
@@ -11,13 +12,13 @@ public final class DepositLogisticsTree {
     private DepositLogisticsTree() {}
 
     public static Node build(LogisticsContext logistics, String role, Predicate<ItemStack> filter) {
-        return new Sequence("déposer-" + role,
+        return new Sequence("deposit-" + role,
             LogisticsOperations.open(logistics, role, true), MoveLogisticsOffhandTree.build(logistics, role, filter),
             LogisticsOperations.open(logistics, role, true),
-            new RepeatUntil("transferts-confirmés-" + role,
+            new RepeatUntil("transfers-confirmed-" + role,
                 () -> !logistics.outputs.inventory().hasMatchingItem(filter)
                     || !logistics.outputs.inventory().containerCapacity(filter), 72,
-                LogisticsOperations.transfer(logistics, role, true, "work",
+                LogisticsOperations.transfer(logistics, role, true, TransferPurposes.WORK,
                     () -> logistics.outputs.inventory().firstDeposit(filter))));
     }
 }

@@ -132,7 +132,7 @@ public final class TreeJava extends Module {
         engine.bots().register("lab", () -> new LabBot(labSettings));
         engine.bots().register("farmerbuddy", () -> new FarmerBuddyBot(farmerSettings, farmerCatalog, world, baritone, engine.outputs(), farmerWaypoints));
         List<SettingGroup> farmerStepGroups = new ArrayList<>();
-        for (int i = 1; i <= FarmerSettings.MAX_STEPS; i++) farmerStepGroups.add(settings.createGroup("FarmerBuddy: étape " + i));
+        for (int i = 1; i <= FarmerSettings.MAX_STEPS; i++) farmerStepGroups.add(settings.createGroup("FarmerBuddy: step " + i));
         farmerSettings.register(farmerStepGroups, settings.createGroup("FarmerBuddy: base"));
         for (String bot : engine.bots().names()) {
             if (!bot.equals("farmerbuddy")) engine.bots().create(bot).onRegister(settings.createGroup("Bot: " + bot));
@@ -246,10 +246,10 @@ public final class TreeJava extends Module {
             baritone.capture(), engine.outputs().ownBaritone() || engine.outputs().borrowedBaritone());
         if (refusal == null && !world.legacyRegear() && engine.outputs().foreignMovement()) refusal = "Another producer owns Baritone movement inputs";
         if (refusal == null) refusal = name.equals("farmerbuddy") ? mining.temporaryRefusal() : mining.refusal();
-        if (refusal == null && name.equals("farmerbuddy") && world.countMatching(com.hunterbuddy.behavior.mc.InventoryLayout::silkPickaxe) == 0) refusal = "pioche Toucher de soie absente de l'inventaire";
+        if (refusal == null && name.equals("farmerbuddy") && world.countMatching(com.hunterbuddy.behavior.mc.InventoryLayout::silkPickaxe) == 0) refusal = "Silk Touch pickaxe missing from inventory";
         if (refusal == null && name.equals("farmerbuddy")) {
             AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
-            if (regear != null && regear.isActive()) refusal = "FarmerBuddy fait son propre regear";
+            if (regear != null && regear.isActive()) refusal = "FarmerBuddy handles its own regear";
         }
         if (refusal == null && name.equals("farmerbuddy")) refusal = farmerSettings.refusal(farmerCatalog);
         if (refusal != null) throw new IllegalStateException(refusal);
@@ -351,7 +351,7 @@ public final class TreeJava extends Module {
         String refusal = mining.temporaryRefusal();
         if (refusal != null) throw new IllegalStateException(refusal);
         if (world.countMatching(InventoryLayout::silkPickaxe) == 0) {
-            throw new IllegalStateException("pioche Toucher de soie absente");
+            throw new IllegalStateException("Silk Touch pickaxe missing");
         }
         BlockPos center = world.feet();
         FarmerZone zone = FarmerZone.build(List.of(

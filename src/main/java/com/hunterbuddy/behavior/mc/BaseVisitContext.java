@@ -8,6 +8,7 @@ import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.LogisticsFacts;
 import com.hunterbuddy.behavior.farmer.LogisticsMemory;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.resource.Outputs;
 import java.util.List;
@@ -43,7 +44,7 @@ public final class BaseVisitContext {
         logistics.facts = logistics.memory.load(ctx);
         if (facts == null || facts.recoveredAt != null) {
             if (LogisticsMemory.active(ctx, logistics.mission)) {
-                throw new IllegalStateException("rangement actif : reprendre le matériel suivi avant la visite de base");
+                throw new IllegalStateException("storage active: recover tracked equipment before visiting base");
             }
             facts = new BaseVisitFacts();
             facts.world = logistics.world.storageKey();
@@ -60,15 +61,15 @@ public final class BaseVisitContext {
             logistics.facts.dimension = logistics.world.identity().dimensionKey();
             logistics.facts.step = facts.step;
             logistics.facts.zone = logistics.zones.get().corners().stream().map(LogisticsFacts::coordinates).toList();
-            for (String role : List.of("chest", "material", "divers", "reserve")) {
+            for (String role : List.of(LogisticsRoles.CHEST, LogisticsRoles.MATERIAL, LogisticsRoles.MISCELLANEOUS, LogisticsRoles.RESERVE)) {
                 logistics.mission.equipment(ctx, logistics.equipmentName(role), "");
                 logistics.forget(role);
             }
-            save(ctx, "visite de base demandée");
+            save(ctx, "base visit requested");
         }
         if (!facts.world.equals(logistics.world.storageKey()) || facts.step != step.index() - 1
             || !facts.profile.equals(logistics.profile.key()) || logistics.facts == null) {
-            throw new IllegalStateException("visite enregistrée pour une autre étape ou un autre monde");
+            throw new IllegalStateException("visit recorded for another step or world");
         }
         logistics.layout = new InventoryLayout(logistics.world);
         logistics.requiredFlightWear = facts.wearBudget;
@@ -79,13 +80,13 @@ public final class BaseVisitContext {
             throw new IllegalStateException(refusal);
         }
         if (logistics.world.countMatching(InventoryLayout::silkPickaxe) == 0) {
-            throw new IllegalStateException("pioche Toucher de soie absente avant la visite de base");
+            throw new IllegalStateException("Silk Touch pickaxe missing before base visit");
         }
         if (logistics.facts.site == null && logistics.world.count(Items.ENDER_CHEST) == 0) {
-            throw new IllegalStateException("ender chest absent avant la visite de base");
+            throw new IllegalStateException("ender chest missing before base visit");
         }
         if (logistics.layout.freeSlot() < 0) {
-            throw new IllegalStateException("slot libre absent, rien ne sera jeté");
+            throw new IllegalStateException("no free slot, no item will be discarded");
         }
         BaseStockPlan.measure(ctx, this);
     }
@@ -100,12 +101,12 @@ public final class BaseVisitContext {
 
     public void save(TickContext ctx, String label) {
         memory.save(ctx, facts);
-        logistics.save(ctx, "base : " + label);
+        logistics.save(ctx, "base: " + label);
     }
 
     public List<ItemStack> enderContents() {
         if (logistics.facts.enderContents.isEmpty()) {
-            throw new IllegalStateException("ender chest non observé");
+            throw new IllegalStateException("ender chest not observed");
         }
         return LogisticsInventory.decode(logistics.facts.enderContents, 27, logistics.world);
     }
@@ -132,7 +133,7 @@ public final class BaseVisitContext {
         List<ItemStack> contents = enderContents();
         for (int i = 0; i < contents.size(); i++) {
             ItemStack stack = contents.get(i);
-            if (!roleSlot(i, "reserve") && !roleSlot(i, "divers") && ShulkerSignature.isShulker(stack)
+            if (!roleSlot(i, LogisticsRoles.RESERVE) && !roleSlot(i, LogisticsRoles.MISCELLANEOUS) && ShulkerSignature.isShulker(stack)
                 && LogisticsInventory.full(ShulkerSignature.of(stack, logistics.world), logistics.profile)) return i;
         }
         return -1;
@@ -142,7 +143,7 @@ public final class BaseVisitContext {
         List<ItemStack> contents = enderContents();
         for (int i = 0; i < contents.size(); i++) {
             ItemStack stack = contents.get(i);
-            if (!roleSlot(i, "reserve") && !roleSlot(i, "divers") && ShulkerSignature.isShulker(stack)
+            if (!roleSlot(i, LogisticsRoles.RESERVE) && !roleSlot(i, LogisticsRoles.MISCELLANEOUS) && ShulkerSignature.isShulker(stack)
                 && ShulkerSignature.of(stack, logistics.world).empty()) return i;
         }
         return -1;
@@ -153,7 +154,7 @@ public final class BaseVisitContext {
         List<ItemStack> contents = enderContents();
         for (int i = 0; i < contents.size(); i++) {
             ItemStack stack = contents.get(i);
-            if (!roleSlot(i, "reserve") && !roleSlot(i, "divers") && ShulkerSignature.isShulker(stack)
+            if (!roleSlot(i, LogisticsRoles.RESERVE) && !roleSlot(i, LogisticsRoles.MISCELLANEOUS) && ShulkerSignature.isShulker(stack)
                 && ShulkerSignature.of(stack, logistics.world).empty()) count++;
         }
         return count;

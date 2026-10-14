@@ -39,7 +39,7 @@ public final class SurveyContext {
     public SurveyRoute route;
     public MaterialSite selected;
     public BlockPos arrivalStand;
-    public String result = "prospection incomplète";
+    public String result = "incomplete survey";
     public boolean missionMode;
     public boolean interrupted;
     public BooleanSupplier returnRequested = () -> false;
@@ -70,6 +70,6 @@ public final class SurveyContext {
     }
 
     public String coverageReport() {
-        return coverage.verified() + "/" + coverage.chunks().size() + " chunks vérifiés";
+        return coverage.verified() + "/" + coverage.chunks().size() + " chunks verified";
     }
 }

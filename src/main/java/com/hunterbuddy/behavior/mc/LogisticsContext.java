@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.LogisticsFacts;
 import com.hunterbuddy.behavior.farmer.LogisticsMemory;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.resource.Outputs;
@@ -38,6 +39,7 @@ public final class LogisticsContext {
     public InventoryLayout layout;
     public int requiredFlightWear;
     private WorldIdentity identity;
+    public Supplier<String> materialSite = () -> "";
     public String equipmentPrefix = "logistics";
     public BooleanSupplier evacuationRequested = () -> false;
 
@@ -66,17 +68,18 @@ public final class LogisticsContext {
             if (profile == null) throw new IllegalStateException("logistics profile missing");
             facts = new LogisticsFacts();
             facts.profile = profile.key();
+            facts.materialSite = materialSite.get();
             facts.dimension = identity.dimensionKey();
             facts.store = store;
             facts.regear = regear.getAsBoolean();
             facts.step = step.getAsInt();
             facts.zone = zones.get().corners().stream().map(LogisticsFacts::coordinates).toList();
-            for (String role : List.of("chest", "material", "divers", "reserve")) {
+            for (String role : List.of(LogisticsRoles.CHEST, LogisticsRoles.MATERIAL, LogisticsRoles.MISCELLANEOUS, LogisticsRoles.RESERVE)) {
                 mission.equipment(ctx, equipmentName(role), "");
             }
             save(ctx, "logistics requested");
         } else {
-            if (facts.store != store) throw new IllegalStateException("reprendre l'activité logistique déjà journalisée");
+            if (facts.store != store) throw new IllegalStateException("resume the logistics activity already recorded in the journal");
             if (!facts.dimension.equals(identity.dimensionKey())) {
                 throw new IllegalStateException("logistics facts belong to another dimension");
             }
@@ -86,10 +89,10 @@ public final class LogisticsContext {
         String refusal = outputs.mining().temporaryRefusal();
         if (refusal != null) throw new IllegalStateException(refusal);
         if (world.countMatching(InventoryLayout::silkPickaxe) == 0) {
-            throw new IllegalStateException("pioche Toucher de soie absente de l'inventaire");
+            throw new IllegalStateException("Silk Touch pickaxe missing from inventory");
         }
         if (facts.site == null && world.count(Items.ENDER_CHEST) == 0) {
-            throw new IllegalStateException("ender chest absent de l'inventaire");
+            throw new IllegalStateException("ender chest missing from inventory");
         }
         restore(ctx);
     }
@@ -99,8 +102,8 @@ public final class LogisticsContext {
         ProtectionRegistry.restore(ctx, mission, outputs.mining());
         if (facts.site == null) return;
         equipment.clear();
-        restoreEquipment(ctx, "chest");
-        for (String role : List.of("material", "divers", "reserve")) {
+        restoreEquipment(ctx, LogisticsRoles.CHEST);
+        for (String role : List.of(LogisticsRoles.MATERIAL, LogisticsRoles.MISCELLANEOUS, LogisticsRoles.RESERVE)) {
             if (!cycle(role).signature.isEmpty()) restoreEquipment(ctx, role);
         }
         identity = world.identity();
@@ -109,7 +112,7 @@ public final class LogisticsContext {
     private void restoreEquipment(TickContext ctx, String role) {
         TemporaryEquipment item = equipment(role);
         item.restore(ctx);
-        if (!role.equals("chest")) item.signature(ShulkerSignature.decode(cycle(role).signature, world));
+        if (!role.equals(LogisticsRoles.CHEST)) item.signature(ShulkerSignature.decode(cycle(role).signature, world));
         if (!item.tracked()) return;
         outputs.mining().trackTemporaryBlock(item.pos());
         if (item.enderChest()) outputs.mining().trackTemporaryChest(item.pos());
@@ -120,15 +123,15 @@ public final class LogisticsContext {
     }
 
     public ShulkerCycleFacts cycle(String role) {
-        if (role.equals("material")) return facts.material;
-        if (role.equals("divers")) return facts.divers;
-        if (role.equals("reserve")) return facts.reserve;
+        if (role.equals(LogisticsRoles.MATERIAL)) return facts.material;
+        if (role.equals(LogisticsRoles.MISCELLANEOUS)) return facts.divers;
+        if (role.equals(LogisticsRoles.RESERVE)) return facts.reserve;
         throw new IllegalArgumentException("unknown shulker role " + role);
     }
 
     public TemporaryEquipment equipment(String role) {
         return equipment.computeIfAbsent(role, key -> {
-            boolean chest = key.equals("chest");
+            boolean chest = key.equals(LogisticsRoles.CHEST);
             BlockPos pos = chest ? facts.chest() : facts.shulker();
             TemporaryEquipment item = new TemporaryEquipment(equipmentName(key), pos, chest, world,
                 mission);
@@ -138,7 +141,7 @@ public final class LogisticsContext {
     }
 
     public String equipmentName(String role) {
-        return equipmentPrefix + (role.equals("chest") ? "-chest" : "-box-" + role);
+        return equipmentPrefix + (role.equals(LogisticsRoles.CHEST) ? "-chest" : "-box-" + role);
     }
 
     public void forget(String role) {
@@ -184,7 +187,7 @@ public final class LogisticsContext {
     }
 
     public boolean finishing() {
-        return facts.site != null && (equipment("chest").breakRequested() || returned("chest"));
+        return facts.site != null && (equipment(LogisticsRoles.CHEST).breakRequested() || returned(LogisticsRoles.CHEST));
     }
 
     public boolean topExitRequested() {

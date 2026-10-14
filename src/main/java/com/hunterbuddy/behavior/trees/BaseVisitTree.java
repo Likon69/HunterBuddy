@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.farmer.LogisticsFacts;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.mc.BaseSite;
 import com.hunterbuddy.behavior.mc.BaseStockPlan;
@@ -21,14 +22,14 @@ public final class BaseVisitTree {
     private BaseVisitTree() {}
 
     public static Node build(BaseVisitContext visit) {
-        return new TaskScope(new BaseVisitScope(visit, new Sequence("visite-unique-de-base",
-            new InventoryMilestone("charger-visite-base", visit::initialize),
-            LogisticsOperations.unless("ender chest de visite déjà repris",
-                () -> visit.logistics.facts.site != null && visit.logistics.returned("chest"), work(visit)),
+        return new TaskScope(new BaseVisitScope(visit, new Sequence("single-base-visit",
+            new InventoryMilestone("load-base-visit", visit::initialize),
+            LogisticsOperations.unless("base visit ender chest already recovered",
+                () -> visit.logistics.facts.site != null && visit.logistics.returned(LogisticsRoles.CHEST), work(visit)),
             BaseDepartureInventoryTree.build(visit),
-            new InventoryMilestone("visite-base-terminée", ctx -> {
-                if (!visit.logistics.returned("chest")) {
-                    throw new IllegalStateException("ender chest non revenu dans l'inventaire");
+            new InventoryMilestone("base-visit-completed", ctx -> {
+                if (!visit.logistics.returned(LogisticsRoles.CHEST)) {
+                    throw new IllegalStateException("ender chest not returned to inventory");
                 }
                 if (FarmerFlightBudget.returnDue(ctx, visit.position(visit.facts.delivery),
                     visit.logistics.world, visit.logistics.outputs)) {
@@ -36,58 +37,58 @@ public final class BaseVisitTree {
                 }
                 visit.facts.recoveredAt = LogisticsFacts.coordinates(visit.logistics.world.feet());
                 visit.logistics.facts.departure = visit.facts.recoveredAt;
-                visit.save(ctx, "ender chest repris, visite complète");
+                visit.save(ctx, "ender chest recovered, visit complete");
             }))));
     }
 
     private static Node work(BaseVisitContext visit) {
-        return new Sequence("jalons-de-la-visite",
-            LogisticsOperations.unless("base rejointe près du matériel suivi", () -> {
+        return new Sequence("base-visit-milestones",
+            LogisticsOperations.unless("base reached near tracked equipment", () -> {
                 if (visit.logistics.facts.site == null || !visit.logistics.world.client().player.isOnGround()) {
                     return false;
                 }
                 return Math.hypot(visit.logistics.world.client().player.getX() - visit.logistics.facts.origin().getX(),
                     visit.logistics.world.client().player.getZ() - visit.logistics.facts.origin().getZ()) <= 12;
-            }, new Deferred("vol-jusqu'à-la-base", () -> FlyToTree.build(
+            }, new Deferred("fly-to-base", () -> FlyToTree.build(
                 () -> visit.logistics.facts.site == null ? visit.position(visit.facts.delivery) : visit.logistics.facts.origin(),
                 () -> visit.position(visit.facts.delivery), true, visit.logistics.world,
                 visit.logistics.baritone, visit.logistics.outputs))),
-            LogisticsOperations.unless("emplacement du matériel de base suivi", () -> visit.logistics.facts.site != null,
-                new InventoryMilestone("base-rejointe-emplacement-choisi", ctx -> {
+            LogisticsOperations.unless("base equipment location tracked", () -> visit.logistics.facts.site != null,
+                new InventoryMilestone("base-reached-location-selected", ctx -> {
                     visit.logistics.facts.site = LogisticsFacts.coordinates(
                         BaseSite.choose(visit.position(visit.facts.delivery), List.of(
                             visit.position(visit.facts.delivery), visit.position(visit.facts.returns),
                             visit.position(visit.facts.empties), visit.position(visit.facts.supply)), visit.logistics.world));
-                    visit.save(ctx, "base rejointe, emplacement choisi");
+                    visit.save(ctx, "base reached, location selected");
                 })),
-            new Deferred("rejoindre-matériel-base", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,
+            new Deferred("reach-base-equipment", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,
                 visit.logistics.baritone, visit.logistics.outputs)),
-            LogisticsOperations.unless("ender chest cassé en ramassage", () -> visit.logistics.equipment("chest").breakRequested()
-                && visit.logistics.world.cleared(visit.logistics.facts.chest()), TrackedEquipmentTree.place(visit.logistics, "chest")),
-            LogisticsOperations.unless("ramassage ender chest à terminer", () -> visit.logistics.equipment("chest").breakRequested(),
-                new Sequence("livraisons-et-ravitaillement",
+            LogisticsOperations.unless("broken ender chest being picked up", () -> visit.logistics.equipment(LogisticsRoles.CHEST).breakRequested()
+                && visit.logistics.world.cleared(visit.logistics.facts.chest()), TrackedEquipmentTree.place(visit.logistics, LogisticsRoles.CHEST)),
+            LogisticsOperations.unless("ender chest pickup must be completed", () -> visit.logistics.equipment(LogisticsRoles.CHEST).breakRequested(),
+                new Sequence("deliveries-and-restocking",
                     BaseOperations.pending(visit), LogisticsOperations.pendingTransfer(visit.logistics),
                     BasePackTree.resumeMaterial(visit),
                     BaseCargoResumeTree.build(visit), BaseOperations.ender(visit),
                     BaseInventorySpaceTree.build(visit),
-                    new ChooseShulker(visit.logistics, "reserve"),
-                    new InventoryMilestone("rôles-base-identifiés", ctx -> {
+                    new ChooseShulker(visit.logistics, LogisticsRoles.RESERVE),
+                    new InventoryMilestone("base-roles-identified", ctx -> {
                         if (visit.logistics.facts.reserve.takenContents.isEmpty()
                             && (visit.logistics.facts.reserve.signature.isEmpty()
-                                || !visit.logistics.equipment("reserve").placementRequested())) {
+                                || !visit.logistics.equipment(LogisticsRoles.RESERVE).placementRequested())) {
                             visit.logistics.facts.reserve = new ShulkerCycleFacts();
-                            visit.logistics.forget("reserve");
+                            visit.logistics.forget(LogisticsRoles.RESERVE);
                         }
-                        visit.save(ctx, "rôles réserve et divers identifiés par contenu et journal");
+                        visit.save(ctx, "reserve and miscellaneous roles identified by contents and journal");
                     }), ContainerTree.close(visit.logistics.outputs),
                     BaseDeliveryTree.build(visit), BasePackTree.build(visit),
                     BaseDeliveryTree.build(visit), BaseSurplusTree.build(visit), BaseMiscTree.build(visit),
-                    new InventoryMilestone("mesurer-budget-de-départ", ctx -> BaseStockPlan.measure(ctx, visit)),
+                    new InventoryMilestone("measure-departure-budget", ctx -> BaseStockPlan.measure(ctx, visit)),
                     BaseFuelTree.recoverStock(visit),
                     BaseEmptyShulkersTree.build(visit),
                     BaseReserveTree.build(visit), BaseShelterStockTree.build(visit), BaseFuelTree.build(visit))),
-            new Deferred("retour-au-matériel-base", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,
+            new Deferred("return-to-base-equipment", () -> GroundTravel.build(visit.logistics.facts.origin(), 0,
                 visit.logistics.baritone, visit.logistics.outputs)),
-            TrackedEquipmentTree.recover(visit.logistics, "chest"));
+            TrackedEquipmentTree.recover(visit.logistics, LogisticsRoles.CHEST));
     }
 }

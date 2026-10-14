@@ -7,6 +7,7 @@ import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -35,7 +36,7 @@ public final class SafeRestart extends Composite {
         if (!(result instanceof Success)) return result;
         if (!restarts.tryRestart(ctx.nowMs())) return children().get(1).execute(ctx);
         restartReady = true;
-        ctx.event(this, Kind.BOT, null, "restart", hook() == Hook.RECOVERY ? "level=4" : "source=idle");
+        ctx.event(this, Kind.BOT, null, TraceReasons.RESTART, hook() == Hook.RECOVERY ? "level=4" : "source=idle");
         return result;
     }
 

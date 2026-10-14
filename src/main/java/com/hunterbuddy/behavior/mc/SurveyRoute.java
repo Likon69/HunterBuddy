@@ -79,14 +79,14 @@ public final class SurveyRoute {
         if (survey.missionMode && survey.returnRequested.getAsBoolean()) {
             survey.interrupted = true;
             survey.selected = null;
-            survey.result = "prospection interrompue pour repli de mission";
+            survey.result = "survey interrupted for mission retreat";
             finish(plan, survey.home, ctx);
             return;
         }
         MaterialSite site = survey.best();
         if (site != null) {
             survey.selected = site;
-            survey.result = "site mesuré: " + site.quantity + " blocs, validation sur place requise";
+            survey.result = "site measured: " + site.quantity + " blocks, on-site validation required";
             finish(plan, site.seed(), ctx);
             return;
         }
@@ -131,8 +131,8 @@ public final class SurveyRoute {
             .filter(pos -> visits.getOrDefault(ZoneCoverage.key(pos.x, pos.z), 0) < 3)
             .min(Comparator.comparingDouble(pos -> plan.distance(point(pos.x, pos.z)))).orElse(null);
         if (next == null) {
-            survey.result = "Avertissement: prospection incomplète, " + survey.coverageReport()
-                + "; chunks non chargés ou continuité non vérifiable, absence de matériau non établie";
+            survey.result = "Warning: incomplete survey, " + survey.coverageReport()
+                + "; chunks unloaded or continuity unverifiable, absence of material has not been established";
             finish(plan, survey.world.feet(), ctx);
             return survey.home;
         }
@@ -149,7 +149,7 @@ public final class SurveyRoute {
         double back = Math.hypot(target.getX() - survey.home.getX(), target.getZ() - survey.home.getZ());
         int required = plan.budget.tripRockets(distance, back, false);
         if (survey.world.countMatching(Rockets::isPlain) < required) {
-            survey.result = "prospection incomplète: réserve de retour atteinte; " + survey.coverageReport();
+            survey.result = "incomplete survey: return reserve reached; " + survey.coverageReport();
             if (survey.missionMode) {
                 survey.interrupted = true;
                 survey.selected = null;
@@ -160,7 +160,7 @@ public final class SurveyRoute {
         }
         int wear = plan.budget.tripWear(distance, back, false);
         if (plan.totalDurability() < wear) {
-            survey.result = "prospection incomplète: durabilité réservée au retour; " + survey.coverageReport();
+            survey.result = "incomplete survey: durability reserved for return; " + survey.coverageReport();
             if (survey.missionMode) {
                 survey.interrupted = true;
                 survey.selected = null;

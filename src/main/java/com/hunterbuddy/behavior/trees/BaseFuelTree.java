@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.OperationFailure;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
@@ -18,22 +19,22 @@ public final class BaseFuelTree {
     private BaseFuelTree() {}
 
     public static Node recoverStock(BaseVisitContext visit) {
-        return new Sequence("préparer-fusées-déjà-transportées", BaseOperations.ender(visit),
-            new RepeatUntil("budget-prêt-ou-stock-ender-épuisé", () -> ready(visit)
+        return new Sequence("prepare-already-carried-rockets", BaseOperations.ender(visit),
+            new RepeatUntil("budget-ready-or-ender-stock-exhausted", () -> ready(visit)
                 || visit.enderContents().stream().noneMatch(Rockets::isPlain), 128,
-                take(visit, () -> visit.logistics.facts.chest(), "carburant-transporté")),
+                take(visit, () -> visit.logistics.facts.chest(), TransferPurposes.CARRIED_FUEL)),
             ContainerTree.close(visit.logistics.outputs));
     }
 
     public static Node build(BaseVisitContext visit) {
-        return new Sequence("plein-de-départ-confirmé",
-            LogisticsOperations.unless("budget de départ déjà prêt", () -> ready(visit),
-                new Sequence("compléter-carburant-mesuré",
+        return new Sequence("departure-fuel-fill-confirmed",
+            LogisticsOperations.unless("departure budget already ready", () -> ready(visit),
+                new Sequence("complete-measured-fuel",
                     BaseOperations.open(visit, () -> visit.position(visit.facts.supply)),
-                    new RepeatUntil("budget-prêt-pour-décoller", () -> ready(visit), 512,
-                        take(visit, () -> visit.position(visit.facts.supply), "ravitailler-fusées")),
+                    new RepeatUntil("budget-ready-for-takeoff", () -> ready(visit), 512,
+                        take(visit, () -> visit.position(visit.facts.supply), TransferPurposes.RESTOCK_ROCKETS)),
                     ContainerTree.close(visit.logistics.outputs))),
-            new InventoryMilestone("plein-confirmé", ctx -> visit.save(ctx, "fusées confirmées pour l'aller-retour mesuré")));
+            new InventoryMilestone("fuel-fill-confirmed", ctx -> visit.save(ctx, "rockets confirmed for the measured round trip")));
     }
 
     private static boolean ready(BaseVisitContext visit) {
@@ -41,7 +42,7 @@ public final class BaseFuelTree {
     }
 
     private static Node take(BaseVisitContext visit, Supplier<BlockPos> source, String purpose) {
-        return new Sequence("prendre-une-pile-de-fusées",
+        return new Sequence("take-one-rocket-stack",
             BaseOperations.transfer(visit, source, purpose, () -> {
                 List<ItemStack> contents = visit.logistics.outputs.inventory().containerContents();
                 int needed = visit.facts.rocketBudget - visit.logistics.world.countMatching(Rockets::isPlain);

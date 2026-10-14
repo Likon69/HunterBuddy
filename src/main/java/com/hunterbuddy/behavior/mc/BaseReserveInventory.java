@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.util.GliderSwap;
 import java.util.List;
 import net.minecraft.component.DataComponentTypes;
@@ -49,7 +50,7 @@ public final class BaseReserveInventory {
 
     public int slot() {
         for (int i = 0; i < visit.enderContents().size(); i++) {
-            if (visit.roleSlot(i, "reserve")) {
+            if (visit.roleSlot(i, LogisticsRoles.RESERVE)) {
                 return i;
             }
         }

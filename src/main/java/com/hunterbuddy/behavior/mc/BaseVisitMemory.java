@@ -20,7 +20,7 @@ public final class BaseVisitMemory {
         }
         BaseVisitFacts facts = GSON.fromJson(saved, BaseVisitFacts.class);
         if (facts == null || facts.world == null || facts.profile == null || facts.transfer == null) {
-            throw new IllegalStateException("journal de visite de base invalide, reprise impossible à vérifier");
+            throw new IllegalStateException("invalid base visit journal, resume cannot be verified");
         }
         return facts;
     }

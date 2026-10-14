@@ -4,6 +4,7 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
@@ -22,7 +23,7 @@ public final class ChooseShulker extends Node {
     }
 
     public ChooseShulker(LogisticsContext logistics, String role, boolean requireCapacity) {
-        super("choisir-shulker-" + role);
+        super("choose-shulker-" + role);
         this.requireCapacity = requireCapacity;
         this.logistics = logistics;
         this.role = role;
@@ -33,8 +34,8 @@ public final class ChooseShulker extends Node {
         ShulkerCycleFacts cycle = logistics.cycle(role);
         if (!cycle.signature.isEmpty() || !cycle.unavailable.isEmpty()) return Success.INSTANCE;
         List<ItemStack> contents = logistics.outputs.inventory().containerContents();
-        int reserve = identifyRole(ctx, "reserve", contents);
-        int divers = identifyRole(ctx, "divers", contents);
+        int reserve = identifyRole(ctx, LogisticsRoles.RESERVE, contents);
+        int divers = identifyRole(ctx, LogisticsRoles.MISCELLANEOUS, contents);
         if (reserve >= 0) {
             ShulkerSignature signature = ShulkerSignature.of(contents.get(reserve), logistics.world);
             logistics.mission.equipment(ctx, "logistics-reserve", signature.encoded());
@@ -42,8 +43,8 @@ public final class ChooseShulker extends Node {
             List<String> missing = LogisticsInventory.missing(logistics.world, logistics.profile, signature.contents());
             logistics.mission.equipment(ctx, "reserve-status", missing.isEmpty() ? "ready" : "incomplete");
         }
-        int selected = role.equals("reserve") ? reserve : role.equals("divers") ? divers : -1;
-        if (role.equals("material")) {
+        int selected = role.equals(LogisticsRoles.RESERVE) ? reserve : role.equals(LogisticsRoles.MISCELLANEOUS) ? divers : -1;
+        if (role.equals(LogisticsRoles.MATERIAL)) {
             for (int i = 0; i < contents.size(); i++) {
                 if (i == reserve || i == divers || !ShulkerSignature.isShulker(contents.get(i))) continue;
                 ShulkerSignature signature = ShulkerSignature.of(contents.get(i), logistics.world);
@@ -54,7 +55,7 @@ public final class ChooseShulker extends Node {
                 }
             }
         }
-        if (selected < 0 && !role.equals("reserve")) {
+        if (selected < 0 && !role.equals(LogisticsRoles.RESERVE)) {
             for (int i = 0; i < contents.size(); i++) {
                 if (i != reserve && i != divers && ShulkerSignature.isShulker(contents.get(i))
                     && ShulkerSignature.of(contents.get(i), logistics.world).empty()) {
@@ -64,22 +65,22 @@ public final class ChooseShulker extends Node {
             }
         }
         if (selected < 0) {
-            cycle.unavailable = "shulker " + role + " absente ou pleine";
+            cycle.unavailable = "shulker " + role + " missing or full";
             logistics.facts.incomplete = cycle.unavailable;
-            if (role.equals("reserve")) logistics.mission.equipment(ctx, "reserve-status", cycle.unavailable);
+            if (role.equals(LogisticsRoles.RESERVE)) logistics.mission.equipment(ctx, "reserve-status", cycle.unavailable);
             logistics.save(ctx, cycle.unavailable);
             return Success.INSTANCE;
         }
         ShulkerSignature signature = ShulkerSignature.of(contents.get(selected), logistics.world);
-        if (requireCapacity && !role.equals("reserve") && signature.contents().stream()
+        if (requireCapacity && !role.equals(LogisticsRoles.RESERVE) && signature.contents().stream()
             .allMatch(stack -> !stack.isEmpty() && stack.getCount() == stack.getMaxCount())) {
-            cycle.unavailable = "shulker " + role + " pleine";
+            cycle.unavailable = "shulker " + role + " full";
             logistics.facts.incomplete = cycle.unavailable;
             logistics.save(ctx, cycle.unavailable);
             return Success.INSTANCE;
         }
-        if (requireCapacity && !role.equals("reserve") && !acceptsPlayer(signature)) {
-            cycle.unavailable = "shulker " + role + " sans place pour les objets présents";
+        if (requireCapacity && !role.equals(LogisticsRoles.RESERVE) && !acceptsPlayer(signature)) {
+            cycle.unavailable = "shulker " + role + " has no space for the current items";
             logistics.facts.incomplete = cycle.unavailable;
             logistics.save(ctx, cycle.unavailable);
             return Success.INSTANCE;
@@ -109,7 +110,7 @@ public final class ChooseShulker extends Node {
             if (matches.size() != 1) throw new IllegalStateException("known " + name + " shulker identity is ambiguous");
             return matches.getFirst();
         }
-        if (!name.equals("reserve")) return -1;
+        if (!name.equals(LogisticsRoles.RESERVE)) return -1;
         List<Integer> candidates = new ArrayList<>();
         for (int i = 0; i < contents.size(); i++) {
             if (ShulkerSignature.isShulker(contents.get(i))
@@ -123,7 +124,7 @@ public final class ChooseShulker extends Node {
         List<ItemStack> player = new ArrayList<>(LogisticsInventory.player(logistics.world));
         player.add(logistics.world.client().player.getOffHandStack());
         for (ItemStack item : player) {
-            boolean accepted = role.equals("material")
+            boolean accepted = role.equals(LogisticsRoles.MATERIAL)
                 ? LogisticsInventory.accepted(logistics.profile).test(item)
                 : LogisticsInventory.miscellaneous(logistics.profile).test(item);
             if (!accepted) continue;

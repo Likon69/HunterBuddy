@@ -13,7 +13,7 @@ public final class ConfirmEquipmentPlacement extends Node {
     private final String role;
 
     public ConfirmEquipmentPlacement(LogisticsContext logistics, String role) {
-        super("preuve-pose-" + role);
+        super("placement-evidence-" + role);
         this.logistics = logistics;
         this.role = role;
     }

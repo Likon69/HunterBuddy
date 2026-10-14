@@ -13,7 +13,7 @@ public final class ReconcileBaseTransfer extends Node {
     private final BaseVisitContext visit;
 
     public ReconcileBaseTransfer(BaseVisitContext visit) {
-        super("réconcilier-preuves-transfert-base");
+        super("reconcile-base-transfer-evidence");
         this.visit = visit;
     }
 
@@ -24,7 +24,7 @@ public final class ReconcileBaseTransfer extends Node {
             return Success.INSTANCE;
         }
         if (!visit.logistics.outputs.inventory().at(visit.position(facts.position))) {
-            throw new IllegalStateException("mauvais coffre pour réconcilier le transfert de base");
+            throw new IllegalStateException("wrong chest for reconciling the base transfer");
         }
         boolean playerUnchanged = LogisticsInventory.equal(LogisticsInventory.decode(facts.receipt.player, 36,
             visit.logistics.world), LogisticsInventory.player(visit.logistics.world));
@@ -32,7 +32,7 @@ public final class ReconcileBaseTransfer extends Node {
             visit.logistics.world), visit.logistics.outputs.inventory().containerContents());
         if (playerUnchanged && containerUnchanged) {
             facts.receipt.pending = false;
-            visit.save(ctx, "transfert non appliqué : deux inventaires inchangés");
+            visit.save(ctx, "transfer not applied: both inventories unchanged");
         } else {
             BaseTransferReceipt.accept(ctx, visit);
         }

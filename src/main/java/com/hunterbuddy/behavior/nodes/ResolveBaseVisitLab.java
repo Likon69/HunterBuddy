@@ -19,7 +19,7 @@ public final class ResolveBaseVisitLab extends Action {
     private final BaseVisitLabContext lab;
 
     public ResolveBaseVisitLab(BaseVisitLabContext lab) {
-        super("résoudre-étape-et-base-FarmerBuddy");
+        super("resolve-FarmerBuddy-step-and-base");
         this.lab = lab;
         limit(100);
     }
@@ -27,21 +27,21 @@ public final class ResolveBaseVisitLab extends Action {
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (!lab.worldKey.equals(lab.world.storageKey())) {
-            return fail(FailureCode.REFUSED, "monde du labo base changé");
+            return fail(FailureCode.REFUSED, "base lab world changed");
         }
         if (!lab.mission.isDone()) {
-            return new Running("chargement du journal FarmerBuddy");
+            return new Running("loading FarmerBuddy journal");
         }
         try {
             ctx.bb().loadDurable("bot:farmerbuddy", lab.mission.join());
             MissionJournal journal = new MissionJournal(FarmerSettings.MAX_STEPS, "bot:farmerbuddy");
             int current = journal.currentStep(ctx);
             FarmerStepConfig step = lab.steps.stream().filter(FarmerStepConfig::enabled).filter(s -> s.index() >= current)
-                .findFirst().orElseThrow(() -> new IllegalStateException("aucune étape FarmerBuddy courante activée"));
-            FarmerProfile profile = lab.catalog.profile(step.profile()).orElseThrow(() -> new IllegalStateException("profil inconnu"));
+                .findFirst().orElseThrow(() -> new IllegalStateException("no current FarmerBuddy step enabled"));
+            FarmerProfile profile = lab.catalog.profile(step.profile()).orElseThrow(() -> new IllegalStateException("unknown profile"));
             if (step.deliveryChest().equals(BlockPos.ORIGIN) || lab.settings.returnChest().equals(BlockPos.ORIGIN)
                 || lab.settings.emptyShulkersChest().equals(BlockPos.ORIGIN) || lab.settings.resupplyChest().equals(BlockPos.ORIGIN)) {
-                throw new IllegalStateException("régler les quatre rôles de coffre de base avant la visite");
+                throw new IllegalStateException("configure all four base chest roles before visiting");
             }
             FarmerZoneLookup.Resolved resolved = lab.lookup.resolve(step.name());
             if (!resolved.ok()) {

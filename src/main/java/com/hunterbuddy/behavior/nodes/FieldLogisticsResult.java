@@ -8,6 +8,7 @@ import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.LogisticsFacts;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.mc.FarmerMissionContext;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 
@@ -30,7 +31,7 @@ public final class FieldLogisticsResult extends Decorator {
         }
         if (!(result instanceof Failure failure) || logistics.facts == null
             || failure.code() != FailureCode.BUDGET && failure.code() != FailureCode.NO_OPTION) return result;
-        if (logistics.facts.site != null && logistics.equipment("chest").placementRequested()) return result;
+        if (logistics.facts.site != null && logistics.equipment(LogisticsRoles.CHEST).placementRequested()) return result;
         logistics.facts.departure = LogisticsFacts.coordinates(logistics.world.feet());
         logistics.save(ctx, "field logistics deferred to base: " + failure.reason());
         mission.facts.baseRequested = true;

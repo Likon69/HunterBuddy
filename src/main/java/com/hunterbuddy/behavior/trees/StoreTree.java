@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
@@ -35,21 +36,21 @@ public final class StoreTree {
     }
 
     public static Node build(LogisticsContext logistics) {
-        return new TaskScope(new LogisticsRun(logistics, new Sequence("rangement",
+        return new TaskScope(new LogisticsRun(logistics, new Sequence("storage",
             new InventoryMilestone("load-logistics-facts", logistics::initialize),
             LogisticsOperations.unless("ender chest recovery already started", logistics::finishing,
                 new Sequence("prepare-and-work-field-storage", LogisticsSiteTree.build(logistics),
-                    TrackedEquipmentTree.place(logistics, "chest"),
-                    LogisticsOperations.pendingTransfer(logistics), material(logistics, "material"), material(logistics, "divers"),
+                    TrackedEquipmentTree.place(logistics, LogisticsRoles.CHEST),
+                    LogisticsOperations.pendingTransfer(logistics), material(logistics, LogisticsRoles.MATERIAL), material(logistics, LogisticsRoles.MISCELLANEOUS),
                     LogisticsOperations.unless("regear is not due", () -> !logistics.facts.regear
-                        || logistics.evacuationRequested.getAsBoolean() && logistics.cycle("reserve").signature.isEmpty(),
+                        || logistics.evacuationRequested.getAsBoolean() && logistics.cycle(LogisticsRoles.RESERVE).signature.isEmpty(),
                         RegearTree.protectedCycle(logistics)))),
             LogisticsFinishTree.build(logistics))));
     }
 
     private static Node material(LogisticsContext logistics, String role) {
-        return LogisticsOperations.unless("aucun objet " + role, () -> logistics.cycle(role).signature.isEmpty()
-            && (logistics.evacuationRequested.getAsBoolean() || logistics.world.countMatching(role.equals("material")
+        return LogisticsOperations.unless("no item " + role, () -> logistics.cycle(role).signature.isEmpty()
+            && (logistics.evacuationRequested.getAsBoolean() || logistics.world.countMatching(role.equals(LogisticsRoles.MATERIAL)
                 ? LogisticsInventory.accepted(logistics.profile) : LogisticsInventory.miscellaneous(logistics.profile)) == 0),
             new RepeatShulkerCycle(logistics, role, ShulkerCycleTree.build(logistics, role,
                 () -> MaterialWorkTree.build(logistics, role))));

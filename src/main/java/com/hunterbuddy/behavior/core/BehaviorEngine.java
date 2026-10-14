@@ -39,6 +39,7 @@ import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.RingSink;
 import com.hunterbuddy.behavior.trace.Trace;
 import com.hunterbuddy.behavior.trace.TraceEvent;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import com.hunterbuddy.behavior.trace.TraceSink;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -137,7 +138,7 @@ public final class BehaviorEngine {
         if (running() || suspended()) throw new IllegalStateException("TreeJava is already running; use switch");
         if (ticking || callback != Callback.NONE) throw new IllegalStateException("cannot start during an engine tick or bot callback");
         try {
-            install(next, "started");
+            install(next, TraceReasons.STARTED);
             while (running() && !pending.isEmpty()) pending.removeFirst().run();
         } catch (RuntimeException ex) {
             pending.clear();
@@ -161,7 +162,7 @@ public final class BehaviorEngine {
                 return;
             }
             bindWorld(key);
-            install(next, "switched");
+            install(next, TraceReasons.SWITCHED);
         });
         if (suspended() && !ticking && callback == Callback.NONE) while (!pending.isEmpty()) pending.removeFirst().run();
     }
@@ -313,7 +314,7 @@ public final class BehaviorEngine {
                         ctx.resetSeries();
                         callBot(Callback.RESUME, () -> bot.onResume(botContext));
                         root.resumeSession();
-                        ctx.event(hooks.build(), Kind.BOT, null, "reconnected", "RESUME gate=ok");
+                        ctx.event(hooks.build(), Kind.BOT, null, TraceReasons.RECONNECTED, "RESUME gate=ok");
                     }
                     ctx.end();
                     return;

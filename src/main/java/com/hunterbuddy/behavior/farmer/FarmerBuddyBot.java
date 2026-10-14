@@ -120,19 +120,19 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
     @Override
     public List<HookEntry> extraEntries(BotContext context) {
         requireContext(context);
-        Node recovery = new Deferred("retour-au-dernier-appui-par-Baritone", () -> {
+        Node recovery = new Deferred("return-to-last-support-with-Baritone", () -> {
             if (mission.tick == null || mission.unfinishedMine() || mission.fieldActive() || mission.baseActive()) {
                 return new Succeed();
             }
             if (!mission.tick.sensors().onGround()) {
-                return new Fail(FailureCode.UNREACHABLE, "retour au dernier appui différé jusqu'au repli de mission");
+                return new Fail(FailureCode.UNREACHABLE, "return to last support deferred until mission retreat");
             }
             TargetPoint last = mission.tick.bb().get(context.owner(), FarmerTracker.LAST_SAFE).orElse(null);
             BlockPos destination = last == null ? world.feet() : BlockPos.ofFloored(last.x(), last.y(), last.z());
             return GroundTravel.build(destination, 2, baritone, outputs);
         });
         Guard guard = new Guard(new Condition("farmer-recovery", sensors -> true), recovery);
-        Node change = new InventoryMilestone("demander-un-autre-site-après-échec-de-reprise", ctx -> {
+        Node change = new InventoryMilestone("request-another-site-after-failed-resume", ctx -> {
             mission.tick = ctx;
             if (mission.facts == null || !recoveryOnSite || mission.fieldActive() || mission.baseActive()) return;
             mission.facts.changeRequested = true;
@@ -206,12 +206,13 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             recoveryOnSite = false;
             return FarmerSurveyTree.build(mission);
         }).resumable();
-        store = new Deferred("ranger-et-regear-sous-la-même-protection", () -> {
+        store = new Deferred("store-and-regear-under-the-same-shelter", () -> {
             recoveryOnSite = false;
             LogisticsContext logistics = new LogisticsContext(() -> activeProfile, () -> mission.zone, true,
                 () -> regearAvailable && LogisticsInventory.needsRegear(world, activeProfile), mission::flightAfterField,
                 () -> mission.step.index() - 1, world, baritone, outputs, journal);
             logistics.evacuationRequested = () -> mission.players() || mission.fuelDue();
+            logistics.materialSite = () -> mission.selected == null ? "" : Long.toString(mission.selected.shelterId);
             logistics.requiredFlightWear = mission.returnWear();
             return new FieldLogisticsResult(mission, logistics, StoreTree.build(logistics));
         }).resumable();
@@ -219,20 +220,21 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
             recoveryOnSite = false;
             LogisticsContext logistics = new LogisticsContext(() -> activeProfile, () -> mission.zone, false,
                 () -> true, mission::flightAfterField, () -> mission.step.index() - 1, world, baritone, outputs, journal);
+            logistics.materialSite = () -> mission.selected == null ? "" : Long.toString(mission.selected.shelterId);
             logistics.requiredFlightWear = mission.returnWear();
             return new FieldLogisticsResult(mission, logistics, RegearTree.build(logistics));
         }).resumable();
-        return new Sequence("cerveau-de-mission",
+        return new Sequence("mission-brain",
             new ResolveProfile(),
             new UtilitySelector("farmer-task",
-                new UtilityOption(store, this::storeScore, ctx -> "ranger"),
+                new UtilityOption(store, this::storeScore, ctx -> "store"),
                 new UtilityOption(regear, this::regearScore, ctx -> "regear"),
                 new UtilityOption(base, this::baseScore, ctx -> "base"),
-                new UtilityOption(new Deferred("changer-de-site", () -> FarmerSiteTree.change(mission)),
-                    this::changeScore, ctx -> "changer de site"),
-                new UtilityOption(survey, this::surveyScore, ctx -> "prospecter"),
-                new UtilityOption(mining, this::mineScore, ctx -> "miner site=" + mission.facts.site),
-                new UtilityOption(new WaitForFarmerZone(mission), this::waitScore, ctx -> "attendre à la base"),
+                new UtilityOption(new Deferred("change-site", () -> FarmerSiteTree.change(mission)),
+                    this::changeScore, ctx -> "change site"),
+                new UtilityOption(survey, this::surveyScore, ctx -> "survey"),
+                new UtilityOption(mining, this::mineScore, ctx -> "mine site=" + mission.facts.site),
+                new UtilityOption(new WaitForFarmerZone(mission), this::waitScore, ctx -> "wait at base"),
                 new UtilityOption(new NextStep(), this::nextStepScore, ctx -> "next-step")));
     }
 
@@ -367,10 +369,10 @@ public final class FarmerBuddyBot implements Bot, LiveWorldBot {
                 }
                 String refusal = outputs.mining().temporaryRefusal();
                 if (refusal == null && world.countMatching(InventoryLayout::silkPickaxe) == 0) {
-                    refusal = "pioche Toucher de soie absente de l'inventaire";
+                    refusal = "Silk Touch pickaxe missing from inventory";
                 }
                 if (refusal == null && world.count(Items.ENDER_CHEST) == 0 && !mission.fieldActive() && !mission.baseActive()) {
-                    refusal = "ender chest absent de l'inventaire";
+                    refusal = "ender chest missing from inventory";
                 }
                 if (refusal != null) throw new IllegalStateException(refusal);
                 return Success.INSTANCE;

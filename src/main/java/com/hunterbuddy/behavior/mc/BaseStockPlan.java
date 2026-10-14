@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.mc;
 
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.util.Rockets;
 import java.util.List;
 import net.minecraft.item.ItemStack;
@@ -26,13 +27,13 @@ public final class BaseStockPlan {
             distance = Math.max(distance, Math.hypot(corner.getX() - base.getX(), corner.getZ() - base.getZ()));
         }
         if (distance > visit.settings.flightRadius()) {
-            throw new IllegalStateException("zone hors du rayon de vol configuré");
+            throw new IllegalStateException("zone outside configured flight radius");
         }
         FlightBudget budget = new FlightBudget(performance, visit.logistics.outputs.flight().minimumRockets());
         visit.facts.rocketBudget = budget.departureRockets(distance);
         visit.facts.wearBudget = budget.departureWear(distance);
         visit.logistics.requiredFlightWear = visit.facts.wearBudget;
-        visit.save(ctx, "budget mesuré : " + visit.facts.rocketBudget + " fusées et " + visit.facts.wearBudget + " durabilité");
+        visit.save(ctx, "measured budget: " + visit.facts.rocketBudget + " rockets and " + visit.facts.wearBudget + " durability");
     }
 
     public static void empties(TickContext ctx, BaseVisitContext visit) {
@@ -41,7 +42,7 @@ public final class BaseStockPlan {
         int other = 0;
         for (int i = 0; i < contents.size(); i++) {
             ItemStack stack = contents.get(i);
-            if (stack.isEmpty() || visit.roleSlot(i, "reserve") || visit.roleSlot(i, "divers")) continue;
+            if (stack.isEmpty() || visit.roleSlot(i, LogisticsRoles.RESERVE) || visit.roleSlot(i, LogisticsRoles.MISCELLANEOUS)) continue;
             if (Rockets.isPlain(stack)) continue;
             if (ShulkerSignature.isShulker(stack)) {
                 ShulkerSignature signature = ShulkerSignature.of(stack, visit.logistics.world);
@@ -56,6 +57,6 @@ public final class BaseStockPlan {
         long rocketSlots = contents.stream().filter(Rockets::isPlain).count();
         int capacity = Math.max(0, 27 - 2 - (int) rocketSlots - partials - other);
         visit.facts.emptyTarget = (int) Math.min(remaining, capacity);
-        visit.save(ctx, "plan ender chest : " + visit.facts.emptyTarget + " vides utiles, réserve, divers et carburant");
+        visit.save(ctx, "ender chest plan: " + visit.facts.emptyTarget + " useful empties, reserve, miscellaneous and fuel");
     }
 }

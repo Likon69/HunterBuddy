@@ -30,23 +30,23 @@ public final class ProtectionExitTree {
     private ProtectionExitTree() {}
 
     public static Node build(LogisticsContext logistics) {
-        return new Sequence("sortie-de-protection",
+        return new Sequence("shelter-exit",
             new InventoryMilestone("choose-shelter-exit-from-current-mission", ctx -> {
                 if (!logistics.facts.exitBreaking) logistics.facts.exitTop = logistics.topExitRequested();
                 logistics.save(ctx, "shelter exit selected from current mission state");
             }), new Deferred("chosen-shelter-exit", () -> logistics.facts.exitTop ? top(logistics) : ground(logistics)),
-            new InventoryMilestone("sortie-confirmée", ctx -> {
+            new InventoryMilestone("exit-confirmed", ctx -> {
                 logistics.facts.departure = LogisticsFacts.coordinates(logistics.world.feet());
                 logistics.outputs.mining().releaseExit();
-                logistics.save(ctx, "sortie confirmée at=" + logistics.world.feet().toShortString());
+                logistics.save(ctx, "exit confirmed at=" + logistics.world.feet().toShortString());
             }));
     }
 
     private static Node ground(LogisticsContext logistics) {
         BlockPos door = logistics.facts.door();
         Key<BlockPos> key = new Key<>("logistics-exit-door", BlockPos.class, Scope.OWNER, false);
-        return new Sequence("sortie-un-bloc",
-            new InventoryMilestone("preuve-paroi", ctx -> {
+        return new Sequence("one-block-exit",
+            new InventoryMilestone("wall-evidence", ctx -> {
                 LogisticsFacts facts = logistics.facts;
                 if (!facts.exitBreaking) {
                     int index = -1;
@@ -68,12 +68,12 @@ public final class ProtectionExitTree {
                 }
                 logistics.outputs.mining().allowExit(door);
             }), new SetValue<>(key, ctx -> door),
-            LogisticsOperations.unless("bloc de sortie cassé", () -> logistics.world.cleared(door),
+            LogisticsOperations.unless("exit block broken", () -> logistics.world.cleared(door),
                 new Timeout(400, new WithLease(Set.of(Resource.MINING), LeasePolicy.WAIT,
                     new BreakBlock(key, false, logistics.world, logistics.outputs)))),
             new PickupItem(door, stack -> exitDrop(logistics, stack), () -> logistics.facts.exitBaseline,
                 "protection-exit", logistics.world, logistics.baritone, logistics.outputs, logistics.mission),
-            new InventoryMilestone("bloc-sortie-ramassé", ctx -> {
+            new InventoryMilestone("exit-block-picked-up", ctx -> {
                 if (logistics.world.countMatching(stack -> exitDrop(logistics, stack)) != logistics.facts.exitBaseline + 1) {
                     throw new IllegalStateException("exit block recovery is ambiguous");
                 }
@@ -83,11 +83,11 @@ public final class ProtectionExitTree {
     }
 
     private static Node top(LogisticsContext logistics) {
-        return LogisticsOperations.unless("au-dessus de la protection",
+        return LogisticsOperations.unless("above the shelter",
             () -> logistics.world.client().player.isGliding()
                 && logistics.world.feet().getY() >= logistics.facts.origin().getY() + 2,
-            new Timeout(800, new Sequence("sortie-par-le-haut",
-                new InventoryMilestone("vol-autorisé", ctx -> {
+            new Timeout(800, new Sequence("exit-through-top",
+                new InventoryMilestone("flight-authorized", ctx -> {
                     if (ctx.landing() || logistics.outputs.landingFlight()) {
                         throw new IllegalStateException("flight exit is forbidden under Landing");
                     }

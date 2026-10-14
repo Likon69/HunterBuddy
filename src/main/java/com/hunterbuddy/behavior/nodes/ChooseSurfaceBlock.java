@@ -50,8 +50,8 @@ public final class ChooseSurfaceBlock extends Action {
             boolean remaining = mine.patch.stream().anyMatch(point -> mine.material(point)
                 && !mine.facts.supports.contains(point.asLong()));
             mine.facts.siteState = unknown || remaining ? "inaccessible" : "exhausted";
-            mine.facts.outcome = remaining || unknown ? "tranche supérieure inaccessible avec une sortie sûre"
-                : "blocs exploitables épuisés; marches de sortie conservées";
+            mine.facts.outcome = remaining || unknown ? "upper layer inaccessible with a safe exit"
+                : "mineable blocks exhausted; exit steps preserved";
             return Success.INSTANCE;
         }
         return Success.INSTANCE;

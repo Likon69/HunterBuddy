@@ -21,9 +21,9 @@ public final class FarmerSurveyTree {
         survey.eligible = mission::eligible;
         survey.returnRequested = () -> mission.fuelDue()
             || (mission.players() || mission.facts.changeRequested) && mission.best() == null;
-        return new Sequence("prospecter-puis-rendre-la-main-au-cerveau",
+        return new Sequence("survey-then-return-control-to-mission",
             new Timeout(FarmerSettings.ACTIVITY_TIMEOUT_TICKS, SurveyTree.build(survey)),
-            new InventoryMilestone("prospection-de-mission-confirmée", ctx -> {
+            new InventoryMilestone("mission-survey-confirmed", ctx -> {
                 mission.select(ctx, survey.interrupted ? mission.best() : survey.selected);
                 if (survey.interrupted) {
                     mission.facts.baseRequested = mission.fuelDue() || mission.selected == null;

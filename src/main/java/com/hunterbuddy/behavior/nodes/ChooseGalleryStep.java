@@ -19,7 +19,7 @@ public final class ChooseGalleryStep extends Node {
     protected NodeResult onTick(TickContext ctx) {
         if (!GallerySelection.choose(mine)) {
             mine.facts.siteState = "inaccessible";
-            mine.facts.outcome = "aucune nouvelle galerie sûre dans la tache; appuis de retour conservés";
+            mine.facts.outcome = "no new safe gallery in the patch; return supports preserved";
         }
         return Success.INSTANCE;
     }

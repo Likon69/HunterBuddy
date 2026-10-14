@@ -74,6 +74,7 @@ public final class ProtectionBuilder extends Node {
         preparing = false;
         traveling = false;
         ProtectionRegistry.remember(ctx, mission, outputs.mining(), state.origin());
+        ProtectionRegistry.rememberSite(ctx, mission, state);
     }
 
     @Override

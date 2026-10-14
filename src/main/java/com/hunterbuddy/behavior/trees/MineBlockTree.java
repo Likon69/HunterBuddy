@@ -106,7 +106,7 @@ public final class MineBlockTree {
                 }
             }
             if (chosen.isEmpty()) {
-                mine.facts.outcome = "regear nécessaire: aucun outil sain adapté à ce bloc";
+                mine.facts.outcome = "regear required: no healthy tool suitable for this block";
                 return new Fail(FailureCode.MISSING_ITEM, mine.facts.outcome);
             }
             ItemStack expected = chosen;

@@ -14,7 +14,7 @@ public final class BaseVisitScope extends Decorator {
     private final BaseVisitContext visit;
 
     public BaseVisitScope(BaseVisitContext visit, Node child) {
-        super("visite-base-preuves-durables", child);
+        super("base-visit-durable-evidence", child);
         this.visit = visit;
     }
 

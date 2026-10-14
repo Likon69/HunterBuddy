@@ -13,6 +13,8 @@ public final class LogisticsFacts {
     public boolean armorBlocked;
     public boolean baseRequested;
     public int step;
+    public String materialSite = "";
+    public boolean reusedShelter;
     public int[] site;
     public int[] departure;
     public List<int[]> zone = new ArrayList<>();

@@ -8,6 +8,7 @@ import com.hunterbuddy.behavior.core.TreeValidator;
 import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.ReactiveSelector;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -81,7 +82,7 @@ public final class TreeHooks {
             validateCandidate(next);
         } catch (IllegalArgumentException ex) {
             rejected.accept(ex.getMessage());
-            ctx.event(root, Kind.HOOK, null, "refused", ex.getMessage());
+            ctx.event(root, Kind.HOOK, null, TraceReasons.REFUSED, ex.getMessage());
             return false;
         }
         Set<Node> retained = Collections.newSetFromMap(new IdentityHashMap<>());

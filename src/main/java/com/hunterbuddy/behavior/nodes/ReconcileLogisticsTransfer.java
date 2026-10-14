@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.TransferFacts;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
@@ -20,7 +21,7 @@ public final class ReconcileLogisticsTransfer extends Node {
     private final boolean inShulker;
 
     public ReconcileLogisticsTransfer(LogisticsContext logistics, String role, boolean inShulker) {
-        super("réconcilier-transfert-" + role);
+        super("reconcile-transfer-" + role);
         this.logistics = logistics;
         this.role = role;
         this.inShulker = inShulker;
@@ -41,7 +42,7 @@ public final class ReconcileLogisticsTransfer extends Node {
             }
             return Success.INSTANCE;
         }
-        String container = inShulker ? "shulker" : "chest";
+        String container = inShulker ? "shulker" : LogisticsRoles.CHEST;
         if (!transfer.container.equals(container) || !transfer.role.equals(role)) {
             throw new IllegalStateException("pending transfer belongs to another container or shulker role");
         }

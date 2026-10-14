@@ -8,6 +8,7 @@ import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.trace.Kind;
 import com.hunterbuddy.behavior.trace.Trace;
 import com.hunterbuddy.behavior.trace.TraceEvent;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -118,7 +119,7 @@ public final class TickContext {
     public void announceIdle(Node node, Consumer<String> alert) {
         if (idleAnnounced) return;
         idleAnnounced = true;
-        event(node, Kind.RECOVERY, null, "safe idle", "leases=0");
+        event(node, Kind.RECOVERY, null, TraceReasons.SAFE_IDLE, "leases=0");
         alert.accept("SafeIdle: resources released");
     }
 

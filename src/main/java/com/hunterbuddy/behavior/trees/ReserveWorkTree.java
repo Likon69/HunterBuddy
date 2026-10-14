@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
@@ -20,20 +22,20 @@ public final class ReserveWorkTree {
         ReserveInventory reserve = new ReserveInventory(logistics);
         return new Sequence("regear-under-protection",
             new InventoryMilestone("refresh-armor-binding-state", ctx -> logistics.facts.armorBlocked = false),
-            DepositLogisticsTree.build(logistics, "reserve", reserve::beforeReplacement),
+            DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::beforeReplacement),
             ContainerTree.close(logistics.outputs), EquipReserveArmorTree.build(logistics),
-            DepositLogisticsTree.build(logistics, "reserve", reserve::used),
+            DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::used),
             new RepeatUntil("take-equip-and-recheck-reserve-needs", () -> reserve.neededSlot() < 0 || !reserve.room(), 72,
                 new Sequence("replace-one-reserve-item",
-                    LogisticsOperations.transfer(logistics, "reserve", true, "work", () -> {
+                    LogisticsOperations.transfer(logistics, LogisticsRoles.RESERVE, true, TransferPurposes.WORK, () -> {
                         int slot = reserve.neededSlot();
                         if (slot < 0) throw new IllegalStateException("reserve equipment source changed");
                         ItemStack expected = logistics.outputs.inventory().containerContents().get(slot).copy();
                         return logistics.outputs.inventory().takeStack(slot, expected);
                     }), ContainerTree.close(logistics.outputs), EquipReserveArmorTree.build(logistics),
-                    DepositLogisticsTree.build(logistics, "reserve", reserve::used))),
-            DepositLogisticsTree.build(logistics, "reserve", reserve::used),
-            new InventoryMilestone("réserve-vérifiée", ctx -> {
+                    DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::used))),
+            DepositLogisticsTree.build(logistics, LogisticsRoles.RESERVE, reserve::used),
+            new InventoryMilestone("reserve-verified", ctx -> {
                 List<ItemStack> contents = logistics.outputs.inventory().containerContents();
                 List<String> missing = new ArrayList<>(LogisticsInventory.missing(logistics.world, logistics.profile, contents));
                 if (FlightPlan.totalDurability(logistics.world) < logistics.requiredFlightWear

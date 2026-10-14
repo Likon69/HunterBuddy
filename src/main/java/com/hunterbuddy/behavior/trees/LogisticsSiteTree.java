@@ -14,18 +14,20 @@ public final class LogisticsSiteTree {
     private LogisticsSiteTree() {}
 
     public static Node build(LogisticsContext logistics) {
-        return LogisticsOperations.unless("site choisi valide et protégé", logistics::protectedSite,
-            new RetryLogisticsSite(logistics, new Sequence("choisir-et-protéger-emplacement",
+        return LogisticsOperations.unless("selected-site-valid-and-protected", logistics::protectedSite,
+            new RetryLogisticsSite(logistics, new Sequence("choose-and-protect-location",
                 new ChooseLogisticsSite(logistics), LogisticsOperations.prepare(logistics, InventoryLayout::silkPickaxe, 1),
-                new Deferred("rejoindre-emplacement", () ->
-                    GroundTravel.build(logistics.facts.origin(), 2, logistics.baritone, logistics.outputs)),
-                new Deferred("préparer-emplacement", () -> new PrepareLogisticsSite(
-                    logistics.facts, logistics.world, logistics.baritone, logistics.outputs)),
-                new Deferred("construire-sol-central", () -> new ProtectionBuilder(logistics.facts, logistics.memory,
+                new Deferred("reach-location", () ->
+                    logistics.facts.reusedShelter ? ShelterEntryTree.build(logistics)
+                        : GroundTravel.build(logistics.facts.origin(), 2, logistics.baritone, logistics.outputs)),
+                LogisticsOperations.unless("reuse-existing-shelter-space", () -> logistics.facts.reusedShelter,
+                    new Deferred("prepare-location", () -> new PrepareLogisticsSite(
+                        logistics.facts, logistics.world, logistics.baritone, logistics.outputs))),
+                new Deferred("build-central-floor", () -> new ProtectionBuilder(logistics.facts, logistics.memory,
                     logistics.world, logistics.baritone, logistics.outputs, true, logistics.profile, logistics.mission)),
-                new Deferred("rejoindre-centre", () ->
+                new Deferred("reach-center", () ->
                     GroundTravel.build(logistics.facts.origin(), 0, logistics.baritone, logistics.outputs)),
-                new Deferred("construire-protection", () -> new ProtectionBuilder(logistics.facts, logistics.memory,
+                new Deferred("build-shelter", () -> new ProtectionBuilder(logistics.facts, logistics.memory,
                     logistics.world, logistics.baritone, logistics.outputs, false, logistics.profile, logistics.mission)))));
     }
 }

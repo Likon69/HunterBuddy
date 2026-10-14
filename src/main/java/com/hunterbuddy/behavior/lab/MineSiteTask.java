@@ -46,7 +46,7 @@ public record MineSiteTask(FarmerCatalog catalog, FarmerZoneLookup lookup, List<
         MineSiteLabContext lab = new MineSiteLabContext(catalog, lookup, steps, mission, worldKey, world, baritone, outputs);
         return new Sequence("mine-verified-site-lab", new ResolveMineSiteLab(lab),
             new Deferred("mine-site-by-catalog-strategy", () -> MineSiteTree.build(lab.mine)),
-            StopBot.withReason(ExitReason.COMPLETED, ctx -> "Minage " + lab.mine.profile.label() + ": " + lab.mine.facts.mined
-                + " blocs, " + lab.mine.facts.excavated + " blocs d'accès; retour confirmé. " + lab.mine.facts.outcome));
+            StopBot.withReason(ExitReason.COMPLETED, ctx -> "Mining " + lab.mine.profile.label() + ": " + lab.mine.facts.mined
+                + " blocks, " + lab.mine.facts.excavated + " access blocks; return confirmed. " + lab.mine.facts.outcome));
     }
 }

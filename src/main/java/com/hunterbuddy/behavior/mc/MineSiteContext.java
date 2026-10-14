@@ -80,7 +80,7 @@ public final class MineSiteContext {
 
     public boolean finished() {
         if (facts.pending == null && retreatRequested.getAsBoolean() && facts.outcome.isEmpty()) {
-            facts.outcome = "repli de mission demandé avant une nouvelle casse";
+            facts.outcome = "mission retreat requested before another break";
         }
         return facts.mined >= MaterialSite.SHULKER_BLOCKS || !facts.outcome.isEmpty();
     }

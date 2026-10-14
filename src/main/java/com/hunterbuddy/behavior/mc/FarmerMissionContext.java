@@ -84,20 +84,20 @@ public final class FarmerMissionContext {
         knowledge.biomeBounds(step.deliveryChest(), settings.flightRadius());
         sites = knowledge.zone(zone, profile);
         if (facts.occupied.entrySet().removeIf(entry -> entry.getValue() <= System.currentTimeMillis())) {
-            save(ctx, "observations de joueurs expirées");
+            save(ctx, "player observations expired");
         }
         if (!facts.world.isEmpty() && !facts.world.equals(world.storageKey())) {
-            throw new IllegalStateException("les faits de mission appartiennent à un autre monde");
+            throw new IllegalStateException("mission facts belong to another world");
         }
         if (facts.step != step.index() || !facts.profile.equals(profile.key())) {
             if (unfinishedMine() || fieldActive() || baseActive()) {
-                throw new IllegalStateException("opération inachevée d'une autre étape : reprise requise");
+                throw new IllegalStateException("unfinished operation from another step: resume required");
             }
             facts = new FarmerMissionFacts();
             facts.world = world.storageKey();
             facts.step = step.index();
             facts.profile = profile.key();
-            save(ctx, "étape de mission sélectionnée");
+            save(ctx, "mission-step-selected");
         }
         selected = facts.site == null ? null : sites.sites.get(Long.toString(facts.site));
         if (retained && selected == null && facts.siteSnapshot != null
@@ -107,7 +107,7 @@ public final class FarmerMissionContext {
         }
         MineSiteFacts mine = mineFacts();
         if (mine != null && !mine.exited && selected == null) {
-            throw new IllegalStateException("site du minage interrompu absent de la connaissance persistée");
+            throw new IllegalStateException("interrupted mining site absent from persisted knowledge");
         }
         ProtectionRegistry.restore(ctx, journal, outputs.mining());
         outputs.mining().breakRule(baseActive() ? pos -> false
@@ -213,8 +213,8 @@ public final class FarmerMissionContext {
     public int capacity() {
         int result = 0;
         List<ItemStack> contents = stock();
-        String diversSlot = journal.equipment(tick, "logistics-divers-slot");
-        String diversSignature = journal.equipment(tick, "logistics-divers");
+        String diversSlot = journal.equipment(tick, "logistics-miscellaneous-slot");
+        String diversSignature = journal.equipment(tick, "logistics-miscellaneous");
         for (int slot = 0; slot < contents.size(); slot++) {
             ItemStack stack = contents.get(slot);
             if (Integer.toString(slot).equals(diversSlot) && !diversSignature.isEmpty()
@@ -271,7 +271,7 @@ public final class FarmerMissionContext {
         facts.site = site == null ? null : site.seed().asLong();
         facts.changeRequested = false;
         facts.changeReason = "";
-        save(ctx, site == null ? "sélection sans site, prospection requise" : "site retenu " + site.seed().toShortString());
+        save(ctx, site == null ? "no site selected, survey required" : "site selected " + site.seed().toShortString());
     }
 
     public void save(TickContext ctx, String milestone) {

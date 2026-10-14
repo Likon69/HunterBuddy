@@ -87,7 +87,10 @@ public final class SurveyScanner {
         if (site != null) {
             String key = Long.toString(site.seed().asLong());
             MaterialSite previous = memory.sites.get(key);
-            if (previous != null) site.flightAvoidedUntil = previous.flightAvoidedUntil;
+            if (previous != null) {
+                site.flightAvoidedUntil = previous.flightAvoidedUntil;
+                site.shelterId = previous.shelterId;
+            }
             if (previous == null || !previous.status.equals("inaccessible")) memory.sites.put(key, site);
         }
         CoverageState state = scan.verified() ? CoverageState.VERIFIED : CoverageState.OBSERVED;

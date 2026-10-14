@@ -17,7 +17,7 @@ public final class FarmerMissionMemory {
         String data = journal.equipment(ctx, "mission-facts");
         FarmerMissionFacts facts = data.isEmpty() ? new FarmerMissionFacts() : GSON.fromJson(data, FarmerMissionFacts.class);
         if (facts == null || facts.world == null || facts.profile == null || facts.occupied == null) {
-            throw new IllegalStateException("faits de mission invalides, reprise ambiguë");
+            throw new IllegalStateException("invalid mission facts, ambiguous resume");
         }
         return facts;
     }

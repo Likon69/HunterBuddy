@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.core;
 
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.List;
 import java.util.Objects;
 
@@ -34,7 +35,7 @@ public abstract class Node {
             } else if (stage == Stage.SUSPENDED) {
                 stage = Stage.ACTIVE;
                 onResume(ctx, ctx.tick() - suspendedTick, ctx.nowMs() - suspendedMs - (ctx.clock().frozenMs() - suspendedFrozen));
-                ctx.event(this, Kind.GATE, null, "resumed", "activation retained");
+                ctx.event(this, Kind.GATE, null, TraceReasons.RESUMED, "activation retained");
             }
             NodeResult result = Objects.requireNonNull(onTick(ctx), "null node result: " + path);
             if (result instanceof Running) {

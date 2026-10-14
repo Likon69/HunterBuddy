@@ -13,7 +13,7 @@ public final class WaitForFarmerZone extends Node {
     private long provedAt;
 
     public WaitForFarmerZone(FarmerMissionContext mission) {
-        super("attendre-à-la-base-la-zone-occupée");
+        super("wait-at-base-for-occupied-zone");
         this.mission = mission;
     }
 
@@ -28,14 +28,14 @@ public final class WaitForFarmerZone extends Node {
         if (remaining > 0) {
             if (ctx.nowMs() - provedAt >= PROOF_INTERVAL_MS) {
                 provedAt = ctx.nowMs();
-                ctx.progress("attente planifiée à la base, zone occupée");
+                ctx.progress("scheduled wait at base, zone occupied");
             }
-            return new Running("zone occupée, attente à la base restante=" + remaining / 1000 + "s");
+            return new Running("zone occupied, remaining wait at base=" + remaining / 1000 + "s");
         }
         mission.facts.waitUntil = 0;
         mission.facts.waitAtBase = false;
         mission.facts.occupied.entrySet().removeIf(entry -> entry.getValue() <= System.currentTimeMillis());
-        mission.save(ctx, "attente terminée, nouvelle sélection de site");
+        mission.save(ctx, "wait finished, selecting another site");
         return Success.INSTANCE;
     }
 }

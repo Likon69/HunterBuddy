@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.OperationFailure;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
@@ -20,7 +21,7 @@ public final class BaseShelterStockTree {
                 new Sequence("top-up-shelter-stock-to-64",
                     BaseOperations.open(visit, () -> visit.position(visit.facts.supply)),
                     new RepeatUntil("64-shelter-blocks-confirmed", () -> stock(visit) >= 64, 64,
-                        BaseOperations.transfer(visit, () -> visit.position(visit.facts.supply), "shelter-stock", () -> {
+                        BaseOperations.transfer(visit, () -> visit.position(visit.facts.supply), TransferPurposes.SHELTER_STOCK, () -> {
                             List<ItemStack> contents = visit.logistics.outputs.inventory().containerContents();
                             int needed = 64 - stock(visit);
                             long free = LogisticsInventory.player(visit.logistics.world).stream().filter(ItemStack::isEmpty).count();

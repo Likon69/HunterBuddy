@@ -6,6 +6,7 @@ import net.minecraft.util.math.BlockPos;
 
 public final class MaterialSite {
     public static final int SHULKER_BLOCKS = 1728;
+    public long shelterId;
     public int x;
     public int y;
     public int z;
@@ -19,6 +20,7 @@ public final class MaterialSite {
     public List<Long> blocks = new ArrayList<>();
 
     public MaterialSite(BlockPos seed, int quantity, boolean lowerBound, long now) {
+        shelterId = seed.asLong();
         x = seed.getX();
         y = seed.getY();
         z = seed.getZ();

@@ -30,7 +30,7 @@ public record BaseVisitTask(FarmerCatalog catalog, FarmerZoneLookup lookup, Farm
 
     @Override
     public String target() {
-        return "visite complète de la base de l'étape FarmerBuddy courante";
+        return "full base visit for the current FarmerBuddy step";
     }
 
     @Override
@@ -50,9 +50,9 @@ public record BaseVisitTask(FarmerCatalog catalog, FarmerZoneLookup lookup, Farm
     @Override
     public Node build(BotContext context, WorldReader world, Outputs outputs) {
         BaseVisitLabContext lab = new BaseVisitLabContext(catalog, lookup, settings, mission, worldKey, world, baritone, outputs);
-        return new Sequence("labo-visite-base", new Timeout(100, new ResolveBaseVisitLab(lab)),
-            new Deferred("visiter-base-en-un-passage", () -> BaseVisitTree.build(lab.visit)).resumable(),
-            StopBot.withReason(ExitReason.COMPLETED, ctx -> "Base visitée, livraisons confirmées : "
-                + lab.visit.logistics.mission.delivered(ctx, lab.visit.facts.step) + "; réserve et fusées prêtes, ender chest repris."));
+        return new Sequence("base-visit-lab", new Timeout(100, new ResolveBaseVisitLab(lab)),
+            new Deferred("visit-base-in-one-pass", () -> BaseVisitTree.build(lab.visit)).resumable(),
+            StopBot.withReason(ExitReason.COMPLETED, ctx -> "Base visited, deliveries confirmed: "
+                + lab.visit.logistics.mission.delivered(ctx, lab.visit.facts.step) + "; reserve and rockets ready, ender chest recovered."));
     }
 }

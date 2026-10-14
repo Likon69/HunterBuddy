@@ -9,6 +9,7 @@ import com.hunterbuddy.behavior.nodes.Sequence;
 import com.hunterbuddy.behavior.nodes.Succeed;
 import com.hunterbuddy.behavior.nodes.Timeout;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.function.Consumer;
 
 public final class Recovery extends Composite {
@@ -40,7 +41,7 @@ public final class Recovery extends Composite {
     public void next(TickContext ctx) {
         halt(ctx, ExitReason.ABORTED);
         level = Math.min(4, level + 1);
-        ctx.event(this, Kind.RECOVERY, null, "enter", "level=" + level);
+        ctx.event(this, Kind.RECOVERY, null, TraceReasons.ENTER, "level=" + level);
     }
 
     public void reset() {

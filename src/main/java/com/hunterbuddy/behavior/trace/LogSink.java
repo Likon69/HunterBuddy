@@ -29,12 +29,12 @@ public final class LogSink implements TraceSink {
     private boolean important(TraceEvent event) {
         return switch (event.kind()) {
             case FAULT, MONITOR, RECOVERY, BOT -> true;
-            case HOOK -> event.reason().equals("refused");
-            case GATE -> event.nodePath().equals("root") && (event.reason().equals("paused") || event.reason().equals("resumed"))
-                || event.reason().equals("overdue") || event.reason().equals("flee");
+            case HOOK -> event.reason().equals(TraceReasons.REFUSED);
+            case GATE -> event.nodePath().equals("root") && (event.reason().equals(TraceReasons.PAUSED) || event.reason().equals(TraceReasons.RESUMED))
+                || event.reason().equals(TraceReasons.OVERDUE) || event.reason().equals(TraceReasons.FLEE);
             case FAILURE -> event.code() == FailureCode.REFUSED;
             case STOP -> event.nodePath().equals("root") && switch (event.reason()) {
-                case "STOPPED", "DISCONNECTED", "DEAD", "WORLD_CHANGED", "FAULT" -> true;
+                case TraceReasons.STOPPED, TraceReasons.DISCONNECTED, TraceReasons.DEAD, TraceReasons.WORLD_CHANGED, TraceReasons.FAULT -> true;
                 default -> false;
             };
             default -> false;

@@ -20,12 +20,12 @@ public final class MoveLogisticsOffhandTree {
     private MoveLogisticsOffhandTree() {}
 
     public static Node build(LogisticsContext logistics, String role, Predicate<ItemStack> filter) {
-        return new Timeout(600, LogisticsOperations.unless("main secondaire prête " + role,
+        return new Timeout(600, LogisticsOperations.unless("offhand ready " + role,
             () -> logistics.cycle(role).secondaryStack.isEmpty()
                 && !filter.test(logistics.world.client().player.getOffHandStack()),
-            new Sequence("déplacer-main-secondaire-" + role,
+            new Sequence("move-offhand-" + role,
                 ContainerTree.close(logistics.outputs),
-                new InventoryMilestone("intention-main-secondaire", ctx -> {
+                new InventoryMilestone("offhand-intent", ctx -> {
                     ShulkerCycleFacts cycle = logistics.cycle(role);
                     if (!cycle.secondaryStack.isEmpty()) return;
                     ItemStack expected = logistics.world.client().player.getOffHandStack().copy();
@@ -33,10 +33,10 @@ public final class MoveLogisticsOffhandTree {
                     cycle.secondaryBaseline = count(logistics, expected);
                     logistics.save(ctx, "offhand move intent " + role);
                 }),
-                LogisticsOperations.unless("déplacement secondaire reçu", () -> moved(logistics, role),
-                    new Sequence("clic-main-secondaire", LogisticsOperations.prepare(logistics, ItemStack::isEmpty, 8),
+                LogisticsOperations.unless("offhand movement received", () -> moved(logistics, role),
+                    new Sequence("offhand-click", LogisticsOperations.prepare(logistics, ItemStack::isEmpty, 8),
                         new WithLease(Set.of(Resource.INVENTORY), LeasePolicy.WAIT,
-                            new Sequence("inventaire-joueur-revendiqué", new InventoryMilestone("revendiquer-inventaire", ctx -> {
+                            new Sequence("player-inventory-claimed", new InventoryMilestone("claim-inventory", ctx -> {
                                 if (!logistics.outputs.inventory().claimPlayer(ctx.leases()
                                     .holder(Resource.INVENTORY).orElseThrow())) {
                                     throw new IllegalStateException("player inventory unavailable");
@@ -50,7 +50,7 @@ public final class MoveLogisticsOffhandTree {
                                 }
                                 return logistics.outputs.inventory().playerSwap(40, 8);
                             }, logistics.outputs.inventory()))))),
-                new InventoryMilestone("main-secondaire-confirmée", ctx -> {
+                new InventoryMilestone("offhand-confirmed", ctx -> {
                     if (!moved(logistics, role)) throw new IllegalStateException("offhand move not confirmed");
                     logistics.cycle(role).secondaryStack = "";
                     logistics.save(ctx, "offhand move confirmed " + role);

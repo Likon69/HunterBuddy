@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.mc.ShulkerSignature;
@@ -29,19 +30,19 @@ public final class ShulkerCycleTree {
             () -> logistics.stored(role) || !logistics.cycle(role).unavailable.isEmpty(),
             new Sequence("cycle-" + role,
                 ready(logistics, role, requireCapacity),
-                available(logistics, role, new Selector("remplir-" + role,
-                    new Guard(new Condition("contenu travaillé " + role, sensors -> workProven(logistics, role)),
-                        new Deferred("vérifier-contenu-travaillé-" + role, () -> {
+                available(logistics, role, new Selector("fill-" + role,
+                    new Guard(new Condition("contents processed " + role, sensors -> workProven(logistics, role)),
+                        new Deferred("verify-processed-contents-" + role, () -> {
                             if (!logistics.placed(role)) return new Succeed();
-                            return new Sequence("contenu-réel-confirmé-" + role,
+                            return new Sequence("actual-contents-confirmed-" + role,
                                 LogisticsOperations.open(logistics, role, true), ContainerTree.close(logistics.outputs));
-                        })), new Deferred("travailler-" + role, work)).propagateFailures()),
+                        })), new Deferred("process-" + role, work)).propagateFailures()),
                 available(logistics, role, TrackedEquipmentTree.recover(logistics, role)),
                 available(logistics, role, store(logistics, role))));
     }
 
     private static Node available(LogisticsContext logistics, String role, Node operation) {
-        return LogisticsOperations.unless("shulker indisponible " + role,
+        return LogisticsOperations.unless("shulker unavailable " + role,
             () -> !logistics.cycle(role).unavailable.isEmpty(), operation);
     }
 
@@ -57,22 +58,22 @@ public final class ShulkerCycleTree {
     }
 
     private static Node ready(LogisticsContext logistics, String role, boolean requireCapacity) {
-        return new Selector("shulker-prête-" + role,
-            LogisticsOperations.guard("shulker suivie " + role, () -> !logistics.cycle(role).signature.isEmpty()
+        return new Selector("shulker-ready-" + role,
+            LogisticsOperations.guard("tracked shulker " + role, () -> !logistics.cycle(role).signature.isEmpty()
                 && (logistics.placed(role) || logistics.returned(role) || workProven(logistics, role))),
-            new Guard(new Condition("signature identifiée " + role,
+            new Guard(new Condition("signature identified " + role,
                 sensors -> !logistics.cycle(role).signature.isEmpty()), new ConfirmEquipmentPlacement(logistics, role)),
-            new Sequence("prendre-et-poser-" + role,
+            new Sequence("take-and-place-" + role,
                 LogisticsOperations.open(logistics, role, false), new ChooseShulker(logistics, role, requireCapacity),
-                new Deferred("prendre-shulker-identifiée-" + role, () -> {
+                new Deferred("take-identified-shulker-" + role, () -> {
                     if (!logistics.cycle(role).unavailable.isEmpty()) return ContainerTree.close(logistics.outputs);
-                    return new Sequence("sortir-shulker-" + role, take(logistics, role),
+                    return new Sequence("take-out-shulker-" + role, take(logistics, role),
                         ContainerTree.close(logistics.outputs), TrackedEquipmentTree.place(logistics, role));
                 }))).propagateFailures();
     }
 
     private static Node take(LogisticsContext logistics, String role) {
-        return LogisticsOperations.unless("shulker retirée de l'ender chest " + role, () -> {
+        return LogisticsOperations.unless("shulker removed from the ender chest " + role, () -> {
             ShulkerCycleFacts cycle = logistics.cycle(role);
             if (cycle.takenContents.isEmpty()) return false;
             if (!LogisticsInventory.decode(cycle.takenContents, 27, logistics.world)
@@ -82,7 +83,7 @@ public final class ShulkerCycleTree {
             if (logistics.world.countMatching(ShulkerSignature.decode(cycle.signature, logistics.world)::matches)
                 != cycle.takeBaseline + 1) throw new IllegalStateException("taken shulker count changed before placement");
             return true;
-        }, LogisticsOperations.transfer(logistics, role, false, "take", () -> {
+        }, LogisticsOperations.transfer(logistics, role, false, TransferPurposes.TAKE, () -> {
             ShulkerCycleFacts cycle = logistics.cycle(role);
             ItemStack expected = logistics.outputs.inventory().containerContents().get(cycle.sourceSlot);
             if (!ShulkerSignature.decode(cycle.signature, logistics.world).matches(expected)) {
@@ -93,16 +94,16 @@ public final class ShulkerCycleTree {
     }
 
     private static Node store(LogisticsContext logistics, String role) {
-        return LogisticsOperations.unless("shulker rangée " + role, () -> logistics.stored(role),
-            new Sequence("ranger-shulker-" + role, LogisticsOperations.open(logistics, role, false),
-                LogisticsOperations.unless("reçu de rangement " + role, () -> logistics.stored(role),
-                    LogisticsOperations.transfer(logistics, role, false, "store", () ->
+        return LogisticsOperations.unless("shulker stored " + role, () -> logistics.stored(role),
+            new Sequence("store-shulker-" + role, LogisticsOperations.open(logistics, role, false),
+                LogisticsOperations.unless("storage receipt " + role, () -> logistics.stored(role),
+                    LogisticsOperations.transfer(logistics, role, false, TransferPurposes.STORE, () ->
                         logistics.outputs.inventory().storeShulker(ShulkerSignature.decode(
                             logistics.cycle(role).signature, logistics.world)))),
                 ContainerTree.close(logistics.outputs),
-                new InventoryMilestone("rangement-confirmé-" + role, ctx -> {
+                new InventoryMilestone("storage-confirmed-" + role, ctx -> {
                     if (!logistics.stored(role)) throw new IllegalStateException("storage receipt missing for " + role);
-                    logistics.save(ctx, "rangé " + role);
+                    logistics.save(ctx, "stored " + role);
                 })));
     }
 }

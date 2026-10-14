@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.OperationFailure;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.mc.BaseTransferReceipt;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.InventoryTransaction;
@@ -28,7 +29,7 @@ public final class BaseOperations {
     private BaseOperations() {}
 
     public static Node open(BaseVisitContext visit, Supplier<BlockPos> position) {
-        return new Deferred("rejoindre-et-ouvrir-coffre-base", () -> {
+        return new Deferred("reach-and-open-base-chest", () -> {
             BlockPos pos = position.get();
             if (visit.configuredChest(pos) && visit.logistics.world.loaded(pos)
                 && !(visit.logistics.world.state(pos).getBlock() instanceof ChestBlock)) {
@@ -38,9 +39,9 @@ public final class BaseOperations {
             if (visit.logistics.outputs.inventory().at(pos)) {
                 return new Succeed();
             }
-            return new Sequence("coffre-base-confirmé", ContainerTree.close(visit.logistics.outputs),
+            return new Sequence("base-chest-confirmed", ContainerTree.close(visit.logistics.outputs),
                 GroundTravel.build(pos, 2, visit.logistics.baritone, visit.logistics.outputs),
-                new InventoryMilestone("coffre-attendu-présent", ctx -> {
+                new InventoryMilestone("expected-chest-present", ctx -> {
                     if (!visit.logistics.world.loaded(pos)) {
                         throw new OperationFailure(FailureCode.UNREACHABLE, "chest not loaded at " + pos);
                     }
@@ -53,10 +54,10 @@ public final class BaseOperations {
     }
 
     public static Node ender(BaseVisitContext visit) {
-        return new Sequence("ender-chest-base-vérifié", open(visit, () -> visit.logistics.facts.chest()),
-            new Deferred("réconcilier-contenu-ender-chest-base", () -> new ReconcileLogisticsTransfer(visit.logistics,
-                visit.logistics.facts.transfer.pending ? visit.logistics.facts.transfer.role : "reserve", false)),
-            new InventoryMilestone("observer-chargement-base", visit::observe));
+        return new Sequence("base-ender-chest-verified", open(visit, () -> visit.logistics.facts.chest()),
+            new Deferred("reconcile-base-ender-chest-contents", () -> new ReconcileLogisticsTransfer(visit.logistics,
+                visit.logistics.facts.transfer.pending ? visit.logistics.facts.transfer.role : LogisticsRoles.RESERVE, false)),
+            new InventoryMilestone("observe-base-loading", visit::observe));
     }
 
     public static Node transfer(BaseVisitContext visit, Supplier<BlockPos> position, String purpose,
@@ -83,14 +84,14 @@ public final class BaseOperations {
     }
 
     public static Node pending(BaseVisitContext visit) {
-        return LogisticsOperations.unless("aucun transfert de base interrompu", () -> !visit.facts.transfer.receipt.pending,
-            new Sequence("reprendre-transfert-base", open(visit, () -> visit.position(visit.facts.transfer.position)),
+        return LogisticsOperations.unless("no interrupted base transfer", () -> !visit.facts.transfer.receipt.pending,
+            new Sequence("resume-base-transfer", open(visit, () -> visit.position(visit.facts.transfer.position)),
                 new ReconcileBaseTransfer(visit), ContainerTree.close(visit.logistics.outputs)));
     }
 
     public static ItemStack cargo(BaseVisitContext visit) {
         if (visit.facts.cargo.isEmpty()) {
-            throw new IllegalStateException("aucun objet transporté confirmé");
+            throw new IllegalStateException("no confirmed carried item");
         }
         return LogisticsInventory.decode(visit.facts.cargo, 1, visit.logistics.world).getFirst();
     }

@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.Sequence;
@@ -13,16 +14,16 @@ public final class LogisticsFinishTree {
     private LogisticsFinishTree() {}
 
     public static Node build(LogisticsContext logistics) {
-        return new Sequence("reprendre-ender-chest-et-sortir",
-            ContainerTree.close(logistics.outputs), TrackedEquipmentTree.recover(logistics, "chest"),
-            new Deferred("restaurer-barre-disponible", () -> {
+        return new Sequence("recover-ender-chest-and-exit",
+            ContainerTree.close(logistics.outputs), TrackedEquipmentTree.recover(logistics, LogisticsRoles.CHEST),
+            new Deferred("restore-available-hotbar", () -> {
                 List<Node> nodes = new ArrayList<>();
                 for (int slot = 0; slot < logistics.layout.size(); slot++) {
                     Predicate<ItemStack> filter = logistics.layout.filter(slot);
                     if (logistics.layout.find(filter, 0) >= 0) nodes.add(LogisticsOperations.prepare(logistics, filter, slot));
                 }
                 nodes.add(LogisticsOperations.prepare(logistics, ItemStack::isEmpty, 8));
-                return new Sequence("barre-fixe-et-slot-libre", nodes.toArray(Node[]::new));
+                return new Sequence("fixed-hotbar-and-free-slot", nodes.toArray(Node[]::new));
             }), ProtectionExitTree.build(logistics));
     }
 }

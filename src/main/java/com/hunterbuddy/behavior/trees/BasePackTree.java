@@ -3,6 +3,8 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.OperationFailure;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.LogisticsInventory;
 import com.hunterbuddy.behavior.mc.ShulkerSignature;
@@ -18,9 +20,9 @@ public final class BasePackTree {
     private BasePackTree() {}
 
     public static Node resumeMaterial(BaseVisitContext visit) {
-        return LogisticsOperations.unless("aucune shulker matériau de base interrompue",
-            () -> visit.logistics.facts.material.signature.isEmpty() || visit.logistics.stored("material"),
-            ShulkerCycleTree.build(visit.logistics, "material", () -> MaterialWorkTree.build(visit.logistics, "material")));
+        return LogisticsOperations.unless("no interrupted base material shulker",
+            () -> visit.logistics.facts.material.signature.isEmpty() || visit.logistics.stored(LogisticsRoles.MATERIAL),
+            ShulkerCycleTree.build(visit.logistics, LogisticsRoles.MATERIAL, () -> MaterialWorkTree.build(visit.logistics, LogisticsRoles.MATERIAL)));
     }
 
     public static Node build(BaseVisitContext visit) {
@@ -32,7 +34,7 @@ public final class BasePackTree {
                 new RepeatUntil("loose-miscellaneous-items-returned", () -> miscellaneous(visit) == 0, 72,
                     new Sequence("return-one-miscellaneous-stack",
                         BaseOperations.open(visit, () -> visit.position(visit.facts.returns)),
-                        BaseOperations.transfer(visit, () -> visit.position(visit.facts.returns), "return-loose-miscellaneous",
+                        BaseOperations.transfer(visit, () -> visit.position(visit.facts.returns), TransferPurposes.RETURN_LOOSE_MISCELLANEOUS,
                             () -> visit.logistics.outputs.inventory().firstDeposit(
                                 LogisticsInventory.miscellaneous(visit.logistics.profile), FailureCode.MISSION_STOP))))),
             ContainerTree.close(visit.logistics.outputs),
@@ -50,16 +52,16 @@ public final class BasePackTree {
     }
 
     private static Node cycle(BaseVisitContext visit) {
-        return new RepeatShulkerCycle(visit.logistics, "material", new Sequence("pack-with-empty-shulker-supply",
+        return new RepeatShulkerCycle(visit.logistics, LogisticsRoles.MATERIAL, new Sequence("pack-with-empty-shulker-supply",
             BaseOperations.ender(visit),
             new InventoryMilestone("retry-packing-with-observed-stock", ctx -> {
-                if (visit.logistics.cycle("material").signature.isEmpty()) {
-                    visit.logistics.cycle("material").unavailable = "";
+                if (visit.logistics.cycle(LogisticsRoles.MATERIAL).signature.isEmpty()) {
+                    visit.logistics.cycle(LogisticsRoles.MATERIAL).unavailable = "";
                 }
             }),
             LogisticsOperations.unless("packing shulker capacity available", () -> capacity(visit),
                 BaseEmptyShulkersTree.loadOne(visit)),
-            ShulkerCycleTree.build(visit.logistics, "material", () -> MaterialWorkTree.build(visit.logistics, "material"))));
+            ShulkerCycleTree.build(visit.logistics, LogisticsRoles.MATERIAL, () -> MaterialWorkTree.build(visit.logistics, LogisticsRoles.MATERIAL))));
     }
 
     private static boolean capacity(BaseVisitContext visit) {
@@ -67,7 +69,7 @@ public final class BasePackTree {
         carried.add(visit.logistics.world.client().player.getOffHandStack());
         for (int i = 0; i < visit.enderContents().size(); i++) {
             ItemStack stack = visit.enderContents().get(i);
-            if (!ShulkerSignature.isShulker(stack) || visit.roleSlot(i, "reserve") || visit.roleSlot(i, "divers")) continue;
+            if (!ShulkerSignature.isShulker(stack) || visit.roleSlot(i, LogisticsRoles.RESERVE) || visit.roleSlot(i, LogisticsRoles.MISCELLANEOUS)) continue;
             ShulkerSignature signature = ShulkerSignature.of(stack, visit.logistics.world);
             if (signature.empty() || LogisticsInventory.pure(signature, visit.logistics.profile) && signature.contents().stream()
                 .anyMatch(destination -> destination.isEmpty() || destination.getCount() < destination.getMaxCount()

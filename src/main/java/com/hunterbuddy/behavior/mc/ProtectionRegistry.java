@@ -27,6 +27,23 @@ public final class ProtectionRegistry {
         mining.protectShelter(center);
     }
 
+    public static BlockPos last(TickContext ctx, MissionJournal journal, LogisticsFacts facts) {
+        if (facts.materialSite.isEmpty()) return null;
+        String saved = journal.equipment(ctx, siteKey(facts));
+        if (saved.isEmpty()) return null;
+        int[] center = GSON.fromJson(saved, int[].class);
+        return centers(ctx, journal).stream().anyMatch(pos -> Arrays.equals(pos, center))
+            ? LogisticsFacts.position(center) : null;
+    }
+
+    public static void rememberSite(TickContext ctx, MissionJournal journal, LogisticsFacts facts) {
+        if (!facts.materialSite.isEmpty()) journal.equipment(ctx, siteKey(facts), GSON.toJson(facts.site));
+    }
+
+    private static String siteKey(LogisticsFacts facts) {
+        return "protection-last-site-" + facts.dimension + "/" + facts.profile + "/" + facts.materialSite;
+    }
+
     private static List<int[]> centers(TickContext ctx, MissionJournal journal) {
         String saved = journal.equipment(ctx, "protection-sites");
         return saved.isEmpty() ? new ArrayList<>() : new ArrayList<>(Arrays.asList(GSON.fromJson(saved, int[][].class)));

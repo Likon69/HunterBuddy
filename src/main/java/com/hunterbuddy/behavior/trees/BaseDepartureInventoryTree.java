@@ -13,18 +13,18 @@ public final class BaseDepartureInventoryTree {
     private BaseDepartureInventoryTree() {}
 
     public static Node build(BaseVisitContext visit) {
-        return new Deferred("slots-de-départ-confirmés", () -> {
+        return new Deferred("departure-slots-confirmed", () -> {
             InventoryLayout layout = new InventoryLayout(visit.logistics.world, visit.logistics.profile);
             List<Node> slots = new ArrayList<>();
             for (int slot = 0; slot < 5; slot++) {
                 slots.add(EquipmentTree.prepareHeld(layout, layout.filter(slot), slot,
                     visit.logistics.outputs, visit.logistics.mission));
             }
-            slots.add(LogisticsOperations.unless("aucun bloc de protection disponible",
+            slots.add(LogisticsOperations.unless("no shelter block available",
                 () -> layout.find(layout.filter(5), 0) < 0,
                 EquipmentTree.prepareHeld(layout, layout.filter(5), 5, visit.logistics.outputs, visit.logistics.mission)));
             slots.add(EquipmentTree.prepareHeld(layout, ItemStack::isEmpty, 8, visit.logistics.outputs, visit.logistics.mission));
-            return new Sequence("barre-prête-et-slot-libre", slots.toArray(Node[]::new));
+            return new Sequence("hotbar-ready-and-slot-free", slots.toArray(Node[]::new));
         });
     }
 }

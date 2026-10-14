@@ -26,10 +26,10 @@ public final class FarmerSiteTree {
     public static Node mine(FarmerMissionContext mission, LongConsumer counted) {
         if (!mission.unfinishedMine() && !FarmerFlightBudget.canReach(mission.tick, mission.selected.seed(),
             mission.step.deliveryChest(), mission.world, mission.outputs)) {
-            return new InventoryMilestone("budget-de-changement-insuffisant-retour-base", ctx -> {
+            return new InventoryMilestone("insufficient-site-change-budget-return-to-base", ctx -> {
                 mission.facts.siteActive = false;
                 mission.facts.baseRequested = true;
-                mission.save(ctx, "ravitaillement avant d'atteindre le prochain site, réserve de retour préservée");
+                mission.save(ctx, "restocking before reaching the next site, return reserve preserved");
             });
         }
         mission.facts.siteActive = true;
@@ -37,11 +37,11 @@ public final class FarmerSiteTree {
         MineSiteContext mine = new MineSiteContext(mission.selected, mission.profile, () -> mission.zone,
             mission.world, mission.baritone, mission.outputs, mission.journal);
         mine.retreatRequested = mission::retreatDue;
-        return new FarmerSiteResult(mission, new Sequence("rejoindre-vérifier-miner-et-remonter",
+        return new FarmerSiteResult(mission, new Sequence("reach-verify-mine-and-return-to-surface",
             mission.unfinishedMine() ? new Succeed() : arrival(mission),
             new Timeout(FarmerSettings.ACTIVITY_TIMEOUT_TICKS, MineSiteTree.build(mine)),
-            new InventoryMilestone("minage-terminé-à-l'entrée", ctx -> {
-                if (!mine.facts.exited) throw new IllegalStateException("minage non remonté, reprise requise");
+            new InventoryMilestone("mining-finished-at-entrance", ctx -> {
+                if (!mine.facts.exited) throw new IllegalStateException("mining has not returned to the surface, resume required");
                 counted.accept(mine.facts.mined);
                 boolean changing = mission.facts.changeRequested || !mission.eligible(mine.site);
                 String changeReason = mission.facts.changeReason;
@@ -49,17 +49,17 @@ public final class FarmerSiteTree {
                 if (changing || !mine.site.usable()) {
                     mission.facts.changeRequested = true;
                     mission.facts.changeReason = changeReason;
-                    mission.save(ctx, "site épuisé ou inaccessible : " + mine.site.reason);
+                    mission.save(ctx, "site exhausted or inaccessible: " + mine.site.reason);
                 }
             })));
     }
 
     public static Node change(FarmerMissionContext mission) {
-        return new Sequence("fermer-reprendre-et-retenir-un-autre-site",
+        return new Sequence("close-recover-and-select-another-site",
             ContainerTree.close(mission.outputs),
-            new InventoryMilestone("choisir-un-site-selon-les-faits", ctx -> {
+            new InventoryMilestone("choose-site-from-facts", ctx -> {
                 if (mission.fieldActive() || mission.baseActive() || mission.unfinishedMine()) {
-                    throw new IllegalStateException("matériel ou minage suivi à reprendre avant de changer de site");
+                    throw new IllegalStateException("tracked equipment or mining must be resumed before changing sites");
                 }
                 mission.avoidVisiblePlayers(ctx);
                 if (!mission.facts.changeReason.isEmpty() && mission.selected != null) {
@@ -72,15 +72,15 @@ public final class FarmerSiteTree {
                 if (next == null && (occupied || mission.players())) {
                     mission.facts.baseRequested = true;
                     mission.facts.waitAtBase = true;
-                    mission.save(ctx, "sites occupés : rentrer et attendre à la base");
+                    mission.save(ctx, "sites occupied: return and wait at base");
                 }
             }));
     }
 
     private static Node arrival(FarmerMissionContext mission) {
         Key<BlockPos> verified = new Key<>("farmer-site-verified", BlockPos.class, Scope.OWNER, false);
-        return new Sequence("vol-ou-marche-puis-validation-sur-place",
-            new Deferred("rejoindre-la-zone-du-site", () -> {
+        return new Sequence("fly-or-walk-then-validate-on-site",
+            new Deferred("reach-site-zone", () -> {
                 double distance = Math.hypot(mission.world.feet().getX() - mission.selected.x,
                     mission.world.feet().getZ() - mission.selected.z);
                 if (mission.world.client().player.isOnGround() && distance <= 64) return new Succeed();

@@ -5,6 +5,7 @@ import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.ProgressEvidence;
 import com.hunterbuddy.behavior.hooks.Hook;
 import com.hunterbuddy.behavior.trace.TraceEvent;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -42,9 +43,9 @@ public final class BotStats {
         String metric = switch (event.kind()) {
             case SUCCESS -> event.hook() == Hook.BOT && event.nodePath().matches("root/BOT/[^/]+/[^/]+") ? "targetsSucceeded" : null;
             case FAILURE -> event.hook() == Hook.BOT && event.nodePath().matches("root/BOT/[^/]+/[^/]+") ? "targetsFailed" : null;
-            case PROGRESS -> event.reason().equals("TRANSACTION_CONFIRMED") ? "transactions" : null;
-            case RECOVERY -> event.reason().equals("safe idle") ? "safeIdle" : event.reason().equals("enter") ? "recovery." + event.detail() : null;
-            case BOT -> event.reason().equals("reconnected") ? "reconnects" : event.reason().equals("restart") ? "restarts" : null;
+            case PROGRESS -> event.reason().equals(TraceReasons.TRANSACTION_CONFIRMED) ? "transactions" : null;
+            case RECOVERY -> event.reason().equals(TraceReasons.SAFE_IDLE) ? "safeIdle" : event.reason().equals(TraceReasons.ENTER) ? "recovery." + event.detail() : null;
+            case BOT -> event.reason().equals(TraceReasons.RECONNECTED) ? "reconnects" : event.reason().equals(TraceReasons.RESTART) ? "restarts" : null;
             default -> null;
         };
         if (metric != null) add(metric, 1);

@@ -6,6 +6,7 @@ import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -31,7 +32,7 @@ public final class SafeIdle extends Node {
     @Override
     protected NodeResult onTick(TickContext ctx) {
         if (elapsedMs + ctx.nowMs() - started - (ctx.clock().frozenMs() - frozenAtStart) >= 30_000) return Success.INSTANCE;
-        return new Running("safe idle");
+        return new Running(TraceReasons.SAFE_IDLE);
     }
 
     @Override

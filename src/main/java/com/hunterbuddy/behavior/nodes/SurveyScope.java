@@ -30,11 +30,11 @@ public final class SurveyScope extends Decorator {
         if (survey.zone != null && survey.step != null) {
             FarmerZoneLookup.Resolved current = survey.lookup.resolve(survey.step.name());
             if (!current.ok()) {
-                survey.result = "Zone Xaero invalide: " + current.refusal();
+                survey.result = "Invalid Xaero zone: " + current.refusal();
                 return fail(FailureCode.REFUSED, survey.result);
             }
             if (!survey.zone.sameFootprint(current.zone())) {
-                survey.result = "Zone Xaero déplacée: nouvelle couverture à vérifier";
+                survey.result = "Xaero zone moved: new coverage must be verified";
                 survey.zone = current.zone();
                 return fail(FailureCode.NO_PROGRESS, survey.result);
             }
@@ -42,7 +42,7 @@ public final class SurveyScope extends Decorator {
         NodeResult result = child().execute(ctx);
         if (result instanceof Failure failure) {
             survey.result = failure.reason() + (survey.coverage == null ? "" : "; " + survey.coverageReport())
-                + "; absence de matériau non établie";
+                + "; absence of material has not been established";
         }
         return result;
     }

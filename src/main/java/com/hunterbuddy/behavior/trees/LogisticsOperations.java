@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.mc.InventoryTransaction;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsTransferReceipt;
@@ -35,17 +36,17 @@ public final class LogisticsOperations {
     }
 
     public static Node prepare(LogisticsContext logistics, Predicate<ItemStack> filter, int slot) {
-        return new Deferred("préparer-slot-" + slot, () ->
+        return new Deferred("prepare-slot-" + slot, () ->
             EquipmentTree.prepareHeld(logistics.layout, filter, slot, logistics.outputs, logistics.mission));
     }
 
     public static Node open(LogisticsContext logistics, String role, boolean inShulker) {
-        return new Deferred("ouvrir-" + (inShulker ? role : "ender-chest"), () -> new Sequence("conteneur-vérifié",
+        return new Deferred("open-" + (inShulker ? role : "ender-chest"), () -> new Sequence("container-verified",
             ContainerTree.open(inShulker ? logistics.facts.shulker() : logistics.facts.chest(),
                 logistics.world, logistics.outputs, logistics.mission),
             new ReconcileLogisticsTransfer(logistics, role, inShulker),
-            new InventoryMilestone("preuve-conteneur-suivi", ctx -> {
-                String equipment = inShulker ? role : "chest";
+            new InventoryMilestone("tracked-container-evidence", ctx -> {
+                String equipment = inShulker ? role : LogisticsRoles.CHEST;
                 if (!logistics.placed(equipment)) throw new IllegalStateException("opened equipment is not tracked and present");
                 if (!inShulker) LogisticsTransferReceipt.observeEnderChest(ctx, logistics);
                 logistics.equipment(equipment).milestone(ctx, "opened");
@@ -61,8 +62,8 @@ public final class LogisticsOperations {
     }
 
     public static Node pendingTransfer(LogisticsContext logistics) {
-        return unless("aucun transfert à réconcilier", () -> !logistics.facts.transfer.pending,
-            new Deferred("ouvrir-conteneur-du-transfert-interrompu", () -> new Sequence("reprendre-preuves-du-transfert",
+        return unless("no transfer to reconcile", () -> !logistics.facts.transfer.pending,
+            new Deferred("open-interrupted-transfer-container", () -> new Sequence("resume-transfer-evidence",
                 ContainerTree.close(logistics.outputs),
                 open(logistics, logistics.facts.transfer.role, logistics.facts.transfer.container.equals("shulker")),
                 ContainerTree.close(logistics.outputs))));

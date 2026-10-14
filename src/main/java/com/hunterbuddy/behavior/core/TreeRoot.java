@@ -7,6 +7,7 @@ import com.hunterbuddy.behavior.nodes.GateWait;
 import com.hunterbuddy.behavior.resource.GateOwner;
 import com.hunterbuddy.behavior.resource.GatePolicy;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -335,7 +336,7 @@ public final class TreeRoot {
             borrowed = ctx.gates().borrowedBaritone();
             for (GateOwner owner : heldGates) ctx.event(hooks.build(), Kind.LEASE, null, "blocked", "by=" + owner.name());
         }
-        if (!cause.equals(pauseCause)) ctx.event(hooks.build(), Kind.GATE, null, "paused", "cause=" + cause);
+        if (!cause.equals(pauseCause)) ctx.event(hooks.build(), Kind.GATE, null, TraceReasons.PAUSED, "cause=" + cause);
         pauseEntry = entry;
         pauseCause = cause;
         state = RootState.PAUSED;
@@ -348,7 +349,7 @@ public final class TreeRoot {
         if (!pauseLimited && ctx.nowMs() - pauseStarted - (ctx.clock().frozenMs() - pauseFrozen) >= GatePolicy.LEGACY.pauseLimitMs()) {
             pauseLimited = true;
             String detail = "Paused by " + pauseCause + " for " + GatePolicy.LEGACY.pauseLimitMs() / 60_000 + " min";
-            ctx.event(hooks.build(), Kind.GATE, null, "overdue", detail);
+            ctx.event(hooks.build(), Kind.GATE, null, TraceReasons.OVERDUE, detail);
             ctx.stopBot(ExitReason.STOPPED, detail);
         }
     }
@@ -364,7 +365,7 @@ public final class TreeRoot {
             return false;
         }
         state = RootState.RUNNING;
-        ctx.event(hooks.build(), Kind.GATE, null, "resumed", "cause=" + pauseCause + " budgets retained");
+        ctx.event(hooks.build(), Kind.GATE, null, TraceReasons.RESUMED, "cause=" + pauseCause + " budgets retained");
         pauseCause = "none";
         return true;
     }

@@ -14,6 +14,7 @@ import com.hunterbuddy.behavior.mc.InventoryTransaction;
 import com.hunterbuddy.behavior.resource.Lease;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.trace.Kind;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -43,7 +44,7 @@ public final class ClickSlot extends Action {
             if (!inventory.readyForClick(lease)) return new Running("settling inventory clicks");
             try {
                 ticket = inventory.click(transaction.get(), lease, ctx.nowMs() - ctx.clock().frozenMs(),
-                    detail -> ctx.event(this, Kind.PROGRESS, null, "TRANSACTION_CONFIRMED", detail));
+                    detail -> ctx.event(this, Kind.PROGRESS, null, TraceReasons.TRANSACTION_CONFIRMED, detail));
             } catch (IllegalStateException ex) {
                 return fail(FailureCode.REFUSED, ex.getMessage());
             }

@@ -5,6 +5,7 @@ import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.hooks.HookEntry;
 import com.hunterbuddy.behavior.trace.TraceEvent;
+import com.hunterbuddy.behavior.trace.TraceReasons;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -48,6 +49,6 @@ public final class StatsPlugin implements Plugin {
     public void observe(TraceEvent event) {
         BotStats current = stats.get();
         if (current != null) current.observe(event);
-        if (event.kind() == com.hunterbuddy.behavior.trace.Kind.BOT && (event.reason().equals("started") || event.reason().equals("switched"))) previous = null;
+        if (event.kind() == com.hunterbuddy.behavior.trace.Kind.BOT && (event.reason().equals(TraceReasons.STARTED) || event.reason().equals(TraceReasons.SWITCHED))) previous = null;
     }
 }

@@ -84,8 +84,8 @@ public final class SurveyTree {
                         new VerifySite(survey.world, survey.zone, survey.profile,
                             survey.knowledge, survey.memory, () -> survey.selected, () -> survey.arrivalStand, survey.verifiedSite))),
                     new Deferred("report-verified-site", () -> survey.missionMode ? new Succeed()
-                        : StopBot.withReason(ExitReason.COMPLETED, ctx -> "Site " + survey.profile.label() + " vérifié à "
-                            + survey.selected.seed().toShortString() + ": au moins " + survey.selected.quantity + " blocs; "
+                        : StopBot.withReason(ExitReason.COMPLETED, ctx -> "Site " + survey.profile.label() + " verified at "
+                            + survey.selected.seed().toShortString() + ": at least " + survey.selected.quantity + " blocks; "
                             + survey.coverageReport())))),
             new Guard(new Condition("no sufficient site selected", sensors -> survey.selected == null),
                 new Deferred("report-survey-outcome", () -> survey.missionMode

@@ -55,7 +55,11 @@ public final class MiningBridge {
     public void allowExit(BlockPos pos) { exit = pos.toImmutable(); }
     public void releaseExit() { exit = null; }
     private boolean protectedPosition(BlockPos pos) {
-        if (pos.equals(exit)) return false;
+        return protectedPosition(pos, true);
+    }
+
+    private boolean protectedPosition(BlockPos pos, boolean doorAccess) {
+        if (doorAccess && pos.equals(exit)) return false;
         for (var entry : shelters.entrySet()) {
             if (!entry.getValue().equals(world.identity())) continue;
             BlockPos center = entry.getKey();
@@ -210,7 +214,7 @@ public final class MiningBridge {
     private void onSend(PacketEvent.Send event) {
         if (event.packet instanceof PlayerActionC2SPacket protectedAction && world.available()
             && (protectedAction.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || protectedAction.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)
-            && (ownBaritone.getAsBoolean() || ownsMining()) && (protectedPosition(protectedAction.getPos()) || outsideBreakRule(protectedAction.getPos()))) { event.cancel(); return; }
+            && (ownBaritone.getAsBoolean() || ownsMining()) && (protectedPosition(protectedAction.getPos(), !ownBaritone.getAsBoolean()) || outsideBreakRule(protectedAction.getPos()))) { event.cancel(); return; }
         if (event.packet instanceof PlayerActionC2SPacket action
             && action.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK
             && world.available() && world.identity().equals(temporaryChests.get(action.getPos()))

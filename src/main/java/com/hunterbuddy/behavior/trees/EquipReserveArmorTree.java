@@ -26,28 +26,28 @@ public final class EquipReserveArmorTree {
         ReserveInventory reserve = new ReserveInventory(logistics);
         List<Node> nodes = new ArrayList<>();
         for (EquipmentSlot slot : ReserveInventory.ARMOR) {
-            nodes.add(LogisticsOperations.unless("armure portée " + slot.getName(), () -> {
+            nodes.add(LogisticsOperations.unless("armor worn " + slot.getName(), () -> {
                 ItemStack worn = logistics.world.client().player.getEquippedStack(slot);
                 return reserve.freshArmor(worn, slot)
                     || logistics.world.countMatching(stack -> reserve.freshArmor(stack, slot)) == 0;
-            }, new Deferred("équiper-" + slot.getName(), () -> {
+            }, new Deferred("equip-" + slot.getName(), () -> {
                 ItemStack worn = logistics.world.client().player.getEquippedStack(slot);
                 if (!logistics.world.client().player.isCreative() && EnchantmentHelper.hasAnyEnchantmentsWith(
                     worn, EnchantmentEffectComponentTypes.PREVENT_ARMOR_CHANGE)) {
-                    return new InventoryMilestone("armure-liée", ctx -> {
+                    return new InventoryMilestone("bound-armor", ctx -> {
                         logistics.facts.armorBlocked = true;
                         logistics.facts.incomplete = "armor bound by Curse of Binding: " + slot.getName();
                         logistics.save(ctx, logistics.facts.incomplete);
                     });
                 }
-                return new Timeout(600, new Sequence("équiper-armure-fraîche",
+                return new Timeout(600, new Sequence("equip-fresh-armor",
                     LogisticsOperations.prepare(logistics, stack -> reserve.freshArmor(stack, slot), 8),
                     new WithLease(Set.of(Resource.SLOT, Resource.INTERACT), LeasePolicy.WAIT,
                         new EquipArmor(slot, logistics.world, logistics.outputs)),
-                    new InventoryMilestone("armure-portée-confirmée", ctx ->
-                        logistics.save(ctx, "armure portée " + slot.getName()))));
+                    new InventoryMilestone("worn-armor-confirmed", ctx ->
+                        logistics.save(ctx, "armor worn " + slot.getName()))));
             })));
         }
-        return new Sequence("équiper-armures", nodes.toArray(Node[]::new));
+        return new Sequence("equip-armor", nodes.toArray(Node[]::new));
     }
 }

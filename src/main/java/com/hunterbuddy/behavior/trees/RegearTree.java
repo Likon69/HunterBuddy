@@ -3,6 +3,7 @@ package com.hunterbuddy.behavior.trees;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
 import com.hunterbuddy.behavior.mc.BaritoneBridge;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
@@ -36,12 +37,12 @@ public final class RegearTree {
             new InventoryMilestone("load-logistics-facts", logistics::initialize),
             LogisticsOperations.unless("ender chest recovery already started", logistics::finishing,
                 new Sequence("prepare-and-work-field-regear", LogisticsSiteTree.build(logistics),
-                    TrackedEquipmentTree.place(logistics, "chest"),
+                    TrackedEquipmentTree.place(logistics, LogisticsRoles.CHEST),
                     LogisticsOperations.pendingTransfer(logistics), protectedCycle(logistics))),
             LogisticsFinishTree.build(logistics))));
     }
 
     public static Node protectedCycle(LogisticsContext logistics) {
-        return ShulkerCycleTree.build(logistics, "reserve", () -> ReserveWorkTree.build(logistics));
+        return ShulkerCycleTree.build(logistics, LogisticsRoles.RESERVE, () -> ReserveWorkTree.build(logistics));
     }
 }

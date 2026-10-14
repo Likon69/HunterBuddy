@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.BaseStockPlan;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.ShulkerSignature;
@@ -15,50 +17,50 @@ public final class BaseEmptyShulkersTree {
 
     public static Node loadOne(BaseVisitContext visit) {
         return new Sequence("load-empty-shulker-for-base-packing",
-            BaseCargoTree.take(visit, () -> visit.position(visit.facts.empties), "vides", stack -> empty(visit, stack)),
-            BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), "ranger-vides"),
+            BaseCargoTree.take(visit, () -> visit.position(visit.facts.empties), LogisticsRoles.EMPTIES, stack -> empty(visit, stack)),
+            BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), TransferPurposes.STORE_EMPTIES),
             BaseOperations.ender(visit));
     }
 
     public static Node build(BaseVisitContext visit) {
-        return new Sequence("charger-vides-prévues", BaseOperations.ender(visit),
-            LogisticsOperations.unless("rôle divers présent", () -> {
+        return new Sequence("load-planned-empties", BaseOperations.ender(visit),
+            LogisticsOperations.unless("miscellaneous role present", () -> {
                 for (int i = 0; i < visit.enderContents().size(); i++) {
-                    if (visit.roleSlot(i, "divers")) {
+                    if (visit.roleSlot(i, LogisticsRoles.MISCELLANEOUS)) {
                         return true;
                     }
                 }
                 return false;
-            }, new Deferred("affecter-divers-par-signature", () -> {
+            }, new Deferred("assign-miscellaneous-by-signature", () -> {
                 int slot = visit.emptySlot();
                 if (slot < 0) {
-                    return new Sequence("préparer-shulker-divers",
+                    return new Sequence("prepare-miscellaneous-shulker",
                         BaseCargoTree.take(visit, () -> visit.position(visit.facts.empties),
-                            "divers-vide", stack -> empty(visit, stack)),
-                        BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), "ranger-divers"), BaseOperations.ender(visit));
+                            LogisticsRoles.EMPTY_MISCELLANEOUS, stack -> empty(visit, stack)),
+                        BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), TransferPurposes.STORE_MISCELLANEOUS), BaseOperations.ender(visit));
                 }
-                return new InventoryMilestone("affecter-vide-au-rôle-divers", ctx -> {
+                return new InventoryMilestone("assign-empty-to-miscellaneous-role", ctx -> {
                     ShulkerSignature signature = ShulkerSignature.of(visit.enderContents().get(slot), visit.logistics.world);
-                    visit.logistics.mission.equipment(ctx, "logistics-divers", signature.encoded());
-                    visit.logistics.mission.equipment(ctx, "logistics-divers-slot", Integer.toString(slot));
-                    visit.save(ctx, "shulker divers vide identifiée dans l'ender chest");
+                    visit.logistics.mission.equipment(ctx, "logistics-miscellaneous", signature.encoded());
+                    visit.logistics.mission.equipment(ctx, "logistics-miscellaneous-slot", Integer.toString(slot));
+                    visit.save(ctx, "empty miscellaneous shulker identified in the ender chest");
                 });
             })),
-            new InventoryMilestone("planifier-vides-restantes", ctx -> BaseStockPlan.empties(ctx, visit)),
-            new RepeatUntil("aucune-vide-inutile", () -> visit.emptyCount() <= visit.facts.emptyTarget, 27,
-                new Deferred("retourner-une-vide-excédentaire", () -> {
+            new InventoryMilestone("plan-remaining-empties", ctx -> BaseStockPlan.empties(ctx, visit)),
+            new RepeatUntil("no-unnecessary-empty", () -> visit.emptyCount() <= visit.facts.emptyTarget, 27,
+                new Deferred("return-one-excess-empty", () -> {
                     int slot = visit.emptySlot();
                     ShulkerSignature signature = ShulkerSignature.of(visit.enderContents().get(slot), visit.logistics.world);
-                    return new Sequence("retour-vide-excédentaire",
+                    return new Sequence("return-excess-empty",
                         BaseCargoTree.takeAt(visit, () -> visit.logistics.facts.chest(),
-                            "vides-excédentaires", () -> slot, signature::matches),
-                        BaseCargoTree.send(visit, () -> visit.position(visit.facts.empties), "retour-vides"), BaseOperations.ender(visit));
+                            LogisticsRoles.EXCESS_EMPTIES, () -> slot, signature::matches),
+                        BaseCargoTree.send(visit, () -> visit.position(visit.facts.empties), TransferPurposes.RETURN_EMPTIES), BaseOperations.ender(visit));
                 })),
-            new RepeatUntil("assez-de-vides-prévues", () -> visit.emptyCount() >= visit.facts.emptyTarget, 25,
-                new Sequence("charger-une-vide",
-                    BaseCargoTree.take(visit, () -> visit.position(visit.facts.empties), "vides", stack -> empty(visit, stack)),
-                    BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), "ranger-vides"), BaseOperations.ender(visit))),
-            new InventoryMilestone("vides-confirmées", ctx -> visit.save(ctx, "vides prévues présentes dans l'ender chest")),
+            new RepeatUntil("enough-planned-empties", () -> visit.emptyCount() >= visit.facts.emptyTarget, 25,
+                new Sequence("load-one-empty",
+                    BaseCargoTree.take(visit, () -> visit.position(visit.facts.empties), LogisticsRoles.EMPTIES, stack -> empty(visit, stack)),
+                    BaseCargoTree.send(visit, () -> visit.logistics.facts.chest(), TransferPurposes.STORE_EMPTIES), BaseOperations.ender(visit))),
+            new InventoryMilestone("empties-confirmed", ctx -> visit.save(ctx, "planned empties present in the ender chest")),
             ContainerTree.close(visit.logistics.outputs));
     }
 

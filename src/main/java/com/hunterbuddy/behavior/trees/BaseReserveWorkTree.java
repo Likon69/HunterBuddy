@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.nodes.InventoryMilestone;
@@ -10,14 +11,14 @@ public final class BaseReserveWorkTree {
     private BaseReserveWorkTree() {}
 
     public static Node build(BaseVisitContext visit) {
-        return new Sequence("regear-base-par-cycle-réutilisé", ContainerTree.close(visit.logistics.outputs),
-            new InventoryMilestone("reprendre-ou-commencer-cycle-réserve", ctx -> {
-                if (visit.logistics.stored("reserve")) {
+        return new Sequence("base-regear-through-reused-cycle", ContainerTree.close(visit.logistics.outputs),
+            new InventoryMilestone("resume-or-start-reserve-cycle", ctx -> {
+                if (visit.logistics.stored(LogisticsRoles.RESERVE)) {
                     visit.logistics.facts.reserve = new ShulkerCycleFacts();
-                    visit.logistics.forget("reserve");
-                    visit.logistics.mission.equipment(ctx, visit.logistics.equipmentName("reserve"), "");
-                    visit.save(ctx, "nouveau besoin de regear, réserve identifiée dans l'ender chest");
+                    visit.logistics.forget(LogisticsRoles.RESERVE);
+                    visit.logistics.mission.equipment(ctx, visit.logistics.equipmentName(LogisticsRoles.RESERVE), "");
+                    visit.save(ctx, "new regear needed, reserve identified in the ender chest");
                 }
-            }), ShulkerCycleTree.build(visit.logistics, "reserve", () -> ReserveWorkTree.build(visit.logistics)));
+            }), ShulkerCycleTree.build(visit.logistics, LogisticsRoles.RESERVE, () -> ReserveWorkTree.build(visit.logistics)));
     }
 }

@@ -56,7 +56,7 @@ public final class ValidateMineBlock extends Node {
             return fail(FailureCode.BUDGET, mine.facts.outcome);
         }
         if (mine.world.countMatching(stack -> LogisticsInventory.tool(stack, mine.profile) && LogisticsInventory.healthy(stack)) == 0) {
-            mine.facts.outcome = "regear nécessaire avant de continuer";
+            mine.facts.outcome = "regear required before continuing";
             return fail(FailureCode.BUDGET, mine.facts.outcome);
         }
         return Success.INSTANCE;

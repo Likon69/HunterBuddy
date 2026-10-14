@@ -22,7 +22,7 @@ public final class BaseSite {
                 }
             }
         }
-        throw new IllegalStateException("aucun sol sec libre près des coffres pour le matériel temporaire");
+        throw new IllegalStateException("no free dry floor near the chests for temporary equipment");
     }
 
     private static boolean usable(BlockPos pos, List<BlockPos> chests, WorldReader world) {

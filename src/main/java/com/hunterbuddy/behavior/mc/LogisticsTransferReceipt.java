@@ -1,8 +1,10 @@
 package com.hunterbuddy.behavior.mc;
 
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.farmer.ShulkerCycleFacts;
 import com.hunterbuddy.behavior.farmer.TransferFacts;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import java.util.List;
 import net.minecraft.item.ItemStack;
 
@@ -26,7 +28,7 @@ public final class LogisticsTransferReceipt {
         transfer.deposit = logistics.outputs.inventory().playerSource(transaction);
         transfer.player = LogisticsInventory.encode(LogisticsInventory.player(logistics.world), logistics.world);
         transfer.contents = LogisticsInventory.encode(logistics.outputs.inventory().containerContents(), logistics.world);
-        transfer.container = inShulker ? "shulker" : "chest";
+        transfer.container = inShulker ? "shulker" : LogisticsRoles.CHEST;
         transfer.role = role;
         transfer.purpose = purpose;
         transfer.pending = true;
@@ -52,7 +54,7 @@ public final class LogisticsTransferReceipt {
             item.contents(ctx, logistics.outputs.inventory());
         } else {
             observeEnderChest(ctx, logistics);
-            if (transfer.purpose.equals("take")) {
+            if (transfer.purpose.equals(TransferPurposes.TAKE)) {
                 ShulkerSignature signature = ShulkerSignature.decode(cycle.signature, logistics.world);
                 if (logistics.world.countMatching(signature::matches) != cycle.takeBaseline + 1
                     || !contents.get(cycle.sourceSlot).isEmpty()) {
@@ -60,7 +62,7 @@ public final class LogisticsTransferReceipt {
                 }
                 cycle.takenContents = logistics.facts.enderContents;
             }
-            if (transfer.purpose.equals("store")) recordStorage(ctx, logistics, cycle, contents);
+            if (transfer.purpose.equals(TransferPurposes.STORE)) recordStorage(ctx, logistics, cycle, contents);
         }
         transfer.pending = false;
         logistics.save(ctx, "transfer confirmed " + transfer.role + " " + transfer.purpose);
@@ -84,7 +86,7 @@ public final class LogisticsTransferReceipt {
         cycle.storageSlot = receiver;
         cycle.storedContents = logistics.facts.enderContents;
         String role = logistics.facts.transfer.role;
-        if (!role.equals("material")) {
+        if (!role.equals(LogisticsRoles.MATERIAL)) {
             logistics.mission.equipment(ctx, "logistics-" + role, cycle.signature);
             logistics.mission.equipment(ctx, "logistics-" + role + "-slot", Integer.toString(receiver));
         }

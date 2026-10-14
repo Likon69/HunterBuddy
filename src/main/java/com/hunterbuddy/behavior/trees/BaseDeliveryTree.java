@@ -1,6 +1,8 @@
 package com.hunterbuddy.behavior.trees;
 
 import com.hunterbuddy.behavior.core.Node;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
+import com.hunterbuddy.behavior.farmer.TransferPurposes;
 import com.hunterbuddy.behavior.mc.BaseVisitContext;
 import com.hunterbuddy.behavior.mc.ShulkerSignature;
 import com.hunterbuddy.behavior.nodes.Deferred;
@@ -12,18 +14,18 @@ public final class BaseDeliveryTree {
     private BaseDeliveryTree() {}
 
     public static Node build(BaseVisitContext visit) {
-        return new Sequence("livrer-toutes-les-pleines", BaseOperations.ender(visit),
-            new RepeatUntil("aucune-pleine-à-livrer", () -> visit.fullSlot() < 0 && !visit.facts.cargoRole.equals("livraison"), 27,
-                new Sequence("livrer-une-shulker-confirmée",
-                    LogisticsOperations.unless("shulker de livraison transportée", () -> visit.facts.cargoRole.equals("livraison"),
-                        new Deferred("sortir-la-pleine-identifiée", () -> {
+        return new Sequence("deliver-all-full-shulkers", BaseOperations.ender(visit),
+            new RepeatUntil("no-full-shulker-to-deliver", () -> visit.fullSlot() < 0 && !visit.facts.cargoRole.equals(LogisticsRoles.DELIVERY), 27,
+                new Sequence("deliver-one-confirmed-shulker",
+                    LogisticsOperations.unless("delivery shulker carried", () -> visit.facts.cargoRole.equals(LogisticsRoles.DELIVERY),
+                        new Deferred("take-identified-full-shulker", () -> {
                             ShulkerSignature signature = ShulkerSignature.of(
                                 visit.enderContents().get(visit.fullSlot()), visit.logistics.world);
                             return BaseCargoTree.takeAt(visit, () -> visit.logistics.facts.chest(),
-                                "livraison", visit::fullSlot, signature::matches);
+                                LogisticsRoles.DELIVERY, visit::fullSlot, signature::matches);
                         })),
-                    BaseCargoTree.send(visit, () -> visit.position(visit.facts.delivery), "livrer"), BaseOperations.ender(visit))),
-            new InventoryMilestone("livraisons-confirmées", ctx -> visit.save(ctx, "toutes les pleines livrées")),
+                    BaseCargoTree.send(visit, () -> visit.position(visit.facts.delivery), TransferPurposes.DELIVER), BaseOperations.ender(visit))),
+            new InventoryMilestone("deliveries-confirmed", ctx -> visit.save(ctx, "all full shulkers delivered")),
             ContainerTree.close(visit.logistics.outputs));
     }
 }

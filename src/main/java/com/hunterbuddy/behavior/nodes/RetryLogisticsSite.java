@@ -7,6 +7,7 @@ import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.LogisticsRoles;
 import com.hunterbuddy.behavior.mc.LogisticsContext;
 import com.hunterbuddy.behavior.mc.LogisticsSite;
 
@@ -14,7 +15,7 @@ public final class RetryLogisticsSite extends Decorator {
     private final LogisticsContext logistics;
 
     public RetryLogisticsSite(LogisticsContext logistics, Node child) {
-        super("repli-emplacement", child);
+        super("location-fallback", child);
         this.logistics = logistics;
     }
 
@@ -24,8 +25,9 @@ public final class RetryLogisticsSite extends Decorator {
         if (!(result instanceof Failure failure)) return result;
         if (failure.code() == FailureCode.REFUSED || failure.code() == FailureCode.BUDGET
             || failure.code() == FailureCode.MISSING_ITEM || failure.code() == FailureCode.NO_OPTION || logistics.facts.building != null
-            || logistics.facts.site != null && logistics.equipment("chest").placementRequested()) return failure;
+            || logistics.facts.site != null && logistics.equipment(LogisticsRoles.CHEST).placementRequested()) return failure;
         logistics.facts.site = null;
+        logistics.facts.reusedShelter = false;
         logistics.facts.walls.clear();
         logistics.facts.wallItems.clear();
         logistics.facts.siteAttempts = Math.min(LogisticsSite.MAX_ATTEMPTS, logistics.facts.siteAttempts + 1);
