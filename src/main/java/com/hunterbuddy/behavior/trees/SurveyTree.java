@@ -10,6 +10,7 @@ import com.hunterbuddy.behavior.nodes.Condition;
 import com.hunterbuddy.behavior.nodes.Deferred;
 import com.hunterbuddy.behavior.nodes.Guard;
 import com.hunterbuddy.behavior.nodes.InitializeSurvey;
+import com.hunterbuddy.behavior.nodes.InventoryMilestone;
 import com.hunterbuddy.behavior.nodes.MiningBounds;
 import com.hunterbuddy.behavior.nodes.ObserveSurvey;
 import com.hunterbuddy.behavior.nodes.Retry;
@@ -36,12 +37,18 @@ public final class SurveyTree {
             preparation(survey),
             new Deferred("continuous-flight-over-measured-bands", () -> flight(survey)), outcome(survey)));
         Node attempts = new Retry(3, 0, work).on(FailureCode.UNREACHABLE, FailureCode.NO_OPTION,
-            FailureCode.NO_PROGRESS, FailureCode.TIMEOUT);
+            FailureCode.NO_PROGRESS, FailureCode.TIMEOUT, FailureCode.NOT_CONFIRMED);
         return new TaskScope(new MiningBounds(survey.outputs.mining(),
             point -> survey.zone != null && survey.zone.contains(point.getX() + 0.5, point.getZ() + 0.5),
             new Selector("survey-with-return-reserve-fallback", attempts,
-            new Sequence("return-after-incomplete-survey", home(survey),
-                StopBot.withReason(ExitReason.FAILED, ctx -> survey.result)))));
+            new Deferred("yield-after-survey-attempts", () -> survey.missionMode
+                && (survey.coverage == null || !survey.coverage.complete() || survey.temporarilyUnavailable())
+                ? new InventoryMilestone("yield-incomplete-survey-to-mission", ctx -> {
+                    survey.selected = survey.memory == null ? null : survey.best();
+                    survey.interrupted = survey.returnRequested.getAsBoolean() || survey.temporarilyUnavailable();
+                })
+                : new Sequence("return-after-survey", home(survey),
+                    StopBot.withReason(ExitReason.FAILED, ctx -> survey.result))))));
     }
 
     private static Node preparation(SurveyContext survey) {
@@ -57,35 +64,33 @@ public final class SurveyTree {
         if (survey.selected != null && survey.world.client().player.isOnGround()
             && Math.hypot(survey.selected.x - survey.world.feet().getX(), survey.selected.z - survey.world.feet().getZ()) <= 32
             && survey.zone.contains(survey.world.client().player.getX(), survey.world.client().player.getZ())) return new Succeed();
-        if (survey.best() == null && survey.coverage.complete()) {
-            survey.result = "Avertissement: zone entièrement vérifiée, aucun site accessible d'au moins 1728 blocs";
-            return home(survey);
-        }
         FlightPlan plan = new FlightPlan(survey.route::initial, () -> survey.home, false,
             survey.world, survey.baritone, survey.outputs);
         plan.cruiseThrough = survey.selected == null;
         plan.observer = ctx -> survey.route.observe(ctx, plan);
-        return new SiteAccess(survey, FlyToTree.build(plan));
+        return new SiteAccess(() -> survey.selected, survey.knowledge, true, FlyToTree.build(plan));
     }
 
     private static Node outcome(SurveyContext survey) {
         return new Selector("site-found-or-coverage-warning",
             new Guard(new Condition("sufficient measured site found", sensors -> survey.selected != null),
                 new Sequence("reach-and-verify-site-before-mining",
-                    new Deferred("access-selected-site", () -> new SiteAccess(survey,
-                        GroundTravel.build(SiteArrival.stand(survey.selected, survey.profile, survey.zone, survey.world), 0,
-                            survey.baritone, survey.outputs))),
+                    new Deferred("access-selected-site", () -> {
+                        survey.arrivalStand = SiteArrival.stand(survey.selected, survey.profile, survey.zone, survey.world);
+                        return new SiteAccess(() -> survey.selected, survey.knowledge, false,
+                            GroundTravel.build(survey.arrivalStand, 0, survey.baritone, survey.outputs));
+                    }),
                     new Deferred("verify-selected-site", () -> new Timeout(2400,
                         new VerifySite(survey.world, survey.zone, survey.profile,
-                            survey.knowledge, survey.memory, () -> survey.selected, survey.verifiedSite))),
+                            survey.knowledge, survey.memory, () -> survey.selected, () -> survey.arrivalStand, survey.verifiedSite))),
                     new Deferred("report-verified-site", () -> survey.missionMode ? new Succeed()
                         : StopBot.withReason(ExitReason.COMPLETED, ctx -> "Site " + survey.profile.label() + " vérifié à "
                             + survey.selected.seed().toShortString() + ": au moins " + survey.selected.quantity + " blocs; "
                             + survey.coverageReport())))),
             new Guard(new Condition("no sufficient site selected", sensors -> survey.selected == null),
-                new Sequence("return-and-report-coverage", home(survey),
-                    new Deferred("report-survey-outcome", () -> survey.missionMode && survey.interrupted
-                        ? new Succeed() : StopBot.withReason(ctx -> survey.result)))));
+                new Deferred("report-survey-outcome", () -> survey.missionMode
+                    && (survey.interrupted || !survey.coverage.complete()) ? new Succeed()
+                    : new Sequence("return-and-report-coverage", home(survey), StopBot.withReason(ctx -> survey.result)))));
     }
 
     private static Node home(SurveyContext survey) {

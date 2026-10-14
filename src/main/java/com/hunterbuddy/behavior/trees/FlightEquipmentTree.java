@@ -44,7 +44,8 @@ public final class FlightEquipmentTree {
     }
 
     public static Node rockets(FlightPlan plan) {
-        return LogisticsOperations.unless("plain rocket hotbar ready", () -> plan.world.findSlot(Rockets::isPlain) >= 0,
+        return LogisticsOperations.unless("plain rocket hotbar ready", () -> plan.world.findSlot(Rockets::isPlain) >= 0
+                || plan.returning && plan.nearDestination() && plan.world.client().player.isGliding(),
             new Deferred("prepare-plain-rockets", () -> steady(plan,
                 EquipmentTree.prepareHeld(new InventoryLayout(plan.world), Rockets::isPlain, 3, plan.outputs, new MissionJournal(8)))));
     }

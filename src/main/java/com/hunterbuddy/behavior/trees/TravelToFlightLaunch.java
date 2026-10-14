@@ -1,5 +1,6 @@
 package com.hunterbuddy.behavior.trees;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
@@ -22,7 +23,7 @@ public final class TravelToFlightLaunch extends Node {
 
     @Override
     protected void onStart(TickContext ctx) {
-        BlockPos pos = ctx.bb().get(ctx.owner(), chosen).orElseThrow();
+        BlockPos pos = ctx.bb().get(ctx.owner(), chosen).orElse(null);
         travel = GroundTravel.build(pos, 0, plan.baritone, plan.outputs);
         TreeValidator.validate(travel);
         TreeValidator.bind(travel, path() + "/ground-travel", ctx.owner(), hook());
@@ -35,6 +36,6 @@ public final class TravelToFlightLaunch extends Node {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        return travel.execute(ctx);
+        return ctx.bb().get(ctx.owner(), chosen).isEmpty() ? fail(FailureCode.NO_OPTION, "no loaded launch point") : travel.execute(ctx);
     }
 }

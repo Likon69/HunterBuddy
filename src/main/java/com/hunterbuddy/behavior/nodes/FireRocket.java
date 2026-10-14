@@ -19,9 +19,16 @@ public final class FireRocket extends RocketAction {
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         int slot = ctx.bb().get(ctx.owner(), slotKey).orElse(-1);
-        if (slot < 0 || slot > 8) return fail(FailureCode.MISSING_ITEM, "plain rocket hotbar slot required");
+        FailureCode refusal = outputs.flight().rocketRefusal(slot);
+        if (refusal != null) return fail(refusal, switch (refusal) {
+            case NOT_CONFIRMED -> "glide lost before rocket emission";
+            case MISSING_ITEM -> "plain rocket stock exhausted";
+            case BUDGET -> "plain rocket reserve reached";
+            default -> "rocket slot changed or landing forbids emission";
+        });
         outputs.slot(ctx.owner(), new SlotIntent(slot, true));
         if (ctx.sensors().selectedSlot() != slot || ctx.sensors().serverSlot() != slot || !outputs.slotSettled(slot)) return new Running("settling rocket slot");
-        return outputs.flight().rocket(ctx, slot) ? Success.INSTANCE : fail(FailureCode.MISSING_ITEM, "rocket refused: reserve, slot, or glide");
+        return outputs.flight().rocket(ctx, slot) ? Success.INSTANCE
+            : fail(FailureCode.NOT_CONFIRMED, "rocket interaction was not accepted");
     }
 }

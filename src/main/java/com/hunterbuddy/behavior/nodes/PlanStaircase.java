@@ -18,7 +18,6 @@ public final class PlanStaircase extends Node {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        if (mine.facts.stairs.isEmpty()) mine.facts.stairs.add(mine.facts.entrance);
         try {
             mine.steps.clear();
             mine.steps.addAll(StaircasePlan.choose(mine));

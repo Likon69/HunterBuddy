@@ -10,12 +10,14 @@ import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 import net.minecraft.util.math.BlockPos;
 
 public final class FindTakeoffPoints extends Action {
     private final Key<BlockPos> originKey;
     private final Key<BlockScan> resultKey;
     private final WorldReader world;
+    private final Predicate<BlockPos> accepted;
     private final List<BlockPos> points = new ArrayList<>();
     private BlockPos origin;
     private BlockPos candidate;
@@ -26,7 +28,13 @@ public final class FindTakeoffPoints extends Action {
     private int head;
 
     public FindTakeoffPoints(Key<BlockPos> originKey, Key<BlockScan> resultKey, WorldReader world) {
+        this(originKey, resultKey, world, point -> true);
+    }
+
+    public FindTakeoffPoints(Key<BlockPos> originKey, Key<BlockScan> resultKey, WorldReader world,
+                             Predicate<BlockPos> accepted) {
         super("find-takeoff-points"); this.originKey = originKey; this.resultKey = resultKey; this.world = world;
+        this.accepted = accepted;
         limit(2_400);
     }
 
@@ -39,14 +47,15 @@ public final class FindTakeoffPoints extends Action {
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (origin == null) return fail(FailureCode.NO_OPTION, "takeoff scan origin missing");
-        if (cache != null && cache.world().equals(world.identity()) && cache.origin().equals(origin) && ctx.tick() - cachedAt < 20) {
+        if (cache != null && cache.world().equals(world.identity()) && cache.origin().equals(origin) && ctx.tick() - cachedAt < 20
+            && cache.blocks().stream().allMatch(accepted)) {
             ctx.bb().set(ctx.owner(), resultKey, cache); return Success.INSTANCE;
         }
         for (int work = 0; work < 64; work++) {
             if (candidate != null) {
                 BlockPos pos = candidate.up(++head);
                 if (!world.inBounds(pos) || !world.loaded(pos) || !world.state(pos).isAir()) candidate = null;
-                else if (head == 6) { points.add(candidate); candidate = null; }
+                else if (head == 6) { if (accepted.test(candidate)) points.add(candidate); candidate = null; }
                 continue;
             }
             int width = radius / 2 + 1;

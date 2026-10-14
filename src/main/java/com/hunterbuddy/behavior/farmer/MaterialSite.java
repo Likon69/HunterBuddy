@@ -1,8 +1,8 @@
 package com.hunterbuddy.behavior.farmer;
 
-import net.minecraft.util.math.BlockPos;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.util.math.BlockPos;
 
 public final class MaterialSite {
     public static final int SHULKER_BLOCKS = 1728;
@@ -12,6 +12,7 @@ public final class MaterialSite {
     public int quantity;
     public long observedAt;
     public long verifiedAt;
+    public long flightAvoidedUntil;
     public String status = "observed";
     public String reason = "";
     public boolean lowerBound;
@@ -32,6 +33,15 @@ public final class MaterialSite {
 
     public boolean usable() {
         return quantity >= SHULKER_BLOCKS && (status.equals("observed") || status.equals("verified"));
+    }
+
+    public boolean flightAvoided() {
+        return flightAvoidedUntil > System.currentTimeMillis();
+    }
+
+    public void avoidFlight(String reason) {
+        flightAvoidedUntil = System.currentTimeMillis() + 1_800_000L;
+        this.reason = reason;
     }
 
     public void unavailable(String status, String reason) {

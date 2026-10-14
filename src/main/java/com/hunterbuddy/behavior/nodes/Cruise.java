@@ -67,7 +67,7 @@ public final class Cruise extends RocketAction {
                 || plan.world.client().player.isCreative() && GliderSwap.rocketAttached(plan.world.client().player)) rocketPending = false;
             else if (ctx.tick() - firedAt > 60) return fail(FailureCode.NOT_CONFIRMED, "cruise rocket consumption unconfirmed");
         }
-        if (count <= plan.rocketReserve() + 2) return fail(FailureCode.BUDGET, "untouchable return rocket reserve reached");
+        if (count <= plan.rocketReserve() + (plan.returning ? 0 : 2)) return fail(FailureCode.BUDGET, "untouchable return rocket reserve reached");
         boolean aligned = Math.abs(Conditions.wrap(yaw - sensors.yaw())) < 20;
         boolean losing = plan.speed(sensors) < 1.2 || sensors.y() < desired - 24
             || climbing && sensors.velocityY() < -0.05 && sensors.y() < desired - 8;

@@ -2,7 +2,6 @@ package com.hunterbuddy.behavior.mc;
 
 import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
@@ -35,9 +34,9 @@ public final class StaircasePlan {
                 }
                 for (int head = 0; head < 3; head++) {
                     BlockPos point = feet.up(head);
-                    if (!mine.world.loaded(point) || mine.facts.supports.contains(point.asLong())
+                    if (!mine.world.loaded(point) || mine.rejected.contains(point) || mine.facts.supports.contains(point.asLong())
                         || mine.world.hardness(point) < 0 || mine.world.client().world.getBlockEntity(point) != null) valid = false;
-                    if (mine.world.loaded(point) && mine.world.state(point).getFluidState().isIn(FluidTags.LAVA)) valid = false;
+                    if (MineGeometry.lavaAdjacent(mine.world, point) || MineGeometry.fallingAbove(mine.world, point)) valid = false;
                 }
                 steps.add(feet);
                 if (!valid) break;

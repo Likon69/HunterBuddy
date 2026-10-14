@@ -38,6 +38,7 @@ public final class SurveyContext {
     public SurveyScanner scanner;
     public SurveyRoute route;
     public MaterialSite selected;
+    public BlockPos arrivalStand;
     public String result = "prospection incomplète";
     public boolean missionMode;
     public boolean interrupted;
@@ -60,6 +61,12 @@ public final class SurveyContext {
 
     public MaterialSite best() {
         return SiteSelection.best(memory, zone, world.feet(), System.currentTimeMillis(), eligible);
+    }
+
+    public boolean temporarilyUnavailable() {
+        return memory != null && memory.sites.values().stream().anyMatch(site -> site.usable()
+            && zone.containsWithMargin(site.x + 0.5, site.z + 0.5, FarmerZoneLookup.TARGET_MARGIN)
+            && (site.flightAvoided() || !eligible.test(site)));
     }
 
     public String coverageReport() {

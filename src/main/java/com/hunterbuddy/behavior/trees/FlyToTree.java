@@ -72,6 +72,6 @@ public final class FlyToTree {
             new Timeout(3600, new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT, new Approach(plan))),
             new Selector("landing-with-KeepFlying-fallback",
                 new Timeout(400, new WithLease(Set.of(Resource.MOVEMENT, Resource.LOOK), LeasePolicy.WAIT, new Touchdown(plan))),
-                new Timeout(2400, new KeepFlying(plan.world, plan.baritone, plan.outputs, () -> plan.landing)))));
+                new Timeout(2400, new KeepFlying(plan.world, plan.baritone, plan.outputs, () -> plan.landing, point -> plan.landing = point)))));
     }
 }

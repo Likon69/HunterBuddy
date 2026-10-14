@@ -7,19 +7,20 @@ import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.resource.Outputs;
 import com.hunterbuddy.behavior.resource.Resource;
 import com.hunterbuddy.behavior.trees.ExitWaterTree;
+import java.util.Objects;
 import java.util.Set;
 
 public record FlightTask(String name, BaritoneBridge bridge) implements LabTask {
     public FlightTask {
         if (!name.equals("exitwater") && !name.equals("takeoff")) throw new IllegalArgumentException("invalid flight laboratory scenario");
-        java.util.Objects.requireNonNull(bridge);
+        Objects.requireNonNull(bridge);
     }
     @Override
     public String target() { return name + ": current position"; }
     @Override
     public Set<Resource> resources() { return Set.of(Resource.BARITONE, Resource.MOVEMENT, Resource.MINING, Resource.ROCKETS, Resource.INTERACT); }
     @Override
-    public void initialize(BotContext context) { java.util.Objects.requireNonNull(context); }
+    public void initialize(BotContext context) { Objects.requireNonNull(context); }
     @Override
     public Node build(BotContext context, WorldReader world, Outputs outputs) { return ExitWaterTree.build(world, bridge, outputs); }
     @Override

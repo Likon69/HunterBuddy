@@ -29,6 +29,7 @@ public final class ChunkMaterialScan {
         this.world = world;
         this.zone = zone;
         this.profile = profile;
+        section = chunk.getSectionArray().length - 1;
     }
 
     public boolean step() {
@@ -44,21 +45,21 @@ public final class ChunkMaterialScan {
             return true;
         }
         ChunkSection[] sections = chunk.getSectionArray();
-        if (section >= sections.length) return true;
+        if (section < 0) return true;
         if (!tested) {
             tested = true;
             if (!sections[section].hasAny(state -> profile.blocks().contains(state.getBlock()))) cell = 4096;
         }
         if (cell >= 4096) {
-            section++;
+            section--;
             cell = 0;
             tested = false;
-            return section >= sections.length;
+            return section < 0;
         }
         int index = cell++;
         int x = chunk.getPos().getStartX() + (index & 15);
         int z = chunk.getPos().getStartZ() + ((index >> 4) & 15);
-        int y = world.bottomY() + section * 16 + (index >> 8);
+        int y = world.bottomY() + section * 16 + (15 - (index >> 8));
         BlockPos point = new BlockPos(x, y, z);
         if (!zone.contains(x + 0.5, z + 0.5) || measured.contains(point.asLong())
             || !profile.blocks().contains(world.state(point).getBlock())) return false;
@@ -69,7 +70,7 @@ public final class ChunkMaterialScan {
         }
         boolean exposed = PatchMeasurement.exposed(point, world);
         if (!exposed && profile.strategy().equals("layer")) uncertain = true;
-        if (world.hardness(point) >= 0 && exposed) {
+        if (world.hardness(point) >= 0 && exposed && !MineGeometry.lavaAdjacent(world, point)) {
             patch = new PatchMeasurement(point, world, zone, profile, measured);
         }
         return false;

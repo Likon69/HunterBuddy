@@ -38,6 +38,7 @@ public final class FlightPlan {
     public boolean cruiseThrough;
     public Consumer<TickContext> observer = ctx -> {};
     public final Set<BlockPos> failedLandings = new HashSet<>();
+    public final Set<BlockPos> failedTakeoffs = new HashSet<>();
 
     public FlightPlan(Supplier<BlockPos> destination, Supplier<BlockPos> home, boolean returning,
                       WorldReader world, BaritoneBridge baritone, Outputs outputs) {
@@ -59,6 +60,7 @@ public final class FlightPlan {
         budget = new FlightBudget(performance, outputs.flight().minimumRockets());
         landing = null;
         failedLandings.clear();
+        failedTakeoffs.clear();
         bestDistance = Double.POSITIVE_INFINITY;
         improvedAt = ctx.tick();
         altitude = Math.max(world.feet().getY() + 24, 96);
@@ -103,7 +105,7 @@ public final class FlightPlan {
     }
 
     public int rocketReserve() {
-        return returning ? budget.landingRockets() : budget.reserve(distance(home));
+        return returning ? 0 : budget.reserve(distance(home));
     }
 
     public int wearRequired() {
@@ -136,7 +138,7 @@ public final class FlightPlan {
         int total = 0;
         for (int i = 0; i < world.client().player.getInventory().size(); i++) {
             ItemStack stack = world.client().player.getInventory().getStack(i);
-            if (GliderSwap.isGlider(stack) && stack.getCount() == 1) total += remaining(stack);
+            if (GliderSwap.isGlider(stack) && stack.getCount() == 1) total += usableDurability(stack);
         }
         return total;
     }
@@ -161,6 +163,10 @@ public final class FlightPlan {
     public boolean nativeMovement() {
         BaritoneSnapshot nativeState = baritone.capture();
         return nativeState.inControl() || nativeState.pathing() || nativeState.calcInProgress();
+    }
+
+    public static int usableDurability(ItemStack stack) {
+        return Math.max(0, remaining(stack) - 16);
     }
 
     public static int remaining(ItemStack stack) {

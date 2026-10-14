@@ -22,11 +22,15 @@ public final class GallerySelection {
         int heading = (axis.getHorizontalQuarterTurns() + turn) & 3;
         for (int attempt = 0; attempt < 4; attempt++) {
             BlockPos next = start.offset(Direction.fromHorizontalQuarterTurns((heading + attempt) & 3));
-            if (!mine.inside(next) || mine.rejected.contains(next) || mine.facts.gallery.contains(next.asLong())
+            if (!mine.inside(next) || (mine.rejected.contains(next) || mine.rejected.contains(next.up())) || mine.facts.gallery.contains(next.asLong())
                 || mine.facts.stairs.contains(next.asLong())
                 || !MineGeometry.floor(mine.world, next.down()) || !connected(mine, next)) continue;
             if (mine.facts.supports.contains(next.asLong()) || mine.facts.supports.contains(next.up().asLong())) continue;
-            if (!mine.world.loaded(next.up(2)) || MineGeometry.fallingAbove(mine.world, next.up())) continue;
+            if (!mine.world.loaded(next.up(2)) || MineGeometry.fallingAbove(mine.world, next.up())
+                || MineGeometry.lavaAdjacent(mine.world, next) || MineGeometry.lavaAdjacent(mine.world, next.up())) {
+                mine.rejected.add(next);
+                continue;
+            }
             mine.stand = start;
             mine.nextFeet = next;
             return true;

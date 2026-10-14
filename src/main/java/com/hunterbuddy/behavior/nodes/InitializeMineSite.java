@@ -73,8 +73,14 @@ public final class InitializeMineSite extends Node {
         if (mine.facts.stairs.isEmpty()) mine.facts.stairs.add(mine.facts.entrance);
         if (mine.facts.pending != null) {
             BlockPos pending = BlockPos.fromLong(mine.facts.pending);
-            if (!mine.facts.broken && mine.world.loaded(pending) && mine.world.cleared(pending)) {
-                return fail(FailureCode.NOT_CONFIRMED, "interrupted break is air without a durable server confirmation at " + pending);
+            if (!mine.facts.broken && mine.world.loaded(pending) && !mine.outputs.mining().confirmed(pending)) {
+                if (mine.world.cleared(pending)) {
+                    mine.patch.remove(pending);
+                    mine.closeBlock(ctx, "interrupted empty mining cell skipped without a server receipt at " + pending.toShortString());
+                } else {
+                    mine.rejected.add(pending);
+                    mine.closeBlock(ctx, "interrupted mining target rejected: block remains at " + pending.toShortString());
+                }
             }
         }
         return Success.INSTANCE;

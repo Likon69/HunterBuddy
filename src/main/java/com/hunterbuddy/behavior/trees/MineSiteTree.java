@@ -44,7 +44,7 @@ public final class MineSiteTree {
             new ReactiveSelector("mining-with-water-recovery",
                 new Guard(new Condition("oxygen recovery needed", mine::needsBreath),
                     new Sequence("recover-oxygen-then-resume", MineWaterTree.build(mine), new ResumeMineWork())),
-                new Guard(new Condition("mining operation active", sensors -> true), bounded)))));
+                new Guard(new Condition("mining return still pending", sensors -> mine.facts == null || !mine.facts.exited), bounded)))));
     }
 
     public static Node measure(MineSiteContext mine) {
@@ -54,7 +54,8 @@ public final class MineSiteTree {
                 new Deferred("refresh-proof-from-carved-access", () -> new Sequence("reach-and-reverify-access",
                     GroundTravel.build(BlockPos.fromLong(mine.facts.stairs.getLast()), 0, mine.baritone, mine.outputs),
                     new Timeout(2400, new VerifySite(mine.world, mine.zone, mine.profile, mine.knowledge,
-                        mine.knowledge.zone(mine.zone, mine.profile), () -> mine.site, verified))))),
+                        mine.knowledge.zone(mine.zone, mine.profile), () -> mine.site,
+                        () -> BlockPos.fromLong(mine.facts.stairs.getLast()), verified))))),
             new InventoryMilestone("load-verified-material-members", ctx -> {
                 if (mine.patch.isEmpty()) for (Long position : mine.site.blocks) mine.patch.add(BlockPos.fromLong(position));
             }));

@@ -91,7 +91,9 @@ public final class SurveyRoute {
             return;
         }
         if (survey.coverage.complete()) {
-            survey.result = "Avertissement: zone entièrement vérifiée, aucun site accessible d'au moins 1728 blocs";
+            survey.interrupted = survey.missionMode && survey.temporarilyUnavailable();
+            survey.result = survey.interrupted ? "survey paused while known sites are temporarily avoided"
+                : "zone fully verified; no accessible site with at least 1728 blocks";
             finish(plan, survey.world.feet(), ctx);
             return;
         }

@@ -35,7 +35,7 @@ public final class TakeoffElytra extends RocketAction implements PostTickable {
     protected NodeResult onActionTick(TickContext ctx) {
         if (stage == Stage.ACTIVE && !outputs.flight().running() && !outputs.flight().succeeded() && outputs.flight().failure() == null) stage = Stage.READY;
         int slot = ctx.bb().get(ctx.owner(), slotKey).orElse(-1);
-        if (!outputs.flight().canTakeoff(slot)) return fail(FailureCode.MISSING_ITEM, "usable elytra and plain hotbar rockets above the reserve required");
+        if (stage == Stage.READY && !outputs.flight().canTakeoff(slot)) return fail(FailureCode.MISSING_ITEM, "usable elytra and plain hotbar rockets above the reserve required");
         outputs.slot(ctx.owner(), new SlotIntent(slot, true));
         if (ctx.sensors().selectedSlot() != slot || ctx.sensors().serverSlot() != slot || !outputs.slotSettled(slot)) return new Running("settling takeoff rocket slot");
         if (stage == Stage.READY) {

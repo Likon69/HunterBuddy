@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.mc;
 
 import baritone.api.utils.input.Input;
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.resource.ConsumablePolicy;
 import com.hunterbuddy.behavior.resource.Lease;
@@ -61,6 +62,18 @@ public final class FlightBridge {
         });
     }
 
+    public boolean rocketAvailable() {
+        return consumables.rocket();
+    }
+
+    public FailureCode rocketRefusal(int slot) {
+        if (!world.available() || !world.client().player.isGliding()) return FailureCode.NOT_CONFIRMED;
+        if (world.countMatching(Rockets::isPlain) == 0) return FailureCode.MISSING_ITEM;
+        if (!consumables.rocket()) return FailureCode.BUDGET;
+        if (landing() || !world.matchesSlot(slot, Rockets::isPlain)) return FailureCode.REFUSED;
+        return null;
+    }
+
     public boolean canTakeoff(int slot) {
         return world.elytraEquipped() && world.matchesSlot(slot, Rockets::isPlain) && consumables.rocket();
     }
@@ -69,7 +82,6 @@ public final class FlightBridge {
         if (stage != Stage.ACTIVE || preAt == ctx.tick()) return;
         require(ctx, Resource.MOVEMENT, Resource.LOOK, Resource.SLOT, Resource.ROCKETS);
         preAt = ctx.tick();
-        if (!consumables.rocket()) { cancel(); failure = "rocket reserve reached"; stage = Stage.FAILED; return; }
         takeoff.tickPre();
     }
 
@@ -77,7 +89,6 @@ public final class FlightBridge {
         if (stage != Stage.ACTIVE || preAt != ctx.tick() || postAt == ctx.tick()) return;
         require(ctx, Resource.MOVEMENT, Resource.LOOK, Resource.SLOT, Resource.ROCKETS);
         postAt = ctx.tick();
-        if (!consumables.rocket()) { cancel(); failure = "rocket reserve reached"; stage = Stage.FAILED; return; }
         takeoff.tickPost();
     }
 

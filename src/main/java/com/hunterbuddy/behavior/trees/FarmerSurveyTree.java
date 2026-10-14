@@ -24,11 +24,11 @@ public final class FarmerSurveyTree {
         return new Sequence("prospecter-puis-rendre-la-main-au-cerveau",
             new Timeout(FarmerSettings.ACTIVITY_TIMEOUT_TICKS, SurveyTree.build(survey)),
             new InventoryMilestone("prospection-de-mission-confirmée", ctx -> {
-                mission.select(ctx, survey.selected);
+                mission.select(ctx, survey.interrupted ? mission.best() : survey.selected);
                 if (survey.interrupted) {
-                    mission.facts.baseRequested = true;
-                    mission.facts.waitAtBase = mission.occupiedOnly();
-                    mission.save(ctx, "prospection suspendue, ravitaillement ou attente à la base");
+                    mission.facts.baseRequested = mission.fuelDue() || mission.selected == null;
+                    mission.facts.waitAtBase = mission.selected == null && mission.occupiedOnly();
+                    mission.save(ctx, "survey interrupted; next site or base resupply selected");
                 }
             }));
     }

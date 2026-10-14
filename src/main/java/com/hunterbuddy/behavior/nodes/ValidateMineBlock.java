@@ -10,7 +10,6 @@ import com.hunterbuddy.behavior.mc.MineGeometry;
 import com.hunterbuddy.behavior.mc.MineInventorySafety;
 import com.hunterbuddy.behavior.mc.MineSiteContext;
 import net.minecraft.entity.FallingBlockEntity;
-import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 
@@ -32,8 +31,8 @@ public final class ValidateMineBlock extends Node {
         if (!mine.inside(point) || !mine.inside(mine.world.feet()) || !mine.world.loaded(point)) {
             return fail(FailureCode.REFUSED, "mining target or player outside the zone margin or loaded world");
         }
-        if (mine.world.state(point).getFluidState().isIn(FluidTags.LAVA)) {
-            return fail(FailureCode.UNREACHABLE, "lava occupies the excavation cell");
+        if (MineGeometry.lavaAdjacent(mine.world, point)) {
+            return fail(FailureCode.UNREACHABLE, "lava occupies or borders the excavation cell");
         }
         if (MineGeometry.clear(mine.world, point)) {
             if (mine.facts.pending != null && mine.facts.pending == point.asLong() && mine.outputs.mining().confirmed(point)) {

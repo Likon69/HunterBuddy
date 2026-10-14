@@ -17,12 +17,8 @@ public final class FlightBudget {
         return Math.max(minimumRockets, 8 + (int) Math.ceil(rockets(metres) * 1.5));
     }
 
-    public int landingRockets() {
-        return Math.max(8, minimumRockets);
-    }
-
     public int tripRockets(double outward, double back, boolean returning) {
-        return returning ? rockets(outward) + landingRockets()
+        return returning ? outward <= 96 ? 0 : rockets(outward - 96)
             : (int) Math.ceil(rockets(outward) * 1.5) + reserve(back);
     }
 

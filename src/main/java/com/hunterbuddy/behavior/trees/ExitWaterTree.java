@@ -87,11 +87,12 @@ public final class ExitWaterTree {
         private int swimming;
         private int ascents;
         private boolean platformSpent;
+        private boolean flightUnavailable;
 
         private Escape(WorldReader world, Node... branches) { super("exit-and-fly", branches); this.world = world; }
 
         @Override
-        protected void onStart(TickContext ctx) { stage = Stage.PROBE; swimming = 0; ascents = 0; platformSpent = false; setHere(ctx); }
+        protected void onStart(TickContext ctx) { stage = Stage.PROBE; swimming = 0; ascents = 0; platformSpent = false; flightUnavailable = false; setHere(ctx); }
 
         private void setHere(TickContext ctx) {
             if (!world.available()) return;
@@ -106,6 +107,8 @@ public final class ExitWaterTree {
         @Override
         protected NodeResult onTick(TickContext ctx) {
             if (!world.available()) return fail(FailureCode.UNREACHABLE, "Minecraft world is unavailable");
+            if (flightUnavailable && ctx.sensors().onGround() && !ctx.sensors().inWater()
+                && !ctx.sensors().submerged()) return Success.INSTANCE;
             if (ctx.sensors().gliding() && stage != Stage.WATER && stage != Stage.TAKEOFF) return Success.INSTANCE;
             if (stage == Stage.PROBE) {
                 setHere(ctx);
@@ -148,7 +151,8 @@ public final class ExitWaterTree {
             NodeResult result = children().get(branch).execute(ctx);
             if (result instanceof Running) return result;
             if (result instanceof Failure failure) {
-                if (failure.code() == FailureCode.MISSING_ITEM) return result;
+                if ((stage == Stage.WATER || stage == Stage.TAKEOFF)
+                    && (failure.code() == FailureCode.MISSING_ITEM || failure.code() == FailureCode.BUDGET)) flightUnavailable = true;
                 ctx.bb().set(ctx.owner(), MarkFailed.failedKey(spot.toString()), true);
                 enter(ctx, Stage.FIND);
                 return new Running("exit branch failed; select another point");

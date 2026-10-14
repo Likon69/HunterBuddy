@@ -26,17 +26,17 @@ public final class SiteSelection {
 
     private static MaterialSite best(ZoneKnowledge memory, FarmerZone zone, BlockPos from, long now, boolean verified,
                                      Predicate<MaterialSite> eligible) {
-        return memory.sites.values().stream().filter(MaterialSite::usable)
+        return memory.sites.values().stream().filter(MaterialSite::usable).filter(site -> !site.flightAvoided())
             .filter(eligible)
             .filter(site -> !verified || site.status.equals("verified") && site.verifiedAt > 0)
             .filter(site -> zone.containsWithMargin(site.x + 0.5, site.z + 0.5, FarmerZoneLookup.TARGET_MARGIN))
-            .max(Comparator.comparingDouble(site -> score(site, from, now))).orElse(null);
+            .max(Comparator.comparingDouble(site -> score(site, from, now, memory.layer))).orElse(null);
     }
 
-    public static double score(MaterialSite site, BlockPos from, long now) {
+    private static double score(MaterialSite site, BlockPos from, long now, boolean layer) {
         double distance = Math.sqrt(site.seed().getSquaredDistance(from));
         double freshness = 1 / (1 + Math.max(0, now - site.observedAt) / 86_400_000.0);
         double access = Math.max(1, Math.min(distance / 4.3, 40 + distance / 20));
-        return site.quantity * freshness / access;
+        return site.quantity * freshness / (access + (layer ? Math.max(0, from.getY() - site.y) / 1.5 : 0));
     }
 }

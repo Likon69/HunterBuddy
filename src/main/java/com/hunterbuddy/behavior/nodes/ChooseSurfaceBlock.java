@@ -1,6 +1,7 @@
 package com.hunterbuddy.behavior.nodes;
 
 import com.hunterbuddy.behavior.core.Action;
+import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
@@ -23,8 +24,18 @@ public final class ChooseSurfaceBlock extends Action {
     @Override
     protected void onActionStart(TickContext ctx) {
         columns.clear();
-        columns.addAll(mine.patch);
-        if (mine.facts.stairs.isEmpty()) mine.facts.stairs.add(mine.facts.entrance);
+        if (!mine.surfaceInitialized) {
+            columns.addAll(mine.patch);
+            mine.surfaceInitialized = true;
+        } else columns.addAll(mine.surfaceColumns);
+        mine.surfaceColumns.clear();
+    }
+
+    @Override
+    protected void onActionStop(TickContext ctx, ExitReason reason) {
+        if (reason == ExitReason.PREEMPTED || reason == ExitReason.PAUSED || reason == ExitReason.GUARD_LOST) {
+            mine.surfaceColumns.addAll(columns);
+        }
     }
 
     @Override

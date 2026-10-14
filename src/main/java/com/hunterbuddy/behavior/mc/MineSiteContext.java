@@ -1,9 +1,13 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
+import com.hunterbuddy.behavior.core.OperationFailure;
 import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.core.Sensors;
 import com.hunterbuddy.behavior.core.TickContext;
+import com.hunterbuddy.behavior.farmer.ChunkObservation;
+import com.hunterbuddy.behavior.farmer.CoverageState;
 import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
@@ -21,6 +25,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import net.minecraft.block.FallingBlock;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 
 public final class MineSiteContext {
     public final MaterialSite site;
@@ -35,6 +40,8 @@ public final class MineSiteContext {
     public final Key<BlockPos> swimKey = new Key<>("mine-site-swim", BlockPos.class, Scope.OWNER, false);
     public final Set<BlockPos> patch = new LinkedHashSet<>();
     public final Set<BlockPos> rejected = new HashSet<>();
+    public final Set<BlockPos> surfaceColumns = new LinkedHashSet<>();
+    public boolean surfaceInitialized;
     public final ArrayDeque<BlockPos> steps = new ArrayDeque<>();
     public final ArrayDeque<BlockPos> returnSteps = new ArrayDeque<>();
     public MineSiteFacts facts;
@@ -86,6 +93,52 @@ public final class MineSiteContext {
             if (!world.inBounds(point)) break;
             facts.supports.add(point.asLong());
         }
+    }
+
+    public void confirmBlock(TickContext ctx, BlockPos point) {
+        if (facts.broken) return;
+        if (!outputs.mining().confirmed(point)) throw new OperationFailure(FailureCode.NOT_CONFIRMED, "server break receipt is missing");
+        facts.broken = true;
+        if (facts.material) facts.mined++;
+        else facts.excavated++;
+        patch.remove(point);
+        for (Direction direction : Direction.values()) {
+            BlockPos next = point.offset(direction);
+            if (inside(next) && !world.loaded(next)) facts.unexplored = true;
+            if (material(next)) patch.add(next);
+        }
+        if (material(point)) patch.add(point);
+        String chunk = ZoneCoverage.key(point.getX() >> 4, point.getZ() >> 4);
+        knowledge.zone(recordedZone, profile).coverage.put(chunk,
+            new ChunkObservation(CoverageState.OBSERVED, System.currentTimeMillis()));
+        site.status = "observed";
+        site.verifiedAt = 0;
+        if (facts.changedChunks.add(chunk)) knowledge.save(ctx);
+        save(ctx, "mine-site broken at=" + point.toShortString());
+    }
+
+    public void loseBlock(TickContext ctx, String milestone) {
+        if (facts.pending != null && facts.broken) facts.lostBlocks.add(facts.pending);
+        closeBlock(ctx, milestone);
+    }
+
+    public void changedSurface(BlockPos point) {
+        surfaceColumns.add(point);
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) surfaceColumns.add(point.add(x, 0, z));
+        }
+    }
+
+    public void closeBlock(TickContext ctx, String milestone) {
+        if (facts.pending != null) changedSurface(BlockPos.fromLong(facts.pending));
+        facts.pending = null;
+        facts.broken = false;
+        facts.before.clear();
+        facts.entities.clear();
+        facts.drops.clear();
+        facts.dropCounts.clear();
+        outputs.mining().releaseTool();
+        save(ctx, milestone);
     }
 
     public void save(TickContext ctx, String milestone) {

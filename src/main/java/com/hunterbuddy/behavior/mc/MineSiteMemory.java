@@ -21,7 +21,7 @@ public final class MineSiteMemory {
         if (facts == null || facts.world == null || facts.profile == null || facts.stairs == null || facts.gallery == null
             || facts.supports == null || facts.before == null || facts.entities == null || facts.drops == null
             || facts.dropCounts == null || facts.blocks == null || facts.siteState == null || facts.changedChunks == null
-            || facts.mined < 0 || facts.excavated < 0) {
+            || facts.lostBlocks == null || facts.mined < 0 || facts.excavated < 0) {
             throw new IllegalStateException("invalid saved mining facts");
         }
         return facts;

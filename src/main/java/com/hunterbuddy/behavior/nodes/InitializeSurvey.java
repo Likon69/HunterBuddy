@@ -6,9 +6,9 @@ import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
 import com.hunterbuddy.behavior.core.TickContext;
-import com.hunterbuddy.behavior.farmer.FarmerSettings;
 import com.hunterbuddy.behavior.farmer.ChunkObservation;
 import com.hunterbuddy.behavior.farmer.CoverageState;
+import com.hunterbuddy.behavior.farmer.FarmerSettings;
 import com.hunterbuddy.behavior.farmer.FarmerStepConfig;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.MissionJournal;
@@ -71,7 +71,7 @@ public final class InitializeSurvey extends Action {
         survey.memory = survey.knowledge.zone(survey.zone, survey.profile);
         long cutoff = System.currentTimeMillis() - 86_400_000L;
         survey.memory.coverage.replaceAll((key, observation) -> observation.observedAt() < cutoff
-            ? new ChunkObservation(CoverageState.OBSERVED, observation.observedAt(), "old observation needs a fresh scan") : observation);
+            ? new ChunkObservation(CoverageState.OBSERVED, observation.observedAt()) : observation);
         survey.coverage = new ZoneCoverage(survey.zone, survey.memory);
     }
 

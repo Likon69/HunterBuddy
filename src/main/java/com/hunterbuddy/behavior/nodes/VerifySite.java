@@ -18,7 +18,6 @@ import com.hunterbuddy.behavior.farmer.MaterialSite;
 import com.hunterbuddy.behavior.farmer.WorldKnowledge;
 import com.hunterbuddy.behavior.farmer.ZoneKnowledge;
 import com.hunterbuddy.behavior.mc.PatchMeasurement;
-import com.hunterbuddy.behavior.mc.SiteArrival;
 import com.hunterbuddy.behavior.mc.WorldReader;
 import com.hunterbuddy.behavior.mc.ZoneCoverage;
 import java.util.HashSet;
@@ -33,12 +32,14 @@ public final class VerifySite extends Action {
     private final ZoneKnowledge memory;
     private final Supplier<MaterialSite> selected;
     private final Key<BlockPos> destination;
+    private final Supplier<BlockPos> access;
+    private int airborneTicks;
     private MaterialSite site;
     private PatchMeasurement measurement;
     private int reported;
 
     public VerifySite(WorldReader world, FarmerZone zone, FarmerProfile profile, WorldKnowledge knowledge,
-                      ZoneKnowledge memory, Supplier<MaterialSite> selected, Key<BlockPos> destination) {
+                      ZoneKnowledge memory, Supplier<MaterialSite> selected, Supplier<BlockPos> access, Key<BlockPos> destination) {
         super("verify-connected-material-on-site-before-mining");
         this.world = world;
         this.zone = zone;
@@ -47,6 +48,7 @@ public final class VerifySite extends Action {
         this.memory = memory;
         this.selected = selected;
         this.destination = destination;
+        this.access = access;
         limit(2400);
     }
 
@@ -55,6 +57,7 @@ public final class VerifySite extends Action {
         site = selected.get();
         measurement = null;
         reported = 0;
+        airborneTicks = 0;
         ctx.bb().remove(ctx.owner(), destination);
     }
 
@@ -62,9 +65,14 @@ public final class VerifySite extends Action {
     protected NodeResult onActionTick(TickContext ctx) {
         if (site == null) return fail(FailureCode.NO_OPTION, "no measured material site selected");
         BlockPos seed = site.seed();
-        if (ctx.sensors().gliding() || !ctx.sensors().onGround()
-            || !zone.contains(ctx.sensors().x(), ctx.sensors().z())
-            || SiteArrival.distanceSquared(site, profile, world) > 256
+        if (ctx.sensors().gliding() || !ctx.sensors().onGround()) {
+            return airborneTicks++ < 200 ? new Running("waiting for ground support before site verification")
+                : fail(FailureCode.NOT_CONFIRMED, "site verification needs another grounded arrival attempt");
+        }
+        airborneTicks = 0;
+        BlockPos support = access.get();
+        if (!zone.contains(ctx.sensors().x(), ctx.sensors().z())
+            || support == null || world.feet().getSquaredDistance(support) > 256
             || !zone.containsWithMargin(seed.getX() + 0.5, seed.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)) {
             return unavailable(ctx, "inaccessible", "site must be checked on the ground inside the current zone");
         }
@@ -105,7 +113,7 @@ public final class VerifySite extends Action {
     private NodeResult unavailable(TickContext ctx, String status, String reason) {
         site.unavailable(status, reason);
         memory.coverage.put(ZoneCoverage.key(site.x >> 4, site.z >> 4),
-            new ChunkObservation(CoverageState.OBSERVED, System.currentTimeMillis(), reason));
+            new ChunkObservation(CoverageState.OBSERVED, System.currentTimeMillis()));
         knowledge.save(ctx);
         return fail(FailureCode.UNREACHABLE, reason);
     }
@@ -114,6 +122,7 @@ public final class VerifySite extends Action {
     protected void onResume(TickContext ctx, long ticks, long ms) {
         measurement = null;
         reported = 0;
+        airborneTicks = 0;
         ctx.bb().remove(ctx.owner(), destination);
     }
 }

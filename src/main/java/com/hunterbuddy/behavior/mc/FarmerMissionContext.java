@@ -164,9 +164,11 @@ public final class FarmerMissionContext {
         return selected != null && !eligible(selected);
     }
 
+    public BlockPos arrivalStand;
+
     public boolean eligible(MaterialSite site) {
         long now = System.currentTimeMillis();
-        return visiblePlayers().stream().noneMatch(player -> Math.hypot(player.getX() - site.x,
+        return !site.flightAvoided() && visiblePlayers().stream().noneMatch(player -> Math.hypot(player.getX() - site.x,
             player.getZ() - site.z) <= 96) && facts.occupied.entrySet().stream().noneMatch(entry -> entry.getValue() > now
             && Math.hypot(BlockPos.fromLong(entry.getKey()).getX() - site.x,
                 BlockPos.fromLong(entry.getKey()).getZ() - site.z) <= 96);
@@ -177,7 +179,9 @@ public final class FarmerMissionContext {
     }
 
     public boolean occupiedOnly() {
-        return best() == null && SiteSelection.best(sites, zone, world.feet(), System.currentTimeMillis()) != null;
+        return best() == null && (SiteSelection.best(sites, zone, world.feet(), System.currentTimeMillis()) != null
+            || sites.sites.values().stream().anyMatch(site -> site.usable() && site.flightAvoided()
+                && zone.containsWithMargin(site.x + 0.5, site.z + 0.5, FarmerZoneLookup.TARGET_MARGIN)));
     }
 
     public void avoidVisiblePlayers(TickContext ctx) {

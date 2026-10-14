@@ -1,10 +1,13 @@
 package com.hunterbuddy.behavior.mc;
 
+import com.hunterbuddy.behavior.farmer.ChunkObservation;
 import com.hunterbuddy.behavior.farmer.CoverageState;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.ZoneKnowledge;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 
@@ -19,6 +22,8 @@ public final class ZoneCoverage {
     private int z;
     private boolean initialized;
     private final List<ChunkPos> chunks = new ArrayList<>();
+    private final Set<Long> included = new HashSet<>();
+    private int verifiedChunks;
 
     public ZoneCoverage(FarmerZone zone, ZoneKnowledge memory) {
         this.zone = zone;
@@ -33,7 +38,12 @@ public final class ZoneCoverage {
 
     public boolean initialize() {
         for (int work = 0; work < 512 && !initialized; work++) {
-            if (intersects(x, z)) chunks.add(new ChunkPos(x, z));
+            if (intersects(x, z)) {
+                ChunkPos chunk = new ChunkPos(x, z);
+                chunks.add(chunk);
+                included.add(chunk.toLong());
+                if (memory.state(key(x, z)) == CoverageState.VERIFIED) verifiedChunks++;
+            }
             z++;
             if (z > maxZ) {
                 z = minZ;
@@ -73,11 +83,21 @@ public final class ZoneCoverage {
     }
 
     public boolean complete() {
-        return initialized && chunks.stream().allMatch(p -> memory.state(key(p.x, p.z)) == CoverageState.VERIFIED);
+        return initialized && verifiedChunks == chunks.size();
     }
 
     public long verified() {
-        return chunks.stream().filter(p -> memory.state(key(p.x, p.z)) == CoverageState.VERIFIED).count();
+        return verifiedChunks;
+    }
+
+    public void update(int x, int z, CoverageState state) {
+        long chunk = ChunkPos.toLong(x, z);
+        String key = key(x, z);
+        if (included.contains(chunk)) {
+            if (memory.state(key) == CoverageState.VERIFIED) verifiedChunks--;
+            if (state == CoverageState.VERIFIED) verifiedChunks++;
+        }
+        memory.coverage.put(key, new ChunkObservation(state, System.currentTimeMillis()));
     }
 
     public static String key(int x, int z) {

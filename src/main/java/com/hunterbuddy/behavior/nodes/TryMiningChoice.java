@@ -25,7 +25,8 @@ public final class TryMiningChoice extends Decorator {
     protected NodeResult onTick(TickContext ctx) {
         NodeResult result = child().execute(ctx);
         if (result instanceof Failure failure && mine.facts.pending == null && mine.facts.outcome.isEmpty()
-            && (failure.code() == FailureCode.UNREACHABLE || failure.code() == FailureCode.TIMEOUT)) {
+            && (failure.code() == FailureCode.UNREACHABLE || failure.code() == FailureCode.TIMEOUT
+                || failure.code() == FailureCode.NOT_CONFIRMED || failure.code() == FailureCode.REFUSED)) {
             mine.rejected.add(choice.get());
             return Success.INSTANCE;
         }

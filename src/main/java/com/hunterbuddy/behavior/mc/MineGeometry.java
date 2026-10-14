@@ -34,6 +34,15 @@ public final class MineGeometry {
             && (world.state(feet).getFluidState().isIn(FluidTags.WATER) || world.state(feet.up()).getFluidState().isIn(FluidTags.WATER));
     }
 
+    public static boolean lavaAdjacent(WorldReader world, BlockPos point) {
+        if (world.loaded(point) && world.state(point).getFluidState().isIn(FluidTags.LAVA)) return true;
+        for (Direction direction : Direction.values()) {
+            BlockPos neighbor = point.offset(direction);
+            if (world.loaded(neighbor) && world.state(neighbor).getFluidState().isIn(FluidTags.LAVA)) return true;
+        }
+        return false;
+    }
+
     public static boolean fallingAbove(WorldReader world, BlockPos point) {
         BlockPos above = point.up();
         return !world.loaded(above) || world.state(above).getBlock() instanceof FallingBlock;

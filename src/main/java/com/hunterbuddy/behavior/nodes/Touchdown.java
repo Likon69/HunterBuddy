@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.nodes;
 
 import com.hunterbuddy.behavior.core.Action;
 import com.hunterbuddy.behavior.core.FailureCode;
+import com.hunterbuddy.behavior.core.Node;
 import com.hunterbuddy.behavior.core.NodeResult;
 import com.hunterbuddy.behavior.core.Running;
 import com.hunterbuddy.behavior.core.Success;
@@ -9,19 +10,31 @@ import com.hunterbuddy.behavior.core.TickContext;
 import com.hunterbuddy.behavior.mc.FlightPlan;
 import com.hunterbuddy.behavior.mc.FlightTerrain;
 import com.hunterbuddy.behavior.resource.MovementIntent;
+import java.util.List;
 
 public final class Touchdown extends Action {
     private final FlightPlan plan;
+    private final Node redeploy;
 
     public Touchdown(FlightPlan plan) {
         super("touchdown");
         this.plan = plan;
+        redeploy = new Timeout(200, new RedeployGlide(plan.world, plan.outputs));
         limit(400);
+    }
+
+    @Override
+    public List<Node> children() {
+        return List.of(redeploy);
     }
 
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (!ctx.sensors().gliding() && (ctx.sensors().onGround() || ctx.sensors().inWater())) return Success.INSTANCE;
+        if (!ctx.sensors().gliding()) {
+            NodeResult result = redeploy.execute(ctx);
+            return result instanceof Success ? new Running("glide redeployed during touchdown") : result;
+        }
         if (plan.landing == null || !FlightTerrain.landing(plan.landing, plan.world)) {
             return fail(FailureCode.UNREACHABLE, "landing point changed; use KeepFlying fallback");
         }

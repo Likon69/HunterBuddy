@@ -11,7 +11,6 @@ import net.minecraft.util.math.BlockPos;
 
 public final class MineSiteScope extends Decorator {
     private final MineSiteContext mine;
-    private String reconciliationFailure = "";
 
     public MineSiteScope(MineSiteContext mine, Node child) {
         super("mining-in-original-world", child);
@@ -25,10 +24,6 @@ public final class MineSiteScope extends Decorator {
 
     @Override
     protected NodeResult onTick(TickContext ctx) {
-        if (!reconciliationFailure.isEmpty()) {
-            mine.failure = reconciliationFailure;
-            return fail(FailureCode.NOT_CONFIRMED, reconciliationFailure);
-        }
         if (mine.facts != null && !mine.facts.world.equals(mine.world.storageKey())) {
             mine.failure = "mining belongs to another world or dimension";
             return fail(FailureCode.REFUSED, mine.failure);
@@ -52,12 +47,9 @@ public final class MineSiteScope extends Decorator {
         mine.facts.receiptVersion = mine.outputs.inventory().playerVersion() - 1;
         BlockPos point = BlockPos.fromLong(mine.facts.pending);
         if (!mine.facts.broken && mine.world.loaded(point) && mine.world.cleared(point) && !mine.outputs.mining().confirmed(point)) {
-            reconciliationFailure = "reconnected break is air without a durable server confirmation at " + point;
+            mine.patch.remove(point);
+            mine.closeBlock(ctx, "resumed empty mining cell skipped without a server receipt at " + point.toShortString());
         }
     }
 
-    @Override
-    protected void onReset() {
-        reconciliationFailure = "";
-    }
 }

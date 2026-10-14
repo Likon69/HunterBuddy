@@ -39,7 +39,7 @@ public final class ConsumablePolicy {
     public boolean rocket() { return world.countMatching(Rockets::isPlain) > rocketReserve(); }
 
     private int rocketReserve() {
-        return Math.max(Math.max(0, rocketsMin.getAsInt()), Math.max(0, flightReserve.getAsInt()));
+        return flightOwner == null ? Math.max(0, rocketsMin.getAsInt()) : Math.max(0, flightReserve.getAsInt());
     }
 
     public int minimumRockets() {

@@ -1,7 +1,6 @@
 package com.hunterbuddy.behavior.mc;
 
 import com.hunterbuddy.behavior.core.TickContext;
-import com.hunterbuddy.behavior.farmer.ChunkObservation;
 import com.hunterbuddy.behavior.farmer.CoverageState;
 import com.hunterbuddy.behavior.farmer.FarmerProfile;
 import com.hunterbuddy.behavior.farmer.FarmerZone;
@@ -61,7 +60,7 @@ public final class SurveyScanner {
             if (!coverage.intersects(position.x, position.z)) continue;
             String key = ZoneCoverage.key(position.x, position.z);
             if (memory.state(key) == CoverageState.UNKNOWN) {
-                memory.coverage.put(key, new ChunkObservation(CoverageState.OBSERVED, System.currentTimeMillis(), "scan pending"));
+                coverage.update(position.x, position.z, CoverageState.OBSERVED);
                 dirty = true;
             }
             if (memory.state(key) != CoverageState.VERIFIED && !attempted.contains(key) && queued.add(key)) pending.add(position);
@@ -88,11 +87,11 @@ public final class SurveyScanner {
         if (site != null) {
             String key = Long.toString(site.seed().asLong());
             MaterialSite previous = memory.sites.get(key);
+            if (previous != null) site.flightAvoidedUntil = previous.flightAvoidedUntil;
             if (previous == null || !previous.status.equals("inaccessible")) memory.sites.put(key, site);
         }
         CoverageState state = scan.verified() ? CoverageState.VERIFIED : CoverageState.OBSERVED;
-        String reason = scan.verified() ? "all loaded sections examined" : "connected patch or neighboring chunk remains unverified";
-        memory.coverage.put(ZoneCoverage.key(current.x, current.z), new ChunkObservation(state, System.currentTimeMillis(), reason));
+        coverage.update(current.x, current.z, state);
         dirty = true;
         if (scan.verified()) ctx.progress("zone chunk verified " + current.x + "," + current.z);
         scan = null;

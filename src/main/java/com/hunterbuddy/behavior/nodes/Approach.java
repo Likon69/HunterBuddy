@@ -2,6 +2,7 @@ package com.hunterbuddy.behavior.nodes;
 
 import com.hunterbuddy.behavior.core.Action;
 import com.hunterbuddy.behavior.core.EvidenceKind;
+import com.hunterbuddy.behavior.core.ExitReason;
 import com.hunterbuddy.behavior.core.FailureCode;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Node;
@@ -25,19 +26,22 @@ public final class Approach extends Action {
     private static final Key<BlockScan> POINTS = new Key<>("flight-landing-points", BlockScan.class, Scope.OWNER, false);
     private final FlightPlan plan;
     private final Node probe;
+    private final Node redeploy;
     private double bestHeight;
 
     public Approach(FlightPlan plan) {
         super("approach-without-rockets");
         this.plan = plan;
         probe = new Timeout(2400, new Sequence("find-flat-dry-landing",
-            new SetValue<>(ORIGIN, ctx -> plan.destination), new FindTakeoffPoints(ORIGIN, POINTS, plan.world)));
+            new SetValue<>(ORIGIN, ctx -> plan.destination), new FindTakeoffPoints(ORIGIN, POINTS, plan.world,
+                pos -> FlightTerrain.landing(pos, plan.world) && !plan.failedLandings.contains(pos))));
+        redeploy = new Timeout(200, new RedeployGlide(plan.world, plan.outputs));
         limit(3600);
     }
 
     @Override
     public List<Node> children() {
-        return List.of(probe);
+        return List.of(probe, redeploy);
     }
 
     @Override
@@ -46,17 +50,21 @@ public final class Approach extends Action {
         plan.landing = null;
         bestHeight = Double.POSITIVE_INFINITY;
         probe.resetMemory();
+        redeploy.resetMemory();
     }
 
     @Override
     protected NodeResult onActionTick(TickContext ctx) {
         if (ctx.sensors().onGround() || ctx.sensors().inWater()) return Success.INSTANCE;
-        if (!ctx.sensors().gliding()) return fail(FailureCode.NOT_CONFIRMED, "glide lost during approach");
+        if (!ctx.sensors().gliding()) {
+            NodeResult result = redeploy.execute(ctx);
+            return result instanceof Success ? new Running("glide redeployed during approach") : result;
+        }
         if (plan.nativeMovement()) return new Running("waiting for Baritone; approach never cancels its movement");
         if (plan.landing != null && !FlightTerrain.landing(plan.landing, plan.world)) {
             plan.failedLandings.add(plan.landing);
             plan.landing = null;
-            probe.halt(ctx, com.hunterbuddy.behavior.core.ExitReason.PREEMPTED);
+            probe.halt(ctx, ExitReason.PREEMPTED);
             probe.resetMemory();
         }
         if (plan.landing == null) {

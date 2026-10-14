@@ -5,9 +5,9 @@ import com.hunterbuddy.behavior.farmer.FarmerZone;
 import com.hunterbuddy.behavior.farmer.FarmerZoneLookup;
 import com.hunterbuddy.behavior.farmer.MaterialSite;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.util.math.BlockPos;
@@ -45,7 +45,7 @@ public final class PatchMeasurement {
         if (!matches(point) || !measured.add(point.asLong())) return done();
         count++;
         members.add(point.asLong());
-        if (entry == null && zone.containsWithMargin(point.getX() + 0.5, point.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)
+        if ((entry == null || profile.strategy().equals("layer") && point.getY() > entry.getY()) && zone.containsWithMargin(point.getX() + 0.5, point.getZ() + 0.5, FarmerZoneLookup.TARGET_MARGIN)
             && exposed(point, world)) entry = point;
         for (Direction direction : Direction.values()) {
             BlockPos neighbor = point.offset(direction);

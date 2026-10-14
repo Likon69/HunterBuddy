@@ -34,11 +34,12 @@ public final class FarmerSiteResult extends Decorator {
             return Success.INSTANCE;
         }
         if (failure.code() != FailureCode.UNREACHABLE && failure.code() != FailureCode.NO_PROGRESS
-            && failure.code() != FailureCode.NO_OPTION && failure.code() != FailureCode.TIMEOUT) {
+            && failure.code() != FailureCode.NO_OPTION && failure.code() != FailureCode.TIMEOUT
+            && failure.code() != FailureCode.NOT_CONFIRMED) {
             ctx.stopBot(ExitReason.FAILED, "[" + failure.code() + "] " + failure.reason());
             return result;
         }
-        if (mission.selected != null) {
+        if (mission.selected != null && !mission.selected.flightAvoided() && failure.code() != FailureCode.NOT_CONFIRMED) {
             mission.selected.unavailable("inaccessible", failure.reason());
             mission.knowledge.save(ctx);
         }

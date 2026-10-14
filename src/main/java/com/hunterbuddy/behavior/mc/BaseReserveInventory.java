@@ -30,7 +30,7 @@ public final class BaseReserveInventory {
         int wear = 0;
         for (int i = 0; i < visit.logistics.world.client().player.getInventory().size(); i++) {
             ItemStack stack = visit.logistics.world.client().player.getInventory().getStack(i);
-            if (GliderSwap.isGlider(stack) && FlightPlan.remaining(stack) > 16) wear += FlightPlan.remaining(stack);
+            if (GliderSwap.isGlider(stack) && stack.getCount() == 1) wear += FlightPlan.usableDurability(stack);
         }
         return wear;
     }
@@ -41,8 +41,8 @@ public final class BaseReserveInventory {
             return false;
         }
         List<ItemStack> contents = ShulkerSignature.of(visit.enderContents().get(slot), visit.logistics.world).contents();
-        int spareWear = contents.stream().filter(item -> GliderSwap.isGlider(item) && FlightPlan.remaining(item) > 16)
-            .mapToInt(FlightPlan::remaining).sum();
+        int spareWear = contents.stream().filter(item -> GliderSwap.isGlider(item) && item.getCount() == 1)
+            .mapToInt(FlightPlan::usableDurability).sum();
         return (carriedWear() >= visit.facts.wearBudget || spareWear > 0)
             && LogisticsInventory.missing(visit.logistics.world, visit.logistics.profile, contents).isEmpty();
     }

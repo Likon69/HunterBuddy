@@ -48,10 +48,4 @@ public final class SiteArrival {
             && world.state(point.down()).isSolidBlock(world.client().world, point.down());
     }
 
-    public static double distanceSquared(MaterialSite site, FarmerProfile profile, WorldReader world) {
-        if (!profile.strategy().equals("layer")) return world.feet().getSquaredDistance(site.seed());
-        double x = world.feet().getX() - site.x;
-        double z = world.feet().getZ() - site.z;
-        return x * x + z * z;
-    }
 }

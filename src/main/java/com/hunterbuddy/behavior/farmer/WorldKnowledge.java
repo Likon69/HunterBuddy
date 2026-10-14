@@ -37,7 +37,9 @@ public final class WorldKnowledge {
     public ZoneKnowledge zone(FarmerZone zone, FarmerProfile profile) {
         StringBuilder key = new StringBuilder(profile.key());
         for (BlockPos corner : zone.corners()) key.append('/').append(corner.getX()).append(',').append(corner.getZ());
-        return zones.computeIfAbsent(key.toString(), ignored -> new ZoneKnowledge());
+        ZoneKnowledge memory = zones.computeIfAbsent(key.toString(), ignored -> new ZoneKnowledge());
+        memory.layer = profile.strategy().equals("layer");
+        return memory;
     }
 
     public void save(TickContext ctx) {
