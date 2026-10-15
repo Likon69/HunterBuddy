@@ -3628,12 +3628,8 @@ public class SpawnerDetector extends Module {
         for (int[] n : rimNeighbors) {
             int nx = x + n[0], nz = z + n[1];
             if (!mc.world.getChunkManager().isChunkLoaded(nx >> 4, nz >> 4)) continue;
-            int g = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, nx, nz) - 1;
+            int g = descendPastFloatingBlocks(null, nx, nz, mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, nx, nz) - 1, mc.world.getBottomY(), true, cursor);
             BlockState gState = mc.world.getBlockState(cursor.set(nx, g, nz));
-            while (g > mc.world.getBottomY() && isSurfaceSkippable(gState, cursor)) {
-                g--;
-                gState = mc.world.getBlockState(cursor.set(nx, g, nz));
-            }
             int feet = g + 1;
 
             if (feet < startY + 2) continue;
@@ -10687,6 +10683,8 @@ public class SpawnerDetector extends Module {
 
         double alignDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
         BlockPos shaftBottom = new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z());
+        Goal shaftReturnGoal = new GoalComposite(new GoalNear(shaftBottom, 1), new GoalNear(shaftBottom.down(1), 1),
+            new GoalNear(shaftBottom.down(2), 1), new GoalNear(shaftBottom.down(3), 1), new GoalNear(shaftBottom.down(4), 1));
         IBaritone alignBt = primaryBaritone();
 
         if (!autoShaftReturning && autoShaftReturnRelaunches < 3 && alignBt != null
@@ -10694,7 +10692,7 @@ public class SpawnerDetector extends Module {
             autoShaftReturning = true;
             autoShaftReturnStartTick = stateTicks;
             releaseAllAutoKeys();
-            alignBt.getCustomGoalProcess().setGoalAndPath(new GoalNear(shaftBottom, 1));
+            alignBt.getCustomGoalProcess().setGoalAndPath(shaftReturnGoal);
             autoLog("SHAFT_ALIGN", autoSite.center, String.format("back to shaft with baritone dist=%.1f", alignDist));
         }
 
@@ -10717,7 +10715,7 @@ public class SpawnerDetector extends Module {
                     if (gaveUp) {
                         autoShaftReturnRelaunches++;
                         releaseAllAutoKeys();
-                        alignBt.getCustomGoalProcess().setGoalAndPath(new GoalNear(shaftBottom, 1));
+                        alignBt.getCustomGoalProcess().setGoalAndPath(shaftReturnGoal);
                         autoLog("SHAFT_ALIGN", autoSite.center, "back to shaft relaunch " + autoShaftReturnRelaunches);
                     }
                     autoPausedTicks++;
@@ -11711,7 +11709,7 @@ public class SpawnerDetector extends Module {
                         + " chest=" + mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem()
                         + " hurtTime=" + mc.player.hurtTime);
                 }
-                if (mc.player.isClimbing() && stateTicks <= 20 * 20) {
+                if (mc.player.isClimbing() && stateTicks <= 20 * 3) {
                     Utils.setPressed(mc.options.jumpKey, true);
                     return;
                 }
