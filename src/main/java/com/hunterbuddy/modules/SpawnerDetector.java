@@ -6687,7 +6687,8 @@ public class SpawnerDetector extends Module {
             double rdx = (gateRim.getX() + 0.5) - mc.player.getX();
             double rdz = (gateRim.getZ() + 0.5) - mc.player.getZ();
             double rHoriz = Math.hypot(rdx, rdz);
-            if (mc.player.isOnGround() && (int) Math.floor(mc.player.getY() + 0.5) == gateRim.getY() && rHoriz <= 0.5) {
+            int rimFeetY = (int) Math.floor(mc.player.getY() + 0.5);
+            if (mc.player.isOnGround() && rimFeetY <= gateRim.getY() && rimFeetY >= gateRim.getY() - 3 && rHoriz <= 0.5) {
                 if (bt != null) bt.getPathingBehavior().cancelEverything();
                 releaseAllAutoKeys();
                 autoWalkStepping = true;
