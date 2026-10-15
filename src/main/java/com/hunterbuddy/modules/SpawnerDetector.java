@@ -9773,10 +9773,13 @@ public class SpawnerDetector extends Module {
 
     private void finishExitTunnelTrail(boolean selfAscend, String details) {
         boolean chainReturn = autoExitReturnSettingsSaved;
+        boolean shaftNear = chainReturn && selfAscend && autoExitShaft != null
+            && Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ()) <= 4.0
+            && Math.abs(mc.player.getY() - autoExitShaft.bottomY()) <= 4.0;
         restoreExitReturnSettings();
         autoExitRetracingTrail = false;
         autoTunnelTrail.clear();
-        autoExitShaftForeign = selfAscend;
+        autoExitShaftForeign = selfAscend && !shaftNear;
         autoExitTrailTicks = 0;
         autoExitTrailSkipped = 0;
         autoExitTrailTotalTicks = 0;
@@ -9784,6 +9787,13 @@ public class SpawnerDetector extends Module {
         autoExitTrailBreakPos = null;
         autoExitTrailBreakLabel = null;
         releaseAllAutoKeys();
+        if (shaftNear) {
+            autoShaftFlyAttempts = 0;
+            autoShaftFlyRerouteAttempts = 0;
+            resetShaftDryRecovery();
+            enterState(autoExitShaft.water() ? AutoState.SWIM_UP : AutoState.SHAFT_ALIGN, details + ", shaft near");
+            return;
+        }
         enterState(chainReturn && selfAscend ? AutoState.ASCEND : AutoState.EXIT, details);
     }
 
@@ -9983,6 +9993,10 @@ public class SpawnerDetector extends Module {
                         if (autoExitReturnDryGoal == null) {
                             autoExitReturning = false;
                             releaseAllAutoKeys();
+                            if (farDxz <= 8.0) {
+                                enterState(AutoState.SWIM_UP, "no dry return goal, swim to the flooded shaft");
+                                return;
+                            }
                             enterState(AutoState.ASCEND, "no dry return goal outside flooded room");
                             return;
                         }
@@ -10644,7 +10658,9 @@ public class SpawnerDetector extends Module {
 
     private int shaftBlockedY(ExitShaft shaft) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
-        for (int y = mc.player.getBlockPos().getY() + 1; y <= shaft.exitY(); y++) {
+        int scanFromY = mc.player.getBlockPos().getY() + 1;
+        if (Math.hypot((shaft.x() + 0.5) - mc.player.getX(), (shaft.z() + 0.5) - mc.player.getZ()) > 1.0) scanFromY = Math.max(scanFromY, shaft.bottomY());
+        for (int y = scanFromY; y <= shaft.exitY(); y++) {
             cursor.set(shaft.x(), y, shaft.z());
             BlockState state = mc.world.getBlockState(cursor);
             if (!isOpenState(state, cursor) || state.getFluidState().isIn(FluidTags.WATER)) return y;
