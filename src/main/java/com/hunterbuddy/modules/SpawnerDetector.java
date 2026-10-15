@@ -11242,7 +11242,7 @@ public class SpawnerDetector extends Module {
             autoExitPathStep = 0;
         }
 
-        if (stateTicks - autoSwimUpProgressTick > 60 * 20) {
+        if (stateTicks - autoSwimUpProgressTick > 20 * 20) {
             releaseAllAutoKeys();
             enterState(AutoState.ASCEND, "swim up timeout");
             return;
@@ -11280,6 +11280,15 @@ public class SpawnerDetector extends Module {
         } else {
             Utils.setPressed(mc.options.sprintKey, false);
         }
+        if (!fastSwimUp && autoSwimUpBreakPos == null && !isShipwreck() && mc.player.isTouchingWater()) {
+            if (onSwimUpColumn) {
+                mc.player.setPitch(-90.0f);
+            } else {
+                int entryY = autoExitShaft != null ? shaftOpenEntryY(autoExitShaft) : swimUpExitY - 1;
+                double entryDy = (entryY + 0.5) - mc.player.getEyeY();
+                mc.player.setPitch(MathHelper.clamp((float) -Math.toDegrees(Math.atan2(entryDy, swimUpColumnDist)), -90.0f, 90.0f));
+            }
+        }
 
         double swimUpY = mc.player.getY();
         Vec3d swimUpPos = mc.player.getEntityPos();
@@ -11292,36 +11301,29 @@ public class SpawnerDetector extends Module {
         }
         autoSwimUpOnColumn = onSwimUpColumn;
 
-        if ((mc.player.isSubmergedInWater() || onSwimUpColumn) && stateTicks - autoSwimUpProgressTick >= 10) {
-            BlockPos swimUpFeet = mc.player.getBlockPos();
+        boolean swimUpAboveCheck = (mc.player.isSubmergedInWater() || onSwimUpColumn) && stateTicks - autoSwimUpProgressTick >= 10;
+        boolean swimUpSideCheck = !onSwimUpColumn && mc.player.horizontalCollision && stateTicks - autoSwimUpProgressTick >= 40;
+        if (swimUpAboveCheck || swimUpSideCheck) {
             BlockPos target = null;
-            for (int up = 2; up >= 1; up--) {
-                BlockPos p = new BlockPos(swimUpFeet.getX(), swimUpFeet.getY() + up, swimUpFeet.getZ());
-                BlockState pState = mc.world.getBlockState(p);
-                boolean solid = !(isShipwreck() ? isShipwreckPassable(pState, p) : isOpenState(pState, p)) && !pState.getFluidState().isIn(FluidTags.LAVA);
-                if (solid && !isLavaNearShaft(p, p.up())) {
-                    target = p;
-                    break;
+            if (swimUpAboveCheck) {
+                BlockPos swimUpFeet = mc.player.getBlockPos();
+                for (int up = 2; up >= 1; up--) {
+                    BlockPos p = new BlockPos(swimUpFeet.getX(), swimUpFeet.getY() + up, swimUpFeet.getZ());
+                    BlockState pState = mc.world.getBlockState(p);
+                    boolean solid = !(isShipwreck() ? isShipwreckPassable(pState, p) : isOpenState(pState, p)) && !pState.getFluidState().isIn(FluidTags.LAVA);
+                    if (solid && !isLavaNearShaft(p, p.up())) {
+                        target = p;
+                        break;
+                    }
                 }
             }
-            if (target != null && (autoSwimUpBreakPos == null || !autoSwimUpBreakPos.equals(target))) {
-                autoSwimUpBreakPos = target;
-                autoSwimUpBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
-            } else if (target == null) {
-                autoSwimUpBreakPos = null;
-                autoSwimUpBreakLabel = null;
+            boolean sideTarget = false;
+            if (target == null && swimUpSideCheck) {
+                int keyX = autoExitPathCell != null ? autoExitPathCell.getX() : swimUpX;
+                int keyZ = autoExitPathCell != null ? autoExitPathCell.getZ() : swimUpZ;
+                target = findWalkStuckObstacle(keyX, keyZ);
+                sideTarget = target != null;
             }
-            if (autoSwimUpBreakPos != null && autoMineTick("SWIM_UP", autoSwimUpBreakPos, false)) {
-                autoLog("SWIM_UP", autoSite.center, String.format("broken %d,%d,%d block=%s",
-                    autoSwimUpBreakPos.getX(), autoSwimUpBreakPos.getY(), autoSwimUpBreakPos.getZ(), autoSwimUpBreakLabel));
-                autoSwimUpBreakPos = null;
-                autoSwimUpBreakLabel = null;
-                autoSwimUpProgressTick = stateTicks;
-            }
-        } else if (!onSwimUpColumn && mc.player.horizontalCollision && stateTicks - autoSwimUpProgressTick >= 40) {
-            int keyX = autoExitPathCell != null ? autoExitPathCell.getX() : swimUpX;
-            int keyZ = autoExitPathCell != null ? autoExitPathCell.getZ() : swimUpZ;
-            BlockPos target = findWalkStuckObstacle(keyX, keyZ);
             if (target != null && (autoSwimUpBreakPos == null || !autoSwimUpBreakPos.equals(target))) {
                 autoSwimUpBreakPos = target;
                 autoSwimUpBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
@@ -11330,9 +11332,9 @@ public class SpawnerDetector extends Module {
                 autoSwimUpBreakLabel = null;
             }
             if (autoSwimUpBreakPos != null) {
-                Utils.setPressed(mc.options.jumpKey, false);
+                if (sideTarget) Utils.setPressed(mc.options.jumpKey, false);
                 if (autoMineTick("SWIM_UP", autoSwimUpBreakPos, false)) {
-                    autoLog("SWIM_UP", autoSite.center, String.format("path broken %d,%d,%d block=%s",
+                    autoLog("SWIM_UP", autoSite.center, String.format("%s %d,%d,%d block=%s", sideTarget ? "path broken" : "broken",
                         autoSwimUpBreakPos.getX(), autoSwimUpBreakPos.getY(), autoSwimUpBreakPos.getZ(), autoSwimUpBreakLabel));
                     autoSwimUpBreakPos = null;
                     autoSwimUpBreakLabel = null;
@@ -11376,11 +11378,16 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (onSwimUpColumn && !mc.player.isSubmergedInWater()
+        boolean dryBelowWater = onSwimUpColumn && !mc.player.isSubmergedInWater()
             && (!mc.player.isTouchingWater() || swimUpColumnDist <= 0.2)
             && mc.world.getFluidState(mc.player.getBlockPos().up()).isEmpty()
             && swimUpY < swimUpExitY - 1
-            && dryOpenToWaterAbove(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY)) {
+            && dryOpenToWaterAbove(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY);
+        boolean waitForFallingWater = dryBelowWater && !InvUtils.find(Items.OBSIDIAN).found();
+        if (waitForFallingWater && stateTicks % 40 == 0) {
+            autoLog("SWIM_UP", autoSite.center, "dry column below water, no throwaway, waiting on the column for the water");
+        }
+        if (dryBelowWater && !waitForFallingWater) {
             releaseAllAutoKeys();
             autoSelfAscendForcePillar = true;
             autoLog("SWIM_UP", autoSite.center, "dry column below water, self ascend pillar");
@@ -11415,7 +11422,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (onSwimUpColumn && !mc.player.isSubmergedInWater() && mc.player.getY() < swimUpExitY - 1
+        if (!waitForFallingWater && onSwimUpColumn && !mc.player.isSubmergedInWater() && mc.player.getY() < swimUpExitY - 1
             && stateTicks - autoSwimUpProgressTick >= 60) {
             releaseAllAutoKeys();
             autoLog("SWIM_UP", autoSite.center, "surface stall, ascend");
@@ -11522,6 +11529,14 @@ public class SpawnerDetector extends Module {
         Integer lowestY = jungleTempleLowestY(site.center);
         if (lowestY == null) return false;
         return site.room.maxY() >= lowestY - 3;
+    }
+
+    private int shaftOpenEntryY(ExitShaft s) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        int y = s.exitY() - 1;
+        if (!isOpenState(mc.world.getBlockState(cursor.set(s.x(), y, s.z())), cursor)) return s.bottomY();
+        while (y - 1 >= s.bottomY() && isOpenState(mc.world.getBlockState(cursor.set(s.x(), y - 1, s.z())), cursor)) y--;
+        return y;
     }
 
     private boolean dryOpenColumn(int x, int z, int fromY, int toY) {
