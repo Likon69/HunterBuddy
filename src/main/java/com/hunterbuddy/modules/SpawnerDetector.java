@@ -928,6 +928,7 @@ public class SpawnerDetector extends Module {
     private Vec3d autoSwimUpProgressPos;
     private boolean autoSwimUpOnColumn;
     private int autoSwimUpProgressTick;
+    private int autoSwimUpMouthY;
     private int autoSwimUpOutOfWaterTicks;
     private BlockPos autoSwimUpBreakPos;
     private String autoSwimUpBreakLabel;
@@ -6911,7 +6912,16 @@ public class SpawnerDetector extends Module {
         }
         float targetYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
         mc.player.setYaw(targetYaw);
-        Utils.setPressed(mc.options.forwardKey, true);
+        boolean pressForward = true;
+        if (mc.player.isTouchingWater()) {
+            Vec3d velocity = mc.player.getVelocity();
+            double towardTarget = (velocity.x * dx + velocity.z * dz) / dist;
+            double drag = mc.player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.DOLPHINS_GRACE) ? 0.96
+                : mc.player.isSprinting() ? 0.9 : 0.8;
+            double coast = Math.max(0.0, towardTarget) / (1.0 - drag);
+            pressForward = dist - coast > eps;
+        }
+        Utils.setPressed(mc.options.forwardKey, pressForward);
         return false;
     }
 
@@ -11242,6 +11252,7 @@ public class SpawnerDetector extends Module {
             autoSwimUpBreakLabel = null;
             autoExitPathCell = null;
             autoExitPathStep = 0;
+            autoSwimUpMouthY = Integer.MIN_VALUE;
         }
 
         if (stateTicks - autoSwimUpProgressTick > 20 * 20) {
@@ -11256,9 +11267,14 @@ public class SpawnerDetector extends Module {
         BlockPos swimUpEntry = autoExitShaft != null ? autoExitShaft.entry() : null;
         double swimUpColumnDist = Math.hypot((swimUpX + 0.5) - mc.player.getX(), (swimUpZ + 0.5) - mc.player.getZ());
         boolean onSwimUpColumn = swimUpColumnDist <= 0.7;
+        if (autoSwimUpMouthY == Integer.MIN_VALUE) {
+            autoSwimUpMouthY = shaftMouthY(swimUpX, swimUpZ, autoExitShaft != null ? autoExitShaft.bottomY() : autoColumn.startY(), swimUpExitY);
+        }
+        boolean swimUpOpenWater = !isShipwreck() && mc.player.isSubmergedInWater()
+            && mc.player.getBlockY() >= autoSwimUpMouthY && waterAllAround(mc.player.getBlockPos());
 
-        navigateExitColumn(swimUpX, swimUpZ, 0.2, swimUpEntry, true);
-        boolean fastSwimUp = onSwimUpColumn && mc.player.isSubmergedInWater()
+        if (!swimUpOpenWater) navigateExitColumn(swimUpX, swimUpZ, 0.2, swimUpEntry, true);
+        boolean fastSwimUp = (onSwimUpColumn || swimUpOpenWater) && mc.player.isSubmergedInWater()
             && autoSwimUpBreakPos == null && autoExitBreakPos == null
             && autoExitTrailBreakPos == null && !autoExitStuckBreaking
             && mc.player.getHungerManager().getFoodLevel() > 6;
@@ -11287,14 +11303,14 @@ public class SpawnerDetector extends Module {
                 mc.player.setPitch(-90.0f);
             } else {
                 int entryY = autoExitShaft != null ? shaftOpenEntryY(autoExitShaft) : swimUpExitY - 1;
-                double entryDy = (entryY + 0.5) - mc.player.getEyeY();
+                double entryDy = Math.max(0.0, (entryY + 0.5) - mc.player.getEyeY());
                 mc.player.setPitch(MathHelper.clamp((float) -Math.toDegrees(Math.atan2(entryDy, swimUpColumnDist)), -90.0f, 90.0f));
             }
         }
 
         double swimUpY = mc.player.getY();
         Vec3d swimUpPos = mc.player.getEntityPos();
-        boolean walkingProgress = !onSwimUpColumn && Math.hypot(swimUpPos.x - autoSwimUpProgressPos.x,
+        boolean walkingProgress = !onSwimUpColumn && !swimUpOpenWater && Math.hypot(swimUpPos.x - autoSwimUpProgressPos.x,
             swimUpPos.z - autoSwimUpProgressPos.z) >= 0.5;
         if (swimUpY >= autoSwimUpLastY + 0.5 || walkingProgress || (onSwimUpColumn && !autoSwimUpOnColumn)) {
             autoSwimUpLastY = Math.max(autoSwimUpLastY, swimUpY);
@@ -11559,6 +11575,31 @@ public class SpawnerDetector extends Module {
             cursor.set(x, y, z);
             BlockState state = mc.world.getBlockState(cursor);
             if (!isOpenState(state, cursor) || !state.getFluidState().isEmpty()) return false;
+        }
+        return true;
+    }
+
+    private int shaftMouthY(int x, int z, int bottomY, int exitY) {
+        int highestFloorY = Integer.MIN_VALUE;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            int nx = x + dir.getOffsetX();
+            int nz = z + dir.getOffsetZ();
+            for (int y = exitY - 1; y >= bottomY; y--) {
+                cursor.set(nx, y, nz);
+                BlockState state = mc.world.getBlockState(cursor);
+                if (state.getFluidState().isIn(FluidTags.WATER) || isOpenState(state, cursor)) continue;
+                if (state.getFluidState().isEmpty()) highestFloorY = Math.max(highestFloorY, y);
+                break;
+            }
+        }
+        return highestFloorY != Integer.MIN_VALUE ? highestFloorY + 1 : bottomY;
+    }
+
+    private boolean waterAllAround(BlockPos feet) {
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (!mc.world.getFluidState(feet.offset(dir)).isIn(FluidTags.WATER)) return false;
+            if (!mc.world.getFluidState(feet.up().offset(dir)).isIn(FluidTags.WATER)) return false;
         }
         return true;
     }
