@@ -7936,6 +7936,27 @@ public class SpawnerDetector extends Module {
             }
         }
 
+        BlockPos approachFeet = mc.player.getBlockPos();
+        double aimDxz = Math.hypot((aimAt.getX() + 0.5) - mc.player.getX(), (aimAt.getZ() + 0.5) - mc.player.getZ());
+        BlockPos approachCeiling = approachFeet.up(2);
+        if (!mc.player.isTouchingWater() && aimAt.getY() > approachFeet.getY() && aimDxz <= 0.7
+            && isOpenState(mc.world.getBlockState(approachCeiling), approachCeiling) && mc.world.getFluidState(approachCeiling).isEmpty()) {
+            Utils.setPressed(mc.options.forwardKey, false);
+            Utils.setPressed(mc.options.sprintKey, false);
+            Utils.setPressed(mc.options.sneakKey, false);
+            Utils.setPressed(mc.options.jumpKey, true);
+            mc.player.setPitch(90.0f);
+            if (!mc.player.isOnGround() && mc.player.getVelocity().y <= 0.05) {
+                BlockPos placePos = approachFeet.down();
+                BlockState placeState = mc.world.getBlockState(placePos);
+                if (isOpenState(placeState, placePos) && placeState.getFluidState().isEmpty()
+                    && selfAscendCanPlaceStep(placePos) && ensureObsidianInHotbar() >= 0) {
+                    tickSelfAscendPlaceStep(placePos);
+                }
+            }
+            return;
+        }
+
         Vec3d cellCenter = Vec3d.ofCenter(aimAt);
         double dx = cellCenter.x - mc.player.getX();
         double dz = cellCenter.z - mc.player.getZ();
@@ -8841,8 +8862,8 @@ public class SpawnerDetector extends Module {
             bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
             return;
         }
-        boolean nearRoomBox = feetY >= autoSite.room.cy() - (mc.player.isTouchingWater() ? 4 : 1) && feetY <= autoSite.room.cy() + 3
-            && horizontalDistanceToRoomBox(autoSite.room, mc.player.getX(), mc.player.getZ()) <= 4.0;
+        boolean nearRoomBox = feetY >= autoSite.room.cy() - 4 && feetY <= autoSite.room.cy() + 3
+            && horizontalDistanceToRoomBox(autoSite.room, mc.player.getX(), mc.player.getZ()) <= 8.0;
         if (!nearRoomBox && baritoneFailed && autoBaritoneRetries >= 3
             && elapsed - autoTunnelBestElapsed >= 10 * 20) {
             BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
