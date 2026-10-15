@@ -3612,6 +3612,9 @@ public class SpawnerDetector extends Module {
             RimResult rr = computeRim(x, z, startY);
             rim = rr.rim();
             holeTopY = rr.holeTopY();
+        } else {
+            int dryTopY = computeRim(x, z, startY).holeTopY();
+            if (dryTopY - exitY >= 5 && dryOpenColumn(x, z, exitY, dryTopY)) holeTopY = dryTopY;
         }
 
         return new ColumnEval(new ColumnPlan(x, z, startY, exitY, water, blocksToBreak, waterCells, maxGap, skyBlocked, holeTopY, rim, false, null), null);
@@ -4104,6 +4107,9 @@ public class SpawnerDetector extends Module {
             RimResult rr = computeRim(x, z, cushion ? topY + 1 : sc.bottomFeet());
             rim = rr.rim();
             if (rim != null) holeTopY = rr.holeTopY();
+        } else {
+            int dryTopY = computeRim(x, z, sc.bottomFeet()).holeTopY();
+            if (dryTopY - exitY >= 5 && dryOpenColumn(x, z, exitY, dryTopY)) holeTopY = dryTopY;
         }
 
         if (rim == null && !water && holeTopY <= sc.bottomFeet() + 3) return new SideHoleAttempt(null, "open hole without rim");
@@ -11412,7 +11418,7 @@ public class SpawnerDetector extends Module {
         }
 
         if (!mc.player.isTouchingWater() && !mc.player.isSubmergedInWater() && mc.player.getY() < swimUpExitY - 3
-            && swimUpColumnDist > 1.5) {
+            && swimUpColumnDist > 1.5 && stateTicks - autoSwimUpProgressTick >= 40) {
             autoSwimUpOutOfWaterTicks++;
         } else {
             autoSwimUpOutOfWaterTicks = 0;
