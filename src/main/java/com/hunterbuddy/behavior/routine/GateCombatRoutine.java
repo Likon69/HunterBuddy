@@ -54,9 +54,9 @@ public final class GateCombatRoutine extends CoreRoutine {
         HookEntry entry = entry(new Condition("combat target or recent attack", sensors -> !flee.active() && !flee.suspended()
             && (sensors.combatTarget() || context.ticks().series().attackedWithin(100))), wait, false);
         entry.guard().onFailureCooldown(200);
-        Condition attackerPresent = new Condition("known attacker still present", sensors -> world.available()
+        Condition attackerPresent = new Condition("recent attacker still present", sensors -> world.available()
             && sensors.lastAttackerId() >= 0 && world.client().world.getEntityById(sensors.lastAttackerId()) != null
-            && (sensors.combatTarget() || context.ticks().series().attackedWithin(100)));
+            && context.ticks().series().attackedWithin(100));
         Guard escape = new Guard(new Condition("combat cooldown with known attacker", sensors ->
             !entry.guard().cooledDown(context.ticks().tick()) && attackerPresent.test(sensors)), flee)
             .stayWhile(attackerPresent).onFailureCooldown(200);

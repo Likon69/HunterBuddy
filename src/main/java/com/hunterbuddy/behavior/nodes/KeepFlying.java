@@ -79,7 +79,6 @@ public final class KeepFlying extends Composite {
         }
         if ((stage == Stage.FLAT || stage == Stage.PROBE) && ctx.bb().get(ctx.owner(), TARGET).isEmpty()
             && ctx.tick() - searchedAt >= 100) {
-            children().get(2).halt(ctx, ExitReason.PREEMPTED);
             children().getFirst().halt(ctx, ExitReason.ABORTED);
             children().getFirst().resetMemory();
             searchedAt = ctx.tick();
@@ -91,7 +90,6 @@ public final class KeepFlying extends Composite {
                 NodeResult flight = children().get(2).execute(ctx);
                 return flight instanceof Failure ? flight : result;
             }
-            children().get(2).halt(ctx, ExitReason.PREEMPTED);
             BlockPos target = preferred == null ? outputs.lastGoal() : preferred.get();
             if (!FlightTerrain.landing(target, world)) {
                 target = result instanceof Failure ? null : ctx.bb().get(ctx.owner(), POINTS).orElseThrow().blocks().stream()
@@ -102,6 +100,7 @@ public final class KeepFlying extends Composite {
             if (target != null) ctx.bb().set(ctx.owner(), TARGET, target);
             else ctx.bb().remove(ctx.owner(), TARGET);
             stage = preferred == null && target != null && bridge.elytraAvailable() ? Stage.NATIVE : Stage.FLAT;
+            if (stage == Stage.NATIVE) children().get(2).halt(ctx, ExitReason.PREEMPTED);
         }
         return children().get(stage == Stage.NATIVE ? 1 : 2).execute(ctx);
     }

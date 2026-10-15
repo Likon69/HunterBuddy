@@ -18,6 +18,7 @@ public final class GateWait extends Node {
     private final boolean stopOnTimeout;
     private long started;
     private long frozen;
+    private long stopped;
     private boolean retained;
 
     public GateWait(String name, Predicate<TickContext> busy, long limitMs) {
@@ -34,7 +35,7 @@ public final class GateWait extends Node {
 
     @Override
     protected void onStart(TickContext ctx) {
-        if (!retained) {
+        if (!retained || ctx.nowMs() - stopped > limitMs) {
             started = ctx.nowMs();
             frozen = ctx.clock().frozenMs();
         }
@@ -56,6 +57,7 @@ public final class GateWait extends Node {
     @Override
     protected void onStop(TickContext ctx, ExitReason reason) {
         retained = !stopOnTimeout && (reason == ExitReason.PREEMPTED || reason == ExitReason.PAUSED);
+        stopped = ctx.nowMs();
     }
 
     @Override

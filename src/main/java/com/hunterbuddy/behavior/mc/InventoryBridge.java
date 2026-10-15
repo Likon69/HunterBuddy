@@ -56,6 +56,7 @@ public final class InventoryBridge {
     private Ticket ticket;
     private Emission emission = Emission.NONE;
     private String quarantine;
+    private ScreenHandler disowned;
     private long suspendedAt = -1;
     private final Deque<CursorReceipt> cursors = new ArrayDeque<>();
     private Lease quietLease;
@@ -296,6 +297,11 @@ public final class InventoryBridge {
             ticket = null;
             forgetScreen();
         }
+        if (disowned != null && (!world.available() || world.client().player.currentScreenHandler != disowned)) disowned = null;
+        if (disowned != null && quarantine == null && disowned.getCursorStack().isEmpty()) {
+            world.client().player.closeHandledScreen();
+            disowned = null;
+        }
     }
 
     public void worldLost() {
@@ -303,6 +309,7 @@ public final class InventoryBridge {
         quietAt = -1;
         java.util.Arrays.fill(playerReceipts, null);
         if (ticket != null && !ticket.finished()) quarantine("session ended during an inventory transaction");
+        disowned = null;
         forgetScreen();
         synchronized (cursors) { cursors.clear(); }
     }
@@ -405,7 +412,10 @@ public final class InventoryBridge {
         if (event.packet instanceof ClickSlotC2SPacket click && emission != Emission.OWN) {
             if (ticket != null && click.syncId() == ticket.transaction.syncId() && !ticket.finished()
                 && (!ticket.serverConfirmed || ticket.transaction.action() == SlotActionType.PICKUP)) quarantine("another actor clicked the inventory");
-            if (handler != null && click.syncId() == handler.syncId) forgetScreen();
+            if (handler != null && click.syncId() == handler.syncId) {
+                if (world.available() && handler != world.client().player.playerScreenHandler) disowned = handler;
+                forgetScreen();
+            }
         }
     }
 

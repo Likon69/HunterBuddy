@@ -39,6 +39,11 @@ public final class FindTakeoffPoints extends Action {
     }
 
     @Override
+    protected String target(TickContext ctx) {
+        return ctx.bb().get(ctx.owner(), originKey).map(Object::toString).orElse("missing-origin");
+    }
+
+    @Override
     protected void onActionStart(TickContext ctx) {
         origin = ctx.bb().get(ctx.owner(), originKey).orElse(null);
         radius = 16; index = 0; head = 0; candidate = null; points.clear();
