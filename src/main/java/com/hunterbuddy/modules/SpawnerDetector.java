@@ -8380,34 +8380,6 @@ public class SpawnerDetector extends Module {
         return Math.hypot(dx, dz) <= 1.5;
     }
 
-    private int ensureThrowawayInHotbar() {
-        for (Item item : AUTO_THROWAWAY) {
-            FindItemResult hotbar = InvUtils.findInHotbar(item);
-            if (hotbar.found() && !hotbar.isOffhand()) return hotbar.slot();
-        }
-        for (Item item : AUTO_THROWAWAY) {
-            FindItemResult inv = InvUtils.find(item);
-            if (!inv.found()) continue;
-            int target = -1;
-            for (int i = 0; i < 9; i++) {
-                if (mc.player.getInventory().getStack(i).isEmpty()) { target = i; break; }
-            }
-            if (target < 0) {
-                for (int i = 0; i < 9; i++) {
-                    ItemStack s = mc.player.getInventory().getStack(i);
-                    if (!s.isIn(ItemTags.PICKAXES) && s.getItem() != Items.FIREWORK_ROCKET && s.getItem() != Items.OBSIDIAN) {
-                        target = i;
-                        break;
-                    }
-                }
-            }
-            if (target < 0) continue;
-            InvUtils.move().from(inv.slot()).to(target);
-            return target;
-        }
-        return -1;
-    }
-
     private boolean tickRoomContainerPillar(BlockPos target) {
         boolean inProgress = target.equals(autoRoomPillarTarget);
         if (!inProgress) {
@@ -8430,7 +8402,6 @@ public class SpawnerDetector extends Module {
             }
 
             int slot = ensureObsidianInHotbar();
-            if (slot < 0) slot = ensureThrowawayInHotbar();
             if (slot < 0) {
                 if (isShipwreck()) autoShipwreckChestOutcome = "no pillar block";
                 autoLog("ROOM", target, "container out of reach, no block to pillar");
@@ -9309,7 +9280,6 @@ public class SpawnerDetector extends Module {
             }
 
             int slot = ensureObsidianInHotbar();
-            if (slot < 0) slot = ensureThrowawayInHotbar();
             if (slot < 0) {
                 abandonRoomClimbPillar("no obsidian");
                 return;
@@ -9752,7 +9722,7 @@ public class SpawnerDetector extends Module {
                 if (!mc.player.isOnGround() && mc.player.getVelocity().y <= 0.05) {
                     BlockPos placePos = mc.player.getBlockPos().down();
                     BlockState placeState = mc.world.getBlockState(placePos);
-                    if (isOpenState(placeState, placePos) && placeState.getFluidState().isEmpty() && ensureThrowawayInHotbar() >= 0) {
+                    if (isOpenState(placeState, placePos) && placeState.getFluidState().isEmpty() && ensureObsidianInHotbar() >= 0) {
                         tickSelfAscendPlaceStep(placePos);
                     }
                 }
@@ -10401,8 +10371,7 @@ public class SpawnerDetector extends Module {
     }
 
     private int ensureShaftRecoveryBlockInHotbar() {
-        int slot = ensureThrowawayInHotbar();
-        if (slot < 0) slot = ensureObsidianInHotbar();
+        int slot = ensureObsidianInHotbar();
         return slot;
     }
 
@@ -12547,7 +12516,7 @@ public class SpawnerDetector extends Module {
             BlockState placeState = mc.world.getBlockState(placePos);
             if (isOpenState(placeState, placePos)
                 && (placeState.getFluidState().isEmpty() || placeState.getFluidState().isIn(FluidTags.WATER))) {
-                if (ensureThrowawayInHotbar() < 0) {
+                if (ensureObsidianInHotbar() < 0) {
                     releaseAllAutoKeys();
                     if (!autoColumn.water() && autoAscendRadius >= 96) {
                         resetSelfAscendState(true);
@@ -12615,7 +12584,7 @@ public class SpawnerDetector extends Module {
             failSelfAscendDirection("place failed");
             return true;
         }
-        int slot = ensureThrowawayInHotbar();
+        int slot = ensureObsidianInHotbar();
         if (slot < 0) {
             failSelfAscendDirection("no throwaway");
             return true;
