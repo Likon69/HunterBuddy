@@ -10200,7 +10200,7 @@ public class SpawnerDetector extends Module {
             }
             boolean eligible = autoShaftFly.get()
                 && autoExitShaft != null
-                && !autoExitShaft.water()
+                && (!autoExitShaft.water() || shaftWaterOnlyAtTop(autoExitShaft))
                 && (!autoExitShaft.skyBlocked() || shaftExitHasPivotEscape(autoExitShaft))
                 && countRockets() >= 4;
             if (!eligible) {
@@ -10629,12 +10629,21 @@ public class SpawnerDetector extends Module {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         int scanFromY = mc.player.getBlockPos().getY() + 1;
         if (Math.hypot((shaft.x() + 0.5) - mc.player.getX(), (shaft.z() + 0.5) - mc.player.getZ()) > 1.0) scanFromY = Math.max(scanFromY, shaft.bottomY());
+        boolean topWaterOnly = shaftWaterOnlyAtTop(shaft);
         for (int y = scanFromY; y <= shaft.exitY(); y++) {
             cursor.set(shaft.x(), y, shaft.z());
             BlockState state = mc.world.getBlockState(cursor);
-            if (!isOpenState(state, cursor) || state.getFluidState().isIn(FluidTags.WATER)) return y;
+            if (!isOpenState(state, cursor) || (!topWaterOnly && state.getFluidState().isIn(FluidTags.WATER))) return y;
         }
         return -1;
+    }
+
+    private boolean shaftWaterOnlyAtTop(ExitShaft shaft) {
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int y = shaft.bottomY(); y <= shaft.bottomY() + 1; y++) {
+            if (!mc.world.getFluidState(cursor.set(shaft.x(), y, shaft.z())).isEmpty()) return false;
+        }
+        return dryOpenToWaterAbove(shaft.x(), shaft.z(), shaft.bottomY(), shaft.exitY());
     }
 
     private void tickShaftAlign() {
@@ -11049,6 +11058,14 @@ public class SpawnerDetector extends Module {
                 return;
             }
 
+            if (!onGround && !gliding && mc.player.isTouchingWater() && y > autoExitShaft.bottomY() + 2) {
+                if (takeoff.isActive()) takeoff.cancel();
+                releaseAllAutoKeys();
+                autoLog("SHAFT_FLY", autoSite.center, String.format("lost flight in the water above y=%.1f, swimming up", y));
+                enterState(AutoState.SWIM_UP, "lost flight in top water");
+                return;
+            }
+
             if (onGround || (!gliding && mc.player.isTouchingWater())) {
                 if (takeoff.isActive()) takeoff.cancel();
                 releaseAllAutoKeys();
@@ -11368,6 +11385,18 @@ public class SpawnerDetector extends Module {
             && mc.world.getFluidState(mc.player.getBlockPos().up()).isEmpty()
             && swimUpY < swimUpExitY - 1
             && dryOpenToWaterAbove(swimUpX, swimUpZ, mc.player.getBlockPos().getY() + 1, swimUpExitY);
+        if (dryBelowWater && (autoAreaLoaderWasOn || autoSoloMode) && autoShaftFly.get() && autoExitShaft != null
+            && shaftWaterOnlyAtTop(autoExitShaft) && countRockets() >= 4 && !isShipwreck()
+            && !waterTakeoffColumnFailed(swimUpX, swimUpZ)
+            && (!autoExitShaft.skyBlocked() || shaftExitHasPivotEscape(autoExitShaft))) {
+            releaseAllAutoKeys();
+            autoShaftFlyAttempts = 0;
+            autoShaftFlyRerouteAttempts = 0;
+            resetShaftDryRecovery();
+            autoLog("SWIM_UP", autoSite.center, "dry column below water, shaft-fly through the water");
+            enterState(AutoState.SHAFT_ALIGN, "dry column below water, shaft-fly");
+            return;
+        }
         boolean waitForFallingWater = dryBelowWater && !InvUtils.find(Items.OBSIDIAN).found();
         if (waitForFallingWater && stateTicks % 40 == 0) {
             autoLog("SWIM_UP", autoSite.center, "dry column below water, no throwaway, waiting on the column for the water");
