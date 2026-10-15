@@ -23,7 +23,6 @@ import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
 import baritone.api.pathing.goals.GoalNear;
-import baritone.api.pathing.goals.GoalXZ;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
@@ -10687,6 +10686,7 @@ public class SpawnerDetector extends Module {
         }
 
         double alignDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
+        BlockPos shaftBottom = new BlockPos(autoExitShaft.x(), autoExitShaft.bottomY(), autoExitShaft.z());
         IBaritone alignBt = primaryBaritone();
 
         if (!autoShaftReturning && autoShaftReturnRelaunches < 3 && alignBt != null
@@ -10694,7 +10694,7 @@ public class SpawnerDetector extends Module {
             autoShaftReturning = true;
             autoShaftReturnStartTick = stateTicks;
             releaseAllAutoKeys();
-            alignBt.getCustomGoalProcess().setGoalAndPath(new GoalXZ(autoExitShaft.x(), autoExitShaft.z()));
+            alignBt.getCustomGoalProcess().setGoalAndPath(new GoalNear(shaftBottom, 1));
             autoLog("SHAFT_ALIGN", autoSite.center, String.format("back to shaft with baritone dist=%.1f", alignDist));
         }
 
@@ -10717,7 +10717,7 @@ public class SpawnerDetector extends Module {
                     if (gaveUp) {
                         autoShaftReturnRelaunches++;
                         releaseAllAutoKeys();
-                        alignBt.getCustomGoalProcess().setGoalAndPath(new GoalXZ(autoExitShaft.x(), autoExitShaft.z()));
+                        alignBt.getCustomGoalProcess().setGoalAndPath(new GoalNear(shaftBottom, 1));
                         autoLog("SHAFT_ALIGN", autoSite.center, "back to shaft relaunch " + autoShaftReturnRelaunches);
                     }
                     autoPausedTicks++;
