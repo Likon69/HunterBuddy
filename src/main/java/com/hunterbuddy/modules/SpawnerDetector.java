@@ -10778,7 +10778,12 @@ public class SpawnerDetector extends Module {
                 enterState(AutoState.SWIM_UP, "shaft blocked by water");
             } else {
                 ExitShaft lowered = new ExitShaft(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), blockedY - 3, autoExitShaft.water(), true, autoExitShaft.entry());
-                if (blockedY - 4 > autoExitShaft.bottomY() && shaftExitHasPivotEscape(lowered)) {
+                boolean pivot = blockedY - 4 > autoExitShaft.bottomY() && shaftExitHasPivotEscape(lowered);
+                if (!pivot && blockedY - 3 > autoExitShaft.bottomY()) {
+                    lowered = new ExitShaft(autoExitShaft.x(), autoExitShaft.z(), autoExitShaft.bottomY(), blockedY - 2, autoExitShaft.water(), true, autoExitShaft.entry());
+                    pivot = shaftExitHasPivotEscape(lowered);
+                }
+                if (pivot) {
                     autoExitShaft = lowered;
                     autoShaftAlignCenteredTicks = 0;
                     autoLog("SHAFT_ALIGN", autoSite.center, String.format("shaft blocked at y=%d, side escape below it, shaft fly with pivot (exitY=%d)", blockedY, lowered.exitY()));
@@ -11102,7 +11107,7 @@ public class SpawnerDetector extends Module {
                 if (gliding && y >= autoExitShaft.exitY()) {
                     BlockPos.Mutable aboveCursor = new BlockPos.Mutable();
                     boolean columnBlocked = false;
-                    for (int dy = 2; dy <= 4; dy++) {
+                    for (int dy = 1; dy <= 4; dy++) {
                         aboveCursor.set(px, feetY + dy, pz);
                         if (!isOpenState(mc.world.getBlockState(aboveCursor), aboveCursor)) { columnBlocked = true; break; }
                     }
