@@ -164,8 +164,7 @@ public final class FarmerMissionContext {
     }
 
     public boolean players() {
-        return visiblePlayers().stream().anyMatch(player -> Math.hypot(player.getX() - world.client().player.getX(),
-            player.getZ() - world.client().player.getZ()) <= 96);
+        return visiblePlayers().stream().anyMatch(player -> player.squaredDistanceTo(world.client().player) <= 96 * 96);
     }
 
     private List<? extends PlayerEntity> visiblePlayers() {

@@ -1,12 +1,16 @@
 package com.hunterbuddy.behavior.persist;
 
 import com.google.gson.Gson;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.hunterbuddy.behavior.bot.BotStats;
 import com.hunterbuddy.behavior.core.Key;
 import com.hunterbuddy.behavior.core.Scope;
 import com.hunterbuddy.behavior.core.TargetPoint;
 import com.hunterbuddy.behavior.core.UtilityFailure;
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -84,7 +88,7 @@ public final class PersistentStore {
                 return Map.of();
             }
             if (Files.size(path) > sizeLimit(path)) throw new IOException("store exceeds size limit");
-            StoreEntry entry = gson.fromJson(Files.readString(path, StandardCharsets.UTF_8), StoreEntry.class);
+            StoreEntry entry = decode(Files.readString(path, StandardCharsets.UTF_8), StoreEntry.class);
             if (entry == null || entry.values() == null) throw new IOException("invalid store structure");
             if (entry.schema() != StoreEntry.SCHEMA) throw new IOException("unsupported store schema " + entry.schema());
             if (entry.values().size() > 4_096) throw new IOException("too many durable entries");
@@ -93,7 +97,7 @@ public final class PersistentStore {
                 Class<?> type = TYPES.get(value.getValue().type());
                 Scope scope = Scope.valueOf(value.getValue().scope());
                 if (type == null || scope == Scope.TASK) continue;
-                Object decoded = gson.fromJson(value.getValue().json(), type);
+                Object decoded = decode(value.getValue().json(), type);
                 String prefix = scope.name() + "/";
                 if (decoded != null && value.getKey().startsWith(prefix)) values.put(new Key<>(value.getKey().substring(prefix.length()), type, scope, true), decoded);
             }
@@ -102,6 +106,15 @@ public final class PersistentStore {
         } catch (IOException | RuntimeException ex) {
             unreadable.add(path);
             throw new IOException("Cannot read " + path.getFileName() + ": " + Objects.toString(ex.getMessage(), ex.getClass().getSimpleName()), ex);
+        }
+    }
+
+    private <T> T decode(String json, Class<T> type) throws IOException {
+        try (JsonReader reader = new JsonReader(new StringReader(json))) {
+            reader.setStrictness(Strictness.STRICT);
+            T value = gson.getAdapter(type).read(reader);
+            if (reader.peek() != JsonToken.END_DOCUMENT) throw new IOException("trailing store data");
+            return value;
         }
     }
 

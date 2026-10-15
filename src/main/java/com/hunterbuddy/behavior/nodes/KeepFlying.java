@@ -77,9 +77,12 @@ public final class KeepFlying extends Composite {
             NodeResult result = children().get(3).execute(ctx);
             return result instanceof Success ? new Running("landing glide redeployed") : result;
         }
-        if (stage == Stage.FLAT && ctx.bb().get(ctx.owner(), TARGET).isEmpty() && ctx.tick() - searchedAt >= 100) {
+        if ((stage == Stage.FLAT || stage == Stage.PROBE) && ctx.bb().get(ctx.owner(), TARGET).isEmpty()
+            && ctx.tick() - searchedAt >= 100) {
             children().get(2).halt(ctx, ExitReason.PREEMPTED);
+            children().getFirst().halt(ctx, ExitReason.ABORTED);
             children().getFirst().resetMemory();
+            searchedAt = ctx.tick();
             stage = Stage.PROBE;
         }
         if (stage == Stage.PROBE) {
@@ -96,7 +99,6 @@ public final class KeepFlying extends Composite {
                     .min(Comparator.comparingDouble(pos -> Math.hypot(pos.getX() - ctx.sensors().x(), pos.getZ() - ctx.sensors().z()))).orElse(null);
             }
             chosen.accept(target);
-            searchedAt = ctx.tick();
             if (target != null) ctx.bb().set(ctx.owner(), TARGET, target);
             else ctx.bb().remove(ctx.owner(), TARGET);
             stage = preferred == null && target != null && bridge.elytraAvailable() ? Stage.NATIVE : Stage.FLAT;
