@@ -11097,6 +11097,14 @@ public class SpawnerDetector extends Module {
                 return;
             }
 
+            double landedShaftDist = Math.hypot((autoExitShaft.x() + 0.5) - mc.player.getX(), (autoExitShaft.z() + 0.5) - mc.player.getZ());
+            if (onGround && landedShaftDist > 0.7 && y > autoExitShaft.bottomY() + 4) {
+                if (takeoff.isActive()) takeoff.cancel();
+                releaseAllAutoKeys();
+                enterState(AutoState.ASCEND, "landed out of the shaft");
+                return;
+            }
+
             if (onGround || (!gliding && mc.player.isTouchingWater())) {
                 if (takeoff.isActive()) takeoff.cancel();
                 releaseAllAutoKeys();
