@@ -11147,19 +11147,24 @@ public class SpawnerDetector extends Module {
 
             if (!autoShaftFlyPivot) {
                 boolean blockedAboveColumn = false;
+                int escapeFeetY = feetY;
                 if (gliding && y >= autoExitShaft.exitY()) {
                     BlockPos.Mutable aboveCursor = new BlockPos.Mutable();
                     boolean columnBlocked = false;
                     for (int dy = 1; dy <= 4; dy++) {
                         aboveCursor.set(px, feetY + dy, pz);
-                        if (!isOpenState(mc.world.getBlockState(aboveCursor), aboveCursor)) { columnBlocked = true; break; }
+                        if (!isOpenState(mc.world.getBlockState(aboveCursor), aboveCursor)) {
+                            columnBlocked = true;
+                            escapeFeetY = Math.min(feetY, feetY + dy - 2);
+                            break;
+                        }
                     }
                     blockedAboveColumn = columnBlocked || autoShaftFlySlowClimb;
                 }
 
                 if (blockedAboveColumn) {
                     if (!autoShaftFlyPivotNoEscapeLogged) {
-                        BlockPos escape = findShaftPivotEscape(px, feetY, pz);
+                        BlockPos escape = findShaftPivotEscape(px, escapeFeetY, pz);
                         if (escape != null) {
                             autoShaftFlyPivot = true;
                             autoShaftFlyPivotCollisionTicks = 0;
