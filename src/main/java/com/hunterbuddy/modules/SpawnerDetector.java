@@ -8837,8 +8837,9 @@ public class SpawnerDetector extends Module {
             int dx = autoTunnelGoal.getX() - autoTunnelStep.getX();
             int dz = autoTunnelGoal.getZ() - autoTunnelStep.getZ();
             int dy = Integer.signum(autoTunnelGoal.getY() - autoTunnelStep.getY());
-            autoTunnelStep = dx != 0
-                ? autoTunnelStep.add(Integer.signum(dx), dy, 0)
+            BlockPos xFirst = autoTunnelStep.add(Integer.signum(dx), dy, 0);
+            autoTunnelStep = dx != 0 && !(dz != 0 && isTunnelProtected(xFirst))
+                ? xFirst
                 : autoTunnelStep.add(0, dy, Integer.signum(dz));
             autoTunnelBestElapsed = elapsed;
         }
