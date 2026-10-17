@@ -6641,7 +6641,9 @@ public class SpawnerDetector extends Module {
         double dx = (autoColumn.x() + 0.5) - mc.player.getX();
         double dz = (autoColumn.z() + 0.5) - mc.player.getZ();
         double horiz = Math.hypot(dx, dz);
-        boolean feetOk = mc.player.getBlockPos().getY() == autoColumn.startY();
+        boolean feetOk = mc.player.getBlockPos().getY() == autoColumn.startY()
+            || (!autoColumn.water() && autoColumn.rim() == null && mc.player.isOnGround()
+                && mc.player.getBlockPos().getY() > autoColumn.startY());
 
         IBaritone bt = primaryBaritone();
 
