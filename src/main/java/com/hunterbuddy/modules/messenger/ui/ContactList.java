@@ -84,10 +84,10 @@ public final class ContactList {
         if (!peers.containsAll(known)) pulse.clear();
         known.clear();
         known.addAll(peers);
+        ChatTheme theme = cfg.chatStyle.get();
         double u = p.lineHeight();
-        double pad = Math.round(u * 0.5);
-        double rowH = u + pad * 1.2;
-        double radius = cfg.cornerRadius.get();
+        double pad = theme.padding(u);
+        double rowH = u + pad * (theme == ChatTheme.Bubbles ? 1.8 : 1.2);
 
         scroll = Math.max(0, Math.min(scroll, Math.max(0, all.size() - MAX_ROWS)));
         int shown = Math.min(MAX_ROWS, all.size() - scroll);
@@ -143,7 +143,7 @@ public final class ContactList {
         Color dim = cfg.dimColor.get();
         Color accent = cfg.accentColor.get();
 
-        GlassPanel.draw(p, cfg, bounds, headerH, null);
+        theme.panel(p, cfg, bounds, headerH, null);
         p.text("Messages", lx + pad, top + (headerH - u) / 2.0, text);
 
         int total = messenger.unreadTotal();
@@ -168,8 +168,9 @@ public final class ContactList {
             boolean hoverRemove = remove.contains(mx, my);
             Color peerColor = PeerColor.of(conversation.peer());
             boolean colored = cfg.peerColors.get();
-            if (row.contains(mx, my) && !hoverRemove) {
-                p.round(row.x(), row.y(), row.w(), row.h(), radius * 0.6, p.with(accent, 45));
+            boolean hover = row.contains(mx, my) && !hoverRemove;
+            theme.contact(p, cfg, row, hover, conversation.unread() > 0);
+            if (hover) {
                 if (colored && cfg.bandWidth.get() > 0) p.round(row.x(), row.y(), cfg.bandWidth.get(), row.h(), 1.5, peerColor);
             }
 
@@ -202,7 +203,7 @@ public final class ContactList {
             Color fill = armed ? p.with(cfg.dangerColor.get(), 255)
                 : hover ? p.with(accent, 150)
                 : p.with(cfg.incomingColor.get(), 160);
-            p.round(clearAll.x(), clearAll.y(), bw, bh, bh / 2.0, fill);
+            p.round(clearAll.x(), clearAll.y(), bw, bh, theme.buttonRadius(bh), fill);
             p.text(label, clearAll.x() + pad, clearAll.y() + (bh - u) / 2.0, hover || armed ? text : dim);
         }
     }

@@ -43,8 +43,6 @@ public final class ConversationWindow {
     private static final long CONFIRM_MS = 3000L;
     private static final long COPIED_MS = 1200L;
     private static final long AUTO_SCROLL_MS = 120L;
-    private static final Color WHITE_FAINT = new Color(255, 255, 255, 14);
-    private static final Color WHITE_CLEAR = new Color(255, 255, 255, 0);
 
     private final String peer;
     private final TextSelection selection = new TextSelection();
@@ -189,10 +187,10 @@ public final class ConversationWindow {
 
     public void render(Painter p, Messenger messenger, double mx, double my, boolean focused, int sw, int sh) {
         MessengerSettings cfg = messenger.cfg();
+        ChatTheme theme = cfg.chatStyle.get();
         double u = p.lineHeight();
-        double pad = Math.round(u * 0.5);
-        double rowH = u + cfg.lineSpacing.get();
-        double radius = cfg.cornerRadius.get();
+        double pad = theme.padding(u);
+        double rowH = theme.rowHeight(u, cfg.lineSpacing.get());
         double w = Math.min(cfg.windowWidth.get(), sw - 8.0);
         double headerH = u + pad * 2.0;
         double areaH = cfg.windowLines.get() * rowH + pad;
@@ -222,7 +220,7 @@ public final class ConversationWindow {
         Color dim = cfg.dimColor.get();
         Color accent = cfg.accentColor.get();
 
-        GlassPanel.draw(p, cfg, bounds, headerH, PeerColor.of(peer));
+        theme.panel(p, cfg, bounds, headerH, PeerColor.of(peer));
 
         double buttonH = u + pad * 0.7;
         double buttonY = top + (headerH - buttonH) / 2.0;
@@ -240,7 +238,7 @@ public final class ConversationWindow {
             Color fill = isArmed ? p.with(cfg.dangerColor.get(), 255)
                 : hover ? (i == 0 ? p.with(cfg.dangerColor.get(), 210) : p.with(accent, 150))
                 : p.with(cfg.incomingColor.get(), 160);
-            p.round(bx, buttonY, bw, buttonH, buttonH / 2.0, fill);
+            p.round(bx, buttonY, bw, buttonH, theme.buttonRadius(buttonH), fill);
             p.text(label, bx + (bw - p.width(label)) / 2.0, buttonY + (buttonH - u) / 2.0, hover || isArmed ? text : dim);
             edge = bx - pad * 0.5;
         }
@@ -256,7 +254,7 @@ public final class ConversationWindow {
         double padX = pad * 0.8;
 
         layout.update(p, conversation, areaRight - areaLeft, padX, cfg.textScale.get(),
-            cfg.timestamps.get(), cfg.streamMode.get(), p.hasShadow());
+            cfg.timestamps.get(), cfg.streamMode.get(), p.hasShadow(), theme.messageFraction());
         List<MessageLayout.Row> rows = layout.rows();
         int capacity = cfg.windowLines.get();
         area = new Rect(areaLeft, areaTop, areaRight - areaLeft, areaBottom - areaTop);
@@ -267,7 +265,7 @@ public final class ConversationWindow {
         }
         scrollRows = Math.max(0, Math.min(scrollRows, Math.max(0, rows.size() - capacity)));
 
-        drawRows(p, cfg, rows, areaTop, areaBottom, areaLeft, areaRight, padX, rowH, u, radius);
+        drawRows(p, cfg, rows, areaTop, areaBottom, areaLeft, areaRight, padX, rowH, u, theme);
         List<RowHit> done = hits;
         hits = nextHits;
         nextHits = done;
@@ -279,9 +277,7 @@ public final class ConversationWindow {
         double boxW = w - pad * 2.0;
         inputBox = new Rect(boxX, boxY, boxW, inputH);
 
-        Color border = focused ? p.with(accent, 255) : p.with(dim, 80);
-        Color boxFill = cfg.glass.get() == MessengerSettings.Glass.Tint ? p.with(cfg.headerColor.get(), 120) : cfg.headerColor.get();
-        p.bordered(boxX, boxY, boxW, inputH, radius * 0.6, boxFill, border);
+        theme.input(p, cfg, inputBox, focused);
 
         inputTextX = boxX + pad * 0.7;
         double inner = boxW - pad * 1.4;
@@ -301,34 +297,28 @@ public final class ConversationWindow {
 
     private void drawRows(Painter p, MessengerSettings cfg, List<MessageLayout.Row> rows, double areaTop,
                           double areaBottom, double left, double right, double padX, double rowH, double u,
-                          double radius) {
+                          ChatTheme theme) {
         double yy = areaBottom;
-        boolean glossy = cfg.glass.get() == MessengerSettings.Glass.Tint && cfg.sheen.get();
-        double bubbleRadius = radius * 0.8;
         nextHits.clear();
 
         for (int i = rows.size() - 1 - scrollRows; i >= 0; i--) {
             MessageLayout.Row row = rows.get(i);
-            double rh = row.kind() == MessageLayout.Kind.GAP ? rowH * 0.35 : rowH;
+            double rh = row.kind() == MessageLayout.Kind.GAP ? rowH * theme.gap() : rowH;
             if (yy - rh < areaTop - 0.01) break;
             yy -= rh;
             if (row.kind() == MessageLayout.Kind.GAP) continue;
 
-            double bx = row.incoming() ? left : right - row.bubbleWidth();
-            Color fill = row.incoming() ? cfg.incomingColor.get() : cfg.outgoingColor.get();
-            p.round(bx, yy, row.bubbleWidth(), rh, bubbleRadius, fill, row.first(), row.last());
-
-            if (glossy && row.first() && row.kind() == MessageLayout.Kind.TEXT) {
-                double inset = Math.min(bubbleRadius, row.bubbleWidth() / 2.0);
-                p.gradient(bx + inset, yy + 1.0, row.bubbleWidth() - inset * 2.0, rh * 0.5, WHITE_FAINT, WHITE_CLEAR);
-            }
+            double bw = theme.alignedBubbles() ? row.bubbleWidth() : right - left;
+            double bx = theme.alignedBubbles() && !row.incoming() ? right - bw : left;
+            Rect box = new Rect(bx, yy, bw, rh);
+            theme.message(p, cfg, row, box);
 
             double textX = bx + padX;
             double ty = yy + (rh - u) / 2.0;
-            nextHits.add(new RowHit(row, new Rect(bx, yy, row.bubbleWidth(), rh), textX));
+            nextHits.add(new RowHit(row, box, textX));
 
             if (row.kind() == MessageLayout.Kind.TIME) {
-                p.text(row.text(), bx + row.bubbleWidth() - padX - p.width(row.text()), ty, cfg.dimColor.get());
+                p.text(row.text(), bx + bw - padX - p.width(row.text()), ty, cfg.dimColor.get());
                 continue;
             }
 

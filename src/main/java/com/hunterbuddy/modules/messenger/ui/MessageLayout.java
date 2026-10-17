@@ -27,6 +27,8 @@ final class MessageLayout {
     private int revision = -1;
     private double width;
     private double scale;
+    private double padding;
+    private double fraction;
     private boolean timestamps;
     private boolean stream;
     private boolean shadow;
@@ -36,10 +38,11 @@ final class MessageLayout {
     }
 
     void update(Painter painter, Conversation source, double areaWidth, double padX, double textScale,
-                   boolean showTimes, boolean streamMode, boolean withShadow) {
+                   boolean showTimes, boolean streamMode, boolean withShadow, double messageFraction) {
         int sourceRevision = source == null ? -1 : source.revision();
         if (source == conversation && sourceRevision == revision && areaWidth == width && textScale == scale
-            && showTimes == timestamps && streamMode == stream && withShadow == shadow) {
+            && showTimes == timestamps && streamMode == stream && withShadow == shadow
+            && padX == padding && messageFraction == fraction) {
             return;
         }
 
@@ -47,6 +50,8 @@ final class MessageLayout {
         revision = sourceRevision;
         width = areaWidth;
         scale = textScale;
+        padding = padX;
+        fraction = messageFraction;
         timestamps = showTimes;
         stream = streamMode;
         shadow = withShadow;
@@ -54,7 +59,7 @@ final class MessageLayout {
         rows.clear();
         if (source == null) return;
 
-        double maxText = areaWidth * 0.8 - padX * 2.0;
+        double maxText = Math.max(1.0, areaWidth * messageFraction - padX * 2.0);
         boolean firstMessage = true;
         int index = 0;
 

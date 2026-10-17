@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.messenger;
 
+import com.hunterbuddy.modules.messenger.ui.ChatTheme;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -83,6 +84,7 @@ public final class MessengerSettings {
     public final Setting<Boolean> animations;
     public final Setting<ListSide> listSide;
 
+    public final Setting<ChatTheme> chatStyle;
     public final Setting<Glass> glass;
     public final Setting<Boolean> sheen;
     public final Setting<Boolean> peerColors;
@@ -278,6 +280,10 @@ public final class MessengerSettings {
         dangerColor = sgColors.add(new ColorSetting.Builder()
             .name("danger-color").description("Remove, clear and ignore buttons on hover.")
             .defaultValue(new SettingColor(230, 80, 80, 255)).build());
+
+        chatStyle = sgStyle.add(new EnumSetting.Builder<ChatTheme>()
+            .name("chat-style").description("Classic glass, soft message bubbles, dark Slate panels or a dense Compact transcript.")
+            .defaultValue(ChatTheme.Bubbles).build());
 
         glass = sgStyle.add(new EnumSetting.Builder<Glass>()
             .name("glass").description("Off keeps flat panels. Tint makes panels translucent with a light reflection and edges.")
