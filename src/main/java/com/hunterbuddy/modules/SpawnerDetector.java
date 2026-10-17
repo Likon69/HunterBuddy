@@ -8380,7 +8380,12 @@ public class SpawnerDetector extends Module {
             approachBlock(pos);
         } else {
             releaseAllAutoKeys();
-            if (alignedTowards(center)) {
+            float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), center);
+            boolean facing = Math.abs(MathHelper.wrapDegrees(mc.player.getYaw() - rot[0])) <= 3.0f
+                && Math.abs(mc.player.getPitch() - rot[1]) <= 3.0f;
+            mc.player.setYaw(rot[0]);
+            mc.player.setPitch(rot[1]);
+            if (facing) {
                 if (autoRoomSubState == 0) {
                     mc.interactionManager.interactEntity(mc.player, cart, Hand.MAIN_HAND);
                     autoRoomOpenAttempts++;
