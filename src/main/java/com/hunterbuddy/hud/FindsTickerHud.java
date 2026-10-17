@@ -5,9 +5,8 @@ import com.hunterbuddy.util.HudGlowPanel;
 import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.HuntFeed;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
@@ -24,19 +23,12 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 
-/**
- * The last few finds as a live feed: coloured dot, what it was, how long ago.
- *
- * <p>The Discord notifier already tells the phone; this tells the pilot. Lines fade as they age,
- * so a glance separates "just now" from "ten minutes back" without reading a single number.
- */
 public class FindsTickerHud extends HudElement {
     public static final HudElementInfo<FindsTickerHud> INFO = new HudElementInfo<>(
         HunterBuddyAddon.HUD_GROUP, "FindsTicker",
         "Recent finds and sightings as a fading feed.",
         FindsTickerHud::new);
 
-    /** Which way the dot and the text sit against the panel. */
     public enum Align {
         Left,
         Right
@@ -65,9 +57,14 @@ public class FindsTickerHud extends HudElement {
         .name("alert-on-player").description("Critical glow for a minute after a player sighting.")
         .defaultValue(true).build());
 
+    private final Setting<Boolean> mergeDuplicates = sgGeneral.add(new BoolSetting.Builder()
+        .name("merge-duplicates")
+        .description("Fold the same find seen again within a minute and a few blocks into one line with a count, instead of repeating it.")
+        .defaultValue(true).build());
+
     private final Setting<Boolean> animations = sgGeneral.add(new BoolSetting.Builder()
         .name("animations")
-        .description("Lines slide and fade in and out instead of snapping.")
+        .description("Lines slide and fade in and out and the rest glide into place instead of snapping.")
         .defaultValue(true).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
@@ -146,17 +143,70 @@ public class FindsTickerHud extends HudElement {
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
-    private static final long ENTER_MS = 250L;
-    private static final long EXIT_MS = 200L;
-    private static final double SLIDE_PX = 12.0;
+    private static final long ENTER_MS = 280L;
+    private static final long EXIT_MS = 220L;
+    private static final long REFRESH_MS = 50L;
+    private static final long MERGE_WINDOW_MS = 60_000L;
+    private static final int MERGE_RADIUS = 4;
+    private static final double SLIDE_PX = 14.0;
+    private static final double ROW_TAU = 0.08;
+    private static final double HEIGHT_TAU = 0.1;
+    private static final String ELLIPSIS = "...";
 
-    private record Ghost(HuntFeed.Entry entry, int index, long startedAt) {
+    private static final class Group {
+        final HuntFeed.Entry newest;
+        HuntFeed.Entry last;
+        long oldestAt;
+        int count = 1;
+
+        Group(HuntFeed.Entry entry) {
+            this.newest = entry;
+            this.last = entry;
+            this.oldestAt = entry.at();
+        }
     }
 
+    private static final class Slot {
+        HuntFeed.Entry newest;
+        int count;
+        boolean claimed;
+        boolean placed;
+        double y;
+        int target;
+        long bornAt = -1L;
+        long orderKey;
+        long exitAt = -1L;
+
+        String name;
+        String where;
+        String ageText;
+        String countText;
+        int countShown;
+        String signature;
+        long signatureAt;
+        int signatureCount;
+
+        String fitName;
+        String fitCount;
+        String fitted;
+        double fitAvail;
+        double fitScale;
+        double fitCountW;
+        boolean fitShadow;
+    }
+
+    private final List<Slot> slots = new ArrayList<>();
+    private final List<Slot> scratchSlots = new ArrayList<>();
+    private final List<Slot> liveSlots = new ArrayList<>();
+    private final List<Group> groups = new ArrayList<>();
+    private final Color scratch = new Color(255, 255, 255, 255);
+
     private long lastFrameNanos;
-    private final Map<String, Integer> prevIndexByKey = new LinkedHashMap<>();
-    private final Map<String, HuntFeed.Entry> prevEntryByKey = new LinkedHashMap<>();
-    private final Map<String, Ghost> ghosts = new LinkedHashMap<>();
+    private long lastRefreshMs;
+    private double heightLines;
+    private double slidePx;
+    private String newestSignature = "";
+    private boolean demoMode;
 
     public FindsTickerHud() {
         super(INFO);
@@ -167,43 +217,18 @@ public class FindsTickerHud extends HudElement {
         long nowNanos = System.nanoTime();
         double dt = lastFrameNanos == 0L ? 0.016 : Math.min(0.25, (nowNanos - lastFrameNanos) / 1_000_000_000.0);
         lastFrameNanos = nowNanos;
+        long nowMs = System.currentTimeMillis();
         boolean anim = animations.get();
 
-        List<HuntFeed.Entry> entries = collect();
-        boolean demo = entries.isEmpty() && isInEditor();
-        if (demo) entries = demoEntries();
-        boolean live = !demo;
-
-        Map<String, Integer> indexByKey = new LinkedHashMap<>();
-        for (int i = 0; i < entries.size(); i++) indexByKey.put(entryKey(entries.get(i)), i);
-
-        long nowMs = System.currentTimeMillis();
-
-        if (anim && live) {
-            for (Map.Entry<String, Integer> pe : prevIndexByKey.entrySet()) {
-                String k = pe.getKey();
-                if (indexByKey.containsKey(k)) continue;
-
-                HuntFeed.Entry ghostEntry = prevEntryByKey.get(k);
-                if (ghostEntry != null) ghosts.putIfAbsent(k, new Ghost(ghostEntry, pe.getValue(), nowMs));
-            }
-            ghosts.keySet().removeIf(indexByKey::containsKey);
-            ghosts.values().removeIf(g -> nowMs - g.startedAt() >= EXIT_MS);
-        } else {
-            ghosts.clear();
+        if (nowMs - lastRefreshMs >= REFRESH_MS) {
+            lastRefreshMs = nowMs;
+            refresh(nowMs, anim);
         }
 
-        if (live) {
-            prevIndexByKey.clear();
-            prevIndexByKey.putAll(indexByKey);
-            prevEntryByKey.clear();
-            for (HuntFeed.Entry e : entries) prevEntryByKey.put(entryKey(e), e);
-        }
+        step(dt, nowMs, anim);
 
-        int lineCount = entries.size();
-        for (Ghost g : ghosts.values()) lineCount = Math.max(lineCount, g.index() + 1);
-
-        if (lineCount == 0) {
+        if (slots.isEmpty() && heightLines < 0.02) {
+            heightLines = 0.0;
             setSize(0.0, 0.0);
             return;
         }
@@ -213,7 +238,8 @@ public class FindsTickerHud extends HudElement {
         double pad = panel.padding();
         double lineH = renderer.textHeight(shadow, scale) + 2.0 * scale;
         double w = panelWidth.get();
-        double h = lineCount * lineH - 2.0 * scale;
+        slidePx = Math.min(SLIDE_PX * scale, pad);
+        double h = Math.max(0.0, heightLines * lineH - 2.0 * scale);
 
         HudGlowPanel.Severity severity = HudGlowPanel.Severity.OK;
         if (alertOnPlayer.get()) {
@@ -223,126 +249,366 @@ public class FindsTickerHud extends HudElement {
 
         panel.draw(renderer, x + pad, y + pad, w, h, severity);
 
-        float freshness = pulse.freshness("newest",
-            entries.isEmpty() ? "" : String.valueOf(entries.get(0).at()), 700);
+        float freshness = anim ? pulse.freshness("newest", newestSignature, 700) : 0.0f;
 
-        for (int i = 0; i < entries.size(); i++) {
-            double rank = rankFactor(i, entries.size());
-            double easedIndex = anim && live
-                ? pulse.ease("pos#" + entryKey(entries.get(i)), i, dt, 0.15)
-                : i;
-            double ty = y + pad + easedIndex * lineH;
-            drawEntry(renderer, entries.get(i), x + pad, ty, w, shadow, scale,
-                i == 0 ? freshness : 0.0f, rank, anim);
-        }
+        boolean whereOn = showDistance.get() || showCoords.get();
+        double gap = 4.0 * scale;
+        double ageSlot = renderer.textWidth("88 min", shadow, scale);
+        double whereSlot = whereOn ? renderer.textWidth(whereTemplate(), shadow, scale) : 0.0;
+        double textH = renderer.textHeight(shadow, scale);
 
-        for (Ghost g : ghosts.values()) {
-            double rank = rankFactor(g.index(), Math.max(entries.size(), g.index() + 1));
-            double exitT = MathHelper.clamp((nowMs - g.startedAt()) / (double) EXIT_MS, 0.0, 1.0);
-            double ty = y + pad + g.index() * lineH;
-            drawEntry(renderer, g.entry(), x + pad, ty, w, shadow, scale, 0.0f, rank * (1.0 - exitT), false);
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            double top = y + pad + slot.y * lineH;
+            drawSlot(renderer, slot, x + pad, top, w, shadow, scale, gap, ageSlot, whereSlot, textH,
+                slot.target == 0 && slot.exitAt < 0L ? freshness : 0.0f, nowMs, anim);
         }
 
         setSize(w + pad * 2.0, h + pad * 2.0);
     }
 
-    private void drawEntry(HudRenderer renderer, HuntFeed.Entry entry, double left, double top,
-                           double w, boolean shadow, double scale, float freshness,
-                           double extraAlpha, boolean animateEntrance) {
-        long age = entry.ageMs();
+    private void refresh(long nowMs, boolean anim) {
+        List<HuntFeed.Entry> entries = collect(nowMs);
+        demoMode = entries.isEmpty() && isInEditor();
+        if (demoMode) entries = demoEntries();
 
-        double enterT = animateEntrance ? MathHelper.clamp(age / (double) ENTER_MS, 0.0, 1.0) : 1.0;
-        double enterEase = easeOutCubic(enterT);
-        double enterAlpha = 0.15 + 0.85 * enterEase;
+        groups.clear();
+        if (demoMode) {
+            for (HuntFeed.Entry entry : entries) groups.add(new Group(entry));
+        } else {
+            groupEntries(entries);
+        }
 
-        double fade = ageFade(age) * extraAlpha * enterAlpha;
+        boolean firstFill = slots.isEmpty();
+        for (int i = 0; i < slots.size(); i++) slots.get(i).claimed = false;
+        liveSlots.clear();
 
-        double slide = (1.0 - enterEase) * SLIDE_PX * scale;
-        left = align.get() == Align.Right ? left + slide : left - slide;
+        for (int i = 0; i < groups.size(); i++) {
+            Group group = groups.get(i);
+            Slot slot = findSlot(group);
 
-        SettingColor dot = colorFor(entry.type());
-        double dotSize = 3.0 * scale;
-        double gap = 4.0 * scale;
-        double textH = renderer.textHeight(shadow, scale);
+            if (slot == null) {
+                slot = new Slot();
+                slot.orderKey = group.oldestAt;
+                if (!anim || (firstFill && group.newest.ageMs() >= 1000L)) slot.bornAt = nowMs - ENTER_MS;
+            }
 
-        String ageText = formatAge(age);
-        String whereText = where(entry);
+            slot.claimed = true;
+            slot.exitAt = -1L;
+            slot.newest = group.newest;
+            slot.count = group.count;
+            describe(slot, nowMs);
 
-        // Both side columns get a fixed slot sized from a worst-case template. Measured from their
-        // own text, the age would slide left as "9 s" became "10 min" and the whole row would
-        // twitch every time a line aged.
-        double ageSlot = renderer.textWidth("88 min", shadow, scale);
-        double whereSlot = whereText == null ? 0.0 : renderer.textWidth(whereTemplate(), shadow, scale) + gap;
+            int at = liveSlots.size();
+            while (at > 0 && liveSlots.get(at - 1).orderKey < slot.orderKey) at--;
+            liveSlots.add(at, slot);
+        }
+
+        scratchSlots.clear();
+        scratchSlots.addAll(liveSlots);
+
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            if (slot.claimed || !anim || slot.bornAt < 0L) continue;
+
+            if (slot.exitAt < 0L) slot.exitAt = nowMs;
+
+            int at = 0;
+            for (int j = i - 1; j >= 0; j--) {
+                int found = scratchSlots.indexOf(slots.get(j));
+                if (found >= 0) {
+                    at = found + 1;
+                    break;
+                }
+            }
+
+            scratchSlots.add(at, slot);
+        }
+
+        slots.clear();
+        slots.addAll(scratchSlots);
+        layout();
+    }
+
+    private void layout() {
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            slot.target = i;
+
+            if (!slot.placed) {
+                slot.y = i;
+                slot.placed = true;
+            }
+        }
+    }
+
+    private void step(double dt, long nowMs, boolean anim) {
+        boolean removed = false;
+
+        for (int i = slots.size() - 1; i >= 0; i--) {
+            Slot slot = slots.get(i);
+
+            if (slot.exitAt >= 0L && (!anim || nowMs - slot.exitAt >= EXIT_MS)) {
+                slots.remove(i);
+                removed = true;
+            }
+        }
+
+        if (removed) layout();
+
+        double rowAlpha = anim ? 1.0 - Math.exp(-dt / ROW_TAU) : 1.0;
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            slot.y = slot.bornAt < 0L ? slot.target : settle(slot.y, slot.target, rowAlpha);
+        }
+
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            if (slot.bornAt < 0L && placeIsFree(slot)) slot.bornAt = nowMs;
+        }
+
+        double heightAlpha = anim ? 1.0 - Math.exp(-dt / HEIGHT_TAU) : 1.0;
+        double needed = 0.0;
+        Slot top = null;
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            if (slot.bornAt >= 0L) needed = Math.max(needed, slot.y + enterProgress(slot, nowMs, anim));
+            if (top == null && slot.exitAt < 0L) top = slot;
+        }
+
+        if (top != null && top.bornAt >= 0L) newestSignature = demoMode ? "demo" : top.signature;
+        else if (top == null) newestSignature = "";
+
+        heightLines = Math.max(needed, settle(heightLines, slots.size(), heightAlpha));
+    }
+
+    private static double enterProgress(Slot slot, long nowMs, boolean anim) {
+        if (!anim) return 1.0;
+        return easeOutCubic(MathHelper.clamp((nowMs - slot.bornAt) / (double) ENTER_MS, 0.0, 1.0));
+    }
+
+    private boolean placeIsFree(Slot waiting) {
+        for (int i = 0; i < slots.size(); i++) {
+            Slot other = slots.get(i);
+            if (other != waiting && other.bornAt >= 0L && Math.abs(other.y - waiting.target) < 0.9) return false;
+        }
+
+        return true;
+    }
+
+    private static double settle(double current, double target, double alpha) {
+        double next = current + (target - current) * alpha;
+        return Math.abs(target - next) < 0.003 ? target : next;
+    }
+
+    private Slot findSlot(Group group) {
+        for (int i = 0; i < slots.size(); i++) {
+            Slot slot = slots.get(i);
+            if (slot.claimed) continue;
+
+            if (demoMode) {
+                if (slot.newest.type() == group.newest.type() && slot.newest.label().equals(group.newest.label())) {
+                    return slot;
+                }
+                continue;
+            }
+
+            long at = slot.newest.at();
+            if (at >= group.oldestAt && at <= group.newest.at() && sameSubject(slot.newest, group.newest)) return slot;
+        }
+
+        return null;
+    }
+
+    private void groupEntries(List<HuntFeed.Entry> entries) {
+        int limit = maxLines.get();
+        boolean merge = mergeDuplicates.get();
+
+        for (int i = 0; i < entries.size(); i++) {
+            HuntFeed.Entry entry = entries.get(i);
+            Group target = null;
+
+            if (merge) {
+                for (int g = 0; g < groups.size(); g++) {
+                    Group group = groups.get(g);
+                    if (group.last.at() - entry.at() <= MERGE_WINDOW_MS && sameSubject(group.last, entry)) {
+                        target = group;
+                        break;
+                    }
+                }
+            }
+
+            if (target != null) {
+                target.count++;
+                target.last = entry;
+                target.oldestAt = entry.at();
+            } else if (groups.size() < limit) {
+                groups.add(new Group(entry));
+            }
+        }
+    }
+
+    private static boolean sameSubject(HuntFeed.Entry a, HuntFeed.Entry b) {
+        return a.type() == b.type()
+            && Objects.equals(a.label(), b.label())
+            && Objects.equals(a.dimension(), b.dimension())
+            && near(a.pos(), b.pos());
+    }
+
+    private static boolean near(BlockPos a, BlockPos b) {
+        if (a == null || b == null) return a == b;
+
+        return Math.abs(a.getX() - b.getX()) <= MERGE_RADIUS
+            && Math.abs(a.getY() - b.getY()) <= MERGE_RADIUS
+            && Math.abs(a.getZ() - b.getZ()) <= MERGE_RADIUS;
+    }
+
+    private void describe(Slot slot, long nowMs) {
+        slot.name = displayText(slot.newest);
+        slot.where = where(slot.newest);
+        slot.ageText = formatAge(Math.max(0L, nowMs - slot.newest.at()));
+
+        if (slot.signature == null || slot.signatureAt != slot.newest.at() || slot.signatureCount != slot.count) {
+            slot.signatureAt = slot.newest.at();
+            slot.signatureCount = slot.count;
+            slot.signature = slot.signatureAt + "|" + slot.signatureCount;
+        }
+
+        if (slot.count != slot.countShown) {
+            slot.countShown = slot.count;
+            slot.countText = slot.count > 1 ? "(" + slot.count + "x)" : null;
+        }
+    }
+
+    private void drawSlot(HudRenderer renderer, Slot slot, double left, double top, double w, boolean shadow,
+                          double scale, double gap, double ageSlot, double whereSlot, double textH,
+                          float freshness, long nowMs, boolean anim) {
+        if (slot.bornAt < 0L) return;
+
+        long age = Math.max(0L, nowMs - slot.newest.at());
+        boolean exiting = slot.exitAt >= 0L;
+
+        double enterEase = enterProgress(slot, nowMs, anim);
+        double exitT = exiting ? MathHelper.clamp((nowMs - slot.exitAt) / (double) EXIT_MS, 0.0, 1.0) : 0.0;
+
+        double rankSpan = Math.max(1, maxLines.get() - 1);
+        double rank = 1.0 - 0.4 * MathHelper.clamp(slot.y, 0.0, rankSpan) / rankSpan;
+        double highlight = exiting ? 0.0 : MathHelper.clamp(1.0 - slot.y, 0.0, 1.0);
+
+        double cover = MathHelper.clamp(heightLines - slot.y, 0.0, 1.0);
+        double fade = ageFade(age) * rank * enterEase * (1.0 - exitT) * cover;
+        if (fade <= 0.004) return;
 
         boolean right = align.get() == Align.Right;
+        double slide = ((1.0 - enterEase) + exitT * 0.6) * slidePx;
+        left = right ? left + slide : left - slide;
+
+        SettingColor dot = colorFor(slot.newest.type());
+        double dotSize = 3.0 * scale;
+        boolean whereOn = whereSlot > 0.0;
 
         double dotX, textLeft, textRight, whereX, ageX;
 
         if (right) {
             ageX = left;
-            whereX = left + ageSlot + gap;
-            textLeft = left + ageSlot + gap + whereSlot;
-            textRight = left + w - dotSize - gap;
+            whereX = ageX + ageSlot + gap;
+            textLeft = whereOn ? whereX + whereSlot + gap : ageX + ageSlot + gap;
             dotX = left + w - dotSize;
+            textRight = dotX - gap;
         } else {
             dotX = left;
-            textLeft = left + dotSize + gap;
-            textRight = left + w - ageSlot - whereSlot - 2.0 * scale;
-            whereX = textRight + 2.0 * scale;
+            textLeft = dotX + dotSize + gap;
             ageX = left + w - ageSlot;
+            double whereRight = ageX - gap;
+            whereX = whereRight - whereSlot;
+            textRight = whereOn ? whereX - gap : whereRight;
         }
 
-        renderer.quad(dotX, top + (textH - dotSize) / 2.0, dotSize, dotSize,
-            new Color(dot.r, dot.g, dot.b, (int) (dot.a * fade)));
+        if (highlight > 0.01) {
+            scratch.set(dot.r, dot.g, dot.b, alpha(30.0 * fade * highlight));
+            renderer.quad(left, top - scale, w, textH + 2.0 * scale, scratch);
+        }
 
-        String label = fit(renderer, displayText(entry), textRight - textLeft, shadow, scale);
+        double popSize = dotSize * HudPulse.pop(freshness);
+        scratch.set(dot.r, dot.g, dot.b, alpha(dot.a * fade));
+        renderer.quad(dotX - (popSize - dotSize) / 2.0, top + (textH - popSize) / 2.0, popSize, popSize, scratch);
+
+        fitLabel(renderer, slot, textRight - textLeft, shadow, scale, gap);
+
+        double labelW = renderer.textWidth(slot.fitted, shadow, scale);
+        double labelX;
+        double countX;
+
+        if (right) {
+            labelX = textRight - labelW;
+            countX = labelX - gap - slot.fitCountW;
+        } else {
+            labelX = textLeft;
+            countX = labelX + labelW + gap;
+        }
 
         SettingColor base = valueColor.get();
-        Color faded = new Color(base.r, base.g, base.b, (int) (base.a * fade));
-        Color textColor = freshness > 0.0f
-            ? HudPulse.tint(HudPulse.Style.Subtle, toSetting(faded), dot, freshness)
-            : faded;
+        double mix = freshness * 0.6;
+        scratch.set(
+            (int) (base.r + (dot.r - base.r) * mix),
+            (int) (base.g + (dot.g - base.g) * mix),
+            (int) (base.b + (dot.b - base.b) * mix),
+            alpha(base.a * fade));
+        renderer.text(slot.fitted, labelX, top, scratch, shadow, scale);
 
-        renderer.text(label, right ? textRight - renderer.textWidth(label, shadow, scale) : textLeft,
-            top, textColor, shadow, scale);
-
-        SettingColor ageBase = labelColor.get();
-        Color ageColor = new Color(ageBase.r, ageBase.g, ageBase.b, (int) (ageBase.a * fade));
-
-        if (whereText != null) {
-            // Pinned to the side the age is on, so the two side columns read as one block.
-            double whereW = renderer.textWidth(whereText, shadow, scale);
-            renderer.text(whereText, right ? whereX : whereX + (whereSlot - gap) - whereW, top, ageColor, shadow, scale);
+        if (slot.fitCount != null) {
+            scratch.set(labelColor.get().r, labelColor.get().g, labelColor.get().b, alpha(labelColor.get().a * fade));
+            renderer.text(slot.fitCount, countX, top, scratch, shadow, scale);
         }
 
-        renderer.text(ageText, right ? ageX : ageX + ageSlot - renderer.textWidth(ageText, shadow, scale),
-            top, ageColor, shadow, scale);
+        SettingColor ageBase = labelColor.get();
+        scratch.set(ageBase.r, ageBase.g, ageBase.b, alpha(ageBase.a * fade));
+
+        if (whereOn && slot.where != null) {
+            double whereW = renderer.textWidth(slot.where, shadow, scale);
+            renderer.text(slot.where, right ? whereX : whereX + whereSlot - whereW, top, scratch, shadow, scale);
+        }
+
+        renderer.text(slot.ageText, right ? ageX : ageX + ageSlot - renderer.textWidth(slot.ageText, shadow, scale),
+            top, scratch, shadow, scale);
     }
 
-    /**
-     * What the line actually says.
-     *
-     * <p>The player sources publish a bare name, which is all a webhook needs but leaves the feed
-     * saying "Fit2Win" twice with no way to tell an arrival from a departure. The wording belongs
-     * here rather than in the notifier: the same event still reaches Discord unchanged.
-     */
+    private void fitLabel(HudRenderer renderer, Slot slot, double available, boolean shadow, double scale, double gap) {
+        available = Math.max(0.0, available);
+
+        if (slot.fitted != null
+            && slot.fitName.equals(slot.name)
+            && Objects.equals(slot.fitCount, slot.countText)
+            && Math.abs(slot.fitAvail - available) < 0.01
+            && slot.fitScale == scale
+            && slot.fitShadow == shadow) {
+            return;
+        }
+
+        slot.fitName = slot.name;
+        slot.fitCount = slot.countText;
+        slot.fitAvail = available;
+        slot.fitScale = scale;
+        slot.fitShadow = shadow;
+        slot.fitCountW = slot.countText == null ? 0.0 : renderer.textWidth(slot.countText, shadow, scale);
+
+        double room = slot.countText == null ? available : Math.max(0.0, available - slot.fitCountW - gap);
+        slot.fitted = fit(renderer, slot.name, room, shadow, scale);
+    }
+
+    private static int alpha(double value) {
+        return MathHelper.clamp((int) value, 0, 255);
+    }
+
     private static String displayText(HuntFeed.Entry entry) {
         return switch (entry.type()) {
             case PLAYER_ENTER -> entry.label() + " entered range";
             case PLAYER_LEAVE -> entry.label() + " left range";
-            // "Portal lit" reads as a noun until you get to the end of it. You lit it, so say so.
             case PORTAL -> "Lit a portal";
             default -> entry.label();
         };
     }
 
-    /**
-     * The distance-and-bearing column, or null when it is switched off.
-     *
-     * <p>A dash when there is nothing honest to say — no position recorded, no world to compare
-     * against, or a find made in another dimension, where the numbers do not convert and a bearing
-     * would point confidently at nothing.
-     */
     private String where(HuntFeed.Entry entry) {
         if (!showDistance.get() && !showCoords.get()) return null;
         if (entry.pos() == null) return "-";
@@ -360,7 +626,6 @@ public class FindsTickerHud extends HudElement {
         return formatDistance(Math.sqrt(dx * dx + dz * dz)) + " " + bearing(dx, dz);
     }
 
-    /** The widest the column can get, so its slot never has to move. */
     private String whereTemplate() {
         return showCoords.get() ? "-8888888, -8888888" : "8888km NW";
     }
@@ -372,30 +637,22 @@ public class FindsTickerHud extends HudElement {
         return km < 10.0 ? String.format("%.1fkm", km) : (int) km + "km";
     }
 
-    /**
-     * Eight-point compass, written out.
-     *
-     * <p>Letters rather than an arrow on purpose: the HUD font carries six code point ranges and
-     * an arrow is in none of them, so it would render as a blank space rather than a glyph.
-     */
-    private static String bearing(double dx, double dz) {
-        // atan2(dz, dx) is 0 due east and grows towards south, matching Minecraft's axes.
-        double degrees = (Math.toDegrees(Math.atan2(dz, dx)) + 360.0) % 360.0;
-        String[] points = {"E", "SE", "S", "SW", "W", "NW", "N", "NE"};
+    private static final String[] COMPASS = {"E", "SE", "S", "SW", "W", "NW", "N", "NE"};
 
-        return points[(int) Math.round(degrees / 45.0) % 8];
+    private static String bearing(double dx, double dz) {
+        double degrees = (Math.toDegrees(Math.atan2(dz, dx)) + 360.0) % 360.0;
+        return COMPASS[(int) Math.round(degrees / 45.0) % 8];
     }
 
-    private List<HuntFeed.Entry> collect() {
+    private List<HuntFeed.Entry> collect(long nowMs) {
         long cutoff = maxAgeMinutes.get() * 60_000L;
         List<HuntFeed.Entry> out = new ArrayList<>();
 
         for (HuntFeed.Entry entry : HuntFeed.get().entries()) {
-            if (entry.ageMs() > cutoff) break;
+            if (nowMs - entry.at() > cutoff) break;
             if (!enabled(entry.type())) continue;
 
             out.add(entry);
-            if (out.size() >= maxLines.get()) break;
         }
 
         return out;
@@ -446,18 +703,9 @@ public class FindsTickerHud extends HudElement {
         return plateauFloor * (1.0 - t);
     }
 
-    private static double rankFactor(int index, int count) {
-        if (count <= 1) return 1.0;
-        return 1.0 - 0.4 * index / (double) (count - 1);
-    }
-
     private static double easeOutCubic(double t) {
         double u = 1.0 - t;
         return 1.0 - u * u * u;
-    }
-
-    private static String entryKey(HuntFeed.Entry entry) {
-        return entry.type() + "|" + entry.at();
     }
 
     private static String formatAge(long ms) {
@@ -470,25 +718,12 @@ public class FindsTickerHud extends HudElement {
     private String fit(HudRenderer renderer, String label, double available, boolean shadow, double scale) {
         if (renderer.textWidth(label, shadow, scale) <= available) return label;
 
-        String out = label;
-        while (out.length() > 1 && renderer.textWidth(out + "..", shadow, scale) > available) {
-            out = out.substring(0, out.length() - 1);
-        }
+        int end = label.length();
+        while (end > 0 && renderer.textWidth(label.substring(0, end) + ELLIPSIS, shadow, scale) > available) end--;
 
-        return out + "..";
+        return end == 0 ? "" : label.substring(0, end) + ELLIPSIS;
     }
 
-    private static SettingColor toSetting(Color color) {
-        return new SettingColor(color.r, color.g, color.b, color.a);
-    }
-
-    /**
-     * A sample of every kind of line, so the editor shows what the settings actually do.
-     *
-     * <p>Positions are laid out around wherever you happen to be standing, which is what makes the
-     * distance column show real numbers while you drag the panel about. The last one is marked as
-     * another dimension on purpose: it is the only way to see the dash in the editor.
-     */
     private List<HuntFeed.Entry> demoEntries() {
         long now = System.currentTimeMillis();
         List<HuntFeed.Entry> out = new ArrayList<>();
