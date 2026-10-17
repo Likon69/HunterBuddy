@@ -8838,7 +8838,7 @@ public class SpawnerDetector extends Module {
             BlockPos support = floor.offset(side.getOpposite());
             Vec3d hitPos = Vec3d.ofCenter(support).add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
             Utils.setPressed(mc.options.sneakKey, true);
-            if (stateTicks % 5 == 0 && interactWhenAligned(hitPos, new BlockHitResult(hitPos, side, support, false))) {
+            if (alignedTowards(hitPos) && stateTicks % 5 == 0 && interactWhenAligned(hitPos, new BlockHitResult(hitPos, side, support, false))) {
                 mc.player.swingHand(Hand.MAIN_HAND);
                 autoLog("TUNNEL", autoSite.center, "direct placed obsidian=" + floor.toShortString());
             }
