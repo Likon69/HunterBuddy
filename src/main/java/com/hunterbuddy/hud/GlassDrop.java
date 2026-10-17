@@ -19,12 +19,9 @@ final class GlassDrop {
     private static final Identifier BODY = Identifier.of("hunterbuddy", "textures/messenger/drop_body.png");
     private static final Identifier RIM = Identifier.of("hunterbuddy", "textures/messenger/drop_rim.png");
     private static final Identifier SPECULAR = Identifier.of("hunterbuddy", "textures/messenger/drop_specular.png");
-    private static final Identifier DISC = Identifier.of("hunterbuddy", "textures/messenger/disc.png");
     private static final Identifier GLOW = Identifier.of("hunterbuddy", "textures/radar/glow.png");
-    private static final Identifier RING = Identifier.of("hunterbuddy", "textures/radar/ring.png");
 
     private final Color[] haloColors = {new Color(), new Color(), new Color()};
-    private final Color rippleColor = new Color();
     private final HudRenderer renderer;
 
     GlassDrop(HudRenderer renderer) {
@@ -54,14 +51,4 @@ final class GlassDrop {
         }
     }
 
-    void ripple(double cx, double cy, double d, Color accent, float fresh) {
-        double size = d + 0.7 * d * (1.0 - fresh);
-        renderer.texture(RING, cx - size / 2.0, cy - size / 2.0, size, size,
-            rippleColor.set(accent.r, accent.g, accent.b, (int) (180 * fresh)));
-    }
-
-    void core(double cx, double cy, double d, Color color) {
-        double size = d * 0.58;
-        renderer.texture(DISC, cx - size / 2.0, cy - size / 2.0, size, size, color);
-    }
 }

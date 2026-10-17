@@ -114,7 +114,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `FollowerHeading` | Heading tape for the waypoint follower: the target as a sliding diamond, the next turns as ghosts. |
 | `FollowerRoute` | The follower's route as a line of milestones, with a halo on the current one and +N for the rest. |
 | `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
-| `MessengerBubble` | Round button showing how many private messages are unread. Click it while the chat is open to show the contact list. |
+| `MessengerBubble` | Messenger button with three shapes, three drawn icons, Flat or Glass finishes and a colored unread badge. Click it in chat to open contacts. |
 | `movement-status` | Current sneaking and sprinting status. |
 | `Odometer` | Session distance on mechanical drums, lifetime total below. |
 | `Performance` | FPS, ping and server TPS in one line, colored by level and flashing on spikes and drops. |
