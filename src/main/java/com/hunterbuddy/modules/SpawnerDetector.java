@@ -8186,13 +8186,8 @@ public class SpawnerDetector extends Module {
                 holdNonBlockItem();
                 Utils.setPressed(mc.options.sneakKey, false);
                 Vec3d center = Vec3d.ofCenter(target);
-                float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), center);
-                boolean facing = Math.abs(MathHelper.wrapDegrees(mc.player.getYaw() - rot[0])) <= 3.0f
-                    && Math.abs(mc.player.getPitch() - rot[1]) <= 3.0f;
-                mc.player.setYaw(rot[0]);
-                mc.player.setPitch(rot[1]);
-                if (facing) {
-                    mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, new BlockHitResult(center, Direction.UP, target, false));
+                boolean aligned = interactWhenAligned(center, new BlockHitResult(center, Direction.UP, target, false));
+                if (aligned) {
                     autoRoomSubStateStartMs = System.currentTimeMillis();
                     autoRoomOpenAttempts++;
                     autoRoomSubState = 3;
