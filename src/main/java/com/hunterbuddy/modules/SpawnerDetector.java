@@ -6776,7 +6776,9 @@ public class SpawnerDetector extends Module {
                 ? autoColumn.holeTopY() : autoColumn.startY();
         int feetY = (int) Math.floor(mc.player.getY() + 0.5);
         boolean nearHole = Math.hypot((nearKeyX + 0.5) - mc.player.getX(), (nearKeyZ + 0.5) - mc.player.getZ()) <= 3.0
-            && (feetY == nearKeyY || (gateRim == null && feetY == nearKeyY - 1));
+            && (feetY == nearKeyY || (gateRim == null && feetY == nearKeyY - 1)
+                || (!pathing && grounded && gateRim == null && autoColumn.water()
+                    && Math.abs(feetY - autoColumn.exitY()) <= 1));
         if (pathing && nearHole && stateTicks - autoWalkBestDistTick > 100) {
             bt.getPathingBehavior().cancelEverything();
             releaseAllAutoKeys();
