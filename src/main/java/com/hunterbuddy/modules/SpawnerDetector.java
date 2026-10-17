@@ -8752,11 +8752,8 @@ public class SpawnerDetector extends Module {
             BaritoneAPI.getSettings().allowPlace.value = true;
             autoTunnelGoal = findTunnelGoal(autoSite.room);
             if (autoTunnelGoal == null) {
-                autoLog("TUNNEL", autoSite.center, "tunnel failed: no floor cell");
-                autoRunAbandoned = true;
-                if (autoExitShaft != null && !autoTunnelTrail.isEmpty()) autoExitShaftForeign = true;
-                enterState(AutoState.EXIT, "");
-                return;
+                autoLog("TUNNEL", autoSite.center, "no floor cell, aiming at the room center");
+                autoTunnelGoal = new BlockPos(autoSite.room.cx(), autoSite.room.cy(), autoSite.room.cz());
             }
             autoTunnelBestDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(autoTunnelGoal));
             autoTunnelBestElapsed = 0;
