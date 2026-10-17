@@ -8842,7 +8842,9 @@ public class SpawnerDetector extends Module {
             autoTunnelBestElapsed = elapsed;
             mc.interactionManager.cancelBlockBreaking();
         }
-        if (elapsed - autoTunnelBestElapsed > 10 * 20) {
+        int stallLimit = 10 * 20;
+        if (autoBreachPos != null && mc.player.isSubmergedInWater() && mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED) < 0.99) stallLimit *= 5;
+        if (elapsed - autoTunnelBestElapsed > stallLimit) {
             startTunnelBaritone(autoBreachPos != null ? autoBreachPos : autoTunnelStep, "direct passage stalled");
             return;
         }
