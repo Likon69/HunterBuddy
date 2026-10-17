@@ -758,6 +758,7 @@ public class SpawnerDetector extends Module {
     private int autoWalkBestDistTick;
     private int autoWalkSinkBestY;
     private int autoWalkSinkBestTick;
+    private DugHoles.Feature autoWalkTestedShaft;
     private boolean autoWalkReapproach;
     private int autoWalkReapproachCount;
     private boolean autoFinalBlockedLogged;
@@ -1135,6 +1136,7 @@ public class SpawnerDetector extends Module {
         autoWalkBestDist = -1;
         autoWalkBestDistTick = 0;
         autoWalkSinkBestTick = -1;
+        autoWalkTestedShaft = null;
         autoWalkReapproach = false;
         autoWalkReapproachCount = 0;
     }
@@ -3717,6 +3719,65 @@ public class SpawnerDetector extends Module {
         return best;
     }
 
+    private ColumnPlan evaluateExistingShaft(Site site, DugHoles.Feature shaft, boolean straightDown, boolean logShafts) {
+        Room room = site.room;
+        int sx = shaft.minX(), sz = shaft.minZ();
+        int shaftOpen = shaft.maxY() - shaft.minY() + 1;
+        if (shaftOpen < 4) {
+            if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: too short", sx, sz));
+            return null;
+        }
+        boolean insideInterior = sx >= room.cx() - room.k() && sx <= room.cx() + room.k()
+            && sz >= room.cz() - room.p() && sz <= room.cz() + room.p();
+
+        ColumnPlan shaftPlan;
+
+        if (insideInterior) {
+            if (floorOpenBelow(room, sx, sz)) {
+                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: open floor below", sx, sz));
+                return null;
+            }
+            ColumnEval shaftEval = evaluateColumnResult(site.center, room, sx, sz, autoMaxFall.get(), false);
+            shaftPlan = shaftEval.plan();
+            if (shaftPlan == null) {
+                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
+                    shaftEval.rejectReason() != null ? shaftEval.rejectReason() : "plan null"));
+                return null;
+            }
+            BlockPos.Mutable fallCursor = new BlockPos.Mutable();
+            int fallRun = 0;
+            boolean shaftCobweb = false;
+            for (int fy = (shaftPlan.rim() != null ? shaftPlan.rim().getY() : shaftPlan.holeTopY()) - 1; fy >= shaftPlan.startY(); fy--) {
+                BlockState fallState = mc.world.getBlockState(fallCursor.set(sx, fy, sz));
+                if (fallState.getBlock() == Blocks.COBWEB) shaftCobweb = true;
+                if (fallState.getFluidState().isIn(FluidTags.WATER)) {
+                    fallRun = 0;
+                } else if (isOpenState(fallState, fallCursor)) {
+                    fallRun++;
+                }
+            }
+            if (shaftCobweb) {
+                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: cobweb", sx, sz));
+                return null;
+            }
+            if (fallRun > autoMaxFall.get()) {
+                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: fall", sx, sz));
+                return null;
+            }
+        } else {
+            if (straightDown) return null;
+            SideHoleAttempt attempt = evaluateSideHolePosition(site.center, room, sx, sz);
+            if (attempt.plan() == null) {
+                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
+                    attempt.rejectReason() != null ? attempt.rejectReason() : "no plan"));
+                return null;
+            }
+            shaftPlan = attempt.plan();
+        }
+
+        return shaftPlan;
+    }
+
     private ColumnPlan planColumn(Site site) {
         if (site.shipwreck != null) return planShipwreckColumn(site.center);
         Room room = site.room;
@@ -3728,67 +3789,13 @@ public class SpawnerDetector extends Module {
         int bestShaftOpen = 0;
 
         for (DugHoles.Feature shaft : site.entryShafts) {
-            int sx = shaft.minX(), sz = shaft.minZ();
-            int shaftOpen = shaft.maxY() - shaft.minY() + 1;
-            if (shaftOpen < 4) {
-                if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: too short", sx, sz));
-                continue;
-            }
-            boolean insideInterior = sx >= room.cx() - room.k() && sx <= room.cx() + room.k()
-                && sz >= room.cz() - room.p() && sz <= room.cz() + room.p();
-
-            ColumnPlan shaftPlan;
-            String label;
-
-            if (insideInterior) {
-                label = "inside";
-                if (floorOpenBelow(room, sx, sz)) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: open floor below", sx, sz));
-                    continue;
-                }
-                ColumnEval shaftEval = evaluateColumnResult(site.center, room, sx, sz, autoMaxFall.get(), false);
-                shaftPlan = shaftEval.plan();
-                if (shaftPlan == null) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
-                        shaftEval.rejectReason() != null ? shaftEval.rejectReason() : "plan null"));
-                    continue;
-                }
-                BlockPos.Mutable fallCursor = new BlockPos.Mutable();
-                int fallRun = 0;
-                boolean shaftCobweb = false;
-                for (int fy = (shaftPlan.rim() != null ? shaftPlan.rim().getY() : shaftPlan.holeTopY()) - 1; fy >= shaftPlan.startY(); fy--) {
-                    BlockState fallState = mc.world.getBlockState(fallCursor.set(sx, fy, sz));
-                    if (fallState.getBlock() == Blocks.COBWEB) shaftCobweb = true;
-                    if (fallState.getFluidState().isIn(FluidTags.WATER)) {
-                        fallRun = 0;
-                    } else if (isOpenState(fallState, fallCursor)) {
-                        fallRun++;
-                    }
-                }
-                if (shaftCobweb) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: cobweb", sx, sz));
-                    continue;
-                }
-                if (fallRun > autoMaxFall.get()) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: fall", sx, sz));
-                    continue;
-                }
-            } else {
-                if (straightDown) continue;
-                label = "beside";
-                SideHoleAttempt attempt = evaluateSideHolePosition(site.center, room, sx, sz);
-                if (attempt.plan() == null) {
-                    if (logShafts) autoLog("PLAN", site.center, String.format("existing shaft %d,%d refused: %s", sx, sz,
-                        attempt.rejectReason() != null ? attempt.rejectReason() : "no plan"));
-                    continue;
-                }
-                shaftPlan = attempt.plan();
-            }
+            ColumnPlan shaftPlan = evaluateExistingShaft(site, shaft, straightDown, logShafts);
+            if (shaftPlan == null) continue;
 
             if (bestShaftPlan == null || shaftPlan.blocksToBreak() < bestShaftPlan.blocksToBreak()) {
                 bestShaftPlan = shaftPlan;
-                bestShaftLabel = label;
-                bestShaftOpen = shaftOpen;
+                bestShaftLabel = insideInterior(room, shaft.minX(), shaft.minZ()) ? "inside" : "beside";
+                bestShaftOpen = shaft.maxY() - shaft.minY() + 1;
             }
         }
 
@@ -6400,6 +6407,7 @@ public class SpawnerDetector extends Module {
             autoWalkBestDist = -1;
             autoWalkBestDistTick = stateTicks;
             autoWalkSinkBestTick = -1;
+            autoWalkTestedShaft = null;
             if (autoWalkDirect) {
                 autoLog("WALK", autoSite.center, "water direct");
             } else if (autoColumn.water()) {
@@ -6655,14 +6663,32 @@ public class SpawnerDetector extends Module {
     }
 
     private void tickWalkBaritone() {
+        IBaritone bt = primaryBaritone();
+        BlockPos feet = mc.player.getBlockPos();
+        if (mc.player.isOnGround() || mc.player.isTouchingWater()) {
+            for (DugHoles.Feature shaft : autoSite.entryShafts) {
+                if ((shaft.minX() == autoColumn.x() && shaft.minZ() == autoColumn.z())
+                    || feet.getX() < shaft.minX() || feet.getX() > shaft.maxX()
+                    || feet.getZ() < shaft.minZ() || feet.getZ() > shaft.maxZ()
+                    || feet.getY() < autoSite.room.cy() || feet.getY() > shaft.maxY()) continue;
+                if (autoWalkTestedShaft != null && shaft.minX() == autoWalkTestedShaft.minX()
+                    && shaft.minZ() == autoWalkTestedShaft.minZ()) break;
+                autoWalkTestedShaft = shaft;
+                ColumnPlan plan = evaluateExistingShaft(autoSite, shaft, autoAbandonedOnce.contains(autoSite.center), true);
+                if (plan != null) {
+                    autoColumn = plan;
+                    autoLog("WALK", autoSite.center, "fell into existing shaft " + plan.x() + "," + plan.z() + ", using it");
+                    if (bt != null) bt.getPathingBehavior().cancelEverything();
+                }
+                break;
+            }
+        }
         double dx = (autoColumn.x() + 0.5) - mc.player.getX();
         double dz = (autoColumn.z() + 0.5) - mc.player.getZ();
         double horiz = Math.hypot(dx, dz);
         boolean feetOk = mc.player.getBlockPos().getY() == autoColumn.startY()
             || (!autoColumn.water() && autoColumn.rim() == null && mc.player.isOnGround()
                 && mc.player.getBlockPos().getY() > autoColumn.startY());
-
-        IBaritone bt = primaryBaritone();
 
         if (horiz <= 0.5 && feetOk) {
             if (bt != null) bt.getPathingBehavior().cancelEverything();
