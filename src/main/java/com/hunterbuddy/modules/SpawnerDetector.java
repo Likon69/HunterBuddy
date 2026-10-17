@@ -8333,7 +8333,7 @@ public class SpawnerDetector extends Module {
     private boolean tickRoomMinecarts() {
         if (autoRoomMinecart == null) {
             Room room = autoSite.room;
-            Box zone = new Box(room.minX() - 1, room.minY() - 1, room.minZ() - 1, room.maxX() + 2, room.maxY() + 2, room.maxZ() + 2);
+            Box zone = new Box(room.minX() - 3, room.minY() - 3, room.minZ() - 3, room.maxX() + 4, room.maxY() + 4, room.maxZ() + 4);
             autoRoomMinecart = mc.world.getOtherEntities(null, zone,
                     e -> (e instanceof ChestMinecartEntity || e instanceof HopperMinecartEntity) && e.isAlive()
                         && zone.contains(e.getX(), e.getY(), e.getZ()) && !autoRoomMinecartIgnored.contains(e.getId()))
