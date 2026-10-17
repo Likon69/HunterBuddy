@@ -8824,9 +8824,12 @@ public class SpawnerDetector extends Module {
             int dz = autoTunnelGoal.getZ() - autoTunnelStep.getZ();
             int dy = Integer.signum(autoTunnelGoal.getY() - autoTunnelStep.getY());
             BlockPos xFirst = autoTunnelStep.add(Integer.signum(dx), dy, 0);
-            autoTunnelStep = dx != 0 && !(dz != 0 && isTunnelProtected(xFirst))
+            BlockPos next = dx != 0 && !(dz != 0 && isTunnelProtected(xFirst))
                 ? xFirst
                 : autoTunnelStep.add(0, dy, Integer.signum(dz));
+            if (dy > 0 && Math.abs(dx) + Math.abs(dz) > autoTunnelGoal.getY() - autoTunnelStep.getY()
+                && tunnelStepNeedsFloor(next) && !isTunnelProtected(next.down())) next = next.down();
+            autoTunnelStep = next;
             autoTunnelBestElapsed = elapsed;
         }
 
@@ -8856,8 +8859,7 @@ public class SpawnerDetector extends Module {
             startTunnelBaritone(floor, "lava below passage");
             return;
         }
-        boolean needsFloor = floorState.getCollisionShape(mc.world, floor).isEmpty()
-            && (floorState.getFluidState().isEmpty() || mc.world.getFluidState(autoTunnelStep).isEmpty());
+        boolean needsFloor = tunnelStepNeedsFloor(autoTunnelStep);
         Direction side = needsFloor ? selfAscendPlaceSide(floor) : null;
         if (needsFloor && (!floorState.isReplaceable() || side == null || ensureObsidianInHotbar() < 0)) {
             startTunnelBaritone(floor, "no safe obsidian support");
@@ -8939,6 +8941,13 @@ public class SpawnerDetector extends Module {
             autoTunnelTrail.add(feet);
             if (autoTunnelTrail.size() > 4000) autoTunnelTrail.remove(0);
         }
+    }
+
+    private boolean tunnelStepNeedsFloor(BlockPos step) {
+        BlockPos floor = step.down();
+        BlockState floorState = mc.world.getBlockState(floor);
+        return floorState.getCollisionShape(mc.world, floor).isEmpty()
+            && (floorState.getFluidState().isEmpty() || mc.world.getFluidState(step).isEmpty());
     }
 
     private boolean isTunnelProtected(BlockPos pos) {
