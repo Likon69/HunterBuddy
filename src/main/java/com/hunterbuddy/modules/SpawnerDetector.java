@@ -101,7 +101,6 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
-import net.minecraft.client.gui.screen.ingame.HopperScreen;
 import net.minecraft.client.gui.screen.ingame.ShulkerBoxScreen;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
@@ -687,9 +686,6 @@ public class SpawnerDetector extends Module {
     private long autoRoomDebrisStartMs;
     private int autoRoomDebrisBroken;
 
-    private final Set<Integer> autoRoomMinecartIgnored = new java.util.HashSet<>();
-    private Entity autoRoomMinecart;
-    private int autoRoomMinecartTicks;
 
     private final Map<BlockPos, Set<BlockPos>> autoApproachBadCells = new HashMap<>();
     private BlockPos autoApproachTarget;
@@ -1106,8 +1102,6 @@ public class SpawnerDetector extends Module {
         autoRoomDebrisCurrent = null;
         autoRoomDebrisStartMs = 0;
         autoRoomDebrisBroken = 0;
-        autoRoomMinecartIgnored.clear();
-        autoRoomMinecart = null;
         autoApproachBadCells.clear();
         autoApproachTarget = null;
         autoApproachCell = null;
@@ -7703,15 +7697,13 @@ public class SpawnerDetector extends Module {
         }
     }
 
-    private boolean readContainer(BlockPos target, String cartKind) {
+    private boolean readContainer(BlockPos target) {
         boolean isShulkerScreen = mc.currentScreen instanceof ShulkerBoxScreen;
         int containerSlots;
         if (isShulkerScreen) {
             containerSlots = 27;
         } else if (mc.currentScreen instanceof GenericContainerScreen gcs) {
             containerSlots = ((GenericContainerScreenHandler) gcs.getScreenHandler()).getRows() * 9;
-        } else if (cartKind != null && mc.currentScreen instanceof HopperScreen) {
-            containerSlots = 5;
         } else {
             mc.player.closeHandledScreen();
             return true;
@@ -7736,8 +7728,7 @@ public class SpawnerDetector extends Module {
 
         statShulkersFound += fullShulkers;
 
-        String kindLabel = isShulkerScreen ? "shulker_box" : cartKind != null ? cartKind
-            : Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
+        String kindLabel = isShulkerScreen ? "shulker_box" : Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
         boolean keep = fullShulkers > 0;
         if (keep) {
             playAutoSound("shulker_found", soundShulker);
@@ -8139,7 +8130,6 @@ public class SpawnerDetector extends Module {
                 autoLog("ROOM", spawner, "spawner still there, retry");
                 return;
             }
-            if (tickRoomMinecarts()) return;
             finishRoomAndAscend();
             return;
         }
@@ -8231,7 +8221,7 @@ public class SpawnerDetector extends Module {
                     if (isShipwreck()) autoShipwreckChestOutcome = "not opened";
                     return;
                 }
-                boolean kept = readContainer(target, null);
+                boolean kept = readContainer(target);
                 if (kept) {
                     autoRoomIndex++;
                     autoRoomContainerFails = 0;
@@ -8319,84 +8309,6 @@ public class SpawnerDetector extends Module {
         }
 
         autoMineTick("ROOM", target, false);
-    }
-
-    private boolean tickRoomMinecarts() {
-        if (autoRoomMinecart == null) {
-            Room room = autoSite.room;
-            Box zone = new Box(room.minX() - 3, room.minY() - 3, room.minZ() - 3, room.maxX() + 4, room.maxY() + 4, room.maxZ() + 4);
-            autoRoomMinecart = mc.world.getOtherEntities(null, zone,
-                    e -> (e instanceof ChestMinecartEntity || e instanceof HopperMinecartEntity) && e.isAlive()
-                        && zone.contains(e.getX(), e.getY(), e.getZ()) && !autoRoomMinecartIgnored.contains(e.getId()))
-                .stream().min(Comparator.comparingDouble(e -> e.squaredDistanceTo(mc.player))).orElse(null);
-            if (autoRoomMinecart == null) return false;
-            autoRoomSubState = 0;
-            autoRoomOpenAttempts = 0;
-            autoRoomMinecartTicks = 0;
-        }
-
-        if (autoEatSyncModule() != null && autoEatSyncModule().isEating()) return true;
-
-        Entity cart = autoRoomMinecart;
-        BlockPos pos = cart.getBlockPos();
-        Vec3d center = cart.getBoundingBox().getCenter();
-        boolean open = mc.currentScreen instanceof GenericContainerScreen || mc.currentScreen instanceof HopperScreen;
-        String end = null;
-
-        if (!cart.isAlive()) {
-            if (autoRoomSubState == 3 && autoRoomWaitTicks-- > 0) {
-                Utils.setPressed(mc.options.jumpKey, mc.player.horizontalCollision);
-                recenterDig(pos.getX(), pos.getZ(), 0.3);
-                return true;
-            }
-            end = autoRoomSubState == 3 ? "broken" : "gone";
-        } else if (++autoRoomMinecartTicks > 15 * 20) {
-            end = "skipped reason=" + (autoRoomSubState == 0 ? "unreachable" : "timeout");
-        } else if (autoRoomSubState == 1) {
-            if (open) {
-                autoRoomWaitTicks = 5;
-                autoRoomSubState = 2;
-            } else if (--autoRoomWaitTicks <= 0) {
-                if (autoRoomOpenAttempts < 2) autoRoomSubState = 0;
-                else end = "skipped reason=no-screen";
-            }
-        } else if (autoRoomSubState == 2) {
-            if (autoRoomWaitTicks-- <= 0) {
-                if (readContainer(pos, Registries.ENTITY_TYPE.getId(cart.getType()).getPath())) end = "kept";
-                open = false;
-                autoRoomWaitTicks = 40;
-                autoRoomSubState = 3;
-            }
-        } else if (mc.player.getEyePos().distanceTo(center) > 3.0) {
-            approachBlock(pos);
-        } else {
-            releaseAllAutoKeys();
-            float[] rot = RotationUtils.getRotationsTo(mc.player.getEyePos(), center);
-            boolean facing = Math.abs(MathHelper.wrapDegrees(mc.player.getYaw() - rot[0])) <= 3.0f
-                && Math.abs(mc.player.getPitch() - rot[1]) <= 3.0f;
-            mc.player.setYaw(rot[0]);
-            mc.player.setPitch(rot[1]);
-            if (facing) {
-                if (autoRoomSubState == 0) {
-                    mc.interactionManager.interactEntity(mc.player, cart, Hand.MAIN_HAND);
-                    autoRoomOpenAttempts++;
-                    autoRoomWaitTicks = 60;
-                    autoRoomSubState = 1;
-                } else if (mc.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
-                    mc.interactionManager.attackEntity(mc.player, cart);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                }
-            }
-        }
-
-        if (end != null) {
-            autoLog("ROOM", pos, "minecart " + end);
-            autoRoomMinecartIgnored.add(cart.getId());
-            autoRoomMinecart = null;
-            releaseAllAutoKeys();
-            if (open) mc.player.closeHandledScreen();
-        }
-        return true;
     }
 
     private boolean containerOutOfReachHigh(BlockPos target) {
@@ -9144,8 +9056,6 @@ public class SpawnerDetector extends Module {
             autoRoomDebrisCurrent = null;
             autoRoomDebrisStartMs = 0;
             autoRoomDebrisBroken = 0;
-            autoRoomMinecartIgnored.clear();
-            autoRoomMinecart = null;
             autoPaused = false;
             autoPauseReason = null;
             autoPauseStartMs = 0;
