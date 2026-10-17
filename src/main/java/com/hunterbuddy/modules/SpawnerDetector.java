@@ -658,6 +658,7 @@ public class SpawnerDetector extends Module {
     private long autoRoomSpawnerStartMs;
     private BlockPos autoRoomSpawnerPos;
     private int autoRoomFoundShulkers;
+    private boolean autoRoomNotOpened;
     private int autoRoomFoundItems;
     private int autoRoomBreakTicks;
     private int autoRoomContainerGoneTicks;
@@ -4711,6 +4712,7 @@ public class SpawnerDetector extends Module {
         autoExitShaftForeign = false;
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
+        autoRoomNotOpened = false;
         autoRoomFoundItems = 0;
         autoShipwreckChestOutcome = null;
         autoChestplateAllowed = !plan.water();
@@ -5196,6 +5198,7 @@ public class SpawnerDetector extends Module {
             autoRoomSpawnerPos = null;
             autoRoomSpawnerHandled = true;
             autoRoomFoundShulkers = 0;
+            autoRoomNotOpened = false;
             autoRoomFoundItems = 0;
             autoRoomIndex = 0;
             autoRoomContainerFails = 0;
@@ -5628,6 +5631,7 @@ public class SpawnerDetector extends Module {
         autoChestplateAllowed = !plan.water();
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
+        autoRoomNotOpened = false;
         autoRoomFoundItems = 0;
         autoAscendFromAbort = false;
         autoAscendSurfacedCount = 0;
@@ -8197,11 +8201,12 @@ public class SpawnerDetector extends Module {
                 if (mc.currentScreen instanceof GenericContainerScreen || mc.currentScreen instanceof ShulkerBoxScreen) {
                     autoRoomWaitTicks = 5;
                     autoRoomSubState = 4;
-                } else if (System.currentTimeMillis() - autoRoomSubStateStartMs > 3000L) {
-                    if (autoRoomOpenAttempts < 2) {
+                } else if (System.currentTimeMillis() - autoRoomSubStateStartMs > 1000L) {
+                    if (autoRoomOpenAttempts < 20) {
                         autoRoomSubState = 2;
                     } else {
                         autoLog("ROOM", target, "container did not open, left unbroken");
+                        autoRoomNotOpened = true;
                         autoRoomIndex++;
                         autoRoomContainerFails = 0;
                         autoRoomSubState = 0;
@@ -8217,6 +8222,7 @@ public class SpawnerDetector extends Module {
                     if (System.currentTimeMillis() - autoRoomSubStateStartMs < 8000L) return;
                     mc.player.closeHandledScreen();
                     autoLog("ROOM", target, "container contents never arrived, left unbroken");
+                    autoRoomNotOpened = true;
                     autoRoomIndex++;
                     autoRoomContainerFails = 0;
                     autoRoomSubState = 0;
@@ -8588,7 +8594,7 @@ public class SpawnerDetector extends Module {
                 : autoRoomFoundShulkers > 0 ? "shulkers" : "processed", System.currentTimeMillis());
             return;
         }
-        exitLootedKeys.add(BlockPos.asLong(autoSite.center.getX(), autoSite.center.getY(), autoSite.center.getZ()));
+        if (!autoRoomNotOpened) exitLootedKeys.add(BlockPos.asLong(autoSite.center.getX(), autoSite.center.getY(), autoSite.center.getZ()));
         releaseAllAutoKeys();
 
         if (autoRoomFoundShulkers > 0) {
@@ -8621,6 +8627,7 @@ public class SpawnerDetector extends Module {
         autoSite = lower;
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
+        autoRoomNotOpened = false;
         autoRoomFoundItems = 0;
 
         enterDigState("continuing shaft to lower room");
@@ -8706,6 +8713,7 @@ public class SpawnerDetector extends Module {
         autoSite = chainSite;
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
+        autoRoomNotOpened = false;
         autoRoomFoundItems = 0;
 
         enterState(AutoState.TUNNEL, String.format("chained underground from %d,%d,%d dist=%.1f",
@@ -9113,6 +9121,7 @@ public class SpawnerDetector extends Module {
             autoRoomQueue = new ArrayList<>(autoSite.roomContainers);
             autoRoomQueue.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(mc.player.getBlockPos())));
             autoRoomFoundShulkers = 0;
+            autoRoomNotOpened = false;
             autoRoomFoundItems = 0;
             autoRoomSpawnerPos = findSpawnerInRoom(autoSite.room);
             autoLog("ROOM", autoSite.center, "spawner=" + (autoRoomSpawnerPos != null
@@ -9586,6 +9595,7 @@ public class SpawnerDetector extends Module {
         autoChestplateAllowed = !chainPlan.water();
         autoRunAbandoned = false;
         autoRoomFoundShulkers = 0;
+        autoRoomNotOpened = false;
         autoRoomFoundItems = 0;
         autoClimbLostGlideRetries = 0;
         autoTakeoffRetries = 0;
@@ -13231,6 +13241,7 @@ public class SpawnerDetector extends Module {
     }
 
     private String autoRunOutcome() {
+        if (autoRoomNotOpened) return "failed:chest not opened";
         return autoRoomFoundShulkers > 0 ? "shulkers:" + autoRoomFoundShulkers : "empty";
     }
 
