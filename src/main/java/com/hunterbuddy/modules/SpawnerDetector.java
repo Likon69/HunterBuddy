@@ -629,6 +629,8 @@ public class SpawnerDetector extends Module {
     private boolean autoAreaLoaderWasOn, autoPitch40WasOn, autoElytraRecastWasOn;
     private float autoTrailYaw;
     private boolean autoTrailYawSaved;
+    private float autoWaypointYaw;
+    private boolean autoWaypointYawSaved;
     private boolean autoMemoryChaseFromFlightModule;
     private boolean autoSavedAllowPlace;
     private List<Item> autoSavedThrowawayItems;
@@ -1087,6 +1089,7 @@ public class SpawnerDetector extends Module {
         autoSoloCruiseAltitude = 0.0;
         autoMemoryChaseFromFlightModule = false;
         autoTrailYawSaved = false;
+        autoWaypointYawSaved = false;
         autoFailRecoveries = 0;
         autoResumeClimbTries = 0;
         autoClimbStuckWaterReturns = 0;
@@ -5560,6 +5563,9 @@ public class SpawnerDetector extends Module {
                     if (fm instanceof TrailFollower tf && fm.isActive()) {
                         autoTrailYaw = tf.headingYaw();
                         autoTrailYawSaved = true;
+                    } else if (fm instanceof WaypointFollower) {
+                        autoWaypointYaw = mc.player.getYaw();
+                        autoWaypointYawSaved = true;
                     }
                     fm.toggle();
                     autoMemoryChaseFromFlightModule = true;
@@ -5950,6 +5956,9 @@ public class SpawnerDetector extends Module {
                 if (fm instanceof TrailFollower tf && fm.isActive()) {
                     autoTrailYaw = tf.headingYaw();
                     autoTrailYawSaved = true;
+                } else if (fm instanceof WaypointFollower) {
+                    autoWaypointYaw = mc.player.getYaw();
+                    autoWaypointYawSaved = true;
                 }
                 fm.toggle();
             }
@@ -13370,6 +13379,9 @@ public class SpawnerDetector extends Module {
                         mc.player.setYaw(autoTrailYaw);
                         mc.player.setPitch(0.0f);
                         autoLog("RESUME", autoSite.center, "yaw restored for TrailFollower");
+                    } else if (autoWaypointYawSaved && fm instanceof WaypointFollower) {
+                        mc.player.setYaw(autoWaypointYaw);
+                        autoLog("RESUME", autoSite.center, "yaw restored for WaypointFollower=" + autoWaypointYaw);
                     }
                     fm.toggle();
                     autoLog("RESUME", autoSite.center, "re-enabled " + fm.name);
