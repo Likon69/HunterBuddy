@@ -213,7 +213,7 @@ public class SpiralCoverageHud extends HudElement {
         double w = box;
         w = Math.max(w, renderer.textWidth("ZIGZAG PAUSED COMBAT 999s next 88888 b", shadow, scale));
         w = Math.max(w, renderer.textWidth("turns 88888 lines 88888 88888/88888", shadow, scale));
-        w = Math.max(w, renderer.textWidth("spawn 8888.8 km · origin 8888.8 km · flown 8888.8 km", shadow, scale));
+        w = Math.max(w, renderer.textWidth("center 8888.8 km · flown 8888.8 km", shadow, scale));
         w = Math.max(w, renderer.textWidth("progress 100%", shadow, scale));
         double h = lineH + gap + box + gap + lineH * 3.0 + gap + barH;
 
@@ -279,12 +279,13 @@ public class SpiralCoverageHud extends HudElement {
         int segCount = pts.size() - 1;
         int curSeg = clampSegment(preview.flownSegments, segCount);
         double progress = segmentProgress(pts, curSeg, curX, curZ);
-        double easedProgress = anim ? pulse.ease("progress", progress, dt, 0.25) : progress;
         int turns = Math.max(0, preview.flownSegments);
         String mode = modeName(preview.label);
+        double shown = shownProgress(mode, pts, curSeg, progress);
+        double easedProgress = anim ? pulse.ease("progress", shown, dt, 0.25) : shown;
         String detail = safeText(preview.detail);
-        String distanceLine = distanceLine(preview, pts, curSeg, progress);
-        String progressLine = "progress " + Math.round(progress * 100.0) + "%";
+        String distanceLine = distanceLine(mode, preview, pts, curSeg, progress);
+        String progressLine = progressLine(mode, shown);
         float turnFresh = anim ? pulse.freshness("turns", String.valueOf(turns), 900L) : 0.0f;
         float badgeFresh = anim ? pulse.freshness("badge", state.badge, 900L) : 0.0f;
         Color turnColor = HudPulse.tint(HudPulse.Style.Subtle, valueColor.get(), currentColor.get(), turnFresh);
@@ -485,19 +486,46 @@ public class SpiralCoverageHud extends HudElement {
         return "";
     }
 
-    private static String distanceLine(AreaLoaderMode.CoveragePreview preview, List<double[]> pts, int curSeg, double progress) {
-        double spawn = Math.hypot(preview.currentX, preview.currentZ);
+    private static String distanceLine(String mode, AreaLoaderMode.CoveragePreview preview, List<double[]> pts, int curSeg, double progress) {
         double origin = validPoint(pts.get(0)) ? Math.hypot(preview.currentX - pts.get(0)[0], preview.currentZ - pts.get(0)[1]) : 0.0;
-        String s = "spawn " + formatDistance(spawn) + " · origin " + formatDistance(origin);
-        if (hasFlownDistance(preview.label)) {
-            s += " · flown " + formatDistance(pathLength(pts, curSeg, progress));
-        }
-        return s;
+        return ("SPIRAL".equals(mode) ? "center " : "start ") + formatDistance(origin)
+            + " · flown " + formatDistance(pathLength(pts, curSeg, progress));
     }
 
-    private static boolean hasFlownDistance(String label) {
-        String s = safeText(label).toLowerCase();
-        return "zigzag".equals(s) || "rect".equals(s) || "circle".equals(s);
+    private static double shownProgress(String mode, List<double[]> pts, int curSeg, double progress) {
+        if ("RECT".equals(mode)) {
+            double total = pathLength(pts, pts.size() - 1, 0.0);
+            return total > 0.0 ? MathHelper.clamp(pathLength(pts, curSeg, progress) / total, 0.0, 1.0) : 0.0;
+        }
+        if ("CIRCLE".equals(mode)) {
+            double perTurn = (pts.size() - 1 - curSeg) / 2.0;
+            if (perTurn <= 0.0) return 0.0;
+            double turnsDone = (curSeg + progress) / perTurn;
+            return turnsDone - Math.floor(turnsDone);
+        }
+        if ("SPIRAL".equals(mode)) {
+            int lapStart = curSeg - curSeg % 4;
+            double lap = 0.0;
+            double done = 0.0;
+            for (int i = lapStart; i < lapStart + 4 && i + 1 < pts.size(); i++) {
+                double len = segmentLength(pts.get(i), pts.get(i + 1));
+                lap += len;
+                if (i < curSeg) done += len;
+                else if (i == curSeg) done += len * progress;
+            }
+            return lap > 0.0 ? MathHelper.clamp(done / lap, 0.0, 1.0) : 0.0;
+        }
+        return progress;
+    }
+
+    private static String progressLine(String mode, double shown) {
+        String percent = Math.round(shown * 100.0) + "%";
+        return switch (mode) {
+            case "SPIRAL", "CIRCLE" -> "lap " + percent;
+            case "RECT" -> "progress " + percent;
+            case "ZIGZAG" -> "leg " + percent;
+            default -> "side " + percent;
+        };
     }
 
     private static String formatDistance(double blocks) {
