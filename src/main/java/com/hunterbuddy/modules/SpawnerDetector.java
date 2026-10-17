@@ -822,6 +822,8 @@ public class SpawnerDetector extends Module {
     private BlockPos autoTunnelGoal;
     private BlockPos autoTunnelStep;
     private boolean autoTunnelBaritone;
+    private boolean autoTunnelDirectRetried;
+    private BlockPos autoTunnelBlocked;
     private List<Block> autoTunnelDisallowedBreaking;
     private double autoTunnelBestDist;
     private int autoTunnelBestElapsed;
@@ -8741,6 +8743,7 @@ public class SpawnerDetector extends Module {
         if (stateTicks == 1) {
             autoBaritoneRetries = 0;
             autoTunnelBaritone = false;
+            autoTunnelDirectRetried = false;
             resetShaftDryRecovery();
             autoPaused = false;
             autoPauseReason = null;
@@ -8804,6 +8807,20 @@ public class SpawnerDetector extends Module {
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
         } else if ((failed && elapsed - autoTunnelBestElapsed >= 10 * 20)
             || elapsed - autoTunnelBestElapsed > 30 * 20) {
+            BlockState blockedState = mc.world.getBlockState(autoTunnelBlocked);
+            if (!autoTunnelDirectRetried && !blockedState.isOf(Blocks.SPAWNER) && !isContainerPresent(autoTunnelBlocked)
+                && !isLava(blockedState) && (isTunnelOpen(autoTunnelBlocked) || blockedState.getHardness(mc.world, autoTunnelBlocked) >= 0)) {
+                autoTunnelDirectRetried = true;
+                autoLog("TUNNEL", autoSite.center, "baritone failed, resuming direct passage from " + feet.toShortString());
+                releaseAllAutoKeys();
+                if (bt != null) bt.getPathingBehavior().cancelEverything();
+                restoreTunnelSettings();
+                BaritoneAPI.getSettings().allowPlace.value = true;
+                autoTunnelBaritone = false;
+                autoTunnelStep = feet;
+                autoTunnelBestElapsed = elapsed;
+                return;
+            }
             autoLog("TUNNEL", autoSite.center, "tunnel failed: no path around blocked direct passage");
             autoRunAbandoned = true;
             releaseAllAutoKeys();
@@ -8920,6 +8937,7 @@ public class SpawnerDetector extends Module {
         mc.interactionManager.cancelBlockBreaking();
         autoBreachPos = null;
         autoTunnelBaritone = true;
+        autoTunnelBlocked = blocked;
         autoTunnelBestElapsed = stateTicks - autoPausedTicks;
         autoLog("TUNNEL", autoSite.center, "direct blocked=" + blocked.toShortString()
             + " block=" + Registries.BLOCK.getId(mc.world.getBlockState(blocked).getBlock()).getPath()
