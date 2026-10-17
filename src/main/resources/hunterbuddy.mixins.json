@@ -35,7 +35,9 @@
     "EntityScaleMixin",
     "MeteorNametagsHeightMixin",
     "LegacyModuleNameMixin",
-    "LegacyHudNameMixin"
+    "LegacyHudNameMixin",
+    "ChatScreenOverlayMixin",
+    "KeyboardCharMixin"
   ],
   "injectors": {
     "defaultRequire": 1
