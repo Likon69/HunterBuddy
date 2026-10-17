@@ -3951,6 +3951,12 @@ public class SpawnerDetector extends Module {
 
         List<BlockPos> horizCells = new ArrayList<>();
         int hx = x, hz = z;
+        if (sideEntryAlongZ(room, x, z)) {
+            while (hz != tz) {
+                hz += Integer.signum(tz - hz);
+                horizCells.add(new BlockPos(hx, cy, hz));
+            }
+        }
         while (hx != tx) {
             hx += Integer.signum(tx - hx);
             horizCells.add(new BlockPos(hx, cy, hz));
@@ -4059,15 +4065,18 @@ public class SpawnerDetector extends Module {
         return new SideHoleCost(bottomFeet, tx, tz, cost, entryBlocks, null);
     }
 
+    private boolean sideEntryAlongZ(Room room, int x, int z) {
+        boolean outsideX = x < room.cx() - room.k() || x > room.cx() + room.k();
+        boolean outsideZ = z < room.cz() - room.p() || z > room.cz() + room.p();
+        return !(outsideZ && (!outsideX || Math.abs(z - room.cz()) >= Math.abs(x - room.cx())));
+    }
+
     private BlockPos resolveSideHoleEntry(Room room, int x, int z, int tx, int tz, BlockPos.Mutable cursor) {
         if (!sideHoleEntryBlocked(tx, room.cy(), tz, cursor)) return new BlockPos(tx, room.cy(), tz);
 
-        int axisX = 0;
-        int axisZ = 0;
-        boolean outsideX = x < room.cx() - room.k() || x > room.cx() + room.k();
-        boolean outsideZ = z < room.cz() - room.p() || z > room.cz() + room.p();
-        if (outsideZ && (!outsideX || Math.abs(z - room.cz()) >= Math.abs(x - room.cx()))) axisX = 1;
-        else axisZ = 1;
+        boolean alongZ = sideEntryAlongZ(room, x, z);
+        int axisX = alongZ ? 0 : 1;
+        int axisZ = alongZ ? 1 : 0;
 
         int[][] tries = {{axisX, axisZ}, {-axisX, -axisZ}};
         for (int[] t : tries) {
@@ -7551,7 +7560,10 @@ public class SpawnerDetector extends Module {
             BlockPos t = col.sideEntry();
             int nx = feet.getX();
             int nz = feet.getZ();
-            if (feet.getX() != t.getX()) nx += Integer.signum(t.getX() - feet.getX());
+            if (sideEntryAlongZ(room, col.x(), col.z())) {
+                if (feet.getZ() != t.getZ()) nz += Integer.signum(t.getZ() - feet.getZ());
+                else nx += Integer.signum(t.getX() - feet.getX());
+            } else if (feet.getX() != t.getX()) nx += Integer.signum(t.getX() - feet.getX());
             else nz += Integer.signum(t.getZ() - feet.getZ());
             BlockPos nHead = new BlockPos(nx, cy + 1, nz);
             BlockPos nFloor = new BlockPos(nx, cy, nz);
