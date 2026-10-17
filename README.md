@@ -69,7 +69,7 @@ Restocking and inventory handling tools.
 | `shulker-peek` | Draws the main item of each shulker box over its icon, in inventories and on the hotbar, with a mark when the box holds several kinds of items. |
 | `shulker-sorter` | Sorts the shulkers and loose items from your input chests into category chests, walking between them with Baritone. Register chests with `tag-key` and the buttons in its settings; `dry-run` reports where items would go without moving them. It pauses while another player is in sight. |
 
-### Utility (15)
+### Utility (16)
 
 | Meteor name | Description |
 |---|---|
@@ -83,23 +83,25 @@ Restocking and inventory handling tools.
 | `inventory-cleaner` | Throws out every item not on its list (or only the listed ones in blacklist mode), one stack every `delay` ticks. The hotbar is optional; works in the inventory, a crafting table or a container. |
 | `kick-alarm` | Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed. |
 | `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. |
+| `messenger` | Moves private messages into small movable glass windows over the chat, one per player, with an unread counter button. Replies go out through `reply-command` (`msg` by default), spaced by `send-interval`. `hide-from-main-chat`, `friends-only`, `ignored-names` and `stream-mode` keep the chat clean, and `keep-history` brings conversations back next session. |
 | `mlep-air-place` | Places a block in air where your crosshair is pointing. |
 | `mlep-scaffold` | Places blocks under you as you move, ahead of your motion, with `tower`, `air-place` and `safewalk` options. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatic `speed-multiplier`, and can brake near terrain. Can trace every boosted tick to a CSV for tuning. |
 | `Villager Trading` | Buys experience bottles from clerics with emeralds, visiting each cleric in range with Baritone while the price stays under `experience-max-price`. Restocks emeralds from a chest, drops bottles in another, then switches off and walks home. |
 
-## Commands (3)
+## Commands (4)
 
 Commands use the configured Meteor command prefix.
 
 | Command | Description |
 |---|---|
 | `arealoaderreset` | Delete every AreaLoader saved profile, not just the selected one. |
+| `messenger` | Open a conversation (`open <name>`), clear every conversation (`clear`), or `ignore` and `unignore` a player. |
 | `sorter` | Setup and withdrawal for the shulker sorter: `input`, `dest`, `reserve`, `station`, `remove`, `list`, `get`, `categories`, `check`, `reload`, `resetfull`. |
 | `trails` | List, restore, forget one or clear the trails chunk-radar remembers. |
 
-## HUD elements (23)
+## HUD elements (24)
 
 All HUD elements are registered in the `HunterBuddy` HUD group.
 
@@ -112,6 +114,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `FollowerHeading` | Heading tape for the waypoint follower: the target as a sliding diamond, the next turns as ghosts. |
 | `FollowerRoute` | The follower's route as a line of milestones, with a halo on the current one and +N for the rest. |
 | `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
+| `MessengerBubble` | Round button showing how many private messages are unread. Click it while the chat is open to show the contact list. |
 | `movement-status` | Current sneaking and sprinting status. |
 | `Odometer` | Session distance on mechanical drums, lifetime total below. |
 | `Performance` | FPS, ping and server TPS in one line, colored by level and flashing on spikes and drops. |
