@@ -8887,7 +8887,7 @@ public class SpawnerDetector extends Module {
             startTunnelBaritone(floor, "lava below passage");
             return;
         }
-        boolean needsFloor = floorState.getCollisionShape(mc.world, floor).isEmpty();
+        boolean needsFloor = floorState.getCollisionShape(mc.world, floor).isEmpty() && floorState.getFluidState().isEmpty();
         Direction side = needsFloor ? selfAscendPlaceSide(floor) : null;
         if (needsFloor && (!floorState.isReplaceable() || side == null || ensureObsidianInHotbar() < 0)) {
             startTunnelBaritone(floor, "no safe obsidian support");
