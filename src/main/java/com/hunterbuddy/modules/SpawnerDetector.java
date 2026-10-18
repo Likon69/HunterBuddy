@@ -9621,6 +9621,9 @@ public class SpawnerDetector extends Module {
         }
 
         BlockPos feet = mc.player.getBlockPos();
+        BlockPos target = autoTunnelTrail.get(autoTunnelTrail.size() - 1);
+        boolean descending = feet.getX() == target.getX() && feet.getZ() == target.getZ() && target.getY() < feet.getY();
+        if (descending) Utils.setPressed(mc.options.forwardKey, false);
         for (int i = autoTunnelTrail.size() - 2; i >= 0; i--) {
             BlockPos p = autoTunnelTrail.get(i);
             int d = Math.max(Math.abs(p.getX() - feet.getX()), Math.max(Math.abs(p.getY() - feet.getY()), Math.abs(p.getZ() - feet.getZ())));
@@ -9638,7 +9641,6 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        BlockPos target = autoTunnelTrail.get(autoTunnelTrail.size() - 1);
         double dx = (target.getX() + 0.5) - mc.player.getX();
         double dz = (target.getZ() + 0.5) - mc.player.getZ();
         double dxz = Math.hypot(dx, dz);
@@ -9745,20 +9747,25 @@ public class SpawnerDetector extends Module {
                 autoExitTrailSkipped = 0;
             } else {
                 releaseAllAutoKeys();
-                autoMineTick("EXIT", autoExitTrailBreakPos, false);
+                autoMineTick("EXIT", autoExitTrailBreakPos, descending && autoExitTrailBreakPos.equals(feet.down()));
                 return;
             }
         }
 
-        if (autoExitTrailTicks >= 40) {
-            BlockPos obstacle = findTrailRetraceObstacle(target);
+        BlockPos below = feet.down();
+        BlockState belowState = mc.world.getBlockState(below);
+        boolean descendNow = descending && !mc.player.isTouchingWater() && mc.player.isOnGround()
+            && !isOpenState(belowState, below) && belowState.getHardness(mc.world, below) >= 0
+            && !isTunnelProtected(below) && !isLavaNearShaft(below, feet) && !isLavaNearShaft(below.down(), below);
+        if (descendNow || autoExitTrailTicks >= 40) {
+            BlockPos obstacle = descendNow ? below : findTrailRetraceObstacle(target);
             if (obstacle != null) {
                 autoExitTrailBreakPos = obstacle;
                 autoExitTrailBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(obstacle).getBlock()).getPath();
                 autoLog("EXIT", autoSite.center, String.format("trail blocked at %d,%d,%d block=%s, breaking",
                     obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoExitTrailBreakLabel));
                 releaseAllAutoKeys();
-                autoMineTick("EXIT", autoExitTrailBreakPos, false);
+                autoMineTick("EXIT", autoExitTrailBreakPos, descending && autoExitTrailBreakPos.equals(below));
                 return;
             }
         }
@@ -9783,8 +9790,8 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        mc.player.setYaw((float) Math.toDegrees(Math.atan2(-dx, dz)));
-        Utils.setPressed(mc.options.forwardKey, true);
+        if (!descending) mc.player.setYaw((float) Math.toDegrees(Math.atan2(-dx, dz)));
+        Utils.setPressed(mc.options.forwardKey, !descending);
         Utils.setPressed(mc.options.sprintKey, false);
         Utils.setPressed(mc.options.jumpKey, target.getY() > feet.getY() || mc.player.horizontalCollision);
         Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && !mc.player.isOnGround() && target.getY() < feet.getY());
