@@ -358,6 +358,7 @@ public class ElytraBounce extends Module {
    private volatile long fakeFlyLastStartAge = Long.MIN_VALUE / 2;
    private long mealPreparedAge = Long.MIN_VALUE / 2;
    private boolean mealPause;
+   private net.minecraft.client.network.ClientPlayerEntity timerPlayer;
 
    private volatile int tickCount;
    private final ArrayDeque<Integer> pendingPongs = new ArrayDeque<>();
@@ -748,6 +749,10 @@ public class ElytraBounce extends Module {
          this.releaseHeldGlideState();
          this.flushPackets();
          return;
+      }
+      if (this.mc.player != this.timerPlayer) {
+         this.timerPlayer = this.mc.player;
+         this.resetPlayerTimers();
       }
       this.airTicks = this.mc.player.isOnGround() ? 0 : this.airTicks + 1;
       this.logGliderWear();
@@ -1271,6 +1276,19 @@ public class ElytraBounce extends Module {
    private boolean mealInProgress() {
       AutoEatSync eat = Modules.get().get(AutoEatSync.class);
       return eat != null && eat.isActive() && eat.isEating();
+   }
+
+   private void resetPlayerTimers() {
+      this.jumpTick = this.mc.player.age;
+      this.heldSince = 0L;
+      this.fakeFlyBurstHand = null;
+      this.fakeFlyPendingSequence = -1;
+      this.fakeFlyAckedAt = -1L;
+      this.fakeFlyDesynced = false;
+      this.fakeFlyPairReady = true;
+      this.fakeFlyLastStartAge = Long.MIN_VALUE / 2;
+      this.mealPreparedAge = Long.MIN_VALUE / 2;
+      this.mealPause = false;
    }
 
    public boolean enabled() {
