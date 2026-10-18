@@ -349,6 +349,9 @@ public class ElytraBounce extends Module {
    private Hand fakeFlyBurstHand = null;
    private int fakeFlyPendingSequence = -1;
    private long fakeFlyAckedAt = -1L;
+   private int fakeFlySentSequence = -1;
+   private long fakeFlySentAge = Long.MIN_VALUE / 2;
+   private int fakeFlyServerSequence = -1;
    private boolean fakeFlyDesynced = false;
    private boolean fakeFlyArmedForSend = false;
    private String fakeFlyBlockedReason = null;
@@ -407,6 +410,10 @@ public class ElytraBounce extends Module {
          && ack.sequence() >= this.fakeFlyPendingSequence) {
          this.fakeFlyAckedAt = this.mc.player.age;
       }
+      if (event.packet instanceof PlayerActionResponseS2CPacket ack) {
+         int sequence = ack.sequence();
+         this.mc.execute(() -> this.fakeFlyServerSequence = sequence);
+      }
       if (event.packet instanceof PlayerPositionLookS2CPacket) {
          this.teleports.incrementAndGet();
          if (this.enabled() && this.bounce.get() && this.realGliding) {
@@ -445,6 +452,8 @@ public class ElytraBounce extends Module {
       if (this.fakeFlyArmedForSend && event.packet instanceof PlayerInteractItemC2SPacket interact) {
          this.fakeFlyPendingSequence = interact.getSequence();
          this.fakeFlyAckedAt = -1L;
+         this.fakeFlySentSequence = interact.getSequence();
+         this.fakeFlySentAge = this.mc.player.age;
       }
       if (event.packet instanceof net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket move) {
          this.fakeFlyPrevSentOnGround = this.fakeFlyLastSentOnGround;
@@ -1157,6 +1166,11 @@ public class ElytraBounce extends Module {
          this.fakeFlyPairReady = true;
          this.fakeFlyBlockedReason = null;
 
+         if (this.fakeFlySentSequence > this.fakeFlyServerSequence && age - this.fakeFlySentAge < 10L) {
+            BounceProbe.get().line("FAKEFLY-WAIT", "reason=ack");
+            return;
+         }
+
          if (age % 2L != 0L || screenOpen) return;
 
          ItemStack main = this.mc.player.getStackInHand(Hand.MAIN_HAND);
@@ -1284,6 +1298,9 @@ public class ElytraBounce extends Module {
       this.fakeFlyBurstHand = null;
       this.fakeFlyPendingSequence = -1;
       this.fakeFlyAckedAt = -1L;
+      this.fakeFlySentSequence = -1;
+      this.fakeFlySentAge = Long.MIN_VALUE / 2;
+      this.fakeFlyServerSequence = -1;
       this.fakeFlyDesynced = false;
       this.fakeFlyPairReady = true;
       this.fakeFlyLastStartAge = Long.MIN_VALUE / 2;
