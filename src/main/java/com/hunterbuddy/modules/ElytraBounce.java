@@ -1237,6 +1237,17 @@ public class ElytraBounce extends Module {
       if (SwapWindow.silent()) this.mc.player.setSprinting(false);
    }
 
+   public boolean isBouncing() {
+      return this.bounce.get() && this.enabled() && this.autoJumpAllowed();
+   }
+
+   public boolean prepareForEating() {
+      if (!this.bounce.get() || !this.enabled() || !this.fakeFly.get()) return true;
+      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
+      ItemStack held = this.mc.player.getMainHandStack();
+      return !(isGlider(worn) && isChestPiece(held) || isChestPiece(worn) && isGlider(held));
+   }
+
    public boolean enabled() {
       return this.isActive() && !this.paused && !SwapWindow.silent() && this.rubberBandCooldown <= 0
          && this.mc.player != null && this.mc.world != null

@@ -9,7 +9,6 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import com.hunterbuddy.HunterBuddyAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.SlotUtils;
 import meteordevelopment.orbit.EventHandler;
@@ -17,6 +16,7 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 
 public class AutoEatSync extends Module {
@@ -186,7 +186,7 @@ public class AutoEatSync extends Module {
             holdBaritoneFireworks(false);
         }
 
-        if (mc.player == null || mc.world == null || !mc.player.isAlive()) {
+        if (mc.player == null || mc.world == null || mc.interactionManager == null || !mc.player.isAlive()) {
             if (eating) stopEating("disabled");
             return;
         }
@@ -266,6 +266,8 @@ public class AutoEatSync extends Module {
             holdBaritoneFireworks(false);
         }
 
+        if (mc.player.isUsingItem() && mc.player.getStackInHand(mc.player.getActiveHand()).get(DataComponentTypes.FOOD) != null) return;
+
         boolean wantsToEat = shouldEat();
         if (wantsToEat && safeToStart() && (emergency() || (tickCounter >= noBiteRetryAfterTick && tickCounter >= handRetryAfterTick))) {
             int slot = findSlot();
@@ -304,9 +306,16 @@ public class AutoEatSync extends Module {
         return elytraMustStop() || combatMustStop();
     }
 
+    private boolean bouncing() {
+        ElytraBounce bounce = Modules.get().get(ElytraBounce.class);
+        return bounce != null && bounce.isBouncing();
+    }
+
     private boolean elytraMustStop() {
-        if (!mc.player.isGliding()) return false;
+        boolean bouncing = bouncing();
+        if (!mc.player.isGliding() && !bouncing) return false;
         if (!eatInFlight.get()) return true;
+        if (bouncing) return mc.player.horizontalCollision;
 
         Vec3d velocity = mc.player.getVelocity();
         double hSpeed = Math.hypot(velocity.x, velocity.z);
@@ -319,13 +328,14 @@ public class AutoEatSync extends Module {
     }
 
     private String mustStopReason() {
-        if (mc.player.isGliding()) {
+        boolean bouncing = bouncing();
+        if (mc.player.isGliding() || bouncing) {
             if (!eatInFlight.get()) return "disabled";
 
             Vec3d velocity = mc.player.getVelocity();
             double hSpeed = Math.hypot(velocity.x, velocity.z);
-            if (hSpeed < flightReleaseSpeed.get()) return "rocket-window";
-            if (mc.player.horizontalCollision || mc.player.verticalCollision) return "collision";
+            if (!bouncing && hSpeed < flightReleaseSpeed.get()) return "rocket-window";
+            if (mc.player.horizontalCollision || (!bouncing && mc.player.verticalCollision)) return "collision";
         }
 
         KillAuraPlus killAura = Modules.get().get(KillAuraPlus.class);
@@ -336,6 +346,7 @@ public class AutoEatSync extends Module {
 
     private String currentContext() {
         if (regearRunning()) return "regear-survival";
+        if (bouncing()) return "bounce";
         if (mc.player.isGliding()) return "flight";
 
         KillAuraPlus killAura = Modules.get().get(KillAuraPlus.class);
@@ -353,12 +364,13 @@ public class AutoEatSync extends Module {
     private boolean safeToStart() {
         if (emergency()) return true;
 
-        if (mc.player.isGliding()) {
+        boolean bouncing = bouncing();
+        if (mc.player.isGliding() || bouncing) {
             if (!eatInFlight.get()) return false;
 
             Vec3d velocity = mc.player.getVelocity();
             double hSpeed = Math.hypot(velocity.x, velocity.z);
-            if (hSpeed < flightMinSpeed.get() || mc.player.horizontalCollision || mc.player.verticalCollision) return false;
+            if (mc.player.horizontalCollision || (!bouncing && (hSpeed < flightMinSpeed.get() || mc.player.verticalCollision))) return false;
         }
 
         KillAuraPlus killAura = Modules.get().get(KillAuraPlus.class);
@@ -460,12 +472,14 @@ public class AutoEatSync extends Module {
 
     private void beginEating(int slot) {
         if (waitingForQuiet(slot)) return;
+        ElytraBounce bounce = Modules.get().get(ElytraBounce.class);
+        if (bounce != null && !bounce.prepareForEating()) return;
 
         if (prevSlot == -1) prevSlot = mc.player.getInventory().getSelectedSlot();
         if (!changeSlot(slot)) return;
 
         mc.options.useKey.setPressed(true);
-        if (!mc.player.isUsingItem()) Utils.rightClick();
+        if (!mc.player.isUsingItem()) useFood();
 
         eating = true;
         eatTicks = 0;
@@ -487,6 +501,10 @@ public class AutoEatSync extends Module {
         }
     }
 
+    private void useFood() {
+        mc.interactionManager.interactItem(mc.player, eatSlot == SlotUtils.OFFHAND ? Hand.OFF_HAND : Hand.MAIN_HAND);
+    }
+
     private void continueEating() {
         mc.options.useKey.setPressed(true);
 
@@ -496,7 +514,7 @@ public class AutoEatSync extends Module {
         }
 
         if (wasUsingItem) {
-            if (eatTicks >= mealUseTime) {
+            if (tickCounter - biteStartTick >= mealUseTime) {
                 if (debug.get()) info("[AutoEatSync] finished after " + eatTicks + " ticks");
                 stopEating("finished");
                 return;
@@ -505,13 +523,13 @@ public class AutoEatSync extends Module {
             wasUsingItem = false;
             restartSent = false;
             biteStartTick = tickCounter;
-            Utils.rightClick();
+            useFood();
             if (debug.get()) info("[AutoEatSync] bite cut after " + eatTicks + " of " + mealUseTime + " ticks — biting again");
             return;
         }
 
         if (eatTicks > 10 && !restartSent) {
-            Utils.rightClick();
+            useFood();
             restartSent = true;
         }
     }
