@@ -72,8 +72,9 @@ public class MineRender {
         }
 
         for (HMine.MiningData d : active) {
-            if (!this.cleared(world, d.pos()) && !this.fades.containsKey(d)) {
-                this.fades.put(d, new Fade(true, look.fadeMs()));
+            if (!this.cleared(world, d.pos())) {
+                Fade fade = this.fades.remove(d);
+                this.fades.put(d, fade == null ? new Fade(true, look.fadeMs()) : fade);
             }
         }
 
@@ -157,7 +158,7 @@ public class MineRender {
         VoxelShape shape = state.getOutlineShape(world, pos);
         Box local = (shape.isEmpty() ? VoxelShapes.fullCube() : shape).getBoundingBox();
         Box full = local.offset(pos);
-        boolean finished = cleared || damage >= 0.95F;
+        boolean finished = cleared || damage >= total * 0.95F;
         SettingColor base = finished ? look.done() : look.mine();
 
         if (look.outline()) {

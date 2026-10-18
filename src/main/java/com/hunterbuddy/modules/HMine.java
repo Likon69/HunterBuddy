@@ -1,12 +1,14 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.mine.BreakMath;
 import com.hunterbuddy.modules.mine.EnemyBlocks;
 import com.hunterbuddy.modules.mine.MineRender;
 import com.hunterbuddy.modules.mine.ToolHold;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.util.GrimBreakBalance;
+import com.hunterbuddy.util.ServerSlot;
 import com.hunterbuddy.util.SessionStats;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,9 +48,12 @@ import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 public class HMine extends Module {
     public enum SpeedmineMode {
@@ -83,6 +88,7 @@ public class HMine extends Module {
 
     private final List<MiningData> active = new ArrayList<>();
     private final List<MiningData> waiting = new ArrayList<>();
+    private final DoubleQueue doubleQueue = new DoubleQueue();
 
     private final Setting<SpeedmineMode> mode = this.sgGeneral.add(new EnumSetting.Builder<SpeedmineMode>()
         .name("mode")
@@ -144,12 +150,13 @@ public class HMine extends Module {
 
     private final Setting<Boolean> queue = this.sgGeneral.add(new BoolSetting.Builder()
         .name("queue")
-        .description("Queue clicked blocks and mine one at a time, or two with double-break. Waiting blocks send no mining packets.")
+        .description("Queue clicked blocks. Double-break uses concurrent primary and secondary targets with the Tim packet sequence.")
         .defaultValue(false)
         .visible(this::packetMode)
         .onChanged(value -> {
             if (!value) {
                 this.waiting.clear();
+                if (this.doubleQueue != null) this.doubleQueue.clearWaiting();
             }
         })
         .build());
@@ -412,6 +419,7 @@ public class HMine extends Module {
         private float damage;
         private float previousDamage;
         private boolean started;
+        private int queueRetry;
 
         public MiningData(BlockPos pos, Direction direction) {
             this.position = pos.toImmutable();
@@ -495,6 +503,10 @@ public class HMine extends Module {
         }
     }
 
+    private boolean doubleQueueMode() {
+        return this.queue.get() && this.doubleBreak.get() && this.packetMode();
+    }
+
     private boolean packetMode() {
         return this.mode.get() == SpeedmineMode.PACKET;
     }
@@ -568,6 +580,7 @@ public class HMine extends Module {
     }
 
     private boolean busy(BlockPos pos) {
+        if (this.doubleQueue.running && this.doubleQueue.retryHas(pos)) return true;
         for (MiningData d : this.active) {
             if (d.position.equals(pos)) {
                 return true;
@@ -641,6 +654,7 @@ public class HMine extends Module {
 
     @Override
     public void onActivate() {
+        this.doubleQueue.stop(false);
         this.active.clear();
         this.capacity = this.doubleBreak.get() ? 2 : 1;
         this.tool.forget();
@@ -654,6 +668,7 @@ public class HMine extends Module {
             return;
         }
 
+        this.doubleQueue.stop(true);
         this.active.clear();
         this.waiting.clear();
         this.blockedByPress = null;
@@ -664,6 +679,7 @@ public class HMine extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        this.doubleQueue.stop(true);
         this.active.clear();
         this.waiting.clear();
         this.blockedByPress = null;
@@ -688,6 +704,7 @@ public class HMine extends Module {
         if (clearPressed && !this.queueClearKeyDown) {
             int n = this.waiting.size();
             this.waiting.clear();
+            this.doubleQueue.clearWaiting();
             this.blockedByPress = null;
             this.chat("§fQueue cleared (" + n + " block(s))");
         }
@@ -709,17 +726,22 @@ public class HMine extends Module {
         this.workedThisTick = false;
         this.swungThisTick = false;
 
-        if (this.mc.player == null || this.mc.player.isCreative() || this.mc.player.isSpectator()) {
+        if (this.mc.player == null || this.mc.world == null || this.mc.interactionManager == null || this.mc.player.isCreative() || this.mc.player.isSpectator()) {
             return;
         }
 
         this.handleKeys();
 
+        if (this.doubleQueue.running && !this.doubleQueueMode()) this.doubleQueue.stop(true);
         if (this.mode.get() == SpeedmineMode.DAMAGE) {
             return;
         }
-
         this.syncCapacity();
+        if (this.doubleQueueMode()) {
+            if (this.hunt.get()) this.runAutoMine();
+            this.doubleQueue.tick();
+            return;
+        }
 
         if (this.hunt.get() && this.packetMode()) {
             if (this.runAutoMine()) {
@@ -869,7 +891,7 @@ public class HMine extends Module {
             return;
         }
 
-        if (this.queue.get() && this.solidLeft() && this.active.size() >= (this.doubleBreak.get() ? 2 : 1)) {
+        if (this.queue.get() && this.solidLeft()) {
             return;
         }
 
@@ -994,6 +1016,10 @@ public class HMine extends Module {
     }
 
     public void queueMiningData(MiningData data) {
+        if (this.doubleQueueMode()) {
+            if (!cleared(data.state()) && !this.busy(data.position) && !this.waitingHas(data.position) && this.waiting.size() < WAITING_LIMIT) this.waiting.add(data);
+            return;
+        }
         if (cleared(data.state())) {
             return;
         }
@@ -1070,8 +1096,7 @@ public class HMine extends Module {
             return;
         }
 
-        if (useQueue && ((this.solidLeft() && this.active.size() >= (this.doubleBreak.get() ? 2 : 1))
-            || !this.waiting.isEmpty())) {
+        if (useQueue && (this.doubleQueueMode() || this.solidLeft() || !this.waiting.isEmpty())) {
             if (this.waiting.size() >= WAITING_LIMIT) {
                 return;
             }
@@ -1134,7 +1159,17 @@ public class HMine extends Module {
     private void onPacketSend(PacketEvent.Send event) {
         Packet<?> packet = event.packet;
 
-        if (!event.isCancelled() && this.grim.get()) {
+        if (this.doubleQueue.running && !this.doubleQueue.sendingCustomPacket && packet instanceof PlayerActionC2SPacket action
+            && (action.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK
+                || action.getAction() == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK
+                || action.getAction() == PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK)
+            && this.doubleQueue.isTracked(action.getPos())) {
+            event.cancel();
+            return;
+        }
+        boolean fakeQueueStart = this.doubleQueue.running && packet instanceof PlayerActionC2SPacket action
+            && action.getAction() == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK && action.getPos().getY() == 1024;
+        if (!event.isCancelled() && this.grim.get() && !fakeQueueStart) {
             long now = System.currentTimeMillis();
             if (packet instanceof PlayerActionC2SPacket action) {
                 BlockPos pos = action.getPos();
@@ -1160,10 +1195,19 @@ public class HMine extends Module {
             this.sendAction(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, action.getPos(), action.getDirection());
         }
 
-        if (packet instanceof UpdateSelectedSlotC2SPacket && this.switchReset.get() && this.packetMode() && !this.tool.ownChange()) {
-            this.syncCapacity();
-            for (MiningData d : this.active) {
-                d.restart();
+        if (packet instanceof UpdateSelectedSlotC2SPacket && this.switchReset.get() && this.packetMode() && !this.tool.ownChange() && !this.doubleQueue.ownChange) {
+            if (this.doubleQueue.running) {
+                List<MiningData> restarting = new ArrayList<>(this.active);
+                this.doubleQueue.stop(true);
+                for (int i = restarting.size() - 1; i >= 0; i--) {
+                    MiningData data = restarting.get(i);
+                    if (!cleared(data.state()) && !this.waitingHas(data.position)) this.waiting.add(0, new MiningData(data.position, data.face));
+                }
+            } else {
+                this.syncCapacity();
+                for (MiningData d : this.active) {
+                    d.restart();
+                }
             }
         }
     }
@@ -1186,6 +1230,10 @@ public class HMine extends Module {
     }
 
     private void handleUpdate(BlockUpdateS2CPacket update) {
+        if (this.doubleQueue.running) {
+            BlockPos pos = update.getPos().toImmutable();
+            this.mc.execute(() -> this.doubleQueue.onServerBlockUpdate(pos, update.getState()));
+        }
         if (!cleared(update.getState())) {
             return;
         }
@@ -1228,7 +1276,7 @@ public class HMine extends Module {
             return;
         }
 
-        this.renderer.draw3D(event, this.mc.world, this.active, d -> this.packetMined(d) ? 1.0 : this.speed.get(),
+        this.renderer.draw3D(event, this.mc.world, this.active, d -> this.doubleQueue.running ? this.doubleQueue.renderLimit(d) : this.packetMined(d) ? 1.0 : this.speed.get(),
             this.waitingPositions(), this.look());
     }
 
@@ -1240,5 +1288,597 @@ public class HMine extends Module {
         }
 
         this.renderer.draw2D(event, this.waitingPositions(), this.look());
+    }
+
+    private final class DoubleQueue {
+        private static final double BREAK_THRESHOLD = 0.7;
+        private static final long RESTART_DELAY = 300;
+        private static final long BURST_PAUSE = 275;
+        private static final int BURST_COUNT = 22;
+        private static final int FAKE_BLOCK_HEIGHT = 1024;
+        private final List<Retry> retries = new ArrayList<>();
+        private Target primary;
+        private Target secondary;
+        private MiningData last;
+        private long lastConfirmedAt;
+        private int tick;
+        private long ready;
+        private long stopped;
+        private boolean fast;
+        private boolean swapped;
+        private boolean ownChange;
+        private boolean sendingCustomPacket;
+        private boolean running;
+
+        private void tick() {
+            if (!this.running) {
+                for (MiningData data : new ArrayList<>(HMine.this.active)) {
+                    HMine.this.cancel(data);
+                    if (!cleared(data.state()) && !HMine.this.waitingHas(data.position)) HMine.this.waiting.add(0, new MiningData(data.position, data.face));
+                }
+                HMine.this.active.clear();
+                HMine.this.tool.shutDown();
+                this.running = true;
+                HunterBuddyAddon.LOG.info("h-mine: Tim double queue packet sequence active");
+            }
+            this.tick++;
+            if (HMine.this.mc.player.isUsingItem() && !HMine.this.keepWhileUsing.get()) {
+                long now = System.currentTimeMillis();
+                if (this.primary != null) this.primary.updated = now;
+                if (this.secondary != null) this.secondary.updated = now;
+                return;
+            }
+            this.promote();
+            this.clean();
+            this.update(this.secondary);
+            this.update(this.primary);
+            this.fill();
+            this.remine();
+            this.syncRender();
+        }
+
+        private void stop(boolean abort) {
+            if (abort && HMine.this.mc.player != null && HMine.this.mc.world != null) {
+                if (this.primary != null && !this.primary.finished) this.action(this.primary, PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, this.primary.pos, this.primary.side);
+                if (this.secondary != null && !this.secondary.finished) this.action(this.secondary, PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, this.secondary.pos, this.secondary.side);
+                this.revertSlot();
+            }
+            if (this.running) HMine.this.active.clear();
+            this.primary = null;
+            this.secondary = null;
+            this.last = null;
+            this.retries.clear();
+            this.tick = 0;
+            this.ready = 0;
+            this.stopped = 0;
+            this.fast = false;
+            this.swapped = false;
+            this.running = false;
+        }
+
+        private void clearWaiting() {
+            this.retries.clear();
+        }
+
+        private void promote() {
+            long now = System.currentTimeMillis();
+            var iterator = this.retries.iterator();
+            while (iterator.hasNext()) {
+                Retry retry = iterator.next();
+                if (now < retry.ready()) continue;
+                iterator.remove();
+                MiningData request = retry.request();
+                if (this.breakable(request.position, HMine.this.mc.world.getBlockState(request.position))) HMine.this.waiting.add(0, request);
+            }
+        }
+
+        private void clean() {
+            HMine.this.waiting.removeIf(request -> !this.breakable(request.position, request.state()));
+            this.retries.removeIf(retry -> !this.breakable(retry.request().position, retry.request().state()));
+        }
+
+        private void fill() {
+            if (HMine.this.waiting.isEmpty()) return;
+            if (this.primary == null) {
+                if (!this.startable()) return;
+                Target target = this.next();
+                if (target != null) this.begin(target);
+            }
+            if (this.primary == null || this.secondary != null || HMine.this.waiting.isEmpty() || !this.parkable()) return;
+            Target target = this.next();
+            if (target == null) return;
+            this.park();
+            this.begin(target);
+        }
+
+        private Target next() {
+            while (!HMine.this.waiting.isEmpty()) {
+                MiningData request = HMine.this.waiting.remove(0);
+                BlockState state = request.state();
+                if (this.breakable(request.position, state)) return new Target(request, state, this.face(request.position, request.face));
+            }
+            return null;
+        }
+
+        private void park() {
+            Target target = this.primary;
+            this.action(target, PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, target.pos, target.side);
+            MiningData request = new MiningData(target.pos, target.side);
+            request.queueRetry = target.retry;
+            Target parked = new Target(request, target.state, target.side);
+            long now = System.currentTimeMillis();
+            parked.started = now;
+            parked.updated = now;
+            parked.slot = target.slot;
+            parked.delta = this.delta(parked);
+            parked.work = Math.max(0.0, parked.delta);
+            parked.instant = parked.delta >= 1.0F;
+            parked.burst = target.burst;
+            this.secondary = parked;
+            this.primary = null;
+        }
+
+        private void remove(Target target, boolean confirmed) {
+            if (target == this.primary) this.primary = null;
+            if (target == this.secondary) {
+                this.secondary = null;
+                this.ready = System.currentTimeMillis() + (confirmed ? 50L : BURST_PAUSE);
+            }
+            if (target.arming && this.swapped) this.revertSlot();
+        }
+
+        private void fail(Target target) {
+            BlockState state = HMine.this.mc.world.getBlockState(target.pos);
+            boolean reachable = this.reachable(target.pos);
+            boolean identical = state.equals(target.state);
+            Direction side = this.face(target.pos, target.side);
+            target.side = side;
+            this.action(target, PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, target.pos, target.side);
+            this.remove(target, false);
+            if (!reachable || !identical || target.retry >= 1) return;
+            MiningData request = new MiningData(target.pos, side);
+            request.queueRetry = target.retry + 1;
+            this.retries.add(new Retry(request, System.currentTimeMillis() + 6 * 50L));
+        }
+
+        private void confirm(Target target) {
+            this.last = new MiningData(target.pos, this.face(target.pos, target.side));
+            this.lastConfirmedAt = System.currentTimeMillis();
+            this.remove(target, true);
+        }
+
+        private boolean remine() {
+            if (!HMine.this.instant.get() || this.last == null || this.primary != null || this.secondary != null) return false;
+            int window = HMine.this.instantWindow.get();
+            if (window > 0 && System.currentTimeMillis() - this.lastConfirmedAt >= window) return false;
+            BlockState state = this.last.state();
+            if (!this.breakable(this.last.position, state)) return false;
+            Direction side = this.face(this.last.position, this.last.face);
+            int slot = this.best(state, this.last.position);
+            this.select(slot);
+            this.packet(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.last.position, side);
+            this.revertSlot();
+            this.stopped = System.currentTimeMillis();
+            return true;
+        }
+
+        private boolean isTracked(BlockPos pos) {
+            if (this.primary != null && this.primary.pos.equals(pos)) return true;
+            if (this.secondary != null && this.secondary.pos.equals(pos)) return true;
+            if (HMine.this.waitingHas(pos)) return true;
+            return this.retryHas(pos);
+        }
+
+        private boolean retryHas(BlockPos pos) {
+            return this.retries.stream().anyMatch(retry -> retry.request().position.equals(pos));
+        }
+
+        private void onServerBlockUpdate(BlockPos pos, BlockState state) {
+            if (!this.running) return;
+            if (this.primary != null && this.primary.pos.equals(pos)) {
+                if (cleared(state)) this.confirm(this.primary);
+                else if (!this.breakable(pos, state)) this.remove(this.primary, false);
+            }
+            if (this.secondary != null && this.secondary.pos.equals(pos)) {
+                if (cleared(state)) this.confirm(this.secondary);
+                else if (!this.breakable(pos, state)) this.remove(this.secondary, false);
+            }
+            HMine.this.waiting.removeIf(request -> request.position.equals(pos) && !this.breakable(pos, state));
+            this.retries.removeIf(retry -> retry.request().position.equals(pos) && !this.breakable(pos, state));
+            this.syncRender();
+        }
+
+        private void syncRender() {
+            HMine.this.active.clear();
+            if (this.primary != null) this.syncRender(this.primary);
+            if (this.secondary != null) this.syncRender(this.secondary);
+        }
+
+        private void syncRender(Target target) {
+            MiningData data = target.data;
+            data.previousDamage = data.damage;
+            data.damage = (float) (target.finished ? this.limit(target) : target.work);
+            data.started = !target.arming;
+            HMine.this.active.add(data);
+        }
+
+        private double renderLimit(MiningData data) {
+            return this.primary != null && this.primary.data == data ? BREAK_THRESHOLD : 1.0;
+        }
+
+        private int selected() {
+            return ((PlayerInventoryAccessor) HMine.this.mc.player.getInventory()).getSelectedSlot();
+        }
+
+        private void setSelected(int slot) {
+            ((PlayerInventoryAccessor) HMine.this.mc.player.getInventory()).setSelectedSlot(slot);
+        }
+
+        private int best(BlockState state, BlockPos pos) {
+            return HMine.this.autoSwap.get() == Swap.OFF ? this.selected() : BreakMath.bestToolSlot(HMine.this.mc.player, state);
+        }
+
+        private void select(int slot) {
+            if (this.selected() == slot || HMine.this.autoSwap.get() == Swap.OFF) {
+                this.swapped = false;
+                return;
+            }
+            this.swapped = true;
+            this.ownChange = true;
+            try {
+                if (HMine.this.autoSwap.get() == Swap.NORMAL) this.setSelected(slot);
+                ServerSlot.get().select(slot);
+            } finally {
+                this.ownChange = false;
+            }
+        }
+
+        private void revertSlot() {
+            if (!this.swapped || HMine.this.autoSwap.get() != Swap.SILENT) return;
+            this.ownChange = true;
+            try {
+                ServerSlot.get().resync();
+            } finally {
+                this.ownChange = false;
+                this.swapped = false;
+            }
+        }
+
+        private void packet(PlayerActionC2SPacket.Action action, BlockPos pos, Direction side) {
+            if (HMine.this.mc.world == null || HMine.this.mc.interactionManager == null) return;
+            this.sendingCustomPacket = true;
+            try {
+                HMine.this.mc.interactionManager.sendSequencedPacket(HMine.this.mc.world,
+                    sequence -> new PlayerActionC2SPacket(action, pos, side, sequence));
+                if (action == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK) HMine.this.stopSentAt.put(pos.toImmutable(), System.currentTimeMillis());
+            } finally {
+                this.sendingCustomPacket = false;
+            }
+        }
+
+        private boolean startable() {
+            return this.fast || System.currentTimeMillis() - this.stopped > RESTART_DELAY;
+        }
+
+        private boolean parkable() {
+            return this.secondary == null
+                && System.currentTimeMillis() >= this.ready
+                && this.primary != null && !this.primary.arming
+                && !this.primary.finished && !this.primary.instant
+                && this.progress(this.primary) < 1.0;
+        }
+
+        private void begin(Target target) {
+            target.side = this.face(target.pos, target.side);
+            target.slot = this.best(target.state, target.pos);
+
+            this.primary = target;
+
+            this.select(target.slot);
+
+            if (this.swapped) {
+                target.arming = true;
+                target.arm = this.tick + 3;
+                return;
+            }
+
+            this.start(target);
+        }
+
+        private void start(Target target) {
+            long now = System.currentTimeMillis();
+
+            target.arming = false;
+            target.started = now;
+            target.updated = now;
+
+            target.delta = this.delta(target);
+            target.work = Math.max(0.0, target.delta);
+
+            target.instant = target.delta >= 1.0F;
+
+            this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, target.pos, target.side);
+
+            if (HMine.this.packetMode() && !target.instant) {
+                this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, this.fake(target.pos), target.side);
+            }
+
+            if (HMine.this.swing.get() == Swing.NONE) {
+                HMine.this.mc.player.networkHandler.sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+            } else {
+                HMine.this.mc.player.swingHand(Hand.MAIN_HAND);
+            }
+
+            if (target.instant) this.finish(target);
+            this.revertSlot();
+        }
+
+        private void update(Target target) {
+            if (target == null) return;
+
+            BlockState state = HMine.this.mc.world.getBlockState(target.pos);
+
+            if (state.isAir()) {
+                this.confirm(target);
+                return;
+            }
+
+            if (!this.reachable(target.pos) || !state.equals(target.state)) {
+                this.fail(target);
+                return;
+            }
+
+            if (target.arming) {
+                int slot = this.best(target.state, target.pos);
+
+                if (slot != target.slot) {
+                    target.slot = slot;
+                    this.select(slot);
+                    if (!this.swapped) {
+                        this.start(target);
+                        return;
+                    }
+                    target.arm = this.tick + 3;
+                    return;
+                }
+
+                if (this.tick < target.arm) {
+                    return;
+                }
+
+                this.start(target);
+                return;
+            }
+
+            if (target.finished) {
+                int delay = target == this.primary ? 5 : 5 * 2;
+                if (this.tick - target.finish >= delay) this.verify(target);
+                return;
+            }
+
+            int slot = this.best(target.state, target.pos);
+            if (slot != target.slot) target.slot = slot;
+
+            this.advance(target);
+
+            double progress = this.progress(target);
+            long elapsed = System.currentTimeMillis() - target.started;
+
+            if (HMine.this.packetMode()) {
+                if (!target.burst && elapsed >= BURST_PAUSE && this.expected(target) >= BURST_PAUSE && progress < 1.0) {
+                    this.burst(target);
+                }
+            }
+
+            if (progress >= 1.0) this.finish(target);
+        }
+
+        private void advance(Target target) {
+            long now = System.currentTimeMillis();
+            long elapsed = Math.max(0, now - target.updated);
+
+            target.delta = this.delta(target);
+
+            if (elapsed > 0 && target.delta > 0.0F) {
+                target.work += target.delta * elapsed / 50.0;
+            }
+
+            target.updated = now;
+        }
+
+        private void burst(Target target) {
+            this.advance(target);
+
+            target.side = this.face(target.pos, target.side);
+            target.slot = this.best(target.state, target.pos);
+
+            this.select(target.slot);
+
+            BlockPos pos = this.fake(target.pos);
+
+            for (int idx = 0; idx < BURST_COUNT; idx++) {
+                this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, target.side);
+            }
+
+            target.burst = true;
+            this.revertSlot();
+        }
+
+        private void finish(Target target) {
+            if (target.finished) return;
+
+            this.advance(target);
+
+            target.finished = true;
+            target.finish = this.tick;
+
+            this.fast = target.burst;
+
+            if (target == this.primary && !target.instant) {
+                this.action(target, PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, target.pos, target.side);
+            }
+
+            this.stopped = System.currentTimeMillis();
+        }
+
+        private void verify(Target target) {
+            BlockState state = HMine.this.mc.world.getBlockState(target.pos);
+
+            if (state.isAir()) {
+                this.confirm(target);
+                return;
+            }
+
+            this.fail(target);
+        }
+
+        private double progress(Target target) {
+            if (target.finished) return 1.0;
+
+            double limit = this.limit(target);
+            if (limit <= 0.0) return 1.0;
+
+            return Math.min(1.0, target.work / limit);
+        }
+
+        private long expected(Target target) {
+            if (target.delta <= 0.0F) return Long.MAX_VALUE;
+
+            double limit = this.limit(target);
+            double ratio = limit / target.delta - 1.0;
+
+            return (long) Math.max(0.0, ratio * 50.0);
+        }
+
+        private double limit(Target target) {
+            return target == this.primary ? BREAK_THRESHOLD : 1.0;
+        }
+
+        private float delta(Target target) {
+            int selected = this.selected();
+            this.setSelected(target.slot);
+
+            try {
+                return target.state.calcBlockBreakingDelta(HMine.this.mc.player, HMine.this.mc.world, target.pos);
+            } finally {
+                this.setSelected(selected);
+            }
+        }
+
+        private void action(Target target, PlayerActionC2SPacket.Action action, BlockPos pos, Direction side) {
+            target.side = this.face(target.pos, target.side);
+            target.slot = this.best(target.state, target.pos);
+
+            this.select(target.slot);
+            this.packet(action, pos, target.side);
+            this.revertSlot();
+        }
+
+        private BlockPos fake(BlockPos pos) {
+            return new BlockPos(pos.getX(), FAKE_BLOCK_HEIGHT, pos.getZ());
+        }
+
+        private Direction face(BlockPos pos, Direction fallback) {
+            Vec3d eye = HMine.this.mc.player.getEyePos();
+
+            Direction best = fallback == null ? Direction.UP : fallback;
+            double distance = Double.POSITIVE_INFINITY;
+
+            for (Direction side : Direction.values()) {
+                Vec3d point = this.point(pos, side);
+
+                BlockHitResult hit = HMine.this.mc.world.raycast(
+                    new RaycastContext(eye, point,
+                        RaycastContext.ShapeType.COLLIDER,
+                        RaycastContext.FluidHandling.NONE,
+                        HMine.this.mc.player
+                    )
+                );
+
+                if (hit.getType() != HitResult.Type.BLOCK ||
+                    !hit.getBlockPos().equals(pos)) {
+                    continue;
+                }
+
+                double value = eye.squaredDistanceTo(point);
+                if (value >= distance) continue;
+
+                distance = value;
+                best = hit.getSide();
+            }
+
+            if (distance < Double.POSITIVE_INFINITY) {
+                return best;
+            }
+
+            for (Direction side : Direction.values()) {
+                Vec3d point = this.point(pos, side);
+
+                double value = eye.squaredDistanceTo(point);
+                if (value >= distance) continue;
+
+                distance = value;
+                best = side;
+            }
+
+            return best;
+        }
+
+        private Vec3d point(BlockPos pos, Direction side) {
+            return new Vec3d(
+                pos.getX() + 0.5 + side.getOffsetX() * 0.49,
+                pos.getY() + 0.5 + side.getOffsetY() * 0.49,
+                pos.getZ() + 0.5 + side.getOffsetZ() * 0.49
+            );
+        }
+
+        private boolean breakable(BlockPos pos, BlockState state) {
+            return this.reachable(pos) && !state.isAir()
+                && !(state.getBlock() instanceof FluidBlock)
+                && state.getHardness(HMine.this.mc.world, pos) >= 0.0F;
+        }
+
+        private boolean reachable(BlockPos pos) {
+            Vec3d eye = HMine.this.mc.player.getEyePos();
+
+            double px = Math.max(pos.getX(), Math.min(eye.x, pos.getX() + 1.0));
+            double py = Math.max(pos.getY(), Math.min(eye.y, pos.getY() + 1.0));
+            double pz = Math.max(pos.getZ(), Math.min(eye.z, pos.getZ() + 1.0));
+
+            double dx = px - eye.x;
+            double dy = py - eye.y;
+            double dz = pz - eye.z;
+
+            return dx * dx + dy * dy + dz * dz <= HMine.this.range.get() * HMine.this.range.get();
+        }
+
+        private record Retry(MiningData request, long ready) {}
+
+        private static final class Target {
+            private final MiningData data;
+            private final BlockPos pos;
+            private final BlockState state;
+            private final int retry;
+            private Direction side;
+            private long started;
+            private long updated;
+            private float delta;
+            private double work;
+            private int slot;
+            private int arm;
+            private int finish;
+            private boolean arming;
+            private boolean burst;
+            private boolean instant;
+            private boolean finished;
+
+            private Target(MiningData data, BlockState state, Direction side) {
+                this.data = data;
+                this.pos = data.position;
+                this.state = state;
+                this.side = side;
+                this.retry = data.queueRetry;
+            }
+        }
     }
 }
