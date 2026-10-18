@@ -17,6 +17,7 @@ public final class ServerSlot {
 
     private final MinecraftClient mc = MinecraftClient.getInstance();
     private int serverSlot = -1;
+    private boolean serverPicked;
     private boolean sending;
 
     private ServerSlot() {
@@ -45,11 +46,12 @@ public final class ServerSlot {
         }
 
         int slot = packet.getSelectedSlot();
-        if (!PlayerInventory.isValidHotbarIndex(slot) || slot == this.serverSlot) {
+        if (!PlayerInventory.isValidHotbarIndex(slot) || (slot == this.serverSlot && !this.serverPicked)) {
             event.cancel();
             return;
         }
 
+        this.serverPicked = false;
         this.serverSlot = slot;
     }
 
@@ -57,6 +59,7 @@ public final class ServerSlot {
     private void onReceive(PacketEvent.Receive event) {
         if (event.packet instanceof UpdateSelectedSlotS2CPacket packet) {
             this.serverSlot = ((UpdateSelectedSlotS2CPacketAccessor) (Object) packet).getSlot();
+            this.serverPicked = true;
         }
     }
 
@@ -99,6 +102,7 @@ public final class ServerSlot {
 
         try {
             this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+            this.serverPicked = false;
             this.serverSlot = slot;
         } finally {
             this.sending = false;
