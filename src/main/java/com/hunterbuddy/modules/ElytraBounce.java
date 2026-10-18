@@ -1378,6 +1378,10 @@ public class ElytraBounce extends Module {
          probe.line("OUT-INPUT", "jump=" + input.input().jump());
       } else if (packet instanceof net.minecraft.network.packet.c2s.common.CommonPongC2SPacket pong) {
          probe.line("OUT-PONG", Integer.toString(pong.getParameter()));
+      } else if (packet instanceof net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket slot) {
+         probe.line("OUT-SLOT", Integer.toString(slot.getSelectedSlot()));
+      } else if (packet instanceof PlayerInteractItemC2SPacket use) {
+         probe.line("OUT-USE", "hand=" + use.getHand() + " seq=" + use.getSequence());
       }
    }
 
@@ -1406,6 +1410,14 @@ public class ElytraBounce extends Module {
          );
       } else if (packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping) {
          probe.line("IN-PING", Integer.toString(ping.getParameter()));
+      } else if (packet instanceof InventoryS2CPacket inventory && inventory.syncId() == 0) {
+         probe.line("IN-INV", "rev=" + inventory.revision());
+      } else if (packet instanceof PlayerActionResponseS2CPacket ack) {
+         probe.line("IN-ACK", "seq=" + ack.sequence());
+      } else if (packet instanceof net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket slot && slot.getSyncId() == 0) {
+         probe.line("IN-SLOT", "slot=" + slot.getSlot() + " item=" + slot.getStack().getItem());
+      } else if (packet instanceof net.minecraft.network.packet.s2c.play.UpdateSelectedSlotS2CPacket held) {
+         probe.line("IN-HELD", Integer.toString(((com.hunterbuddy.modules.mixin.accessors.UpdateSelectedSlotS2CPacketAccessor) (Object) held).getSlot()));
       }
    }
 
