@@ -1930,6 +1930,12 @@ public class SpawnerDetector extends Module {
         for (PendingSite ps : requeue) pendingEval.put(ps.center(), ps);
     }
 
+    private boolean roomInFreshChunk(BlockPos center) {
+        PaletteNewChunks module = ModuleManager.getModule(PaletteNewChunks.class);
+        return module != null && module.isNewChunk(center.getX() >> 4, center.getZ() >> 4,
+            net.minecraft.world.World.OVERWORLD);
+    }
+
     private boolean evaluateSite(PendingSite ps) {
         BlockPos center = ps.center();
         Room room = ps.room();
@@ -1984,11 +1990,15 @@ public class SpawnerDetector extends Module {
             return false;
         }
 
-        if (!ps.hasSpawner()) {
-            if (newChunkSkipLogged.contains(center)) {
-                rejected.add(center);
-                return false;
+        if (newChunkSkipLogged.contains(center) || roomInFreshChunk(center)) {
+            rejected.add(center);
+            if (newChunkSkipLogged.add(center)) {
+                autoLog("SITE", center, "skipped: room in a fresh chunk");
             }
+            return false;
+        }
+
+        if (!ps.hasSpawner()) {
             String houseClue = villageHouseClue(room);
             if (houseClue != null) {
                 rejected.add(center);
@@ -2959,6 +2969,7 @@ public class SpawnerDetector extends Module {
             if (site.category == Category.INTACT && !showIntact.get()) continue;
             if (site.category == Category.EMPTY && !showEmpty.get()) continue;
             if (ignoreBelowZero.get() && site.center.getY() < 0) continue;
+            if (roomInFreshChunk(site.center)) continue;
 
             BlockPos pos = site.center;
             long siteKey = BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ());
@@ -3040,6 +3051,7 @@ public class SpawnerDetector extends Module {
             if (site.category == Category.INTACT && !showIntact.get()) continue;
             if (site.category == Category.EMPTY && !showEmpty.get()) continue;
             if (ignoreBelowZero.get() && site.center.getY() < 0) continue;
+            if (roomInFreshChunk(site.center)) continue;
 
             BlockPos pos = site.center;
             long siteKey = BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ());
@@ -5340,6 +5352,7 @@ public class SpawnerDetector extends Module {
 
     private boolean qualifiesForAuto(Site site) {
         if (site.shipwreck != null) return detectShipwrecks.get() && !isVisited(site.center);
+        if (roomInFreshChunk(site.center)) return false;
         if (site.roomContainers.isEmpty()) return false;
         if (site.score >= triggerScore.get()) return true;
         return autoFarmAll.get();
