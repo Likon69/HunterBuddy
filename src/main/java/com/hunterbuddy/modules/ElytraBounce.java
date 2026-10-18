@@ -356,6 +356,8 @@ public class ElytraBounce extends Module {
    private volatile boolean fakeFlyLastSentOnGround = true;
    private volatile boolean fakeFlyPrevSentOnGround = true;
    private volatile long fakeFlyLastStartAge = Long.MIN_VALUE / 2;
+   private long mealPreparedAge = Long.MIN_VALUE / 2;
+   private boolean mealPause;
 
    private volatile int tickCount;
    private final ArrayDeque<Integer> pendingPongs = new ArrayDeque<>();
@@ -1122,6 +1124,16 @@ public class ElytraBounce extends Module {
       long age = this.mc.player.age;
       boolean screenOpen = this.mc.currentScreen instanceof HandledScreen<?>;
 
+      boolean meal = this.mealInProgress() || age - this.mealPreparedAge <= 20L;
+      if (meal != this.mealPause) {
+         this.mealPause = meal;
+         HunterBuddyAddon.LOG.info(meal ? "[ElytraBounce fakefly] paused for a meal" : "[ElytraBounce fakefly] resumed after the meal");
+      }
+      if (meal) {
+         this.fakeFlyPairReady = true;
+         return;
+      }
+
       if (this.fakeFlyPendingSequence >= 0 && this.fakeFlyAckedAt >= 0 && age > this.fakeFlyAckedAt) {
          this.fakeFlyPendingSequence = -1;
          this.fakeFlyAckedAt = -1L;
@@ -1243,9 +1255,22 @@ public class ElytraBounce extends Module {
 
    public boolean prepareForEating() {
       if (!this.bounce.get() || !this.enabled() || !this.fakeFly.get()) return true;
-      ItemStack worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST);
-      ItemStack held = this.mc.player.getMainHandStack();
-      return !(isGlider(worn) && isChestPiece(held) || isChestPiece(worn) && isGlider(held));
+      if (this.fakeFlyBurstHand != null) return false;
+      if (isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST))) {
+         this.mealPreparedAge = this.mc.player.age;
+         return true;
+      }
+      Hand gliderHand = isGlider(this.mc.player.getMainHandStack()) ? Hand.MAIN_HAND
+         : isGlider(this.mc.player.getOffHandStack()) ? Hand.OFF_HAND : null;
+      if (gliderHand == null) return true;
+      this.swapFakeFlyHand(gliderHand);
+      this.mealPreparedAge = this.mc.player.age;
+      return false;
+   }
+
+   private boolean mealInProgress() {
+      AutoEatSync eat = Modules.get().get(AutoEatSync.class);
+      return eat != null && eat.isActive() && eat.isEating();
    }
 
    public boolean enabled() {
