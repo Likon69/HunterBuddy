@@ -2054,7 +2054,7 @@ public class SpawnerDetector extends Module {
         site.air = air;
         site.airCount = airCount;
         site.roomContainers = computeRoomContainers(room);
-        if (hasMisplacedContainer(room)) {
+        if (hasMisplacedContainer(room, pbr.trialChamberNearby())) {
             site.playerBlocks = true;
             site.playerBlockTypes.add("placed chest");
         }
@@ -2257,17 +2257,18 @@ public class SpawnerDetector extends Module {
         return false;
     }
 
-    private record PlayerBlocksResult(boolean any, Set<String> types) {}
+    private record PlayerBlocksResult(boolean any, Set<String> types, boolean trialChamberNearby) {}
 
     private PlayerBlocksResult computePlayerBlocks(Room room) {
         int range = traceRange.get();
         Set<String> types = new TreeSet<>();
 
         collectPlayerBlockEntities(room, range, types);
-        collectPlayerBlockStates(room, range, types);
+        boolean trialChamberNearby = collectPlayerBlockStates(room, range, types);
         collectPlayerEntities(room, range, types);
+        if (trialChamberNearby) types.removeAll(Set.of("bed", "hopper", "crafting_table"));
 
-        return new PlayerBlocksResult(!types.isEmpty(), types);
+        return new PlayerBlocksResult(!types.isEmpty(), types, trialChamberNearby);
     }
 
     private void collectPlayerBlockEntities(Room room, int range, Set<String> types) {
@@ -2308,18 +2309,22 @@ public class SpawnerDetector extends Module {
         return null;
     }
 
-    private void collectPlayerBlockStates(Room room, int range, Set<String> types) {
+    private boolean collectPlayerBlockStates(Room room, int range, Set<String> types) {
         BlockPos.Mutable cursor = new BlockPos.Mutable();
+        boolean trialChamberNearby = false;
 
         for (int x = room.minX() - range; x <= room.maxX() + range; x++) {
             for (int y = room.minY() - range; y <= room.maxY() + range; y++) {
                 for (int z = room.minZ() - range; z <= room.maxZ() + range; z++) {
                     cursor.set(x, y, z);
-                    String type = playerBlockType(mc.world.getBlockState(cursor).getBlock());
+                    Block block = mc.world.getBlockState(cursor).getBlock();
+                    if (block == Blocks.TRIAL_SPAWNER || block == Blocks.VAULT) trialChamberNearby = true;
+                    String type = playerBlockType(block);
                     if (type != null) types.add(type);
                 }
             }
         }
+        return trialChamberNearby;
     }
 
     private static String playerBlockType(Block block) {
@@ -2613,7 +2618,7 @@ public class SpawnerDetector extends Module {
         return result;
     }
 
-    private boolean hasMisplacedContainer(Room room) {
+    private boolean hasMisplacedContainer(Room room, boolean trialChamberNearby) {
         int cx = room.cx(), cy = room.cy(), cz = room.cz(), k = room.k(), p = room.p();
         BlockPos.Mutable cursor = new BlockPos.Mutable();
         int plainChests = 0;
@@ -2622,6 +2627,7 @@ public class SpawnerDetector extends Module {
             for (int z = cz - p; z <= cz + p; z++) {
                 for (int y = cy; y <= cy + 3; y++) {
                     Block b = mc.world.getBlockState(cursor.set(x, y, z)).getBlock();
+                    if (trialChamberNearby && b == Blocks.BARREL) continue;
                     boolean isChest = b == Blocks.CHEST;
                     boolean isOtherContainer = b == Blocks.TRAPPED_CHEST || b == Blocks.BARREL || b instanceof ShulkerBoxBlock;
                     if (!isChest && !isOtherContainer) continue;
