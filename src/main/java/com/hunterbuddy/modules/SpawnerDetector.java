@@ -8625,10 +8625,11 @@ public class SpawnerDetector extends Module {
             if (site.center.equals(finishedSite.center)) continue;
 
             double dx = site.center.getX() + 0.5 - mc.player.getX();
+            double dy = site.center.getY() + 0.5 - mc.player.getY();
             double dz = site.center.getZ() + 0.5 - mc.player.getZ();
             double distSq = dx * dx + dz * dz;
 
-            if (finishedFlooded && distSq > 32.0 * 32.0) continue;
+            if (finishedFlooded && distSq + dy * dy > 32.0 * 32.0) continue;
 
             if (!qualifiesForAuto(site)) {
                 if (!site.roomContainers.isEmpty() && distSq <= 32.0 * 32.0 && distSq < nearestRejectDistSq) {
