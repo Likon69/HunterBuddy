@@ -823,7 +823,8 @@ public class SpawnerDetector extends Module {
     private BlockPos autoTunnelStep;
     private boolean autoTunnelBaritone;
     private boolean autoTunnelDirectRetried;
-    private BlockPos autoTunnelBlocked;
+    private int autoTunnelRescuePlacements;
+    private BlockPos autoTunnelRescuePlacePos;
     private List<Block> autoTunnelDisallowedBreaking;
     private double autoTunnelBestDist;
     private int autoTunnelBestElapsed;
@@ -8713,6 +8714,8 @@ public class SpawnerDetector extends Module {
             autoBaritoneRetries = 0;
             autoTunnelBaritone = false;
             autoTunnelDirectRetried = false;
+            autoTunnelRescuePlacements = 0;
+            autoTunnelRescuePlacePos = null;
             resetShaftDryRecovery();
             autoPaused = false;
             autoPauseReason = null;
@@ -8721,7 +8724,7 @@ public class SpawnerDetector extends Module {
             resetBreach();
             releaseAllAutoKeys();
             if (bt != null) bt.getPathingBehavior().cancelEverything();
-            BaritoneAPI.getSettings().allowPlace.value = true;
+            BaritoneAPI.getSettings().allowPlace.value = false;
             autoTunnelGoal = findTunnelGoal(autoSite.room);
             if (autoTunnelGoal == null) {
                 autoLog("TUNNEL", autoSite.center, "no floor cell, aiming at the room center");
@@ -8776,26 +8779,18 @@ public class SpawnerDetector extends Module {
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
         } else if ((failed && elapsed - autoTunnelBestElapsed >= 10 * 20)
             || elapsed - autoTunnelBestElapsed > 30 * 20) {
-            BlockState blockedState = mc.world.getBlockState(autoTunnelBlocked);
-            if (!autoTunnelDirectRetried && !blockedState.isOf(Blocks.SPAWNER) && !isContainerPresent(autoTunnelBlocked)
-                && !isLava(blockedState) && (isTunnelOpen(autoTunnelBlocked) || blockedState.getHardness(mc.world, autoTunnelBlocked) >= 0)) {
+            if (!autoTunnelDirectRetried && Math.abs(feet.getX() - autoTunnelGoal.getX()) <= 2
+                && Math.abs(feet.getY() - autoTunnelGoal.getY()) <= 2 && Math.abs(feet.getZ() - autoTunnelGoal.getZ()) <= 2) {
                 autoTunnelDirectRetried = true;
-                autoLog("TUNNEL", autoSite.center, "baritone failed, resuming direct passage from " + feet.toShortString());
                 releaseAllAutoKeys();
                 if (bt != null) bt.getPathingBehavior().cancelEverything();
-                restoreTunnelSettings();
-                BaritoneAPI.getSettings().allowPlace.value = true;
                 autoTunnelBaritone = false;
                 autoTunnelStep = feet;
                 autoTunnelBestElapsed = elapsed;
+                autoLog("TUNNEL", autoSite.center, "baritone failed, direct rescue from " + feet.toShortString());
                 return;
             }
-            autoLog("TUNNEL", autoSite.center, "tunnel failed: no path around blocked direct passage");
-            autoRunAbandoned = true;
-            releaseAllAutoKeys();
-            if (bt != null) bt.getPathingBehavior().cancelEverything();
-            if (autoExitShaft != null && !autoTunnelTrail.isEmpty()) autoExitShaftForeign = true;
-            enterState(AutoState.EXIT, "");
+            abandonTunnel();
             return;
         }
         logNavTelemetry("TUNNEL", autoTunnelGoal, autoBaritoneRetries);
@@ -8862,9 +8857,13 @@ public class SpawnerDetector extends Module {
             return;
         }
         boolean needsFloor = tunnelStepNeedsFloor(autoTunnelStep);
-        Direction side = needsFloor ? selfAscendPlaceSide(floor) : null;
-        if (needsFloor && (!floorState.isReplaceable() || side == null || ensureObsidianInHotbar() < 0)) {
-            startTunnelBaritone(floor, "no safe obsidian support");
+        boolean placed = floor.equals(autoTunnelRescuePlacePos);
+        Direction side = needsFloor && autoTunnelDirectRetried ? selfAscendPlaceSide(floor) : null;
+        if (needsFloor && (!autoTunnelDirectRetried || (!placed && autoTunnelRescuePlacements >= 2)
+            || Math.abs(feet.getX() - autoTunnelGoal.getX()) > 2 || Math.abs(feet.getY() - autoTunnelGoal.getY()) > 2
+            || Math.abs(feet.getZ() - autoTunnelGoal.getZ()) > 2
+            || !floorState.isReplaceable() || side == null || (!placed && ensureObsidianInHotbar() < 0))) {
+            startTunnelBaritone(floor, autoTunnelDirectRetried ? "direct rescue cannot place" : "step without floor");
             return;
         }
         for (BlockPos pos : clearance) {
@@ -8885,11 +8884,13 @@ public class SpawnerDetector extends Module {
                 Utils.setPressed(mc.options.jumpKey, autoTunnelStep.getY() > mc.player.getY());
                 return;
             }
-            InvUtils.swap(slot, false);
+            if (!placed) InvUtils.swap(slot, false);
             BlockPos support = floor.offset(side.getOpposite());
             Vec3d hitPos = Vec3d.ofCenter(support).add(side.getOffsetX() * 0.5, side.getOffsetY() * 0.5, side.getOffsetZ() * 0.5);
             Utils.setPressed(mc.options.sneakKey, true);
-            if (alignedTowards(hitPos) && stateTicks % 5 == 0 && interactWhenAligned(hitPos, new BlockHitResult(hitPos, side, support, false))) {
+            if (alignedTowards(hitPos) && !placed && stateTicks % 5 == 0 && interactWhenAligned(hitPos, new BlockHitResult(hitPos, side, support, false))) {
+                autoTunnelRescuePlacements++;
+                autoTunnelRescuePlacePos = floor;
                 mc.player.swingHand(Hand.MAIN_HAND);
                 autoLog("TUNNEL", autoSite.center, "direct placed obsidian=" + floor.toShortString());
             }
@@ -8906,16 +8907,31 @@ public class SpawnerDetector extends Module {
             "direct step=" + autoTunnelStep.toShortString() + " water=" + mc.player.isTouchingWater() + " jump=" + rising);
     }
 
+    private void abandonTunnel() {
+        autoLog("TUNNEL", autoSite.center, "tunnel failed: no path around blocked direct passage");
+        autoRunAbandoned = true;
+        releaseAllAutoKeys();
+        mc.interactionManager.cancelBlockBreaking();
+        IBaritone bt = primaryBaritone();
+        if (bt != null) bt.getPathingBehavior().cancelEverything();
+        if (autoExitShaft != null && !autoTunnelTrail.isEmpty()) autoExitShaftForeign = true;
+        enterState(AutoState.EXIT, "");
+    }
+
     private void startTunnelBaritone(BlockPos blocked, String reason) {
+        if (autoTunnelDirectRetried) {
+            abandonTunnel();
+            return;
+        }
         releaseAllAutoKeys();
         mc.interactionManager.cancelBlockBreaking();
         autoBreachPos = null;
         autoTunnelBaritone = true;
-        autoTunnelBlocked = blocked;
         autoTunnelBestElapsed = stateTicks - autoPausedTicks;
         autoLog("TUNNEL", autoSite.center, "direct blocked=" + blocked.toShortString()
             + " block=" + Registries.BLOCK.getId(mc.world.getBlockState(blocked).getBlock()).getPath()
             + " reason=" + reason + ", baritone fallback");
+        BaritoneAPI.getSettings().allowPlace.value = false;
         autoTunnelDisallowedBreaking = BaritoneAPI.getSettings().blocksToDisallowBreaking.value;
         List<Block> protectedBlocks = new ArrayList<>(autoTunnelDisallowedBreaking);
         protectedBlocks.addAll(List.of(Blocks.SPAWNER, Blocks.CHEST, Blocks.TRAPPED_CHEST, Blocks.BARREL));
