@@ -144,7 +144,7 @@ public class HMine extends Module {
 
     private final Setting<Boolean> queue = this.sgGeneral.add(new BoolSetting.Builder()
         .name("queue")
-        .description("Click several blocks and break them one after another. Nothing is sent for a waiting block, so the server only ever sees one break at a time.")
+        .description("Queue clicked blocks and mine one at a time, or two with double-break. Waiting blocks send no mining packets.")
         .defaultValue(false)
         .visible(this::packetMode)
         .onChanged(value -> {
@@ -869,7 +869,7 @@ public class HMine extends Module {
             return;
         }
 
-        if (this.queue.get() && this.solidLeft()) {
+        if (this.queue.get() && this.solidLeft() && this.active.size() >= (this.doubleBreak.get() ? 2 : 1)) {
             return;
         }
 
@@ -1070,7 +1070,8 @@ public class HMine extends Module {
             return;
         }
 
-        if (useQueue && (this.solidLeft() || !this.waiting.isEmpty())) {
+        if (useQueue && ((this.solidLeft() && this.active.size() >= (this.doubleBreak.get() ? 2 : 1))
+            || !this.waiting.isEmpty())) {
             if (this.waiting.size() >= WAITING_LIMIT) {
                 return;
             }
