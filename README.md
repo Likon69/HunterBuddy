@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/hunterbuddy-banner.png" alt="HunterBuddy, Meteor addon for 2b2t">
+</p>
+
 # HunterBuddy
 
 > **Every line in this repository was written by us, or comes from open-source projects whose licenses we actually read. If you came here looking for your code: it isn't here. Take your time though, reading it is free. That's how open source works.**
