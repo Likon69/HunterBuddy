@@ -40,7 +40,9 @@
     "KeyboardCharMixin",
     "DroneCameraMixin",
     "render.GameRendererDroneHandMixin",
-    "render.InGameHudDroneCrosshairMixin"
+    "render.GameRendererSpeedBlurMixin",
+    "render.InGameHudDroneCrosshairMixin",
+    "accessors.GameRendererFovAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

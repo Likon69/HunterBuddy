@@ -57,6 +57,19 @@ public final class HbRenderPipelines {
         .withCull(false)
         .build());
 
+    public static final RenderPipeline SPEED_BLUR = add(RenderPipeline.builder()
+        .withLocation(id("pipeline/post/speed_blur"))
+        .withVertexFormat(MeteorVertexFormats.POS2, VertexFormat.DrawMode.TRIANGLES)
+        .withVertexShader(id("shaders/post/base.vert"))
+        .withFragmentShader(id("shaders/post/speed_blur.frag"))
+        .withSampler("u_Scene")
+        .withUniform("PostData", UniformType.UNIFORM_BUFFER)
+        .withUniform("BlurData", UniformType.UNIFORM_BUFFER)
+        .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+        .withDepthWrite(false)
+        .withCull(false)
+        .build());
+
     private HbRenderPipelines() {}
 
     public static Identifier id(String path) {
