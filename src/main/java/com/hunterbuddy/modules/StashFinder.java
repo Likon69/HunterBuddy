@@ -485,7 +485,7 @@ public class StashFinder extends Module {
    private final Setting<Integer> minDecoratedPots = this.sgThresholds
       .add(
          new Builder().name("min-decorated-pots")
-                  .description("Minimum decorated pots to trigger notification (trail ruins have some, player builds more).")
+                  .description("Minimum decorated pots to trigger notification (trial chambers generate many, player builds have some).")
                .defaultValue(3)
             .min(0)
             .sliderRange(0, 20)
