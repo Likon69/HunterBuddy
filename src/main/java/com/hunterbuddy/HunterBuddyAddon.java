@@ -157,6 +157,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new VanityESP());
         Modules.get().add(new EntityView());
         Modules.get().add(new FlightTrail());
+        Modules.get().add(new com.hunterbuddy.modules.DroneCamera());
 
 
         Modules.get().add(new ElytraAutoFly());

@@ -37,7 +37,10 @@
     "LegacyModuleNameMixin",
     "LegacyHudNameMixin",
     "ChatScreenOverlayMixin",
-    "KeyboardCharMixin"
+    "KeyboardCharMixin",
+    "DroneCameraMixin",
+    "render.GameRendererDroneHandMixin",
+    "render.InGameHudDroneCrosshairMixin"
   ],
   "injectors": {
     "defaultRequire": 1
