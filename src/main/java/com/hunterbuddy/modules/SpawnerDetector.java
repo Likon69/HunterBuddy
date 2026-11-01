@@ -84,6 +84,7 @@ import net.minecraft.block.entity.BeaconBlockEntity;
 import net.minecraft.block.entity.BedBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.block.entity.DecoratedPotBlockEntity;
 import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.CrafterBlockEntity;
 import net.minecraft.block.entity.EnchantingTableBlockEntity;
@@ -169,6 +170,11 @@ public class SpawnerDetector extends Module {
     private final Setting<Boolean> detectShipwrecks = sgGeneral.add(new BoolSetting.Builder()
         .name("detect-shipwrecks")
         .description("Detect shipwrecks and farm their chests with auto-farm.")
+        .defaultValue(false).build());
+
+    private final Setting<Boolean> detectPots = sgGeneral.add(new BoolSetting.Builder()
+        .name("detect-pots")
+        .description("Detect decorated pots and, with auto-farm, dig down on top of them and break them to take their loot.")
         .defaultValue(false).build());
 
     private final Setting<Boolean> detectTrial = sgGeneral.add(new BoolSetting.Builder()
@@ -384,6 +390,9 @@ public class SpawnerDetector extends Module {
         .name("looted-color").description("Box color for a room already farmed with success (dim/cross looted-style).")
         .defaultValue(new SettingColor(150, 150, 150, 90)).build());
 
+    private final Setting<SettingColor> potColor = sgColors.add(new ColorSetting.Builder()
+        .name("pot-color").description("Detected decorated pots.")
+        .defaultValue(new SettingColor(200, 120, 70, 200)).build());
     private final Setting<SettingColor> shipwreckColor = sgColors.add(new ColorSetting.Builder()
         .name("shipwreck-color").description("Detected shipwrecks and chests that have not been looted.")
         .defaultValue(new SettingColor(80, 180, 255, 200)).build());
@@ -659,6 +668,7 @@ public class SpawnerDetector extends Module {
     private long autoRoomSpawnerStartMs;
     private BlockPos autoRoomSpawnerPos;
     private int autoRoomFoundShulkers;
+    private int autoRoomPotPickupTicks;
     private boolean autoRoomNotOpened;
     private int autoRoomFoundItems;
     private int autoRoomBreakTicks;
@@ -1267,6 +1277,17 @@ public class SpawnerDetector extends Module {
         if (autoFarm.get()) tryStartAutoFarm();
     }
 
+    private void addPotSite(BlockPos pos) {
+        if (sites.containsKey(pos) || isVisited(pos)) return;
+        Site site = new Site(pos);
+        site.discoveredAt = System.currentTimeMillis();
+        site.discoveredAtTick = totalTicks;
+        site.animation = new Animation(fadeTime.get());
+        sites.put(pos, site);
+        logSite(site, 0);
+        if (autoSoundedSites.add(pos)) playAutoSound("spawner_found", soundFound);
+    }
+
     private void sweepLoadedChunks() {
         if (!(mc.world.getChunkManager() instanceof ClientChunkManager manager)) return;
 
@@ -1279,6 +1300,7 @@ public class SpawnerDetector extends Module {
 
             for (BlockEntity be : chunk.getBlockEntities().values()) {
                 if (detectShipwrecks.get() && overworld && be instanceof ChestBlockEntity) ShipwreckDetector.collect(mc.world, be.getPos());
+                if (detectPots.get() && overworld && be instanceof DecoratedPotBlockEntity) addPotSite(be.getPos().toImmutable());
                 if (be instanceof TrialSpawnerBlockEntity) {
                     BlockPos pos = be.getPos().toImmutable();
                     if (!trialFound.containsKey(pos)) trialPending.add(pos);
@@ -1703,6 +1725,7 @@ public class SpawnerDetector extends Module {
     private boolean spawnerlessCandidateWins(Room room) {
         spawnerlessLossInfo = null;
         for (Site s : sites.values()) {
+            if (s.pot) continue;
             if (boxesOverlap(room, s.room) && (s.hasSpawner || s.room.fit() >= room.fit() || isVisited(s.center)
                 || (state != AutoState.IDLE && autoSite != null && autoSite.center.equals(s.center)))) {
                 spawnerlessLossInfo = String.format("spawnerless loses to site %d,%d,%d spawner=%s",
@@ -1730,12 +1753,12 @@ public class SpawnerDetector extends Module {
     }
 
     private void removeOverlapping(Room room) {
-        sites.entrySet().removeIf(e -> boxesOverlap(room, e.getValue().room));
+        sites.entrySet().removeIf(e -> !e.getValue().pot && boxesOverlap(room, e.getValue().room));
         pendingEval.entrySet().removeIf(e -> boxesOverlap(room, e.getValue().room()));
     }
 
     private void removeOverlappingSpawnerless(Room room) {
-        sites.entrySet().removeIf(e -> !e.getValue().hasSpawner && boxesOverlap(room, e.getValue().room));
+        sites.entrySet().removeIf(e -> !e.getValue().pot && !e.getValue().hasSpawner && boxesOverlap(room, e.getValue().room));
         pendingEval.entrySet().removeIf(e -> !e.getValue().hasSpawner() && boxesOverlap(room, e.getValue().room()));
     }
 
@@ -2968,8 +2991,9 @@ public class SpawnerDetector extends Module {
         for (Site site : sites.values()) {
             if (site.category == Category.INTACT && !showIntact.get()) continue;
             if (site.category == Category.EMPTY && !showEmpty.get()) continue;
-            if (ignoreBelowZero.get() && site.center.getY() < 0) continue;
-            if (roomInFreshChunk(site.center)) continue;
+            if (site.pot && !detectPots.get()) continue;
+            if (ignoreBelowZero.get() && !site.pot && site.center.getY() < 0) continue;
+            if (!site.pot && roomInFreshChunk(site.center)) continue;
 
             BlockPos pos = site.center;
             long siteKey = BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ());
@@ -3050,8 +3074,9 @@ public class SpawnerDetector extends Module {
         for (Site site : sites.values()) {
             if (site.category == Category.INTACT && !showIntact.get()) continue;
             if (site.category == Category.EMPTY && !showEmpty.get()) continue;
-            if (ignoreBelowZero.get() && site.center.getY() < 0) continue;
-            if (roomInFreshChunk(site.center)) continue;
+            if (site.pot && !detectPots.get()) continue;
+            if (ignoreBelowZero.get() && !site.pot && site.center.getY() < 0) continue;
+            if (!site.pot && roomInFreshChunk(site.center)) continue;
 
             BlockPos pos = site.center;
             long siteKey = BlockPos.asLong(pos.getX(), pos.getY(), pos.getZ());
@@ -3800,6 +3825,7 @@ public class SpawnerDetector extends Module {
     private ColumnPlan planColumn(Site site) {
         if (site.shipwreck != null) return planShipwreckColumn(site.center);
         Room room = site.room;
+        if (site.pot) return evaluateColumnResult(site.center, room, room.cx(), room.cz(), autoMaxFall.get(), false).plan();
         boolean logShafts = entryShaftLogged.add(site.center);
         boolean straightDown = autoAbandonedOnce.contains(site.center);
 
@@ -4284,7 +4310,7 @@ public class SpawnerDetector extends Module {
     private boolean qualifiesAsStackedPartner(Site site) {
         if (!qualifiesForAuto(site)) return false;
         if (isVisited(site.center)) return false;
-        if (site.modern) return false;
+        if (site.modern || site.pot) return false;
         if (site.room.cy() < 0) return false;
         if (!mc.world.getChunkManager().isChunkLoaded(site.center.getX() >> 4, site.center.getZ() >> 4)) return false;
         return true;
@@ -5352,6 +5378,7 @@ public class SpawnerDetector extends Module {
 
     private boolean qualifiesForAuto(Site site) {
         if (site.shipwreck != null) return detectShipwrecks.get() && !isVisited(site.center);
+        if (site.pot) return detectPots.get() && !isVisited(site.center);
         if (roomInFreshChunk(site.center)) return false;
         if (site.roomContainers.isEmpty()) return false;
         if (site.score >= triggerScore.get()) return true;
@@ -5369,12 +5396,16 @@ public class SpawnerDetector extends Module {
     private QualResult evaluateQualification(Site site, boolean walkChain, boolean underground) {
         if (site.shipwreck != null) return evaluateShipwreckQualification(site, walkChain);
         if (isVisited(site.center)) return QualResult.reject("visited");
-        if (site.room.cy() < 0) return QualResult.reject("below y 0");
+        if (site.room.cy() < 0 && !site.pot) return QualResult.reject("below y 0");
         if (mc.player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.MINING_FATIGUE)) {
             return QualResult.reject("mining fatigue");
         }
         if (!mc.world.getChunkManager().isChunkLoaded(site.center.getX() >> 4, site.center.getZ() >> 4)) {
             return QualResult.reject("chunk not loaded");
+        }
+        if (site.pot && !mc.world.getBlockState(site.center).isOf(Blocks.DECORATED_POT)) {
+            markVisited(site.center, "pot gone");
+            return QualResult.reject("pot gone");
         }
 
         double dx = site.center.getX() + 0.5 - mc.player.getX();
@@ -5457,7 +5488,7 @@ public class SpawnerDetector extends Module {
         if (isVisited(site.center)) return false;
         if (autoSoloRejectedThisSession.contains(site.center)) return false;
         if (countRockets() <= autoMinRockets.get()) return false;
-        if (site.shipwreck == null && site.room.cy() < 0) return false;
+        if (site.shipwreck == null && !site.pot && site.room.cy() < 0) return false;
         double dx = site.center.getX() + 0.5 - mc.player.getX();
         double dz = site.center.getZ() + 0.5 - mc.player.getZ();
         return Math.hypot(dx, dz) <= autoMaxDistance.get();
@@ -5534,6 +5565,15 @@ public class SpawnerDetector extends Module {
         }
     }
 
+    private List<Site> potsNearestFirst() {
+        List<Site> pots = new ArrayList<>();
+        for (Site site : sites.values()) {
+            if (site.pot && qualifiesForAuto(site)) pots.add(site);
+        }
+        pots.sort(Comparator.comparingDouble(site -> site.center.getSquaredDistance(mc.player.getBlockPos())));
+        return pots;
+    }
+
     private void tryStartAutoFarm() {
         if (state != AutoState.IDLE) return;
         if (autoWatchdogIdlePos != null) {
@@ -5549,6 +5589,7 @@ public class SpawnerDetector extends Module {
         double bestDistSq = Double.MAX_VALUE;
 
         for (Site site : sites.values()) {
+            if (site.pot) continue;
             if (!qualifiesForAuto(site)) {
                 if (!site.roomContainers.isEmpty()) {
                     logSkipOnce(site.center, "score too low score=" + site.score);
@@ -5570,6 +5611,23 @@ public class SpawnerDetector extends Module {
                 best = site;
                 bestPlan = qr.plan();
             }
+        }
+
+        for (Site site : potsNearestFirst()) {
+            QualResult qr = evaluateQualification(site);
+            if (qr.reject() != null) {
+                logSkipOnce(site.center, qr.reject());
+                continue;
+            }
+            double dx = site.center.getX() + 0.5 - mc.player.getX();
+            double dz = site.center.getZ() + 0.5 - mc.player.getZ();
+            double distSq = dx * dx + dz * dz;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = site;
+                bestPlan = qr.plan();
+            }
+            break;
         }
 
         for (Site site : shipwreckTargets()) {
@@ -5613,7 +5671,7 @@ public class SpawnerDetector extends Module {
             return;
         }
 
-        if (best.shipwreck != null) {
+        if (best.shipwreck != null || best.pot) {
             startAutoRun(best, bestPlan);
             return;
         }
@@ -5682,10 +5740,10 @@ public class SpawnerDetector extends Module {
         } else {
         com.hunterbuddy.util.HuntFeed.get().publish(
             com.hunterbuddy.util.HuntFeed.Type.SPAWNER,
-            "Farm · " + (site.hasSpawner ? site.mob : "no spawner") + " · " + site.containers + " chests", site.center);
+            site.pot ? "Farm · pot" : "Farm · " + (site.hasSpawner ? site.mob : "no spawner") + " · " + site.containers + " chests", site.center);
 
         if (chatFeedback.get()) {
-            info("Farm spawner at %d %d %d (%d containers)",
+            info("Farm %s at %d %d %d (%d containers)", site.pot ? "pot" : "spawner",
                 site.center.getX(), site.center.getY(), site.center.getZ(), site.containers);
         }
 
@@ -8582,7 +8640,7 @@ public class SpawnerDetector extends Module {
             autoLog("ROOM", autoSite.center, "found=" + autoRoomFoundShulkers + " items=" + autoRoomFoundItems);
         }
 
-        if (autoWatchdogAbandonedSite == null && tryChainVertical()) return;
+        if (autoWatchdogAbandonedSite == null && !autoSite.pot && tryChainVertical()) return;
         if (autoWatchdogAbandonedSite == null && autoChainUnderground.get() && tryChainUnderground(autoSite)) return;
 
         autoAscendFromAbort = autoWatchdogAbandonedSite != null;
@@ -8641,7 +8699,7 @@ public class SpawnerDetector extends Module {
         double nearestRejectDistSq = Double.MAX_VALUE;
 
         for (Site site : sites.values()) {
-            if (site.center.equals(finishedSite.center)) continue;
+            if (site.center.equals(finishedSite.center) || site.pot != finishedSite.pot) continue;
 
             double dx = site.center.getX() + 0.5 - mc.player.getX();
             double dy = site.center.getY() + 0.5 - mc.player.getY();
@@ -9129,6 +9187,7 @@ public class SpawnerDetector extends Module {
             autoRoomFoundShulkers = 0;
             autoRoomNotOpened = false;
             autoRoomFoundItems = 0;
+            autoRoomPotPickupTicks = 0;
             autoRoomSpawnerPos = findSpawnerInRoom(autoSite.room);
             autoLog("ROOM", autoSite.center, "spawner=" + (autoRoomSpawnerPos != null
                 ? autoRoomSpawnerPos.getX() + "," + autoRoomSpawnerPos.getY() + "," + autoRoomSpawnerPos.getZ()
@@ -9175,6 +9234,11 @@ public class SpawnerDetector extends Module {
 
         if (handleAutoPause(true)) return;
 
+        if (autoSite.pot) {
+            tickRoomPot();
+            return;
+        }
+
         BlockPos debris = findRoomDebris();
         if (debris != null) {
             long now = System.currentTimeMillis();
@@ -9194,6 +9258,59 @@ public class SpawnerDetector extends Module {
         }
 
         tickRoomContainers();
+    }
+
+    private void tickRoomPot() {
+        BlockPos pot = autoSite.center;
+        BlockPos visible = nearestVisiblePot();
+        if (visible != null) {
+            autoRoomPotPickupTicks = 0;
+            autoMineTick("ROOM", visible, false);
+            return;
+        }
+        if (mc.world.getBlockState(pot).isOf(Blocks.DECORATED_POT)) {
+            autoRoomPotPickupTicks = 0;
+            if (mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(pot)) <= 4.2 * 4.2) {
+                autoMineTick("ROOM", pot, false);
+            } else {
+                approachBlock(pot);
+            }
+            return;
+        }
+        Utils.setPressed(mc.options.attackKey, false);
+        autoRoomPotPickupTicks++;
+        ItemEntity drop = nearestDrop();
+        if (drop != null) {
+            recenterDig(drop.getBlockX(), drop.getBlockZ(), 0.3);
+        } else {
+            recenterDig(pot.getX(), pot.getZ(), 0.2);
+        }
+        if (autoRoomPotPickupTicks < 30 || (drop != null && autoRoomPotPickupTicks < 80)) return;
+        autoLog("ROOM", pot, "pot broken");
+        finishRoomAndAscend();
+    }
+
+    private BlockPos nearestVisiblePot() {
+        Vec3d eye = mc.player.getEyePos();
+        BlockPos best = null;
+        double bestDistSq = 4.2 * 4.2;
+        for (Site site : sites.values()) {
+            if (!site.pot || !mc.world.getBlockState(site.center).isOf(Blocks.DECORATED_POT)) continue;
+            double distSq = eye.squaredDistanceTo(Vec3d.ofCenter(site.center));
+            if (distSq > bestDistSq) continue;
+            BlockHitResult hit = mc.world.raycast(new RaycastContext(eye, Vec3d.ofCenter(site.center),
+                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player));
+            if (!site.center.equals(hit.getBlockPos())) continue;
+            bestDistSq = distSq;
+            best = site.center;
+        }
+        return best;
+    }
+
+    private ItemEntity nearestDrop() {
+        Box area = mc.player.getBoundingBox().expand(5.0, 1.5, 5.0);
+        return mc.world.getEntitiesByClass(ItemEntity.class, area, ItemEntity::isAlive).stream()
+            .min(Comparator.comparingDouble(item -> item.squaredDistanceTo(mc.player))).orElse(null);
     }
 
     private void tickRoomClimb() {
@@ -9558,7 +9675,7 @@ public class SpawnerDetector extends Module {
         double nearestRejectDistSq = Double.MAX_VALUE;
 
         for (Site site : sites.values()) {
-            if (site.center.equals(finishedSite.center)) continue;
+            if (site.center.equals(finishedSite.center) || site.pot) continue;
             if (!qualifiesForAuto(site)) continue;
 
             double dx = site.center.getX() + 0.5 - mc.player.getX();
@@ -13671,6 +13788,7 @@ public class SpawnerDetector extends Module {
             case STASH -> stashColor.get();
             case LIT -> torchColor.get();
             case TRIAL -> trialColor.get();
+            case POT -> potColor.get();
             case INTACT -> intactColor.get();
             case EMPTY -> emptyCatColor.get();
         };
@@ -13682,6 +13800,7 @@ public class SpawnerDetector extends Module {
         LIT("Lit"),
         EMPTIED("Emptied"),
         TRIAL("Trial"),
+        POT("Pot"),
         INTACT("Intact"),
         EMPTY("Empty");
 
@@ -13705,6 +13824,7 @@ public class SpawnerDetector extends Module {
         public final BlockPos center;
         public final Room room;
         public final ShipwreckSite shipwreck;
+        public final boolean pot;
         public final boolean hasSpawner;
         public final String mob;
         public final boolean modern;
@@ -13738,6 +13858,7 @@ public class SpawnerDetector extends Module {
             this.center = center;
             this.room = room;
             this.shipwreck = null;
+            this.pot = false;
             this.hasSpawner = hasSpawner;
             this.mob = mob;
             this.modern = modern;
@@ -13746,12 +13867,26 @@ public class SpawnerDetector extends Module {
         Site(ShipwreckSite shipwreck, BlockPos chest) {
             this.center = chest.toImmutable();
             this.shipwreck = shipwreck;
+            this.pot = false;
             this.room = null;
             this.hasSpawner = false;
             this.mob = "shipwreck";
             this.modern = false;
             this.containers = 1;
             this.roomContainers = List.of(this.center);
+        }
+
+        Site(BlockPos pot) {
+            this.center = pot;
+            this.shipwreck = null;
+            this.pot = true;
+            this.room = new Room(pot.getX(), pot.getY(), pot.getZ(), 0, 0,
+                pot.getX(), pot.getY() - 1, pot.getZ(), pot.getX(), pot.getY() + 4, pot.getZ(), false, 0.0);
+            this.hasSpawner = false;
+            this.mob = "pot";
+            this.modern = false;
+            this.containers = 1;
+            this.category = Category.POT;
         }
     }
 
