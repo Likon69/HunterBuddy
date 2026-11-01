@@ -2117,9 +2117,13 @@ public class StashFinder extends Module {
          File file = this.getJsonFile();
          file.getParentFile().mkdirs();
 
-         try (Writer writer = new FileWriter(file)) {
+         File temporary = new File(file.getParentFile(), file.getName() + ".tmp");
+
+         try (Writer writer = new FileWriter(temporary)) {
             GSON.toJson(list, writer);
          }
+
+         java.nio.file.Files.move(temporary.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
       } catch (IOException e) {
          MeteorClient.LOG.error("Error saving stash list", e);
       }
