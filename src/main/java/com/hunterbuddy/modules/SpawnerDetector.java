@@ -7536,6 +7536,22 @@ public class SpawnerDetector extends Module {
 
         Utils.setPressed(mc.options.sneakKey, mc.player.isTouchingWater() && gap <= 0.15);
 
+        if (mc.player.isOnGround() && isOpenState(belowState, below)) {
+            BlockPos feet = below.up();
+            BlockState feetState = mc.world.getBlockState(feet);
+            if (!isOpenState(feetState, feet) && !isLava(feetState) && feetState.getBlock() != Blocks.SPAWNER && !isContainerPresent(feet)) {
+                if (!feet.equals(autoDigQueuedPos)) {
+                    autoDigQueuedPos = feet;
+                    autoDigQueuedBlockLabel = Registries.BLOCK.getId(feetState.getBlock()).getPath();
+                    autoDigBlockStartMs = System.currentTimeMillis();
+                    autoDigBlockTicks = 0;
+                }
+                autoDigBlockTicks++;
+                autoMineTick("DIG", feet, true);
+                return;
+            }
+        }
+
         if (belowState.getFluidState().isIn(FluidTags.WATER)) {
             handleDigBlockCleared(below, gap);
             return;
