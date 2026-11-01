@@ -1102,7 +1102,7 @@ public class WaypointFollower extends Module {
         double closestDistance = Double.MAX_VALUE;
 
         for (BlockPos waypoint : this.waypointsToFollow) {
-            double distance = playerPos.squaredDistanceTo(Vec3d.ofCenter(waypoint));
+            double distance = this.getHorizontalDistance(playerPos, Vec3d.ofCenter(waypoint));
             if (distance < closestDistance) {
                 closestDistance = distance;
                 closest = waypoint;
