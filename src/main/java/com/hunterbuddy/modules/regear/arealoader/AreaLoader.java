@@ -2,373 +2,146 @@ package com.hunterbuddy.modules.regear.arealoader;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.arealoader.modes.Circle;
-import com.hunterbuddy.modules.regear.arealoader.modes.Rectangle;
-import com.hunterbuddy.modules.regear.arealoader.modes.Spiral;
-import com.hunterbuddy.modules.regear.arealoader.modes.ZigZag;
-import meteordevelopment.meteorclient.events.world.TickEvent.Post;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
-import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
-import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.EnumSetting.Builder;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.GameMode;
 
 public class AreaLoader extends Module {
-   private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
-   private final SettingGroup sgFlight = this.settings.createGroup("Flight");
-   private final SettingGroup sgNether = this.settings.createGroup("Nether");
-   private final SettingGroup sgDebug = this.settings.createGroup("Debug");
+    public enum NetherPathMode {
+        BARITONE_ELYTRA,
+        OTHER
+    }
 
-   public final Setting<Boolean> hideCoordinates = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("hide-coordinates")
-                     .description("Replace every coordinate this module prints in chat with a placeholder. For streaming or screenshots.")
-                  .defaultValue(false)
-            .build()
-      );
+    public enum OverworldFlightMode {
+        ROCKETS,
+        PITCH40,
+        OTHER
+    }
 
-   /** Formats a position for chat, honouring {@link #hideCoordinates}. */
-   public String coords(int x, int z) {
-      return this.hideCoordinates.get() ? "(hidden)" : "(" + x + ", " + z + ")";
-   }
+    private static final String HIDDEN_COORDINATES = "(hidden)";
 
-   public String coords(double x, double z) {
-      return this.hideCoordinates.get() ? "(hidden)" : String.format("(%.1f, %.1f)", x, z);
-   }
+    private final AreaModeSlot modeSlot = new AreaModeSlot();
+    private final AreaModeSettings modeSettings = new AreaModeSettings(
+        settings.getDefaultGroup(), this::replaceMode, this::switchMode);
+    private final AreaRectangleSettings rectangleSettings = new AreaRectangleSettings(
+        settings.getDefaultGroup(), modeSettings);
+    private final AreaZigZagSettings zigZagSettings = new AreaZigZagSettings(
+        settings.getDefaultGroup(), modeSettings);
+    private final AreaCircleSettings circleSettings = new AreaCircleSettings(
+        settings.getDefaultGroup(), modeSettings);
+    private final AreaRunSettings runSettings = new AreaRunSettings(
+        settings.getDefaultGroup(), modeSettings);
+    private final AreaFlightSettings flightSettings = new AreaFlightSettings(settings, modeSettings);
+    private final AreaNetherSettings netherSettings = new AreaNetherSettings(settings);
+    private final AreaDebugSettings debugSettings = new AreaDebugSettings(settings);
 
-   public final Setting<AreaLoaderModes> chunkLoadMode = this.sgGeneral
-      .add(
-         new Builder<AreaLoaderModes>().name("mode").description("The mode chunks are loaded.")
-                     .defaultValue(AreaLoaderModes.Rectangle)
-                  .onModuleActivated(chunkMode -> this.rebuildMode(chunkMode.get()))
-               .onChanged(this::onModeChanged).build()
-      );
-   public final Setting<BlockPos> startPos = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BlockPosSetting.Builder()
-                        .name("start-position")
-                     .description("The coordinates to start the rectangle at. Y Pos is ignored")
-                  .defaultValue(new BlockPos(0, 0, 0))
-                  .visible(() -> !this.hideCoordinates.get() && this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
-            .build()
-      );
-   public final Setting<BlockPos> targetPos = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BlockPosSetting.Builder()
-                        .name("end-position")
-                     .description("The coordinates to end the rectangle at. Y Pos is ignored")
-                  .defaultValue(new BlockPos(0, 0, 0))
-                  .visible(() -> !this.hideCoordinates.get() && this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
-            .build()
-      );
-   public final Setting<Integer> rowGap = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("path-gap")
-                  .description("The amount of chunks to space between each chunk path.")
-               .defaultValue(18)
-            .min(1)
-            .sliderRange(0, 100)
-            .build()
-      );
-   public final Setting<Integer> zigzagLegLength = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("zigzag-leg-length")
-                     .description("How far to travel in blocks before turning (one leg of the zigzag).")
-                  .defaultValue(5000)
-               .min(100)
-               .sliderRange(500, 20000)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.ZigZag)
-            .build()
-      );
-   public final Setting<Integer> zigzagRowGap = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("zigzag-row-gap")
-                     .description("How far to shift sideways in blocks between legs.")
-                  .defaultValue(192)
-               .min(16)
-               .sliderRange(16, 512)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.ZigZag)
-            .build()
-      );
-   public final Setting<BlockPos> circleCenter = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BlockPosSetting.Builder()
-                        .name("circle-center")
-                     .description("Center of the polar spiral. Y Pos is ignored.")
-                  .defaultValue(new BlockPos(0, 0, 0))
-               .visible(() -> !this.hideCoordinates.get() && this.chunkLoadMode.get() == AreaLoaderModes.Circle)
-            .build()
-      );
-   public final Setting<Double> circleLayerRadius = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                        .name("circle-layer-radius")
-                     .description("Radius between layers of the spiral, in chunks (scale = this * 16 blocks).")
-                  .defaultValue(1.0)
-               .min(1.0)
-               .sliderRange(1.0, 34.0)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
-            .build()
-      );
-   public final Setting<Double> circleSteps = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                        .name("circle-steps")
-                     .description("How many small turns to make per full orbit. Larger = smoother spiral, more chunks loaded.")
-                  .defaultValue(64.0)
-               .min(6.0)
-               .sliderRange(6.0, 100.0)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
-            .build()
-      );
-   public final Setting<Circle.SpiralDirection> circleDirection = this.sgGeneral
-      .add(
-         new Builder<Circle.SpiralDirection>().name("circle-direction")
-                     .description("Direction of the polar spiral (CLOCKWISE or COUNTERCLOCKWISE).")
-                  .defaultValue(Circle.SpiralDirection.CLOCKWISE)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Circle)
-            .build()
-      );
-   public final Setting<String> saveLocation = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.StringSetting.Builder()
-                     .name("save-name")
-                  .description("The name to use for the folder that saves data. Leave blank to use 'default'.")
-               .defaultValue("default")
-            .build()
-      );
-   public final Setting<Boolean> pitch40DisableAutoBoundAdjust = this.sgFlight
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("pitch40-disable-auto-bound-adjust")
-                     .description(
-                        "If ON: AreaLoader disables ElytraFly's autoBoundAdjust when using PITCH40 mode. "
-                     + "Default OFF — leave ElytraFly bound adjustment enabled to avoid pitch/desync rollback."
-                     )
-                  .defaultValue(false)
-               .visible(() -> this.overworldFlightMode.get() == AreaLoader.OverworldFlightMode.PITCH40)
-            .build()
-      );
-   public final Setting<Boolean> disconnectOnCompletion = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("disconnect-on-completion")
-                     .description("Whether to disconnect after the path is complete. This will turn autoreconnect off when disconnecting.")
-                  .defaultValue(false)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
-            .build()
-      );
-   public final Setting<Double> boatFlySpeed = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                     .name("boat-fly-speed")
-                  .description("Speed in blocks per second for ETA calculation.")
-               .defaultValue(30.0)
-               .min(1.0)
-               .sliderRange(1.0, 100.0)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Rectangle)
-            .build()
-      );
-   public final Setting<AreaLoader.OverworldFlightMode> overworldFlightMode = this.sgFlight
-      .add(
-         new Builder<AreaLoader.OverworldFlightMode>().name("overworld-flight-mode")
-                  .description("How AreaLoader flies in Overworld/End. PITCH40 uses Pitch40, ROCKETS uses RocketFly, OTHER does nothing (manual control).")
-               .defaultValue(AreaLoader.OverworldFlightMode.PITCH40)
-            .build()
-      );
-   public final Setting<Boolean> pitch40AutoFirework = this.sgFlight
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                        .name("pitch40-auto-firework")
-                     .description("Enable auto-firework in Pitch40 when using PITCH40 mode.")
-                  .defaultValue(true)
-               .visible(() -> this.overworldFlightMode.get() == AreaLoader.OverworldFlightMode.PITCH40)
-            .build()
-      );
-   public final Setting<Integer> spiralCornerReachDistance = this.sgFlight
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("corner-reach-distance")
-                     .description(
-                        "How close to a spiral corner before turning. The corner also turns once you pass its coordinate along the leg, so this is mainly a fallback."
-                     ).defaultValue(20)
-               .min(1)
-               .sliderRange(1, 100)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Spiral)
-            .build()
-      );
-   public final Setting<Integer> spiralMaxOffTrackDistance = this.sgFlight
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("max-off-track-distance")
-                     .description("How far off the spiral leg before saving state and navigating back to recover.")
-                  .defaultValue(500)
-               .min(20)
-               .sliderRange(50, 2000)
-               .visible(() -> this.chunkLoadMode.get() == AreaLoaderModes.Spiral)
-            .build()
-      );
-   public final Setting<AreaLoader.NetherPathMode> netherPathMode = this.sgNether
-      .add(
-         new Builder<AreaLoader.NetherPathMode>().name("nether-path-mode")
-                  .description("How AreaLoader navigates in Nether. BARITONE_ELYTRA uses Baritone elytra pathing, OTHER does nothing (manual control).")
-               .defaultValue(AreaLoader.NetherPathMode.BARITONE_ELYTRA)
-            .build()
-      );
-   public final Setting<Integer> netherWaypointDistance = this.sgNether
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("nether-waypoint-distance")
-                     .description("Distance in blocks between Baritone waypoints in the Nether. Smaller = more accurate but slower.")
-                  .defaultValue(100)
-               .min(50)
-               .sliderRange(50, 500)
-               .visible(() -> this.netherPathMode.get() == AreaLoader.NetherPathMode.BARITONE_ELYTRA)
-            .build()
-      );
-   public final Setting<Integer> netherWaypointReachDistance = this.sgNether
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("nether-reach-distance")
-                     .description("How close to a waypoint before considering it reached and moving to next.")
-                  .defaultValue(30)
-               .min(10)
-               .sliderRange(10, 100)
-               .visible(() -> this.netherPathMode.get() == AreaLoader.NetherPathMode.BARITONE_ELYTRA)
-            .build()
-      );
-   public final Setting<Boolean> debugMode = this.sgDebug
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("debug-messages")
-                  .description("Show debug messages in chat (file saves, dimension changes, corner reached, etc.)")
-               .defaultValue(false)
-            .build()
-      );
-   public final Setting<Boolean> showGoalWaypoint = this.sgDebug
-      .add(
-         new meteordevelopment.meteorclient.settings.BoolSetting.Builder()
-                     .name("show-goal-waypoint")
-                  .description("Create a temporary Xaero waypoint at the current goal position.")
-               .defaultValue(false)
-            .build()
-      );
-   private AreaLoaderMode currentMode = new Rectangle();
+    public final Setting<Boolean> hideCoordinates = modeSettings.hideCoordinates;
+    public final Setting<AreaLoaderModes> chunkLoadMode = modeSettings.mode;
+    public final Setting<BlockPos> startPos = rectangleSettings.startPos;
+    public final Setting<BlockPos> targetPos = rectangleSettings.targetPos;
+    public final Setting<Integer> rowGap = rectangleSettings.rowGap;
+    public final Setting<Integer> zigzagLegLength = zigZagSettings.legLength;
+    public final Setting<Integer> zigzagRowGap = zigZagSettings.rowGap;
+    public final Setting<BlockPos> circleCenter = circleSettings.center;
+    public final Setting<Double> circleLayerRadius = circleSettings.layerRadius;
+    public final Setting<Double> circleSteps = circleSettings.steps;
+    public final Setting<Circle.SpiralDirection> circleDirection = circleSettings.direction;
+    public final Setting<String> saveLocation = runSettings.saveLocation;
+    public final Setting<Boolean> pitch40DisableAutoBoundAdjust = flightSettings.pitch40DisableAutoBoundAdjust;
+    public final Setting<Boolean> disconnectOnCompletion = runSettings.disconnectOnCompletion;
+    public final Setting<Double> boatFlySpeed = runSettings.boatFlySpeed;
+    public final Setting<OverworldFlightMode> overworldFlightMode = flightSettings.overworldFlightMode;
+    public final Setting<Boolean> pitch40AutoFirework = flightSettings.pitch40AutoFirework;
+    public final Setting<Integer> spiralCornerReachDistance = flightSettings.spiralCornerReachDistance;
+    public final Setting<Integer> spiralMaxOffTrackDistance = flightSettings.spiralMaxOffTrackDistance;
+    public final Setting<NetherPathMode> netherPathMode = netherSettings.netherPathMode;
+    public final Setting<Integer> netherWaypointDistance = netherSettings.netherWaypointDistance;
+    public final Setting<Integer> netherWaypointReachDistance = netherSettings.netherWaypointReachDistance;
+    public final Setting<Boolean> debugMode = debugSettings.debugMode;
+    public final Setting<Boolean> showGoalWaypoint = debugSettings.showGoalWaypoint;
 
-   /** The mode object currently driving the loader. Read by the SpiralCoverage HUD. */
-   public AreaLoaderMode currentMode() {
-      return this.currentMode;
-   }
+    public AreaLoader() {
+        super(
+            HunterBuddyAddon.HUNT_CATEGORY,
+            "arealoader",
+            "Loads chunks in a rectangle toward a point or by spiralling endlessly from the player."
+                + " Useful with stash finders or map-saving mods."
+        );
+    }
 
-   public AreaLoader() {
-      super(
-         HunterBuddyAddon.HUNT_CATEGORY,
-         "arealoader",
-         "Either loads chunks in a rectangle to a certain point from you, or spirals endlessly from you. Useful with Stash Finder or other map saving mods."
-      );
-   }
+    public AreaLoaderMode currentMode() {
+        return modeSlot.current();
+    }
 
-   public WWidget getWidget(GuiTheme theme) {
-      WVerticalList list = theme.verticalList();
-      WButton clear = (WButton)list.add(theme.button("Clear Currently Selected")).widget();
-      clear.action = () -> {
-         boolean wasActive = this.isActive();
-         if (wasActive) {
-            this.toggle();
-         }
+    public String coords(int x, int z) {
+        if (hideCoordinates.get()) return HIDDEN_COORDINATES;
+        return "(" + x + ", " + z + ")";
+    }
 
-         this.currentMode.clear();
-         if (wasActive) {
-            this.info("Module was disabled. Activate it again to start fresh.", new Object[0]);
-         }
-      };
-      WButton clearAll = (WButton)list.add(theme.button("Clear All")).widget();
-      clearAll.action = () -> {
-         boolean wasActive = this.isActive();
-         if (wasActive) {
-            this.toggle();
-         }
+    public String coords(double x, double z) {
+        if (hideCoordinates.get()) return HIDDEN_COORDINATES;
+        return String.format("(%.1f, %.1f)", x, z);
+    }
 
-         this.currentMode.clearAll();
-         if (wasActive) {
-            this.info("Module was disabled. Activate it again to start fresh with any mode.", new Object[0]);
-         }
-      };
-      list.add(theme.horizontalSeparator()).expandX();
-      WButton recoveryBtn = (WButton)list.add(theme.button("Recovery Configuration")).widget();
-      recoveryBtn.action = () -> this.mc.setScreen(new AreaRecoveryScreen(theme, this));
-      return list;
-   }
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        return AreaLoaderWidget.build(theme, this);
+    }
 
-   public void onActivate() {
-      this.currentMode.onActivate();
-   }
+    @Override
+    public void onActivate() {
+        currentMode().onActivate();
+    }
 
-   public void onDeactivate() {
-      this.currentMode.onDeactivate();
-   }
+    @Override
+    public void onDeactivate() {
+        currentMode().onDeactivate();
+    }
 
-   @EventHandler
-   private void onTick(Post event) {
-      if (!this.isActive()) {
-         return;
-      }
+    @EventHandler
+    private void onTick(TickEvent.Post event) {
+        if (isRunnable()) currentMode().onTick();
+    }
 
-      if (this.mc.player != null && this.mc.world != null) {
-         if (this.mc.interactionManager != null) {
-            GameMode currentGameMode = this.mc.interactionManager.getCurrentGameMode();
-            if (currentGameMode == GameMode.SURVIVAL) {
-               this.currentMode.onTick();
-            }
-         }
-      }
-   }
+    void clearSelectedMode() {
+        boolean wasActive = disableIfActive();
+        currentMode().clear();
+        if (wasActive) info("Module disabled. Re-enable it to start fresh.");
+    }
 
-   private void rebuildMode(AreaLoaderModes mode) {
-      switch (mode) {
-         case Rectangle:
-            this.currentMode = new Rectangle();
-            break;
-         case Spiral:
-            this.currentMode = new Spiral();
-            break;
-         case ZigZag:
-            this.currentMode = new ZigZag();
-            break;
-         case Circle:
-            this.currentMode = new Circle();
-      }
-   }
+    void clearAllModes() {
+        boolean wasActive = disableIfActive();
+        currentMode().clearAll();
+        if (wasActive) info("Module disabled. Re-enable it to start fresh with any mode.");
+    }
 
-   private void onModeChanged(AreaLoaderModes mode) {
-      boolean wasActive = this.isActive() && this.mc.player != null && this.mc.world != null;
-      if (wasActive) {
-         this.currentMode.onDeactivate();
-      }
+    private boolean disableIfActive() {
+        boolean wasActive = isActive();
+        if (wasActive) toggle();
+        return wasActive;
+    }
 
-      this.rebuildMode(mode);
-      if (wasActive) {
-         this.currentMode.onActivate();
-      }
-   }
+    private boolean isRunnable() {
+        return isActive()
+            && mc.player != null
+            && mc.world != null
+            && mc.interactionManager != null
+            && mc.interactionManager.getCurrentGameMode() == GameMode.SURVIVAL;
+    }
 
-   public enum NetherPathMode {
-      BARITONE_ELYTRA,
-      OTHER;
-   }
+    private void replaceMode(AreaLoaderModes type) {
+        modeSlot.replaceWith(type);
+    }
 
-   public enum OverworldFlightMode {
-      ROCKETS,
-      PITCH40,
-      OTHER;
-   }
+    private void switchMode(AreaLoaderModes type) {
+        boolean wasActive = isActive() && mc.player != null && mc.world != null;
+        if (wasActive) currentMode().onDeactivate();
+        modeSlot.replaceWith(type);
+        if (wasActive) currentMode().onActivate();
+    }
 }

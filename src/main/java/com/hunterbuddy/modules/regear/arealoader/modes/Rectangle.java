@@ -1,526 +1,230 @@
 package com.hunterbuddy.modules.regear.arealoader.modes;
 
-import com.hunterbuddy.modules.ElytraRecast;
-import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
-import com.hunterbuddy.modules.regear.arealoader.AreaLoaderMode;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoaderModes;
-import com.hunterbuddy.modules.regear.util.Utils;
+import com.hunterbuddy.modules.regear.arealoader.AreaMath;
+import com.hunterbuddy.modules.regear.arealoader.NetherRouteMode;
 import java.io.File;
 import java.io.FileReader;
-import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
-import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
-public class Rectangle extends AreaLoaderMode {
-   private Rectangle.PathingDataRectangle pd;
-   private boolean goingToStart = true;
-   private long startTime;
-   private BlockPos nextWaypointTarget = null;
-   private boolean recovering = false;
-   private BlockPos recoveryTarget = null;
-   private BlockPos lastKnownGoodPosition = null;
-   private int offTrackCounter = 0;
-   private static final int OFF_TRACK_THRESHOLD = 10;
-   private static final int MAX_OFF_TRACK_DISTANCE = 200;
-   private ElytraRecast elytraRecast = null;
-   private long recoveryCompletedTime = 0L;
-   private static final long RECOVERY_COOLDOWN_MS = 5000L;
+public class Rectangle extends NetherRouteMode {
+    private static final int CHUNK_SIZE = 16;
+    private static final int DEFAULT_SPAN = 10000;
+    private static final double TARGET_ARRIVAL = 20.0;
+    private static final int SECONDS_PER_HOUR = 3600;
+    private static final int SECONDS_PER_MINUTE = 60;
 
-   public Rectangle() {
-      super(AreaLoaderModes.Rectangle);
-   }
+    private PathingDataRectangle pd;
 
-   @Override
-   public void onActivate() {
-      this.startTime = System.nanoTime();
-      this.goingToStart = true;
-      this.nextWaypointTarget = null;
-      this.recovering = false;
-      this.recoveryTarget = null;
-      this.lastKnownGoodPosition = null;
-      this.offTrackCounter = 0;
-      this.elytraRecast = (ElytraRecast)Modules.get().get(ElytraRecast.class);
-      this.recoveryCompletedTime = 0L;
-      File file = this.getJsonFile(super.toString());
-      if (file == null) {
-         this.debugInfo("Error: Cannot create save file path. Check save-name setting.");
-         BlockPos playerPos = this.mc.player.getBlockPos();
-         BlockPos startPos = (BlockPos)this.searchArea.startPos.get();
-         BlockPos targetPos = (BlockPos)this.searchArea.targetPos.get();
-         if (startPos.equals(new BlockPos(0, 0, 0))) {
-            startPos = playerPos;
-         }
+    public Rectangle() {
+        super(AreaLoaderModes.Rectangle);
+    }
 
-         if (targetPos.equals(new BlockPos(0, 0, 0))) {
-            targetPos = startPos.add(10000, 0, 10000);
-         }
+    private int blockGap() {
+        return CHUNK_SIZE * searchArea.rowGap.get();
+    }
 
-         float initialYaw = startPos.getX() < targetPos.getX() ? -90.0F : 90.0F;
-         this.pd = new Rectangle.PathingDataRectangle(startPos, targetPos, playerPos, initialYaw, true, playerPos.getZ());
-         this.goingToStart = false;
-      } else if (!file.exists()) {
-         BlockPos playerPos = this.mc.player.getBlockPos();
-         BlockPos startPos = (BlockPos)this.searchArea.startPos.get();
-         BlockPos targetPos = (BlockPos)this.searchArea.targetPos.get();
-         if (startPos.equals(new BlockPos(0, 0, 0))) {
-            startPos = playerPos;
-            this.debugInfo("Start position not configured, using player position: " + playerPos.toShortString());
-         }
+    private RectangleLayout layout() {
+        return new RectangleLayout(pd.initialPos, pd.targetPos, blockGap());
+    }
 
-         if (targetPos.equals(new BlockPos(0, 0, 0))) {
-            targetPos = startPos.add(10000, 0, 10000);
-            this.debugInfo("End position not configured, using default offset: " + targetPos.toShortString());
-         }
+    @Override
+    public void onActivate() {
+        super.onActivate();
+        setGoingToStart(true);
+        resetRoute();
+        restartAutosave();
+        File file = getJsonFile(toString());
+        if (file != null && file.exists()) {
+            loadSaved(file);
+        } else {
+            startFresh();
+        }
+        initializeFlightModes();
+    }
 
-         float initialYaw;
-         if (startPos.getX() < targetPos.getX()) {
-            initialYaw = -90.0F;
-         } else {
-            initialYaw = 90.0F;
-         }
+    private void startFresh() {
+        BlockPos start = resolveStart();
+        BlockPos target = resolveTarget(start);
+        float yaw = start.getX() < target.getX() ? RectangleYaw.EAST : RectangleYaw.WEST;
+        pd = new PathingDataRectangle(start, target, mc.player.getBlockPos(), yaw, true, mc.player.getBlockZ());
+        setGoingToStart(false);
+        debugInfo("Rectangle started at %s heading for %s", searchArea.coords(start.getX(), start.getZ()),
+            searchArea.coords(target.getX(), target.getZ()));
+    }
 
-         this.pd = new Rectangle.PathingDataRectangle(startPos, targetPos, playerPos, initialYaw, true, playerPos.getZ());
-         this.goingToStart = false;
-         this.debugInfo(
-            "Rectangle started from player position "
-               + playerPos.toShortString()
-               + ". Will scan from "
-               + startPos.toShortString()
-               + " to "
-               + targetPos.toShortString()
-         );
-      } else {
-         try {
-            this.debugInfo("Loading save file: " + file.getAbsolutePath() + " (" + file.length() + " bytes)");
-            FileReader reader = new FileReader(file);
-            this.pd = (Rectangle.PathingDataRectangle)GSON.fromJson(reader, Rectangle.PathingDataRectangle.class);
-            reader.close();
-            if (!this.isRectanglePathingDataValid(this.pd)) {
-               ChatUtils.error("Rectangle save file is missing required fields. Disabling to prevent data loss.", new Object[0]);
-               this.pd = null;
-               this.disable();
-               return;
-            }
+    private BlockPos resolveStart() {
+        BlockPos configured = searchArea.startPos.get();
+        return BlockPos.ORIGIN.equals(configured) ? mc.player.getBlockPos() : configured;
+    }
 
-            this.debugInfo("Loaded saved Rectangle successfully. Current position: " + this.pd.currPos.toShortString());
-            this.printRectangleEstimate();
-         } catch (Exception e) {
-            this.debugInfo("Failed to load saved Rectangle data. Starting fresh.");
-            BlockPos playerPos = this.mc.player.getBlockPos();
-            BlockPos startPos = (BlockPos)this.searchArea.startPos.get();
-            BlockPos targetPos = (BlockPos)this.searchArea.targetPos.get();
-            if (startPos.equals(new BlockPos(0, 0, 0))) {
-               startPos = playerPos;
-            }
+    private BlockPos resolveTarget(BlockPos start) {
+        BlockPos configured = searchArea.targetPos.get();
+        return BlockPos.ORIGIN.equals(configured) ? start.add(DEFAULT_SPAN, 0, DEFAULT_SPAN) : configured;
+    }
 
-            if (targetPos.equals(new BlockPos(0, 0, 0))) {
-               targetPos = startPos.add(10000, 0, 10000);
-            }
+    private void loadSaved(File file) {
+        PathingDataRectangle loaded;
+        try (FileReader reader = new FileReader(file)) {
+            loaded = GSON.fromJson(reader, PathingDataRectangle.class);
+        } catch (Exception e) {
+            startFresh();
+            return;
+        }
+        if (loaded == null || loaded.currPos == null || loaded.initialPos == null || loaded.targetPos == null) {
+            rejectSavedFile(file);
+            return;
+        }
+        pd = loaded;
+        setGoingToStart(true);
+        debugInfo("Rectangle progress loaded, estimated time left: %s", estimateTimeLeft());
+    }
 
-            float initialYaw = startPos.getX() < targetPos.getX() ? -90.0F : 90.0F;
-            this.pd = new Rectangle.PathingDataRectangle(startPos, targetPos, playerPos, initialYaw, true, playerPos.getZ());
-            this.goingToStart = false;
-         }
-      }
+    private void rejectSavedFile(File file) {
+        ChatUtils.error("Rectangle save file %s is incomplete, it was left untouched and the module is disabled", file.getAbsolutePath());
+        pd = null;
+        disable();
+    }
 
-      this.initializeFlightModes();
-   }
+    private String estimateTimeLeft() {
+        long seconds = (long) layout().estimateSeconds(pd.currPos.getZ(), searchArea.boatFlySpeed.get());
+        long hours = seconds / SECONDS_PER_HOUR;
+        long minutes = (seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+        return hours + "h " + minutes + "m " + seconds % SECONDS_PER_MINUTE + "s";
+    }
 
-   @Override
-   public void onDeactivate() {
-      super.onDeactivate();
-      super.saveToJson(this.goingToStart, this.pd);
-      this.nextWaypointTarget = null;
-      this.recoveryTarget = null;
-      this.recovering = false;
-   }
+    @Override
+    public void onDeactivate() {
+        super.onDeactivate();
+        saveToJson(isGoingToStart(), pd);
+        resetRoute();
+    }
 
-   private boolean isRectanglePathingDataValid(Rectangle.PathingDataRectangle data) {
-      return data != null && data.currPos != null && data.initialPos != null && data.targetPos != null;
-   }
+    @Override
+    public void resetState() {
+        pd = null;
+        setGoingToStart(true);
+        resetRoute();
+        debugInfo("Rectangle state reset, the next activation starts fresh");
+    }
 
-   @Override
-   public void resetState() {
-      this.pd = null;
-      this.goingToStart = true;
-      this.nextWaypointTarget = null;
-      this.recovering = false;
-      this.recoveryTarget = null;
-      this.lastKnownGoodPosition = null;
-      this.offTrackCounter = 0;
-      this.debugInfo("Rectangle state reset. Next activation will start fresh.");
-   }
+    @Override
+    protected PathingData pathData() {
+        return pd;
+    }
 
-   private void printRectangleEstimate() {
-      double speedBPS = (Double)this.searchArea.boatFlySpeed.get();
-      double rowDistance = Math.abs(this.pd.initialPos.getX() - this.pd.targetPos.getX());
-      int blockGap = 16 * (Integer)this.searchArea.rowGap.get();
-      int remainingZDistance = Math.abs(this.pd.currPos.getZ() - this.pd.targetPos.getZ());
-      int rowCount = remainingZDistance / blockGap;
-      double totalBlocks = rowCount * (rowDistance + blockGap);
-      long totalSeconds = (long)(totalBlocks / speedBPS);
-      long hours = totalSeconds / 3600L;
-      long minutes = totalSeconds % 3600L / 60L;
-      long seconds = totalSeconds % 60L;
-      this.debugInfo(
-         "Completion will take an estimated %02d hours %02d minutes %02d seconds with boatfly at a speed of %.2f and a gap of %d chunks between paths.",
-         hours,
-         minutes,
-         seconds,
-         speedBPS,
-         this.searchArea.rowGap.get()
-      );
-   }
+    @Override
+    protected void tickOverworld() {
+        if (isReturningToSavedPosition()) return;
+        holdForward();
+        steerYaw(pd.yawDirection);
+        if (isWithinOfTarget(TARGET_ARRIVAL)) {
+            completeRoute();
+        } else if (pd.mainPath) {
+            turnAtRowEnd();
+        } else {
+            startNextRowOnceGapCrossed();
+        }
+    }
 
-   @Override
-   public void onTick() {
-      super.onTick();
-      if (this.mc.player != null && this.mc.world != null) {
-         if (System.nanoTime() - this.startTime > 6.0E11) {
-            this.startTime = System.nanoTime();
-            super.saveToJson(this.goingToStart, this.pd);
-         }
+    private boolean isWithinOfTarget(double distance) {
+        return AreaMath.horizontalDistance(pd.targetPos, mc.player.getX(), mc.player.getZ()) < distance;
+    }
 
-         if (this.isInNether) {
-            this.onTickNether();
-         } else {
-            this.onTickOverworld();
-         }
-      }
-   }
+    private void turnAtRowEnd() {
+        if (!layout().hasPassedRowEnd(pd.yawDirection, mc.player.getX())) return;
+        pd.yawDirection = layout().yawAfterRowEnd(mc.player.getZ());
+        pd.mainPath = false;
+        stopForTurn();
+    }
 
-   private void onTickOverworld() {
-      if (this.goingToStart) {
-         this.updateGoalWaypoint(this.pd.currPos);
-         if (Math.sqrt(
-               this.mc
-                  .player
-                  .getBlockPos()
-                  .getSquaredDistance(this.pd.currPos.getX(), this.mc.player.getY(), this.pd.currPos.getZ())
-            )
-            < 5.0) {
-            this.goingToStart = false;
-            this.stopForTurn();
-         } else {
-            this.steerYawTowards(this.pd.currPos.toCenterPos());
-            Utils.setPressed(this.mc.options.forwardKey, true);
-         }
-      } else {
-         Utils.setPressed(this.mc.options.forwardKey, true);
-         this.steerYaw(this.pd.yawDirection);
-         if (Math.sqrt(
-               this.mc
-                  .player
-                  .getBlockPos()
-                  .getSquaredDistance(this.pd.targetPos.getX(), this.mc.player.getY(), this.pd.targetPos.getZ())
-            )
-            < 20.0) {
-            this.onComplete();
-         } else if (this.pd.mainPath
-            && (
-               this.pd.yawDirection == -90.0F
-                     && this.mc.player.getX() >= Math.max(this.pd.initialPos.getX(), this.pd.targetPos.getX())
-                  || this.pd.yawDirection == 90.0F
-                     && this.mc.player.getX() <= Math.min(this.pd.initialPos.getX(), this.pd.targetPos.getX())
-            )) {
-            this.pd.yawDirection = this.mc.player.getZ() < this.pd.targetPos.getZ() ? 0.0F : 180.0F;
-            this.pd.mainPath = false;
-            this.stopForTurn();
-         } else if (!this.pd.mainPath && Math.abs(this.mc.player.getZ() - this.pd.lastCompleteRowZ) >= 16 * (Integer)this.searchArea.rowGap.get()) {
-            this.pd.lastCompleteRowZ = (int)this.mc.player.getZ();
-            this.pd.yawDirection = this.pd.initialPos.getX() > this.mc.player.getX() ? -90.0F : 90.0F;
-            this.pd.mainPath = true;
-            this.stopForTurn();
-         }
-      }
-   }
+    private void startNextRowOnceGapCrossed() {
+        if (Math.abs(mc.player.getZ() - pd.lastCompleteRowZ) < blockGap()) return;
+        pd.lastCompleteRowZ = (int) mc.player.getZ();
+        pd.yawDirection = layout().yawForNextRow(mc.player.getX());
+        pd.mainPath = true;
+        stopForTurn();
+    }
 
-   private void onTickNether() {
-      if (this.searchArea.netherPathMode.get() != AreaLoader.NetherPathMode.BARITONE_ELYTRA) {
-         this.steerYaw(this.pd.yawDirection);
-      } else {
-         int blockGap = 16 * (Integer)this.searchArea.rowGap.get();
-         int reachDist = (Integer)this.searchArea.netherWaypointReachDistance.get();
-         if (this.recovering && this.recoveryTarget != null) {
-            double distToRecovery = Math.sqrt(
-               this.mc
-                  .player
-                  .getBlockPos()
-                  .getSquaredDistance(this.recoveryTarget.getX(), this.mc.player.getY(), this.recoveryTarget.getZ())
-            );
-            boolean elytraRecovering = this.elytraRecast != null && this.elytraRecast.isActive() && this.elytraRecast.isRecovering();
-            if (elytraRecovering) {
-               this.debugInfo("Rectangle: Waiting for ElytraRecast recovery to complete...");
-            } else {
-               if (distToRecovery < reachDist) {
-                  this.debugInfo(
-                     "Rectangle: Recovery complete. Resuming from X=%d Z=%d", this.recoveryTarget.getX(), this.recoveryTarget.getZ()
-                  );
-                  this.recovering = false;
-                  this.recoveryTarget = null;
-                  this.offTrackCounter = 0;
-                  this.recoveryCompletedTime = System.currentTimeMillis();
-                  this.lastKnownGoodPosition = this.mc.player.getBlockPos();
-                  this.nextWaypointTarget = null;
-               } else if (this.needsNewGoal()) {
-                  this.setBaritoneGoal(this.recoveryTarget);
-               }
-            }
-         } else if (this.goingToStart) {
-            double distToSaved = Math.sqrt(
-               this.mc
-                  .player
-                  .getBlockPos()
-                  .getSquaredDistance(this.pd.currPos.getX(), this.mc.player.getY(), this.pd.currPos.getZ())
-            );
-            if (distToSaved < reachDist) {
-               this.goingToStart = false;
-               this.lastKnownGoodPosition = this.pd.currPos;
-               this.nextWaypointTarget = null;
-               this.debugInfo(
-                  "Rectangle: Reached saved position. Resuming at X=%d Z=%d, yaw=%.1f, mainPath=%b",
-                  this.pd.currPos.getX(),
-                  this.pd.currPos.getZ(),
-                  this.pd.yawDirection,
-                  this.pd.mainPath
-               );
-            } else if (this.needsNewGoal()) {
-               this.setBaritoneGoal(this.pd.currPos);
-            }
-         } else {
-            double distToTarget = Math.sqrt(
-               this.mc
-                  .player
-                  .getBlockPos()
-                  .getSquaredDistance(this.pd.targetPos.getX(), this.mc.player.getY(), this.pd.targetPos.getZ())
-            );
-            if (distToTarget < reachDist) {
-               this.onComplete();
-            } else if (this.nextWaypointTarget == null) {
-               this.calculateNextWaypoint();
-               if (this.nextWaypointTarget != null) {
-                  this.debugInfo(
-                     "Rectangle: New waypoint at X=%d Z=%d (mainPath=%b, yaw=%.1f)",
-                     this.nextWaypointTarget.getX(),
-                     this.nextWaypointTarget.getZ(),
-                     this.pd.mainPath,
-                     this.pd.yawDirection
-                  );
-                  this.setBaritoneGoal(this.nextWaypointTarget);
-               }
-            } else {
-               boolean elytraRecovering = this.elytraRecast != null && this.elytraRecast.isActive() && this.elytraRecast.isRecovering();
-               if (!elytraRecovering) {
-                  long timeSinceRecovery = System.currentTimeMillis() - this.recoveryCompletedTime;
-                  if (this.recoveryCompletedTime > 0L && timeSinceRecovery < 5000L) {
-                     if (this.needsNewGoal()) {
-                        this.setBaritoneGoal(this.nextWaypointTarget);
-                     }
-                  } else {
-                     double offTrackDist = this.getRectangleOffTrackDistance();
-                     if (offTrackDist > 200.0) {
-                        this.offTrackCounter++;
-                        if (this.offTrackCounter >= 10) {
-                           this.debugInfo("Rectangle: Off-track by %.0f blocks. Saving state and initiating recovery...", offTrackDist);
-                           BlockPos currentPos = this.mc.player.getBlockPos();
-                           double distToLastGood = this.lastKnownGoodPosition != null
-                              ? Math.sqrt(currentPos.getSquaredDistance(this.lastKnownGoodPosition))
-                              : Double.MAX_VALUE;
-                           if (this.lastKnownGoodPosition != null && distToLastGood > reachDist * 2) {
-                              this.pd.currPos = this.lastKnownGoodPosition;
-                              super.saveToJson(false, this.pd);
-                              this.recoveryTarget = this.lastKnownGoodPosition;
-                              ChatUtils.info(
-                                 "Rectangle: Saved recovery point at X=%d Z=%d. Navigating back.",
-                                 new Object[]{this.lastKnownGoodPosition.getX(), this.lastKnownGoodPosition.getZ()}
-                              );
-                           } else {
-                              this.recoveryTarget = this.pd.currPos;
-                              super.saveToJson(false, this.pd);
-                              ChatUtils.info(
-                                 "Rectangle: Recovering to last saved position X=%d Z=%d",
-                                 new Object[]{this.pd.currPos.getX(), this.pd.currPos.getZ()}
-                              );
-                           }
+    @Override
+    protected boolean finishRouteIfReached(int reach) {
+        if (!isWithin(pd.targetPos, reach)) return false;
+        completeRoute();
+        return true;
+    }
 
-                           this.recovering = true;
-                           this.nextWaypointTarget = null;
-                           this.offTrackCounter = 0;
-                           this.setBaritoneGoal(this.recoveryTarget);
-                           return;
-                        }
-                     } else {
-                        this.offTrackCounter = 0;
-                        this.lastKnownGoodPosition = this.mc.player.getBlockPos();
-                     }
+    private void completeRoute() {
+        releaseForward();
+        searchArea.toggle();
+        if (searchArea.disconnectOnCompletion.get()) {
+            PathCompletion.disconnect();
+        }
+    }
 
-                     double distToWaypoint = Math.sqrt(
-                        this.mc
-                           .player
-                           .getBlockPos()
-                           .getSquaredDistance(this.nextWaypointTarget.getX(), this.mc.player.getY(), this.nextWaypointTarget.getZ())
-                     );
-                     if (distToWaypoint < reachDist) {
-                        this.debugInfo(
-                           "Rectangle: Reached waypoint at X=%d Z=%d", this.nextWaypointTarget.getX(), this.nextWaypointTarget.getZ()
-                        );
-                        if (this.pd.mainPath) {
-                           int rowEndX = this.pd.yawDirection == -90.0F
-                              ? Math.max(this.pd.initialPos.getX(), this.pd.targetPos.getX())
-                              : Math.min(this.pd.initialPos.getX(), this.pd.targetPos.getX());
-                           boolean reachedRowEnd = Math.abs(this.nextWaypointTarget.getX() - rowEndX) < reachDist;
-                           if (reachedRowEnd) {
-                              this.pd.yawDirection = this.nextWaypointTarget.getZ() < this.pd.targetPos.getZ() ? 0.0F : 180.0F;
-                              this.pd.mainPath = false;
-                              this.debugInfo("Rectangle: Reached row end, turning to yaw=%.1f", this.pd.yawDirection);
-                           }
-                        } else {
-                           int targetRowZ = this.pd.lastCompleteRowZ + (this.pd.yawDirection == 0.0F ? blockGap : -blockGap);
-                           boolean reachedNextRow = Math.abs(this.nextWaypointTarget.getZ() - targetRowZ) < reachDist;
-                           if (reachedNextRow) {
-                              this.pd.lastCompleteRowZ = this.nextWaypointTarget.getZ();
-                              this.pd.yawDirection = this.pd.initialPos.getX() > this.nextWaypointTarget.getX() ? -90.0F : 90.0F;
-                              this.pd.mainPath = true;
-                              this.debugInfo("Rectangle: Reached next row at Z=%d, turning to yaw=%.1f", this.pd.lastCompleteRowZ, this.pd.yawDirection);
-                           }
-                        }
+    @Override
+    protected BlockPos computeWaypoint() {
+        int y = mc.player.getBlockY();
+        if (pd.mainPath) return new BlockPos(layout().rowEndX(pd.yawDirection), y, pd.lastCompleteRowZ);
+        return new BlockPos(referenceX(), y, layout().nextRowZ(pd.yawDirection, pd.lastCompleteRowZ));
+    }
 
-                        this.pd.currPos = this.nextWaypointTarget;
-                        this.lastKnownGoodPosition = this.nextWaypointTarget;
-                        super.saveToJson(false, this.pd);
-                        this.updateGoalWaypoint(null);
-                        this.nextWaypointTarget = null;
-                        this.calculateNextWaypoint();
-                        if (this.nextWaypointTarget != null) {
-                           this.debugInfo(
-                              "Rectangle: Next waypoint at X=%d Z=%d", this.nextWaypointTarget.getX(), this.nextWaypointTarget.getZ()
-                           );
-                           this.setBaritoneGoal(this.nextWaypointTarget);
-                        }
-                     } else if (this.needsNewGoal()) {
-                        this.debugInfo("Rectangle: Baritone needs new goal, resetting");
-                        this.setBaritoneGoal(this.nextWaypointTarget);
-                     }
-                  }
-               }
-            }
-         }
-      }
-   }
+    private int referenceX() {
+        return pd.currPos != null ? pd.currPos.getX() : mc.player.getBlockX();
+    }
 
-   private void calculateNextWaypoint() {
-      int blockGap = 16 * (Integer)this.searchArea.rowGap.get();
-      BlockPos currentRef = this.pd.currPos != null ? this.pd.currPos : this.mc.player.getBlockPos();
-      int targetX;
-      int targetZ;
-      if (this.pd.mainPath) {
-         if (this.pd.yawDirection == -90.0F) {
-            targetX = Math.max(this.pd.initialPos.getX(), this.pd.targetPos.getX());
-         } else {
-            targetX = Math.min(this.pd.initialPos.getX(), this.pd.targetPos.getX());
-         }
+    @Override
+    protected double offTrackDistance() {
+        if (pd.mainPath) return Math.abs(mc.player.getZ() - pd.lastCompleteRowZ);
+        return Math.abs(mc.player.getX() - nextWaypoint().getX());
+    }
 
-         targetZ = this.pd.lastCompleteRowZ;
-      } else {
-         if (this.pd.yawDirection != -90.0F && this.pd.yawDirection != 90.0F) {
-            targetX = this.pd.yawDirection != 0.0F && this.pd.yawDirection != 180.0F ? currentRef.getX() : currentRef.getX();
-         } else {
-            targetX = currentRef.getX();
-         }
+    @Override
+    protected void turnAt(BlockPos waypoint) {
+        if (pd.mainPath) {
+            turnAtRowEndWaypoint(waypoint);
+        } else {
+            startNextRowAtWaypoint(waypoint);
+        }
+    }
 
-         if (this.pd.yawDirection == 0.0F) {
-            targetZ = this.pd.lastCompleteRowZ + blockGap;
-         } else {
-            targetZ = this.pd.lastCompleteRowZ - blockGap;
-         }
-      }
+    private void turnAtRowEndWaypoint(BlockPos waypoint) {
+        int rowEnd = layout().rowEndX(pd.yawDirection);
+        if (Math.abs(waypoint.getX() - rowEnd) >= searchArea.netherWaypointReachDistance.get()) return;
+        pd.yawDirection = layout().yawAfterRowEnd(waypoint.getZ());
+        pd.mainPath = false;
+    }
 
-      this.nextWaypointTarget = new BlockPos(targetX, this.mc.player.getBlockY(), targetZ);
-      this.updateGoalWaypoint(this.nextWaypointTarget);
-   }
+    private void startNextRowAtWaypoint(BlockPos waypoint) {
+        int nextRowZ = layout().nextRowZ(pd.yawDirection, pd.lastCompleteRowZ);
+        if (Math.abs(waypoint.getZ() - nextRowZ) >= searchArea.netherWaypointReachDistance.get()) return;
+        pd.lastCompleteRowZ = waypoint.getZ();
+        pd.yawDirection = layout().yawForNextRow(waypoint.getX());
+        pd.mainPath = true;
+    }
 
-   private void onComplete() {
-      Utils.setPressed(this.mc.options.forwardKey, false);
-      this.searchArea.toggle();
-      if ((Boolean)this.searchArea.disconnectOnCompletion.get()) {
-         AutoReconnect autoReconnect = (AutoReconnect)Modules.get().get(AutoReconnect.class);
-         if (autoReconnect.isActive()) {
-            autoReconnect.toggle();
-         }
+    @Override
+    public CoveragePreview coveragePreview() {
+        if (pd == null) return null;
+        RectanglePreview preview = new RectanglePreview(pd, blockGap());
+        if (!preview.isComplete()) return null;
+        double x = mc.player != null ? mc.player.getX() : pd.currPos.getX();
+        double z = mc.player != null ? mc.player.getZ() : pd.currPos.getZ();
+        return preview.build(x, z, distanceToNextWaypoint(), isRecovering());
+    }
 
-         this.mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(Text.literal("[Search Area] Path is complete")));
-      }
-   }
+    public static class PathingDataRectangle extends PathingData {
+        public BlockPos targetPos;
+        public int lastCompleteRowZ;
 
-   private double getRectangleOffTrackDistance() {
-      if (this.pd == null) {
-         return 0.0;
-      } else {
-         BlockPos currentPos = this.mc.player.getBlockPos();
-         if (this.pd.mainPath) {
-            return Math.abs(currentPos.getZ() - this.pd.lastCompleteRowZ);
-         } else {
-            return this.nextWaypointTarget != null ? Math.abs(currentPos.getX() - this.nextWaypointTarget.getX()) : 0.0;
-         }
-      }
-   }
-
-   @Override
-   public AreaLoaderMode.CoveragePreview coveragePreview() {
-      if (this.pd == null || this.pd.initialPos == null || this.pd.targetPos == null || this.pd.currPos == null) {
-         return null;
-      }
-
-      int gap = Math.max(16, 16 * (Integer) this.searchArea.rowGap.get());
-      int x0 = this.pd.initialPos.getX();
-      int z0 = this.pd.initialPos.getZ();
-      int x1 = this.pd.targetPos.getX();
-      int z1 = this.pd.targetPos.getZ();
-      int stepZ = z1 >= z0 ? gap : -gap;
-
-      java.util.List<double[]> points = new java.util.ArrayList<>();
-      int z = z0;
-      boolean toEnd = true;
-      points.add(new double[]{x0, z});
-      for (int row = 0; row < 400; row++) {
-         int rowX = toEnd ? x1 : x0;
-         points.add(new double[]{rowX, z});
-         if ((stepZ > 0 && z >= z1) || (stepZ < 0 && z <= z1)) {
-            break;
-         }
-
-         z += stepZ;
-         points.add(new double[]{rowX, z});
-         toEnd = !toEnd;
-      }
-
-      double curX = this.mc.player != null ? this.mc.player.getX() : this.pd.currPos.getX();
-      double curZ = this.mc.player != null ? this.mc.player.getZ() : this.pd.currPos.getZ();
-
-      int rowsCompleted = Math.abs(this.pd.lastCompleteRowZ - z0) / gap;
-      int flown = Math.min(points.size() - 1, rowsCompleted * 2);
-
-      double nextTurn = this.nextWaypointTarget != null
-         ? Math.hypot(this.nextWaypointTarget.getX() - curX, this.nextWaypointTarget.getZ() - curZ) : -1.0;
-
-      return new AreaLoaderMode.CoveragePreview(points, flown, curX, curZ, "rect",
-         Math.abs(x1 - x0) + "x" + Math.abs(z1 - z0), nextTurn, this.recovering);
-   }
-
-   public static class PathingDataRectangle extends AreaLoaderMode.PathingData {
-      public BlockPos targetPos;
-      public int lastCompleteRowZ;
-
-      public PathingDataRectangle(BlockPos initialPos, BlockPos targetPos, BlockPos currPos, float yawDirection, boolean mainPath, int lastCompleteRowZ) {
-         this.initialPos = initialPos;
-         this.targetPos = targetPos;
-         this.currPos = currPos;
-         this.yawDirection = yawDirection;
-         this.mainPath = mainPath;
-         this.lastCompleteRowZ = lastCompleteRowZ;
-      }
-   }
+        public PathingDataRectangle(BlockPos initialPos, BlockPos targetPos, BlockPos currPos, float yawDirection,
+                                    boolean mainPath, int lastCompleteRowZ) {
+            this.initialPos = initialPos;
+            this.targetPos = targetPos;
+            this.currPos = currPos;
+            this.yawDirection = yawDirection;
+            this.mainPath = mainPath;
+            this.lastCompleteRowZ = lastCompleteRowZ;
+        }
+    }
 }
