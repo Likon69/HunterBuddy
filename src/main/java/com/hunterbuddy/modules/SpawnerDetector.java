@@ -626,6 +626,18 @@ public class SpawnerDetector extends Module {
     private Site autoSoloTarget;
     private double autoSoloBestDistSq;
     private int autoSoloBestDistTick;
+    private int autoSoloSlowTicks;
+    private int autoSoloEscapeTicks;
+    private float autoSoloEscapeYaw;
+    private int autoSoloEscapeSide = 1;
+    private static final double SOLO_BLOCKED_SPEED = 0.3;
+    private static final int SOLO_BLOCKED_TICKS = 20;
+    private static final int SOLO_ESCAPE_TICKS = 60;
+    private static final int SOLO_ESCAPE_TURN_TICKS = 10;
+    private static final float SOLO_ESCAPE_TURN = 135.0f;
+    private static final float SOLO_ESCAPE_PITCH = -30.0f;
+    private static final double SOLO_ESCAPE_CLIMB = 40.0;
+    private static final double SOLO_MAX_ALTITUDE = 300.0;
     private static final int TUNNEL_BARITONE_RETRIES = 1;
     private int autoSoloNearUnloadedTicks;
     private int autoSoloLastRocketTick;
@@ -13604,6 +13616,8 @@ public class SpawnerDetector extends Module {
             autoSoloBestDistSq = distSq;
             autoSoloBestDistTick = stateTicks;
             autoSoloNearUnloadedTicks = 0;
+            autoSoloSlowTicks = 0;
+            autoSoloEscapeTicks = 0;
             autoSoloCruiseAltitude = Math.max(autoSoloCruiseAltitude, mc.player.getY());
             autoLog("SOLO", target.center, String.format("cruise target=%d,%d,%d remaining=%d dist=%.1f altitude=%.1f",
                 target.center.getX(), target.center.getY(), target.center.getZ(), soloMemoryTargetCount(), dist, autoSoloCruiseAltitude));
@@ -13651,7 +13665,22 @@ public class SpawnerDetector extends Module {
         Vec3d vel = mc.player.getVelocity();
         double speedH = Math.hypot(vel.x, vel.z);
         double y = mc.player.getY();
-        if ((speedH < 1.2 || y < autoSoloCruiseAltitude - 35.0) && dist > 96.0
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        boolean burning = mc.player.isOnFire() || mc.player.isInLava();
+        autoSoloSlowTicks = speedH < SOLO_BLOCKED_SPEED ? autoSoloSlowTicks + 1 : 0;
+        if (autoSoloEscapeTicks == 0 && (burning || autoSoloSlowTicks >= SOLO_BLOCKED_TICKS)) {
+            autoSoloEscapeSide = -autoSoloEscapeSide;
+            autoSoloEscapeYaw = yaw + SOLO_ESCAPE_TURN * autoSoloEscapeSide;
+            autoSoloEscapeTicks = SOLO_ESCAPE_TICKS;
+            autoSoloSlowTicks = 0;
+            autoSoloCruiseAltitude = Math.min(SOLO_MAX_ALTITUDE, Math.max(autoSoloCruiseAltitude, y + SOLO_ESCAPE_CLIMB));
+            autoLog("SOLO", target.center, String.format("blocked speedH=%.2f burning=%s, backing off and climbing to altitude=%.1f",
+                speedH, burning, autoSoloCruiseAltitude));
+        }
+        boolean escaping = autoSoloEscapeTicks > 0;
+        boolean turning = escaping && SOLO_ESCAPE_TICKS - autoSoloEscapeTicks < SOLO_ESCAPE_TURN_TICKS;
+        if (escaping) autoSoloEscapeTicks--;
+        if (!turning && (speedH < 1.2 || y < autoSoloCruiseAltitude - 35.0) && dist > 96.0
             && stateTicks - autoSoloLastRocketTick >= soloCruiseRocketInterval.get() && !ownRocketActive()) {
             if (countRockets() <= autoMinRockets.get()) {
                 autoLog("SOLO", target.center, "out of rockets, staying with flight-module None behavior");
@@ -13665,9 +13694,9 @@ public class SpawnerDetector extends Module {
             }
         }
 
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
         float pitch = y < autoSoloCruiseAltitude - 35.0 ? -25.0f : y > autoSoloCruiseAltitude + 20.0 ? 8.0f : -5.0f;
-        applyGlideRotation(yaw, pitch);
+        if (escaping) applyGlideRotation(autoSoloEscapeYaw, SOLO_ESCAPE_PITCH);
+        else applyGlideRotation(yaw, pitch);
         if (log.get() && stateTicks % 20 == 0) {
             HunterBuddyAddon.LOG.info("[SpawnerDetector/auto] SOLO site={},{},{} D={} y={} speedH={} rockets={} remaining={}",
                 target.center.getX(), target.center.getY(), target.center.getZ(),
