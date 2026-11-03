@@ -13,15 +13,18 @@ import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 @Mixin(value = Camera.class, priority = 1001)
 public class ElytraBounceCameraMixin {
-    @ModifyArgs(method = "update", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/Camera;setRotation(FF)V"))
-    private void hunterBuddy$modifyCameraRotation(Args args, @Local(argsOnly = true) Entity focusedEntity) {
+    private static final int PITCH_ARGUMENT = 1;
+
+    @ModifyArgs(
+        method = "update",
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/Camera;setRotation(FF)V")
+    )
+    private void hunterBuddy$freePitch(Args args, @Local(argsOnly = true) Entity focusedEntity) {
         FreeLook freeLook = Modules.get().get(FreeLook.class);
         if (freeLook != null && freeLook.isActive()) return;
-
-        ElytraBounce elytraBounce = Modules.get().get(ElytraBounce.class);
-        if (elytraBounce != null && elytraBounce.isFreePitchEnabled() && focusedEntity != null) {
-            args.set(1, elytraBounce.cameraPitch);
-            return;
+        ElytraBounce bounce = Modules.get().get(ElytraBounce.class);
+        if (bounce != null && bounce.isFreePitchEnabled() && focusedEntity != null) {
+            args.set(PITCH_ARGUMENT, bounce.cameraPitch);
         }
     }
 }

@@ -9,54 +9,60 @@ import org.spongepowered.asm.mixin.Unique;
 
 @Mixin(Input.class)
 public abstract class InputMixin implements InputAccessor {
-   @Shadow public Vec2f movementVector;
+    @Unique
+    private static final float NORMALIZE_THRESHOLD = 1.0E-4F;
 
-   @Unique private float hunterBuddy$overrideForward = Float.NaN;
-   @Unique private float hunterBuddy$overrideSideways = Float.NaN;
+    @Shadow
+    protected Vec2f movementVector;
 
-   @Override
-   public float getMovementForward() {
-      if (!Float.isNaN(this.hunterBuddy$overrideForward)) return this.hunterBuddy$overrideForward;
+    @Unique
+    private float hunterBuddy$forwardOverride = Float.NaN;
+    @Unique
+    private float hunterBuddy$sidewaysOverride = Float.NaN;
 
-      return this.movementVector != null ? this.movementVector.y : 0.0F;
-   }
+    @Override
+    public float getMovementForward() {
+        if (!Float.isNaN(hunterBuddy$forwardOverride)) return hunterBuddy$forwardOverride;
+        return movementVector == null ? 0.0F : movementVector.y;
+    }
 
-   @Override
-   public void setMovementForward(float value) {
-      this.hunterBuddy$overrideForward = value;
-      this.applyOverrides();
-   }
+    @Override
+    public float getMovementSideways() {
+        if (!Float.isNaN(hunterBuddy$sidewaysOverride)) return hunterBuddy$sidewaysOverride;
+        return movementVector == null ? 0.0F : movementVector.x;
+    }
 
-   @Override
-   public float getMovementSideways() {
-      if (!Float.isNaN(this.hunterBuddy$overrideSideways)) return this.hunterBuddy$overrideSideways;
+    @Override
+    public void setMovementForward(float value) {
+        hunterBuddy$forwardOverride = value;
+        hunterBuddy$apply();
+    }
 
-      return this.movementVector != null ? this.movementVector.x : 0.0F;
-   }
+    @Override
+    public void setMovementSideways(float value) {
+        hunterBuddy$sidewaysOverride = value;
+        hunterBuddy$apply();
+    }
 
-   @Override
-   public void setMovementSideways(float value) {
-      this.hunterBuddy$overrideSideways = value;
-      this.applyOverrides();
-   }
-
-   @Unique
-   private void applyOverrides() {
-      if (this.movementVector != null) {
-         float sideways = Float.isNaN(this.hunterBuddy$overrideSideways) ? this.movementVector.x : this.hunterBuddy$overrideSideways;
-         float forward = Float.isNaN(this.hunterBuddy$overrideForward) ? this.movementVector.y : this.hunterBuddy$overrideForward;
-
-         if (!Float.isNaN(this.hunterBuddy$overrideSideways) && !Float.isNaN(this.hunterBuddy$overrideForward)) {
+    @Unique
+    private void hunterBuddy$apply() {
+        if (movementVector == null) return;
+        float sideways = Float.isNaN(hunterBuddy$sidewaysOverride) ? movementVector.x : hunterBuddy$sidewaysOverride;
+        float forward = Float.isNaN(hunterBuddy$forwardOverride) ? movementVector.y : hunterBuddy$forwardOverride;
+        if (hunterBuddy$bothOverridden()) {
             float length = (float) Math.sqrt(sideways * sideways + forward * forward);
-            if (length > 1.0E-4F) {
-               sideways /= length;
-               forward /= length;
+            if (length > NORMALIZE_THRESHOLD) {
+                sideways /= length;
+                forward /= length;
             }
-         }
+        }
+        movementVector = new Vec2f(sideways, forward);
+        hunterBuddy$forwardOverride = Float.NaN;
+        hunterBuddy$sidewaysOverride = Float.NaN;
+    }
 
-         this.movementVector = new Vec2f(sideways, forward);
-         this.hunterBuddy$overrideForward = Float.NaN;
-         this.hunterBuddy$overrideSideways = Float.NaN;
-      }
-   }
+    @Unique
+    private boolean hunterBuddy$bothOverridden() {
+        return !Float.isNaN(hunterBuddy$forwardOverride) && !Float.isNaN(hunterBuddy$sidewaysOverride);
+    }
 }
