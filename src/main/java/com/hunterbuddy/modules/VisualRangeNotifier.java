@@ -1,884 +1,157 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.events.PlayerDeathEvent;
-import com.hunterbuddy.events.ServerDisconnectEvent;
-import com.hunterbuddy.modules.regear.util.MsgUtil;
-import com.hunterbuddy.modules.regear.util.Utils;
-import com.mojang.authlib.GameProfile;
-import it.unimi.dsi.fastutil.ints.IntListIterator;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import com.hunterbuddy.modules.visualrange.AlertSink;
+import com.hunterbuddy.modules.visualrange.DimensionNames;
+import com.hunterbuddy.modules.visualrange.DisconnectMemory;
+import com.hunterbuddy.modules.visualrange.DiscordActivitySettings;
+import com.hunterbuddy.modules.visualrange.DiscordReporter;
+import com.hunterbuddy.modules.visualrange.DiscordSettings;
+import com.hunterbuddy.modules.visualrange.GroundItemSettings;
+import com.hunterbuddy.modules.visualrange.GroundItemWatch;
+import com.hunterbuddy.modules.visualrange.LeaveClassifier;
+import com.hunterbuddy.modules.visualrange.PlayerRangeSettings;
+import com.hunterbuddy.modules.visualrange.PlayerRangeWatch;
+import com.hunterbuddy.modules.visualrange.PvpAnnouncer;
+import com.hunterbuddy.modules.visualrange.PvpSettings;
+import com.hunterbuddy.modules.visualrange.PvpWatch;
+import com.hunterbuddy.modules.visualrange.RangeSound;
+import com.hunterbuddy.modules.visualrange.RangeSoundSettings;
+import com.hunterbuddy.modules.visualrange.WatchGuard;
+import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
-import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
-import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
-import meteordevelopment.meteorclient.settings.*;
-import meteordevelopment.meteorclient.systems.friends.Friends;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.decoration.EndCrystalEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.BundleS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.text.Text;
+
+import java.time.LocalTime;
 
 public class VisualRangeNotifier extends Module {
+    private static final String UNKNOWN_POSITION = "unknown";
 
-    private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final Setting<Boolean> chatNotify = sgGeneral.add(new BoolSetting.Builder()
-        .name("chat-notify")
-        .description("Show chat messages for notifications.")
-        .defaultValue(true)
-        .build());
+    private final PlayerRangeSettings playerSettings = new PlayerRangeSettings(settings);
+    private final GroundItemSettings itemSettings = new GroundItemSettings(settings);
+    private final RangeSoundSettings soundSettings = new RangeSoundSettings(settings);
+    private final DiscordSettings discordSettings = new DiscordSettings(settings, itemSettings);
+    private final PvpSettings pvpSettings = new PvpSettings(settings);
+    private final DiscordActivitySettings activitySettings = new DiscordActivitySettings(discordSettings);
 
-    private final Setting<Boolean> ignoreFriends = sgGeneral.add(new BoolSetting.Builder()
-        .name("ignore-friends")
-        .description("Don't notify for Meteor friends.")
-        .defaultValue(false)
-        .build());
-
-    private final SettingGroup sgPlayers = settings.createGroup("Players");
-
-    private final Setting<Boolean> playerEnter = sgPlayers.add(new BoolSetting.Builder()
-        .name("player-enter")
-        .description("Notify when a player enters visual range.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> playerLeave = sgPlayers.add(new BoolSetting.Builder()
-        .name("player-leave")
-        .description("Notify when a player leaves visual range.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> playerCoords = sgPlayers.add(new BoolSetting.Builder()
-        .name("player-coords")
-        .description("Include their coordinates in the notification.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> playerEquipment = sgPlayers.add(new BoolSetting.Builder()
-        .name("player-equipment")
-        .description("Include visible equipment in the enter notification.")
-        .defaultValue(true)
-        .visible(playerEnter::get)
-        .build());
-
-    private final SettingGroup sgItems = settings.createGroup("Ground Items");
-
-    private final Setting<Boolean> itemNotify = sgItems.add(new BoolSetting.Builder()
-        .name("item-notify")
-        .description("Notify when selected items appear on the ground nearby.")
-        .defaultValue(false)
-        .build());
-
-    private final Setting<List<Item>> trackedItems = sgItems.add(new ItemListSetting.Builder()
-        .name("tracked-items")
-        .description("Items to notify about when found on the ground.")
-        .defaultValue(List.of(
-            Items.NETHERITE_INGOT, Items.NETHERITE_SCRAP, Items.ANCIENT_DEBRIS,
-            Items.ENCHANTED_GOLDEN_APPLE, Items.TOTEM_OF_UNDYING, Items.ELYTRA,
-            Items.NETHERITE_HELMET, Items.NETHERITE_CHESTPLATE, Items.NETHERITE_LEGGINGS,
-            Items.NETHERITE_BOOTS, Items.NETHERITE_SWORD, Items.NETHERITE_PICKAXE
-        )).visible(itemNotify::get)
-        .build());
-
-    private final Setting<Integer> itemCooldown = sgItems.add(new IntSetting.Builder()
-        .name("item-cooldown")
-        .description("Seconds before the same item entity triggers another notification.")
-        .defaultValue(30)
-        .min(5)
-        .sliderRange(5, 120)
-        .visible(itemNotify::get)
-        .build());
-
-    private final SettingGroup sgSound = settings.createGroup("Sound");
-
-    private final Setting<Boolean> soundEnabled = sgSound.add(new BoolSetting.Builder()
-        .name("sound-enabled")
-        .description("Play a sound on player enter notification.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<List<SoundEvent>> sound = sgSound.add(new SoundEventListSetting.Builder()
-        .name("sound")
-        .description("Sound to play.")
-        .defaultValue(List.of(SoundEvents.ENTITY_PLAYER_LEVELUP)).visible(soundEnabled::get)
-        .build());
-
-    private final Setting<Double> soundVolume = sgSound.add(new DoubleSetting.Builder()
-        .name("sound-volume")
-        .description("Volume of the notification sound.")
-        .defaultValue(1.0)
-        .min(0.0)
-        .max(2.0)
-        .sliderRange(0.0, 2.0)
-        .visible(soundEnabled::get)
-        .build());
-
-    private final Setting<Double> soundPitch = sgSound.add(new DoubleSetting.Builder()
-        .name("sound-pitch")
-        .description("Pitch of the notification sound.")
-        .defaultValue(1.0)
-        .min(0.5)
-        .max(2.0)
-        .sliderRange(0.5, 2.0)
-        .visible(soundEnabled::get)
-        .build());
-
-    private final SettingGroup sgDiscord = settings.createGroup("Discord");
-
-    private final Setting<Boolean> discordEnabled = sgDiscord.add(new BoolSetting.Builder()
-        .name("discord-webhook")
-        .description("Send notifications to a Discord webhook.")
-        .defaultValue(false)
-        .build());
-
-    private final Setting<String> webhookUrl = sgDiscord.add(new StringSetting.Builder()
-        .name("webhook-url")
-        .description("Discord webhook URL.")
-        .defaultValue("")
-        .visible(discordEnabled::get)
-        .build());
-
-    private final Setting<Boolean> discordPlayers = sgDiscord.add(new BoolSetting.Builder()
-        .name("discord-players")
-        .description("Send player enter/leave events to Discord.")
-        .defaultValue(true)
-        .visible(discordEnabled::get)
-        .build());
-
-    private final Setting<Boolean> discordItems = sgDiscord.add(new BoolSetting.Builder()
-        .name("discord-items")
-        .description("Send ground item events to Discord.")
-        .defaultValue(true)
-        .visible(() -> discordEnabled.get() && itemNotify.get())
-        .build());
-
-    private final Setting<String> pingId = sgDiscord.add(new StringSetting.Builder()
-        .name("ping-id")
-        .description("Discord user ID to ping. Leave blank to disable.")
-        .defaultValue("")
-        .visible(discordEnabled::get)
-        .build());
-
-    private final SettingGroup sgPvp = settings.createGroup("PvP Activity");
-
-    private final Setting<Boolean> crystalPlace = sgPvp.add(new BoolSetting.Builder()
-        .name("crystal-place")
-        .description("Notify when a player places an end crystal nearby.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> crystalPop = sgPvp.add(new BoolSetting.Builder()
-        .name("crystal-pop")
-        .description("Notify when a player pops (destroys) an end crystal nearby.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> anchorPlace = sgPvp.add(new BoolSetting.Builder()
-        .name("anchor-place")
-        .description("Notify when a respawn anchor is placed nearby.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> anchorPop = sgPvp.add(new BoolSetting.Builder()
-        .name("anchor-pop")
-        .description("Notify when a respawn anchor is destroyed (exploded) nearby.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Integer> pvpRange = sgPvp.add(new IntSetting.Builder()
-        .name("pvp-range")
-        .description("Maximum range to attribute crystal/anchor activity to a player.")
-        .defaultValue(6)
-        .min(1)
-        .sliderRange(1, 20)
-        .build());
-
-    private final Setting<Boolean> pvpIgnoreSelf = sgPvp.add(new BoolSetting.Builder()
-        .name("pvp-ignore-self")
-        .description("Don't notify for your own crystal/anchor activity.")
-        .defaultValue(true)
-        .build());
-
-    private final Setting<Boolean> discordPvp = sgDiscord.add(new BoolSetting.Builder()
-        .name("discord-pvp")
-        .description("Send crystal/anchor activity to Discord.")
-        .defaultValue(true)
-        .visible(discordEnabled::get)
-        .build());
-
-    private final Setting<Boolean> discordDeath = sgDiscord.add(new BoolSetting.Builder()
-        .name("discord-death")
-        .description("Send your own death to Discord, with the server's own wording so the killer and the cause come along.")
-        .defaultValue(true)
-        .visible(discordEnabled::get)
-        .build());
-
-    private final Setting<Boolean> discordDisconnect = sgDiscord.add(new BoolSetting.Builder()
-        .name("discord-disconnect")
-        .description("Send every disconnect to Discord — kicks, timeouts and AutoLogPlus alike. Leaving through the menu counts too.")
-        .defaultValue(true)
-        .visible(discordEnabled::get)
-        .build());
-
-    private final Set<UUID> trackedPlayers = new HashSet<>();
-    private final Map<UUID, String> uuidNameCache = new HashMap<>();
-    private final Map<Integer, Long> notifiedItems = new HashMap<>();
-    private final Set<BlockPos> trackedAnchors = new HashSet<>();
+    private final DiscordReporter reporter = new DiscordReporter(discordSettings);
+    private final AlertSink alerts = new AlertSink(playerSettings, new RangeSound(soundSettings), reporter);
+    private final PlayerRangeWatch playerWatch = new PlayerRangeWatch(playerSettings, discordSettings, alerts);
+    private final GroundItemWatch itemWatch = new GroundItemWatch(itemSettings, discordSettings, alerts);
+    private final PvpWatch pvpWatch = new PvpWatch(
+        pvpSettings, new PvpAnnouncer(pvpSettings, playerSettings, activitySettings, alerts));
+    private final WatchGuard guard = new WatchGuard();
 
     public VisualRangeNotifier() {
-        super(HunterBuddyAddon.HUNT_CATEGORY, "visual-range-notifier",
-            "Notifies when players enter visual range or selected items appear on the ground with optional Discord webhook alerts.");
+        super(
+            HunterBuddyAddon.HUNT_CATEGORY,
+            "visual-range-notifier",
+            "Notifies when players enter visual range or selected items appear on the ground,"
+                + " with optional Discord webhook alerts."
+        );
+    }
+
+    public static void notifyDeath(Text message) {
+        VisualRangeNotifier module = activeModule();
+        if (module != null) module.reportDeath(message);
+    }
+
+    public static void notifyDisconnect(Text reason) {
+        DisconnectMemory.remember(reason);
     }
 
     @Override
     public void onActivate() {
-        trackedPlayers.clear();
-        uuidNameCache.clear();
-        notifiedItems.clear();
-        trackedAnchors.clear();
+        clearWatches();
     }
 
     @Override
     public void onDeactivate() {
-        trackedPlayers.clear();
-        uuidNameCache.clear();
-        notifiedItems.clear();
-        trackedAnchors.clear();
+        clearWatches();
+    }
+
+    void onDisconnect(Text reason) {
+        HunterBuddyAddon.LOG.info("[HB] VisualRange disconnect: {}", reason.getString());
+        if (!reporter.ready(activitySettings.disconnect)) return;
+        reporter.send("Disconnected", "Reason: " + reason.getString() + "\nTime: " + LocalTime.now().withNano(0));
     }
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
-        trackedPlayers.clear();
-        uuidNameCache.clear();
-        notifiedItems.clear();
-        trackedAnchors.clear();
+        clearWatches();
     }
 
     @EventHandler
-    private void onTick(Pre event) {
+    private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
-
-        // Each watch is isolated. Run one after another in a bare sequence, a single failure in
-        // the first silently takes the other two with it — the module goes quiet everywhere at
-        // once and nothing says which part broke. Caught here, a failing watch costs only itself
-        // and names itself in the log.
-        if (playerEnter.get() || playerLeave.get()) guard("players", this::tickPlayers);
-        if (itemNotify.get()) guard("items", this::tickItems);
-        if (anchorPop.get()) guard("anchors", this::tickAnchorTracking);
-    }
-
-    /** Reports the first failure of each watch once, rather than once per tick. */
-    private void guard(String what, Runnable task) {
-        try {
-            task.run();
-        } catch (Exception e) {
-            if (reportedFailures.add(what)) {
-                HunterBuddyAddon.LOG.error("[HB] VisualRange '{}' watch failed", what, e);
-            }
+        if (playerSettings.playerEnter.get() || playerSettings.playerLeave.get()) {
+            guard.run("players", playerWatch::tick);
         }
+        if (itemSettings.itemNotify.get()) guard.run("items", itemWatch::tick);
+        if (pvpSettings.anchorPop.get()) guard.run("anchors", pvpWatch::forgetVanishedAnchors);
     }
-
-    private final Set<String> reportedFailures = new HashSet<>();
 
     @EventHandler
-    public void onReceivePacket(Receive event) {
-        if (mc.player == null || mc.world == null) return;
-
-        if (event.packet instanceof BundleS2CPacket bundle) {
-            for (Packet<?> subPacket : bundle.getPackets()) {
-                handleInboundPacket(subPacket);
-            }
-        } else {
-            handleInboundPacket(event.packet);
-        }
+    private void onPacket(PacketEvent.Receive event) {
+        pvpWatch.onPacket(event.packet);
     }
 
-    private void handleInboundPacket(Packet<?> packet) {
-        if (packet instanceof EntitySpawnS2CPacket spawn && spawn.getEntityType() == EntityType.END_CRYSTAL) {
-            handleCrystalSpawn(spawn);
-        } else if (packet instanceof EntitiesDestroyS2CPacket destroy) {
-            handleEntitiesDestroy(destroy);
-        } else if (packet instanceof BlockUpdateS2CPacket blockUpdate) {
-            handleBlockUpdate(blockUpdate);
-        }
+    private void clearWatches() {
+        playerWatch.clear();
+        itemWatch.clear();
+        pvpWatch.clear();
     }
 
-    /**
-     * Whether this player is you, by identity rather than by object.
-     *
-     * <p>A reference test is not enough. Freecam leaves a stand-in body in the world so you
-     * can see yourself while the camera flies off, and that body is a different Java object
-     * carrying your name and uuid — so {@code player != mc.player} let it straight through
-     * and the module announced your own arrival, then your departure when you flew back.
-     *
-     * <p>The uuid is the real check. The name is a fallback for a freecam that clones the
-     * body without carrying the uuid over; it is safe here because a premium server cannot
-     * host two accounts under one name.
-     */
-    private boolean isSelf(PlayerEntity player) {
-        if (mc.player == null) return false;
-        if (player == mc.player) return true;
-        if (player.getUuid().equals(mc.player.getUuid())) return true;
-
-        // Compared through Objects.equals, and never the other way round. Written as
-        // player.getGameProfile().name().equals(mine), one neighbour with no profile name — which
-        // a server can perfectly well send — throws here. And this is the first thing done to the
-        // first player of the loop, so that throw took the whole watch with it: no sighting, no
-        // item, no anchor, in complete silence.
-        return java.util.Objects.equals(player.getGameProfile().name(),
-            mc.player.getGameProfile().name());
+    private void reportDeath(Text message) {
+        HunterBuddyAddon.LOG.info(
+            "[HB] VisualRange death: master={} death={} url={}",
+            discordSettings.enabled.get(),
+            activitySettings.death.get(),
+            !discordSettings.webhookUrl.get().isBlank());
+        if (!reporter.ready(activitySettings.death)) return;
+        reporter.send("You Died", message.getString()
+            + "\nPosition: " + deathPosition() + "\nDimension: " + DimensionNames.current());
     }
 
-    private void tickPlayers() {
-        Set<UUID> currentPlayers = new HashSet<>();
-
-        for (Entity entity : mc.world.getEntities()) {
-            if (entity instanceof PlayerEntity player && !isSelf(player)) {
-                UUID uuid = player.getUuid();
-                currentPlayers.add(uuid);
-                uuidNameCache.put(uuid, player.getGameProfile().name());
-
-                if (!trackedPlayers.contains(uuid)
-                    && (!ignoreFriends.get() || !Friends.get().isFriend(player))) {
-                    String feedLabel = player.getGameProfile().name();
-                    if (playerEquipment.get()) {
-                        String equipShort = getEquipmentShort(player);
-                        if (!equipShort.isEmpty()) feedLabel = feedLabel + " · " + equipShort;
-                    }
-                    com.hunterbuddy.util.HuntFeed.get().publish(
-                        com.hunterbuddy.util.HuntFeed.Type.PLAYER_ENTER,
-                        feedLabel, player.getBlockPos());
-                }
-
-                if (playerEnter.get() && !trackedPlayers.contains(uuid) &&
-                    (!ignoreFriends.get() || !Friends.get().isFriend(player))) {
-
-                    String name = player.getGameProfile().name();
-                    int x = (int) player.getX();
-                    int y = (int) player.getY();
-                    int z = (int) player.getZ();
-                    String equipStr = playerEquipment.get() ? getEquipmentString(player) : null;
-
-                    if (chatNotify.get()) {
-                        StringBuilder msg = new StringBuilder();
-                        msg.append("§a").append(name).append(" §7entered visual range");
-                        if (playerCoords.get()) msg.append(" at §f").append(x).append(" ").append(y).append(" ").append(z);
-                        if (equipStr != null && !equipStr.isEmpty()) {
-                            msg.append("\n §8└ §7Gear: §f").append(equipStr);
-                        }
-                        MsgUtil.sendMsg(msg.toString());
-                    }
-
-                    playNotifSound();
-
-                    if (discordEnabled.get() && discordPlayers.get() && !webhookUrl.get().isEmpty()) {
-                        sendDiscordAsync("Player Entered Visual Range",
-                            buildPlayerMessage(name, "entered", x, y, z, equipStr));
-                    }
-                }
-            }
-        }
-
-        for (UUID uuid : trackedPlayers) {
-            if (currentPlayers.contains(uuid)) continue;
-            if (ignoreFriends.get()) {
-                PlayerListEntry entry = mc.getNetworkHandler() != null ?
-                    mc.getNetworkHandler().getPlayerListEntry(uuid) : null;
-                if (entry != null && Friends.get().get(entry.getProfile().name()) != null) continue;
-            }
-
-            com.hunterbuddy.util.HuntFeed.get().publish(
-                com.hunterbuddy.util.HuntFeed.Type.PLAYER_LEAVE, getNameFromUuid(uuid), null);
-        }
-
-        if (playerLeave.get()) {
-            for (UUID uuid : trackedPlayers) {
-                if (!currentPlayers.contains(uuid)) {
-                    if (ignoreFriends.get()) {
-                        PlayerListEntry entry = mc.getNetworkHandler() != null ?
-                            mc.getNetworkHandler().getPlayerListEntry(uuid) : null;
-                        if (entry != null && Friends.get().get(entry.getProfile().name()) != null) continue;
-                    }
-
-                    String name = getNameFromUuid(uuid);
-                    if (chatNotify.get()) {
-                        MsgUtil.sendMsg("§c" + name + " §7left visual range.");
-                    }
-
-                    if (discordEnabled.get() && discordPlayers.get() && !webhookUrl.get().isEmpty()) {
-                        sendDiscordAsync("Player Left Visual Range",
-                            "**" + name + "** left visual range\nDimension: " + getDimension());
-                    }
-                }
-            }
-        }
-
-        trackedPlayers.clear();
-        trackedPlayers.addAll(currentPlayers);
+    private static String deathPosition() {
+        ClientPlayerEntity player = MeteorClient.mc.player;
+        if (player == null) return UNKNOWN_POSITION;
+        return String.format("%.0f, %.0f, %.0f", player.getX(), player.getY(), player.getZ());
     }
 
-    private void tickItems() {
-        long now = System.currentTimeMillis();
-        long cooldownMs = (long) itemCooldown.get() * 1000L;
-        notifiedItems.entrySet().removeIf(e -> now - e.getValue() > cooldownMs);
-
-        List<Item> watchList = trackedItems.get();
-        if (watchList.isEmpty()) return;
-
-        for (Entity entity : mc.world.getEntities()) {
-            if (entity instanceof ItemEntity itemEntity) {
-                Item item = itemEntity.getStack().getItem();
-                if (!watchList.contains(item)) continue;
-
-                int entityId = itemEntity.getId();
-                if (notifiedItems.containsKey(entityId)) continue;
-
-                notifiedItems.put(entityId, now);
-
-                int count = itemEntity.getStack().getCount();
-                String itemName = itemEntity.getStack().getName().getString();
-                int x = (int) itemEntity.getX();
-                int y = (int) itemEntity.getY();
-                int z = (int) itemEntity.getZ();
-
-                String feedLabel = count > 1 ? itemName + " ×" + count : itemName;
-                com.hunterbuddy.util.HuntFeed.get().publish(
-                    com.hunterbuddy.util.HuntFeed.Type.ITEM, feedLabel, itemEntity.getBlockPos());
-
-                if (chatNotify.get()) {
-                    String countStr = count > 1 ? " x" + count : "";
-                    MsgUtil.sendMsg("§d" + itemName + countStr + " §7found on ground at §f" + x + " " + y + " " + z);
-                }
-
-                playNotifSound();
-
-                if (discordEnabled.get() && discordItems.get() && !webhookUrl.get().isEmpty()) {
-                    String countStr = count > 1 ? " x" + count : "";
-                    String message = "**" + itemName + countStr + "** found on ground\nCoords: " +
-                        x + " " + y + " " + z + "\nDimension: " + getDimension();
-                    sendDiscordAsync("Ground Item Alert", message);
-                }
-            }
-        }
+    private static VisualRangeNotifier activeModule() {
+        Modules modules = Modules.get();
+        VisualRangeNotifier module = modules == null ? null : modules.get(VisualRangeNotifier.class);
+        return module != null && module.isActive() ? module : null;
     }
 
-    private void handleCrystalSpawn(EntitySpawnS2CPacket packet) {
-        if (!crystalPlace.get()) return;
-
-        Vec3d pos = new Vec3d(packet.getX(), packet.getY(), packet.getZ());
-        PlayerEntity nearest = findNearestPlayer(pos);
-        String name = nearest != null ? nearest.getGameProfile().name() : "Unknown";
-
-        int x = (int) pos.x;
-        int y = (int) pos.y;
-        int z = (int) pos.z;
-
-        publishDanger("crystal placed", name, new BlockPos(x, y, z));
-
-        if (chatNotify.get()) {
-            MsgUtil.sendMsg("§d" + name + " §7placed an §dEnd Crystal §7at §f" + x + " " + y + " " + z);
-        }
-
-        playNotifSound();
-
-        if (discordEnabled.get() && discordPvp.get() && !webhookUrl.get().isEmpty()) {
-            sendDiscordAsync("End Crystal Placed",
-                "**" + name + "** placed an End Crystal\nCoords: " + x + " " + y + " " + z + "\nDimension: " + getDimension());
-        }
+    private static boolean isModuleActive() {
+        return activeModule() != null;
     }
 
-    private void handleEntitiesDestroy(EntitiesDestroyS2CPacket packet) {
-        if (!crystalPop.get()) return;
-
-        IntListIterator iterator = packet.getEntityIds().iterator();
-        while (iterator.hasNext()) {
-            int id = iterator.nextInt();
-            Entity entity = mc.world.getEntityById(id);
-            if (!(entity instanceof EndCrystalEntity)) continue;
-
-            Vec3d pos = entity.getEntityPos();
-            PlayerEntity nearest = findNearestPlayer(pos);
-            String name = nearest != null ? nearest.getGameProfile().name() : "Unknown";
-
-            int x = (int) pos.x;
-            int y = (int) pos.y;
-            int z = (int) pos.z;
-
-            publishDanger("crystal popped", name, new BlockPos(x, y, z));
-
-            if (chatNotify.get()) {
-                MsgUtil.sendMsg("§c" + name + " §7popped an §cEnd Crystal §7at §f" + x + " " + y + " " + z);
-            }
-
-            playNotifSound();
-
-            if (discordEnabled.get() && discordPvp.get() && !webhookUrl.get().isEmpty()) {
-                sendDiscordAsync("End Crystal Popped",
-                    "**" + name + "** popped an End Crystal\nCoords: " + x + " " + y + " " + z + "\nDimension: " + getDimension());
-            }
-        }
+    private static void reportDisconnect(Text reason) {
+        VisualRangeNotifier module = activeModule();
+        if (module != null) module.onDisconnect(reason);
     }
 
-    private void handleBlockUpdate(BlockUpdateS2CPacket packet) {
-        BlockPos pos = packet.getPos();
-        boolean isAnchor = packet.getState().getBlock() instanceof net.minecraft.block.RespawnAnchorBlock;
-
-        if (isAnchor && !trackedAnchors.contains(pos)) {
-            trackedAnchors.add(pos);
-
-            if (anchorPlace.get()) {
-                Vec3d center = Vec3d.ofCenter(pos);
-                PlayerEntity nearest = findNearestPlayer(center);
-                String name = nearest != null ? nearest.getGameProfile().name() : "Unknown";
-
-                publishDanger("anchor placed", name, pos);
-
-                if (chatNotify.get()) {
-                    MsgUtil.sendMsg("§d" + name + " §7placed a §dRespawn Anchor §7at §f" +
-                        pos.getX() + " " + pos.getY() + " " + pos.getZ());
-                }
-
-                playNotifSound();
-
-                if (discordEnabled.get() && discordPvp.get() && !webhookUrl.get().isEmpty()) {
-                    sendDiscordAsync("Respawn Anchor Placed",
-                        "**" + name + "** placed a Respawn Anchor\nCoords: " +
-                            pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\nDimension: " + getDimension());
-                }
-            }
-        } else if (!isAnchor && trackedAnchors.remove(pos) && anchorPop.get()) {
-            Vec3d center = Vec3d.ofCenter(pos);
-            PlayerEntity nearest = findNearestPlayer(center);
-            String name = nearest != null ? nearest.getGameProfile().name() : "Unknown";
-
-            publishDanger("anchor popped", name, pos);
-
-            if (chatNotify.get()) {
-                MsgUtil.sendMsg("§c" + name + " §7popped a §cRespawn Anchor §7at §f" +
-                    pos.getX() + " " + pos.getY() + " " + pos.getZ());
-            }
-
-            playNotifSound();
-
-            if (discordEnabled.get() && discordPvp.get() && !webhookUrl.get().isEmpty()) {
-                sendDiscordAsync("Respawn Anchor Exploded",
-                    "**" + name + "** popped a Respawn Anchor\nCoords: " +
-                        pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\nDimension: " + getDimension());
-            }
-        }
-    }
-
-    private void publishDanger(String what, String name, BlockPos pos) {
-        String label = "Unknown".equals(name) ? what : what + " · " + name;
-        com.hunterbuddy.util.HuntFeed.get().publish(com.hunterbuddy.util.HuntFeed.Type.DANGER, label, pos);
-    }
-
-    private void tickAnchorTracking() {
-        trackedAnchors.removeIf(pos ->
-            !(mc.world.getBlockState(pos).getBlock() instanceof net.minecraft.block.RespawnAnchorBlock));
-    }
-
-    private PlayerEntity findNearestPlayer(Vec3d pos) {
-        double maxRange = pvpRange.get();
-        PlayerEntity nearest = null;
-        double nearestDist = Double.MAX_VALUE;
-
-        for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof PlayerEntity player)) continue;
-            if (pvpIgnoreSelf.get() && isSelf(player)) continue;
-            if (ignoreFriends.get() && Friends.get().isFriend(player)) continue;
-
-            double dist = player.getEntityPos().distanceTo(pos);
-            if (dist <= maxRange && dist < nearestDist) {
-                nearest = player;
-                nearestDist = dist;
-            }
-        }
-        return nearest;
-    }
-
-    private String buildPlayerMessage(String name, String action, int x, int y, int z, String equipment) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("**").append(name).append("** ").append(action).append(" visual range");
-        if (playerCoords.get()) sb.append("\\nCoords: ").append(x).append(" ").append(y).append(" ").append(z);
-        sb.append("\\nDimension: ").append(getDimension());
-        if (equipment != null && !equipment.isEmpty()) sb.append("\\nGear: ").append(equipment);
-        return sb.toString();
-    }
-
-    private String getEquipmentString(PlayerEntity player) {
-        List<String> parts = new ArrayList<>();
-
-        ItemStack head = player.getEquippedStack(EquipmentSlot.HEAD);
-        ItemStack chest = player.getEquippedStack(EquipmentSlot.CHEST);
-        ItemStack legs = player.getEquippedStack(EquipmentSlot.LEGS);
-        ItemStack feet = player.getEquippedStack(EquipmentSlot.FEET);
-        ItemStack mainHand = player.getMainHandStack();
-        ItemStack offHand = player.getOffHandStack();
-
-        if (!head.isEmpty()) parts.add(head.getName().getString());
-        if (!chest.isEmpty()) parts.add(chest.getName().getString());
-        if (!legs.isEmpty()) parts.add(legs.getName().getString());
-        if (!feet.isEmpty()) parts.add(feet.getName().getString());
-        if (!mainHand.isEmpty()) parts.add(mainHand.getName().getString() + " (hand)");
-        if (!offHand.isEmpty()) parts.add(offHand.getName().getString() + " (off)");
-
-        return String.join(", ", parts);
-    }
-
-    private String getEquipmentShort(PlayerEntity player) {
-        ItemStack head = player.getEquippedStack(EquipmentSlot.HEAD);
-        ItemStack chest = player.getEquippedStack(EquipmentSlot.CHEST);
-        ItemStack legs = player.getEquippedStack(EquipmentSlot.LEGS);
-        ItemStack feet = player.getEquippedStack(EquipmentSlot.FEET);
-        ItemStack mainHand = player.getMainHandStack();
-        ItemStack offHand = player.getOffHandStack();
-
-        boolean netherite = false;
-        boolean totem = false;
-
-        for (ItemStack stack : new ItemStack[]{head, chest, legs, feet, mainHand, offHand}) {
-            if (stack.isEmpty()) continue;
-            if (isNetheriteGear(stack.getItem())) netherite = true;
-            if (stack.getItem() == Items.TOTEM_OF_UNDYING) totem = true;
-        }
-
-        List<String> tags = new ArrayList<>();
-        if (netherite) tags.add("netherite");
-        if (chest.getItem() == Items.ELYTRA) tags.add("elytra");
-        if (totem) tags.add("totem");
-
-        return String.join(", ", tags);
-    }
-
-    private static boolean isNetheriteGear(Item item) {
-        return net.minecraft.registry.Registries.ITEM.getId(item).getPath().startsWith("netherite_");
-    }
-
-    private void playNotifSound() {
-        if (!soundEnabled.get() || sound.get().isEmpty()) return;
-
-        mc.getSoundManager().play(PositionedSoundInstance.master(
-            sound.get().get(0),
-            soundPitch.get().floatValue(),
-            soundVolume.get().floatValue()
-        ));
-    }
-
-    /**
-     * Announces your death. Called straight from the mixin, not through the event bus.
-     *
-     * <p>The bus is not usable at this point in a session's life. Meteor unsubscribes every
-     * active module when it posts {@code GameLeftEvent}, and it posts that from
-     * {@code MinecraftClient.disconnect} — which {@code onDisconnected} calls on its second
-     * instruction. Quitting by hand goes through {@code disconnect} first of all, so by the time
-     * the disconnect reaches a listener there are no listeners left: the notification was being
-     * posted into an empty room. Reaching the module directly sidesteps the whole question,
-     * since the instance outlives its subscription.
-     */
-    public static void notifyDeath(net.minecraft.text.Text message) {
-        VisualRangeNotifier module = Modules.get().get(VisualRangeNotifier.class);
-        if (module == null || !module.isActive()) return;
-
-        module.onDeath(message);
-    }
-
-    /**
-     * Records why the server dropped you, for the notification that follows.
-     *
-     * <p>Only a disconnect the server initiates carries a reason, and only that kind reaches
-     * {@code onDisconnected} at all — leaving through the menu closes the connection from this
-     * side and never calls it. So this stores the reason rather than sending: the send happens
-     * on the one signal both kinds of departure share.
-     */
-    public static void notifyDisconnect(net.minecraft.text.Text reason) {
-        lastDisconnectReason = reason;
-        lastDisconnectReasonAt = System.currentTimeMillis();
-    }
-
-    private static net.minecraft.text.Text lastDisconnectReason;
-    private static long lastDisconnectReasonAt;
-
-    /**
-     * The listener that outlives the module.
-     *
-     * <p>Subscribed once when the addon loads and never unsubscribed, unlike a module — which
-     * Meteor detaches from the bus the moment it posts {@code GameLeftEvent}, from inside
-     * {@code MinecraftClient.disconnect}. A departure notification delivered through a module's
-     * own subscription is therefore delivered to nobody; this object is still listening.
-     */
     public static final class Hooks {
-        /**
-         * Identifies the departure currently waiting to be announced, or 0.
-         *
-         * <p>A join clears it, which is how a transfer is told apart from a real exit.
-         */
-        private static volatile long pendingLeave;
-
-        /** How long a reasonless departure waits to see whether you are simply arriving. */
-        private static final long TRANSFER_GRACE_MS = 4000L;
-
-        /**
-         * A session has to last this long before leaving it counts as leaving.
-         *
-         * <p>Connecting to this server is a sequence of leaves: the queue hands you to the main
-         * server through a reconfiguration, and Meteor posts a departure for it. The arrival that
-         * follows can be a long way behind — reconfiguration is not instant — so waiting a few
-         * seconds for it is not enough to tell the two apart. What does tell them apart is that
-         * you were never really there: a transient happens seconds into a session, a real exit
-         * happens after you have played.
-         */
-        private static final long MIN_SESSION_MS = 45_000L;
-
-        /** When the current session actually began, or 0 if none has. */
-        private static volatile long joinedAt;
-
-        @EventHandler
-        private void onGameLeft(meteordevelopment.meteorclient.events.game.GameLeftEvent event) {
-            VisualRangeNotifier module = Modules.get().get(VisualRangeNotifier.class);
-            if (module == null || !module.isActive()) return;
-
-            boolean fromServer = lastDisconnectReason != null
-                && System.currentTimeMillis() - lastDisconnectReasonAt < 2000L;
-
-            if (fromServer) {
-                // A kick or a timeout is unambiguous and worth knowing about at once, even if
-                // AutoReconnect is about to bring you straight back.
-                net.minecraft.text.Text reason = lastDisconnectReason;
-                lastDisconnectReason = null;
-                pendingLeave = 0L;
-                module.onDisconnect(reason);
-                return;
-            }
-
-            // Nothing to leave. Either no session has started at all — the game has just been
-            // launched — or it began moments ago, which on this server means you are still
-            // arriving rather than departing.
-            long began = joinedAt;
-            if (began == 0L || System.currentTimeMillis() - began < MIN_SESSION_MS) {
-                pendingLeave = 0L;
-                return;
-            }
-
-            // Past that, a departure still waits briefly: a server transfer mid-session looks
-            // the same until the arrival that follows it proves otherwise.
-            long token = System.nanoTime();
-            pendingLeave = token;
-
-            MeteorExecutor.execute(() -> {
-                try {
-                    Thread.sleep(TRANSFER_GRACE_MS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-
-                if (pendingLeave != token) return;
-                pendingLeave = 0L;
-
-                VisualRangeNotifier late = Modules.get().get(VisualRangeNotifier.class);
-                if (late == null || !late.isActive()) return;
-
-                late.onDisconnect(net.minecraft.text.Text.literal("Left the server"));
-            });
-        }
+        private final LeaveClassifier classifier = new LeaveClassifier();
 
         @EventHandler
         private void onGameJoined(GameJoinedEvent event) {
-            // An arrival means the departure just seen was a step on the way in.
-            pendingLeave = 0L;
-            joinedAt = System.currentTimeMillis();
+            classifier.joined();
         }
-    }
 
-    private void onDeath(net.minecraft.text.Text message) {
-        HunterBuddyAddon.LOG.info("[HB] death hook: enabled={} death={} url={}",
-            discordEnabled.get(), discordDeath.get(), !webhookUrl.get().isEmpty());
-
-        if (!discordEnabled.get() || !discordDeath.get() || webhookUrl.get().isEmpty()) return;
-
-        // Snapshot now: by the time the request leaves, the respawn screen has
-        // already moved the player somewhere else.
-        String where = mc.player != null
-            ? String.format("%.0f, %.0f, %.0f", mc.player.getX(), mc.player.getY(), mc.player.getZ())
-            : "unknown";
-
-        sendDiscordAsync("You Died",
-            message.getString() + "\nPosition: " + where + "\nDimension: " + getDimension());
-    }
-
-    void onDisconnect(net.minecraft.text.Text reason) {
-        HunterBuddyAddon.LOG.info("[HB] disconnect hook: enabled={} disconnect={} url={}",
-            discordEnabled.get(), discordDisconnect.get(), !webhookUrl.get().isEmpty());
-
-        if (!discordEnabled.get() || !discordDisconnect.get() || webhookUrl.get().isEmpty()) return;
-
-        // AutoLogPlus writes its own reason into this text, so a logout it caused
-        // arrives already labelled without either module knowing about the other.
-        sendDiscordAsync("Disconnected",
-            "Reason: " + reason.getString()
-                + "\nTime: " + java.time.LocalTime.now().withNano(0));
-    }
-
-    private void sendDiscordAsync(String title, String message) {
-        String url = webhookUrl.get();
-        String ping = pingId.get().isEmpty() ? null : pingId.get();
-        // The player is already being torn down while a disconnect is dispatched,
-        // so the session is the only name still available at that point.
-        String sender = mc.player != null
-            ? mc.player.getGameProfile().name()
-            : (mc.getSession() != null ? mc.getSession().getUsername() : "Unknown");
-
-        HunterBuddyAddon.LOG.info("[HB] webhook queued: {}", title);
-        MeteorExecutor.execute(() -> {
-            Utils.sendWebhook(url, title, message, ping, sender);
-            HunterBuddyAddon.LOG.info("[HB] webhook sent: {}", title);
-        });
-    }
-
-    private String getDimension() {
-        if (mc.world == null) return "Unknown";
-
-        String dim = mc.world.getRegistryKey().getValue().getPath();
-        return switch (dim) {
-            case "overworld" -> "Overworld";
-            case "the_nether" -> "Nether";
-            case "the_end" -> "The End";
-            default -> dim;
-        };
-    }
-
-    private String getNameFromUuid(UUID uuid) {
-        if (mc.getNetworkHandler() != null) {
-            PlayerListEntry entry = mc.getNetworkHandler().getPlayerListEntry(uuid);
-            if (entry != null) return entry.getProfile().name();
+        @EventHandler
+        private void onGameLeft(GameLeftEvent event) {
+            classifier.left(VisualRangeNotifier::reportDisconnect, VisualRangeNotifier::isModuleActive);
         }
-        return uuidNameCache.getOrDefault(uuid, uuid.toString());
     }
 }
