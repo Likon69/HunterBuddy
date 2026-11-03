@@ -4,5 +4,7 @@ public enum DroneShotTrait {
     ABSOLUTE,
     ANCHORED,
     LEVEL_FLIGHT,
-    GROUND
+    GROUND,
+    SCENE,
+    UNDERGROUND
 }

@@ -5,17 +5,17 @@ import java.util.Set;
 import net.minecraft.util.math.Vec3d;
 
 public enum DroneShot {
-    CHASE_THREE_QUARTER(1.0, 2.5) {
+    CHASE_THREE_QUARTER(1.0) {
         @Override
         public Vec3d position(DroneShotContext c) {
             double breath = 1.0 + 0.12 * Math.sin(c.age() * 0.5);
             return c.focus()
                 .add(c.level().multiply(-c.distance() * 0.85 * breath))
-                .add(c.right().multiply(c.side() * c.distance() * 0.5))
+                .add(c.right().multiply(c.side() * c.distance() * c.chaseSide()))
                 .add(0.0, c.distance() * 0.3, 0.0);
         }
     },
-    WIDE_CRANE(0.6, 2.5) {
+    WIDE_CRANE(0.6) {
         @Override
         public Vec3d position(DroneShotContext c) {
             double reach = c.distance() * 2.5;
@@ -26,7 +26,7 @@ public enum DroneShot {
                 .add(0.0, reach * 0.6, 0.0);
         }
     },
-    ORBIT(0.5, 2.5) {
+    ORBIT(0.5) {
         @Override
         public Vec3d position(DroneShotContext c) {
             double radius = c.distance() * (1.0 + 0.15 * Math.sin(c.age() * 0.4));
@@ -34,13 +34,13 @@ public enum DroneShot {
             return c.focus().add(Math.cos(c.orbitAngle()) * radius, height, Math.sin(c.orbitAngle()) * radius);
         }
     },
-    FLYBY(0.3, 2.2, DroneShotTrait.ABSOLUTE, DroneShotTrait.ANCHORED, DroneShotTrait.LEVEL_FLIGHT) {
+    FLYBY(0.3, DroneShotTrait.ABSOLUTE, DroneShotTrait.ANCHORED, DroneShotTrait.LEVEL_FLIGHT) {
         @Override
         public Vec3d position(DroneShotContext c) {
             return c.anchor();
         }
     },
-    FRONT_REVEAL(0.0, 2.5) {
+    FRONT_REVEAL(0.0) {
         @Override
         public Vec3d position(DroneShotContext c) {
             return c.focus()
@@ -49,16 +49,16 @@ public enum DroneShot {
                 .add(0.0, c.distance() * 0.12, 0.0);
         }
     },
-    SIDE_TRACK(1.3, 2.5) {
+    SIDE_TRACK(1.3) {
         @Override
         public Vec3d position(DroneShotContext c) {
             return c.focus()
                 .add(c.right().multiply(c.side() * c.distance() * 0.95))
                 .add(c.level().multiply(-c.distance() * 0.1))
-                .add(0.0, -c.distance() * 0.1, 0.0);
+                .add(0.0, c.distance() * 0.15, 0.0);
         }
     },
-    PULL_BACK(0.3, 2.5, DroneShotTrait.LEVEL_FLIGHT) {
+    PULL_BACK(0.3, DroneShotTrait.LEVEL_FLIGHT) {
         @Override
         public Vec3d position(DroneShotContext c) {
             double progress = DroneEasing.smoothstep(c.age() / Math.max(c.duration(), 1.0));
@@ -67,7 +67,7 @@ public enum DroneShot {
             return c.focus().add(c.level().multiply(-reach)).add(0.0, height, 0.0);
         }
     },
-    GROUND_SKIM(0.3, 2.5, DroneShotTrait.ABSOLUTE, DroneShotTrait.LEVEL_FLIGHT, DroneShotTrait.GROUND) {
+    GROUND_SKIM(0.3, DroneShotTrait.ABSOLUTE, DroneShotTrait.LEVEL_FLIGHT, DroneShotTrait.GROUND) {
         @Override
         public Vec3d position(DroneShotContext c) {
             Vec3d flat = c.focus()
@@ -76,20 +76,28 @@ public enum DroneShot {
             return new Vec3d(flat.x, c.surface() + 1.5, flat.z);
         }
     },
-    GROUND_WATCHER(0.3, 2.2, DroneShotTrait.ABSOLUTE, DroneShotTrait.ANCHORED, DroneShotTrait.LEVEL_FLIGHT, DroneShotTrait.GROUND) {
+    GROUND_WATCHER(0.3, DroneShotTrait.ABSOLUTE, DroneShotTrait.ANCHORED, DroneShotTrait.LEVEL_FLIGHT, DroneShotTrait.GROUND) {
         @Override
         public Vec3d position(DroneShotContext c) {
             return c.anchor();
         }
     },
-    UNDER_BELLY(0.3, 2.5, DroneShotTrait.LEVEL_FLIGHT) {
+    TOP_DOWN(0.3) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.focus()
+                .add(c.level().multiply(-c.distance() * 0.15))
+                .add(0.0, c.distance(), 0.0);
+        }
+    },
+    UNDER_BELLY(0.3, DroneShotTrait.LEVEL_FLIGHT) {
         @Override
         public Vec3d position(DroneShotContext c) {
             double reach = c.distance() * 0.7;
             return c.focus().add(c.level().multiply(-reach * 0.25)).add(0.0, -reach * 0.97, 0.0);
         }
     },
-    WING_CAM(2.5, 2.5, DroneShotTrait.LEVEL_FLIGHT) {
+    WING_CAM(2.5, DroneShotTrait.LEVEL_FLIGHT) {
         @Override
         public Vec3d position(DroneShotContext c) {
             return c.focus()
@@ -97,24 +105,68 @@ public enum DroneShot {
                 .add(c.level().multiply(-1.4))
                 .add(0.0, 0.4, 0.0);
         }
+    },
+    WELL_TOP(0.0, DroneShotTrait.ABSOLUTE, DroneShotTrait.SCENE, DroneShotTrait.UNDERGROUND) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.anchor();
+        }
+    },
+    CLIMB_SIDE(0.0, DroneShotTrait.ABSOLUTE, DroneShotTrait.SCENE, DroneShotTrait.UNDERGROUND) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.anchor();
+        }
+    },
+    TRAIL_CAM(0.0, DroneShotTrait.ABSOLUTE, DroneShotTrait.SCENE, DroneShotTrait.UNDERGROUND) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.anchor();
+        }
+    },
+    ROOM_DRIFT(0.0, DroneShotTrait.ABSOLUTE, DroneShotTrait.SCENE, DroneShotTrait.UNDERGROUND) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.anchor();
+        }
+    },
+    LAUNCH_WATCHER(0.0, DroneShotTrait.ABSOLUTE, DroneShotTrait.SCENE) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.anchor();
+        }
+    },
+    RISE_ABOVE(0.0, DroneShotTrait.ABSOLUTE, DroneShotTrait.SCENE) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            return c.anchor();
+        }
+    },
+    DUEL(0.0, DroneShotTrait.SCENE) {
+        @Override
+        public Vec3d position(DroneShotContext c) {
+            Vec3d toward = c.interest() == null ? Vec3d.ZERO : c.interest().subtract(c.focus());
+            double gap = Math.hypot(toward.x, toward.z);
+            Vec3d back = gap > 0.5 ? new Vec3d(-toward.x / gap, 0.0, -toward.z / gap) : c.level().multiply(-1.0);
+            Vec3d beside = new Vec3d(-back.z, 0.0, back.x);
+            double reach = c.distance() * 0.8 + Math.min(gap, 16.0) * 0.9;
+            return c.focus()
+                .add(back.multiply(reach * 0.7))
+                .add(beside.multiply(c.side() * reach * 0.45))
+                .add(0.0, reach * 0.4, 0.0);
+        }
     };
 
     private final double lead;
-    private final double blendSeconds;
     private final Set<DroneShotTrait> traits;
 
-    DroneShot(double lead, double blendSeconds, DroneShotTrait... traits) {
+    DroneShot(double lead, DroneShotTrait... traits) {
         this.lead = lead;
-        this.blendSeconds = blendSeconds;
         this.traits = traits.length == 0 ? EnumSet.noneOf(DroneShotTrait.class) : EnumSet.of(traits[0], traits);
     }
 
     public double lead() {
         return lead;
-    }
-
-    public double blendSeconds() {
-        return blendSeconds;
     }
 
     public boolean has(DroneShotTrait trait) {

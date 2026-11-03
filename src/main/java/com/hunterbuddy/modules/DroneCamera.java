@@ -3,10 +3,19 @@ package com.hunterbuddy.modules;
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.render.DroneCullGuard;
 import com.hunterbuddy.render.DroneEasing;
 import com.hunterbuddy.render.DronePlacement;
 import com.hunterbuddy.render.DronePose;
 import com.hunterbuddy.render.DroneRig;
+import com.hunterbuddy.render.DroneShot;
+import com.hunterbuddy.render.DroneStage;
+import com.hunterbuddy.render.DroneTerrain;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.Map;
+import java.util.Set;
+import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -27,10 +36,21 @@ public class DroneCamera extends Module {
     private static final double MIN_LOOK_DISTANCE = 0.05;
     private static final double FIRST_PERSON_DISTANCE = 1.0;
     private static final double ROTATION_TAU = 0.25;
+    private static final double TAKEOFF_ROTATION_TAU = 0.45;
+    private static final double ROOM_ROTATION_TAU = 0.6;
+    private static final double FOOT_ROTATION_TAU = 0.5;
     private static final double VANILLA_ROTATION_TAU = 0.25;
     private static final float MAX_PITCH = 89.0f;
+    private static final float GROUND_DEAD_ZONE = 5.0f;
+    private static final float MAX_SUBJECT_ANGLE = 25.0f;
+    private static final double MIN_SUBJECT_COSINE = 0.25;
+    private static final double CHEST_HEIGHT = 0.4;
+    private static final double MIN_YAW_WEIGHT = 0.15;
+    private static final double LOOK_MIN_HORIZONTAL = 0.3;
+    private static final float HOLD_THIRD_PERSON_WEIGHT = 0.5f;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgShots = settings.createGroup("shots");
 
     private final Setting<Double> shotSeconds = sgGeneral.add(new DoubleSetting.Builder()
         .name("shot-seconds")
@@ -44,7 +64,29 @@ public class DroneCamera extends Module {
         .defaultValue(8.0).min(3.0).max(30.0).sliderRange(3.0, 30.0)
         .build());
 
+    private final Setting<Boolean> filmWholeRun = sgGeneral.add(new BoolSetting.Builder()
+        .name("film-whole-run")
+        .description("Keeps filming from outside while the spawner run digs, clears the room and climbs out, instead of returning to first person after the glide.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Boolean> filmCombat = sgGeneral.add(new BoolSetting.Builder()
+        .name("film-combat")
+        .description("Frames both you and your target while the kill aura is fighting.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Double> minSceneSeconds = sgGeneral.add(new DoubleSetting.Builder()
+        .name("min-scene-seconds")
+        .description("Minimum time between two shot changes caused by the run changing phase or by a fight, so quick flips cannot make the camera jump.")
+        .defaultValue(4.0).min(1.0).max(20.0).sliderRange(1.0, 10.0)
+        .build());
+
+    private final Map<DroneShot, Setting<Boolean>> shotToggles = new EnumMap<>(DroneShot.class);
+
     private final DroneRig rig = new DroneRig();
+    private final DroneStageSource stageSource = new DroneStageSource();
+    private final DroneCullGuard cullGuard = new DroneCullGuard();
 
     private double activation;
     private long lastFrameNanos;
@@ -59,6 +101,18 @@ public class DroneCamera extends Module {
     public DroneCamera() {
         super(HunterBuddyAddon.VISUALS_CATEGORY, "drone-camera",
             "Films you from outside while you glide with an elytra, changing shot by itself. Only changes what is drawn.");
+    }
+
+    {
+        for (DroneShot shot : DroneShot.values()) {
+            if (shot == DroneShot.TRAIL_CAM) continue;
+            String name = shot.name().toLowerCase().replace('_', '-');
+            shotToggles.put(shot, sgShots.add(new BoolSetting.Builder()
+                .name(name)
+                .description("Allows the " + name + " shot.")
+                .defaultValue(shot != DroneShot.UNDER_BELLY)
+                .build()));
+        }
     }
 
     @Override
@@ -82,7 +136,8 @@ public class DroneCamera extends Module {
         lastFrameNanos = now;
 
         if (player.isGliding()) lastGlideNanos = now;
-        boolean wanted = lastGlideNanos != 0L && (now - lastGlideNanos) / 1.0e9 < RETURN_DELAY_SECONDS;
+        boolean wanted = (lastGlideNanos != 0L && (now - lastGlideNanos) / 1.0e9 < RETURN_DELAY_SECONDS)
+            || (filmWholeRun.get() && stageSource.running());
 
         if (wanted) {
             activation = Math.min(1.0, activation + dt / RAMP_IN_SECONDS);
@@ -97,19 +152,30 @@ public class DroneCamera extends Module {
 
         Vec3d focus = player.getLerpedPos(tickProgress).add(0.0, player.getHeight() * 0.5, 0.0);
         Vec3d motion = new Vec3d(player.getX() - player.lastX, player.getY() - player.lastY, player.getZ() - player.lastZ);
-        DronePlacement placement = rig.update(mc.world, player, focus, motion, dt, distance.get(), shotSeconds.get());
+        Set<DroneShot> allowed = EnumSet.noneOf(DroneShot.class);
+        shotToggles.forEach((shot, toggle) -> {
+            if (toggle.get()) allowed.add(shot);
+        });
+        allowed.add(DroneShot.TRAIL_CAM);
+        DroneStage stage = stageSource.read(mc.world, player, focus, dt, tickProgress, filmCombat.get());
+        DronePlacement placement = rig.update(mc.world, player, focus, motion, dt, distance.get(), shotSeconds.get(),
+            player.isGliding(), allowed, stage, minSceneSeconds.get());
 
         Vec3d look = placement.lookTarget().subtract(placement.position());
         if (look.length() < MIN_LOOK_DISTANCE) look = rig.flightDirection();
 
         float targetYaw = (float) Math.toDegrees(Math.atan2(-look.x, look.z));
+        if (!player.isGliding() && rotationReady && Math.hypot(look.x, look.z) < LOOK_MIN_HORIZONTAL * look.length()) targetYaw = yaw;
         float targetPitch = MathHelper.clamp((float) -Math.toDegrees(Math.atan2(look.y, Math.hypot(look.x, look.z))), -MAX_PITCH, MAX_PITCH);
 
         if (rotationReady) {
-            float follow = (float) DroneEasing.follow(dt, ROTATION_TAU);
+            float follow = (float) DroneEasing.follow(dt, rig.watchesTakeoff() ? TAKEOFF_ROTATION_TAU : rig.watchesSlowly() ? ROOM_ROTATION_TAU : player.isGliding() ? ROTATION_TAU : FOOT_ROTATION_TAU);
             float vanillaFollow = (float) DroneEasing.follow(dt, VANILLA_ROTATION_TAU);
-            yaw += MathHelper.wrapDegrees(targetYaw - yaw) * follow;
-            pitch += (targetPitch - pitch) * follow;
+            float deadZone = player.isGliding() ? 0.0f : GROUND_DEAD_ZONE;
+            float yawFollow = follow * (float) Math.max(MIN_YAW_WEIGHT, Math.hypot(look.x, look.z) / look.length());
+            yaw += beyond(MathHelper.wrapDegrees(targetYaw - yaw), deadZone) * yawFollow;
+            pitch += beyond(targetPitch - pitch, deadZone) * follow;
+            keepSubjectInFrame(placement.position(), focus.add(0.0, player.isGliding() ? 0.0 : CHEST_HEIGHT, 0.0));
             vanillaYaw += MathHelper.wrapDegrees(eyeYaw - vanillaYaw) * vanillaFollow;
             vanillaPitch += (eyePitch - vanillaPitch) * vanillaFollow;
         } else {
@@ -126,7 +192,9 @@ public class DroneCamera extends Module {
         float basePitch = MathHelper.lerp(rawWeight, vanillaPitch, eyePitch);
 
         Vec3d blended = eyePos.lerp(placement.position(), eased);
-        filming = blended.distanceTo(eyePos) >= FIRST_PERSON_DISTANCE;
+        filming = blended.distanceTo(eyePos) >= FIRST_PERSON_DISTANCE || (rig.holdsThirdPerson() && eased >= HOLD_THIRD_PERSON_WEIGHT);
+
+        cullGuard.update(filming && DroneTerrain.insideBlock(mc.world, blended), dt);
 
         return new DronePose(
             blended.x, blended.y, blended.z,
@@ -134,6 +202,25 @@ public class DroneCamera extends Module {
             MathHelper.lerp(eased, basePitch, pitch),
             filming
         );
+    }
+
+    private static float beyond(float error, float deadZone) {
+        if (Math.abs(error) <= deadZone) return 0.0f;
+        return error > 0.0f ? error - deadZone : error + deadZone;
+    }
+
+    private void keepSubjectInFrame(Vec3d camera, Vec3d subject) {
+        Vec3d way = subject.subtract(camera);
+        double flat = Math.hypot(way.x, way.z);
+        if (way.length() < MIN_LOOK_DISTANCE) return;
+
+        float subjectYaw = (float) Math.toDegrees(Math.atan2(-way.x, way.z));
+        float subjectPitch = (float) -Math.toDegrees(Math.atan2(way.y, flat));
+        float yawLimit = MAX_SUBJECT_ANGLE / (float) Math.max(MIN_SUBJECT_COSINE, flat / way.length());
+        float yawError = MathHelper.wrapDegrees(subjectYaw - yaw);
+        float pitchError = subjectPitch - pitch;
+        yaw += yawError - MathHelper.clamp(yawError, -yawLimit, yawLimit);
+        pitch += pitchError - MathHelper.clamp(pitchError, -MAX_SUBJECT_ANGLE, MAX_SUBJECT_ANGLE);
     }
 
     private boolean suspended() {
@@ -146,6 +233,8 @@ public class DroneCamera extends Module {
         lastGlideNanos = 0L;
         filming = false;
         rotationReady = false;
+        stageSource.reset();
+        cullGuard.restore();
         rig.reset();
     }
 }

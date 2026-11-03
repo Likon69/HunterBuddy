@@ -3,6 +3,7 @@ package com.hunterbuddy.render;
 import java.util.OptionalDouble;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
@@ -16,6 +17,11 @@ public final class DroneTerrain {
         ));
 
         return hit.getType() == HitResult.Type.MISS ? -1.0 : hit.getPos().distanceTo(from);
+    }
+
+    public static boolean insideBlock(World world, Vec3d position) {
+        BlockPos pos = BlockPos.ofFloored(position);
+        return !world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
     }
 
     public static OptionalDouble surfaceBelow(World world, Entity entity, Vec3d from, double depth) {
