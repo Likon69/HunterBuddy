@@ -626,6 +626,7 @@ public class SpawnerDetector extends Module {
     private Site autoSoloTarget;
     private double autoSoloBestDistSq;
     private int autoSoloBestDistTick;
+    private static final int TUNNEL_BARITONE_RETRIES = 1;
     private int autoSoloNearUnloadedTicks;
     private int autoSoloLastRocketTick;
     private double autoSoloCruiseAltitude;
@@ -8958,14 +8959,15 @@ public class SpawnerDetector extends Module {
         boolean pathing = bt != null && bt.getPathingBehavior().isPathing();
         boolean calculating = bt != null && !bt.getPathingBehavior().getInProgress().isEmpty();
         boolean failed = !pathing && !calculating && (bt == null || !bt.getCustomGoalProcess().isActive());
-        if (failed && autoBaritoneRetries < 3) {
+        boolean nearGoal = Math.abs(feet.getX() - autoTunnelGoal.getX()) <= 2
+            && Math.abs(feet.getY() - autoTunnelGoal.getY()) <= 2 && Math.abs(feet.getZ() - autoTunnelGoal.getZ()) <= 2;
+        if (failed && autoBaritoneRetries < TUNNEL_BARITONE_RETRIES) {
             autoBaritoneRetries++;
             releaseAllAutoKeys();
             if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalBlock(autoTunnelGoal));
-        } else if ((failed && elapsed - autoTunnelBestElapsed >= 10 * 20)
+        } else if ((failed && (!nearGoal || elapsed - autoTunnelBestElapsed >= 10 * 20))
             || elapsed - autoTunnelBestElapsed > 30 * 20) {
-            if (!autoTunnelDirectRetried && Math.abs(feet.getX() - autoTunnelGoal.getX()) <= 2
-                && Math.abs(feet.getY() - autoTunnelGoal.getY()) <= 2 && Math.abs(feet.getZ() - autoTunnelGoal.getZ()) <= 2) {
+            if (!autoTunnelDirectRetried && nearGoal) {
                 autoTunnelDirectRetried = true;
                 releaseAllAutoKeys();
                 if (bt != null) bt.getPathingBehavior().cancelEverything();
