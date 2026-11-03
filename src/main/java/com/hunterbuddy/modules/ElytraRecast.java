@@ -1,586 +1,313 @@
 package com.hunterbuddy.modules;
-import com.hunterbuddy.util.QuietClicks;
-import com.hunterbuddy.util.Rockets;
-import com.hunterbuddy.modules.Pitch40;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.recast.AgeGate;
+import com.hunterbuddy.modules.recast.FlightGear;
+import com.hunterbuddy.modules.recast.GliderWearer;
+import com.hunterbuddy.modules.recast.PitchSteering;
+import com.hunterbuddy.modules.recast.RecastCounters;
+import com.hunterbuddy.modules.recast.RecastSettings;
+import com.hunterbuddy.modules.recast.RocketLauncher;
 import com.hunterbuddy.modules.regear.util.ElytraTakeoff;
 import com.hunterbuddy.modules.regear.util.Utils;
-import meteordevelopment.meteorclient.events.world.TickEvent.Post;
-import meteordevelopment.meteorclient.events.world.TickEvent.Pre;
-import meteordevelopment.meteorclient.settings.Setting;
-import meteordevelopment.meteorclient.settings.SettingGroup;
-import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
+import com.hunterbuddy.util.GliderSwap;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Item;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
-import net.minecraft.world.World;
+import net.minecraft.client.network.ClientPlayerEntity;
 
 public class ElytraRecast extends Module {
-   private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
-   private final SettingGroup sgNether = this.settings.createGroup("Nether");
-   private final SettingGroup sgOverworld = this.settings.createGroup("Overworld/End");
-   private final Setting<Boolean> disableIfNoRockets = this.sgGeneral
-      .add(
-         new Builder().name("disable-if-no-rockets")
-                  .description("Automatically disable ElytraRecast when no firework rockets are available.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Boolean> debugMessages = this.sgGeneral
-      .add(
-         new Builder().name("debug-messages").description("Show debug messages in chat for state changes and recovery events.")
-               .defaultValue(false)
-            .build()
-      );
-   private final Setting<Integer> activationDelay = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("activation-delay")
-                  .description("Ticks to wait between jump and elytra activation attempts.")
-               .defaultValue(3)
-            .range(1, 20)
-            .sliderRange(1, 20)
-            .build()
-      );
-   private final Setting<Integer> rocketDelay = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("rocket-delay")
-                  .description("Ticks between rocket usages during ascent.")
-               .defaultValue(15)
-            .range(5, 60)
-            .sliderRange(5, 60)
-            .build()
-      );
-   private final Setting<Double> rotationSpeed = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                  .name("rotation-speed")
-               .description("Degrees per tick to adjust pitch when ascending. Lower = smoother & more realistic.")
-            .defaultValue(3.0)
-            .range(0.5, 15.0)
-            .sliderRange(0.5, 15.0)
-            .build()
-      );
-   private final Setting<Double> targetPitch = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                  .name("target-pitch")
-               .description("Target pitch angle when ascending. Negative = looking up.")
-            .defaultValue(-70.0)
-            .range(-89.0, 0.0)
-            .sliderRange(-89.0, 0.0)
-            .build()
-      );
-   private final Setting<Integer> netherFallDelay = this.sgNether
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("fall-delay")
-                  .description("Ticks to wait after stopping flight before triggering recovery in Nether.")
-               .defaultValue(5)
-            .range(1, 40)
-            .sliderRange(1, 40)
-            .build()
-      );
-   private final Setting<Boolean> usePitch40Bounds = this.sgOverworld
-      .add(
-         new Builder().name("use-pitch40-bounds")
-                  .description("Use Pitch40's lower bounds as the minimum altitude instead of the setting below.")
-               .defaultValue(true)
-            .build()
-      );
-   private final Setting<Integer> overworldTargetAltitude = this.sgOverworld
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                     .name("target-altitude")
-                  .description("Target Y level to ascend to in Overworld/End.")
-               .defaultValue(360)
-            .sliderRange(50, 400)
-            .build()
-      );
-   private final Setting<Integer> overworldMinAltitude = this.sgOverworld
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("min-altitude")
-                     .description("Trigger recovery if Y drops below this in Overworld/End. Ignored if use-pitch40-bounds is enabled.")
-                  .defaultValue(310)
-               .sliderRange(10, 400)
-               .visible(() -> !(Boolean)this.usePitch40Bounds.get())
-               .build()
-      );
-   private ElytraRecast.State state;
-   private int tickCounter;
-   private int rocketTickCounter;
-   private boolean wasGliding;
-   private boolean usedActivationRocket;
-   private int notGlidingTicks;
-   private boolean netherRocketUsed;
-   private boolean rocketWaiting;
-   private boolean wearPending;
-   private Pitch40 pitch40Util;
-   private final ElytraTakeoff takeoff = new ElytraTakeoff();
-   private int monitoringRecoveryCooldown = 0;
-   private int lastTickAge = -1;
-   private int lastPostTickAge = -1;
-   private static final int MONITORING_RECOVERY_PAUSE = 80;
+    private static final int NETHER_CLIMB_TICKS = 10;
+    private static final double PITCH40_BOUND_MARGIN = 10.0;
+    private static final String UP_ARROW = "↑";
 
-   public ElytraRecast() {
-      super(HunterBuddyAddon.HUNT_CATEGORY, "ElytraRecast", "Flight recovery fallback. Monitors and recovers when you stop flying or drop too low.");
-   }
+    private enum RocketOutcome {
+        FIRED,
+        UNAVAILABLE,
+        DISABLED
+    }
 
-   public boolean isAscending() {
-      return this.state == ElytraRecast.State.ASCENDING;
-   }
+    private enum State {
+        MONITORING,
+        JUMPING,
+        ACTIVATING,
+        ASCENDING
+    }
 
-   public boolean isRecovering() {
-      return this.takeoff.isActive() || this.state == ElytraRecast.State.ASCENDING;
-   }
+    private final RecastSettings config = new RecastSettings(settings);
+    private final RecastCounters counters = new RecastCounters();
+    private final RocketLauncher rocketLauncher = new RocketLauncher();
+    private final GliderWearer wearer = new GliderWearer();
+    private final ElytraTakeoff takeoff = new ElytraTakeoff();
+    private final AgeGate preTickGate = new AgeGate();
+    private final AgeGate postTickGate = new AgeGate();
+    private final ElytraTakeoff.Listener takeoffListener = new TakeoffOutcome();
 
-   public void onActivate() {
-      this.wearPending = false;
-      if (this.mc.player != null) {
-         if (!this.hasElytraEquipped()) {
-            this.error("No elytra equipped!", new Object[0]);
-            this.toggle();
-         } else {
-            this.tickCounter = 0;
-            this.rocketTickCounter = 0;
-            this.wasGliding = this.mc.player.isGliding();
-            this.usedActivationRocket = false;
-            this.notGlidingTicks = 0;
-            this.netherRocketUsed = false;
-            this.takeoff.cancel();
-            this.monitoringRecoveryCooldown = 0;
-            this.pitch40Util = (Pitch40)Modules.get().get(Pitch40.class);
-            this.state = ElytraRecast.State.MONITORING;
-            if ((Boolean)this.debugMessages.get()) {
-               this.info("Monitoring flight...", new Object[0]);
-            }
-         }
-      }
-   }
+    private State state;
+    private Pitch40 pitch40;
 
-   public void onDeactivate() {
-      this.wearPending = false;
-      this.takeoff.cancel();
-      Utils.setPressed(this.mc.options.jumpKey, false);
-      this.state = null;
-   }
+    public ElytraRecast() {
+        super(
+            HunterBuddyAddon.HUNT_CATEGORY,
+            "ElytraRecast",
+            "Flight recovery fallback that monitors and recovers when you stop flying or drop too low."
+        );
+    }
 
-   public void requestTakeoff() {
-      if (this.isActive() && this.mc.player != null) {
-         this.monitoringRecoveryCooldown = 0;
-         this.beginRecovery("manual takeoff requested");
-      }
-   }
+    public boolean isRecovering() {
+        return takeoff.isActive() || state == State.ASCENDING;
+    }
 
-   @EventHandler
-   private void onTick(Pre event) {
-      if (this.wearPending && this.mc.player != null) {
-         if (com.hunterbuddy.util.GliderSwap.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) || !com.hunterbuddy.util.GliderSwap.hasGlider(this.mc.player)) {
-            this.wearPending = false;
-         } else {
-            com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor wearInv = (com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor) this.mc.player.getInventory();
-            int wearSlot = wearInv.getSelectedSlot();
-            com.hunterbuddy.util.GliderSwap.wearGlider(this.mc.player);
-            wearInv.setSelectedSlot(wearSlot);
-         }
-      }
+    public boolean isAscending() {
+        return state == State.ASCENDING;
+    }
 
-      if (this.mc.player != null && this.mc.world != null && this.state != null && this.hasElytraEquipped()) {
-         if (this.lastTickAge == this.mc.player.age) return;
-         this.lastTickAge = this.mc.player.age;
-         if (this.takeoff.isActive()) {
-            this.takeoff.tickPre();
+    public void resetToMonitoring() {
+        if (!isActive()) return;
+        state = State.MONITORING;
+        counters.clearKeepingPause();
+        takeoff.cancel();
+    }
+
+    public void requestTakeoff() {
+        if (!isActive() || mc.player == null) return;
+        wearer.clearPending();
+        counters.clearPause();
+        beginRecovery("manual takeoff requested");
+    }
+
+    @Override
+    public String getInfoString() {
+        if (state == null) return null;
+        if (takeoff.isActive()) return "TAKEOFF " + takeoff.getPhase();
+        if (mc.player == null) return state.name();
+        return switch (state) {
+            case MONITORING -> monitoringInfo(mc.player);
+            case ASCENDING -> ascendingInfo(mc.player);
+            default -> "TAKEOFF";
+        };
+    }
+
+    @Override
+    public void onActivate() {
+        wearer.clearPending();
+        if (mc.player == null) return;
+        if (!FlightGear.hasElytra(mc.player)) {
+            error("No elytra equipped!");
+            toggle();
             return;
-         }
+        }
+        counters.clear();
+        takeoff.cancel();
+        pitch40 = Modules.get().get(Pitch40.class);
+        state = State.MONITORING;
+        debug("Monitoring flight...");
+    }
 
-         this.tickCounter++;
-         this.rocketTickCounter++;
-         if (this.state == ElytraRecast.State.MONITORING) {
-            this.handleMonitoring();
-         } else if (this.state == ElytraRecast.State.ASCENDING) {
-            this.handleAscending();
-         }
-      }
-   }
+    @Override
+    public void onDeactivate() {
+        wearer.clearPending();
+        takeoff.cancel();
+        Utils.setPressed(mc.options.jumpKey, false);
+        state = null;
+    }
 
-   @EventHandler
-   private void onTickPost(Post event) {
-      if (this.mc.player != null && this.mc.world != null && this.takeoff.isActive()) {
-         if (this.lastPostTickAge == this.mc.player.age) return;
-         this.lastPostTickAge = this.mc.player.age;
-         this.takeoff.tickPost();
-      }
-   }
-
-   private void handleMonitoring() {
-      if (this.takeoff.isActive()) {
-         return;
-      }
-
-      if (this.monitoringRecoveryCooldown > 0) {
-         this.monitoringRecoveryCooldown--;
-         this.wasGliding = this.mc.player.isGliding();
-         return;
-      }
-
-      boolean currentlyGliding = this.mc.player.isGliding();
-      if (com.hunterbuddy.util.GliderSwap.rocketAttached(this.mc.player)) {
-         this.wasGliding = currentlyGliding;
-         return;
-      }
-
-      double currentY = this.mc.player.getY();
-      if (this.isInNether()) {
-         if (!currentlyGliding) {
-            this.notGlidingTicks++;
-            if (this.notGlidingTicks >= (Integer)this.netherFallDelay.get()) {
-               if ((Boolean)this.debugMessages.get()) {
-                  this.info("Nether: Flight stopped for " + this.notGlidingTicks + " ticks! Recovering...", new Object[0]);
-               }
-
-               this.triggerRecovery();
-               this.notGlidingTicks = 0;
-               return;
-            }
-         } else {
-            this.notGlidingTicks = 0;
-         }
-      } else {
-         double minAlt = this.getEffectiveMinAltitude();
-         if (currentY < minAlt) {
-            if (!currentlyGliding) {
-               if ((Boolean)this.debugMessages.get()) {
-                  this.info("Below min altitude (Y=" + (int)currentY + " < " + (int)minAlt + ") and not flying! Recovering...", new Object[0]);
-               }
-
-               this.triggerRecovery();
-               this.wasGliding = false;
-               return;
-            }
-
-            if (this.isPitch40ManagingFlight()) {
-               this.wasGliding = currentlyGliding;
-               return;
-            }
-
-            if ((Boolean)this.debugMessages.get()) {
-               this.info("Altitude too low (Y=" + (int)currentY + " < " + (int)minAlt + ")! Ascending...", new Object[0]);
-            }
-
-            this.triggerRecovery();
+    @EventHandler
+    private void onPreTick(TickEvent.Pre event) {
+        if (mc.player != null) wearer.retryPendingWear(mc.player);
+        if (!canRun() || preTickGate.alreadySeen(mc.player.age)) return;
+        preTickGate.record(mc.player.age);
+        if (takeoff.isActive()) {
+            takeoff.tickPre();
             return;
-         }
-      }
+        }
+        counters.tick();
+        if (state == State.MONITORING) tickMonitoring();
+        else if (state == State.ASCENDING) tickAscending();
+    }
 
-      this.wasGliding = currentlyGliding;
-   }
+    @EventHandler
+    private void onPostTick(TickEvent.Post event) {
+        if (mc.player == null || !takeoff.isActive() || postTickGate.alreadySeen(mc.player.age)) return;
+        postTickGate.record(mc.player.age);
+        takeoff.tickPost();
+    }
 
-   private double getEffectiveMinAltitude() {
-      return this.usePitch40Bounds.get() && this.pitch40Util != null && this.pitch40Util.isActive()
-         ? (Double)this.pitch40Util.pitch40LowerBounds.get() - 10.0
-         : ((Integer)this.overworldMinAltitude.get()).intValue();
-   }
+    private boolean canRun() {
+        return mc.player != null && mc.world != null && state != null && FlightGear.hasElytra(mc.player);
+    }
 
-   private boolean isPitch40ManagingFlight() {
-      return this.pitch40Util != null && this.pitch40Util.isActive();
-   }
-
-   public void resetToMonitoring() {
-      if (this.isActive()) {
-         this.state = ElytraRecast.State.MONITORING;
-         this.tickCounter = 0;
-         this.rocketTickCounter = 0;
-         this.usedActivationRocket = false;
-         this.notGlidingTicks = 0;
-         this.netherRocketUsed = false;
-         this.takeoff.cancel();
-         if (this.mc.player != null) {
-            this.wasGliding = this.mc.player.isGliding();
-         }
-      }
-   }
-
-   private void triggerRecovery() {
-      this.beginRecovery("recovery triggered");
-   }
-
-   private void beginRecovery(String reason) {
-      if (!this.hasRockets()) {
-         if ((Boolean)this.disableIfNoRockets.get()) {
-            this.error("No firework rockets available! Disabling ElytraRecast.", new Object[0]);
-            this.toggle();
+    private void tickMonitoring() {
+        ClientPlayerEntity player = mc.player;
+        if (counters.isPaused()) {
+            counters.countPauseDown();
             return;
-         }
+        }
+        if (GliderSwap.rocketAttached(player)) return;
+        if (FlightGear.isNether(mc.world)) watchNetherFlight(player);
+        else watchAltitude(player);
+    }
 
-         this.warning("No firework rockets available! Recovery may fail.", new Object[0]);
-      }
+    private void watchNetherFlight(ClientPlayerEntity player) {
+        if (player.isGliding()) {
+            counters.clearNotGliding();
+            return;
+        }
+        if (counters.countNotGliding() < config.fallDelay.get()) return;
+        debug("Not flying for " + config.fallDelay.get() + " ticks.");
+        beginRecovery("recovery triggered");
+        counters.clearNotGliding();
+    }
 
-      if ((Boolean)this.debugMessages.get()) {
-         this.info(reason, new Object[0]);
-      }
+    private void watchAltitude(ClientPlayerEntity player) {
+        if (player.getY() >= minimumAltitude()) return;
+        if (player.isGliding() && isPitch40Active()) return;
+        debug("Below minimum altitude Y=" + (int) player.getY());
+        beginRecovery("below minimum altitude");
+    }
 
-      this.tickCounter = 0;
-      this.rocketTickCounter = (Integer)this.rocketDelay.get();
-      this.usedActivationRocket = false;
-      com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor recastInv = (com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor) this.mc.player.getInventory();
-      int recastSlot = recastInv.getSelectedSlot();
-      com.hunterbuddy.util.GliderSwap.wearGlider(this.mc.player);
-      recastInv.setSelectedSlot(recastSlot);
-      if (!com.hunterbuddy.util.GliderSwap.isGlider(this.mc.player.getEquippedStack(EquipmentSlot.CHEST)) && com.hunterbuddy.util.GliderSwap.hasGlider(this.mc.player)) {
-         this.wearPending = true;
-      }
+    private double minimumAltitude() {
+        if (isPitch40Active() && config.usePitch40Bounds.get()) {
+            return pitch40.pitch40LowerBounds.get() - PITCH40_BOUND_MARGIN;
+        }
+        return config.minAltitude.get();
+    }
 
-      if (this.mc.player.isGliding()) {
-         this.enterAscending();
-      } else {
-         this.startTakeoff();
-      }
-   }
+    private boolean isPitch40Active() {
+        return pitch40 != null && pitch40.isActive();
+    }
 
-   private void startTakeoff() {
-      this.takeoff.start(-1, new ElytraTakeoff.Listener() {
-         @Override
-         public void onTakeoffSuccess(double speedBps) {
-            ElytraRecast.this.enterAscending();
-            if ((Boolean)ElytraRecast.this.debugMessages.get()) {
-               ElytraRecast.this.info("Recovery takeoff complete at " + String.format("%.1f", speedBps) + " b/s", new Object[0]);
+    private void beginRecovery(String reason) {
+        if (!FlightGear.hasRockets()) {
+            if (config.disableIfNoRockets.get()) {
+                disableWithError("No firework rockets available! Disabling ElytraRecast.");
+                return;
             }
-         }
+            warning("No firework rockets available, the recovery may fail.");
+        }
+        debug(reason);
+        counters.restartTicks();
+        counters.primeRocketTimer(config.rocketDelay.get());
+        wearer.wearForRecovery(mc.player);
+        if (mc.player.isGliding()) enterAscending();
+        else startTakeoff();
+    }
 
-         @Override
-         public void onTakeoffFailed(String reason) {
-            ElytraRecast.this.state = ElytraRecast.State.MONITORING;
-            ElytraRecast.this.monitoringRecoveryCooldown = MONITORING_RECOVERY_PAUSE;
-            ElytraRecast.this.tickCounter = 0;
-            if ((Boolean)ElytraRecast.this.debugMessages.get()) {
-               ElytraRecast.this.warning("Recovery takeoff failed: " + reason, new Object[0]);
-            }
-         }
+    private void startTakeoff() {
+        takeoff.start(-1, takeoffListener);
+    }
 
-         @Override
-         public void onTakeoffDebug(String message) {
-            if ((Boolean)ElytraRecast.this.debugMessages.get()) {
-               ElytraRecast.this.info(message, new Object[0]);
-            }
-         }
-      });
-   }
+    private void enterAscending() {
+        state = State.ASCENDING;
+        counters.primeRocketTimer(config.rocketDelay.get());
+        counters.restartTicks();
+        useRocketOrDisable("No rockets for ascent! Disabling.");
+    }
 
-   private void enterAscending() {
-      this.state = ElytraRecast.State.ASCENDING;
-      this.rocketTickCounter = (Integer)this.rocketDelay.get();
-      this.tickCounter = 0;
-      if (!this.useRocketWhileGliding() && !this.rocketWaiting && (Boolean)this.disableIfNoRockets.get()) {
-         this.error("No rockets for ascent! Disabling.", new Object[0]);
-         this.toggle();
-      }
-   }
+    private void returnToMonitoring() {
+        state = State.MONITORING;
+        counters.restartTicks();
+        counters.clearNetherRocket();
+    }
 
-   private void handleAscending() {
-      if (!this.mc.player.isGliding()) {
-         if (!this.hasRockets() && (Boolean)this.disableIfNoRockets.get()) {
-            this.error("Lost flight and no rockets! Disabling.", new Object[0]);
-            this.toggle();
-         } else {
-            this.startTakeoff();
-         }
-      } else if (this.isPitch40ManagingFlight()) {
-         this.state = ElytraRecast.State.MONITORING;
-         this.wasGliding = true;
-         this.tickCounter = 0;
-      } else {
-         if (this.isInNether()) {
-            this.adjustPitchUp();
-            if (!this.netherRocketUsed) {
-               if (this.useRocket()) {
-                  this.netherRocketUsed = true;
-               } else if (!this.rocketWaiting && (Boolean)this.disableIfNoRockets.get()) {
-                  this.error("No rockets for Nether recovery! Disabling.", new Object[0]);
-                  this.toggle();
-                  return;
-               }
-            }
+    private void tickAscending() {
+        ClientPlayerEntity player = mc.player;
+        if (!player.isGliding()) {
+            recoverLostFlight();
+        } else if (isPitch40Active()) {
+            returnToMonitoring();
+        } else if (FlightGear.isNether(mc.world)) {
+            ascendInNether(player);
+        } else {
+            ascendInOverworld(player);
+        }
+    }
 
-            if (this.tickCounter > 10) {
-               if ((Boolean)this.debugMessages.get()) {
-                  this.info("Nether recovery complete - baritone takes over.", new Object[0]);
-               }
+    private void recoverLostFlight() {
+        if (!FlightGear.hasRockets() && config.disableIfNoRockets.get()) {
+            disableWithError("Lost flight and no rockets! Disabling.");
+            return;
+        }
+        startTakeoff();
+    }
 
-               this.state = ElytraRecast.State.MONITORING;
-               this.wasGliding = true;
-               this.tickCounter = 0;
-               this.netherRocketUsed = false;
-               return;
-            }
-         } else {
-            double currentY = this.mc.player.getY();
-            int target = (Integer)this.overworldTargetAltitude.get();
-            if (currentY >= target) {
-               if ((Boolean)this.debugMessages.get()) {
-                  this.info("Target altitude Y=" + target + " reached! Resuming monitoring.", new Object[0]);
-               }
+    private void ascendInNether(ClientPlayerEntity player) {
+        PitchSteering.steer(player, config.targetPitch.get(), config.rotationSpeed.get());
+        if (!counters.netherRocketUsed()) {
+            RocketOutcome outcome = useRocketOrDisable("No rockets for Nether recovery! Disabling.");
+            if (outcome == RocketOutcome.DISABLED) return;
+            if (outcome == RocketOutcome.FIRED) counters.markNetherRocketUsed();
+        }
+        if (counters.ticks() > NETHER_CLIMB_TICKS) {
+            debug("Nether recovery complete - baritone takes over.");
+            returnToMonitoring();
+        }
+    }
 
-               this.state = ElytraRecast.State.MONITORING;
-               this.wasGliding = true;
-               this.tickCounter = 0;
-               return;
-            }
+    private void ascendInOverworld(ClientPlayerEntity player) {
+        if (player.getY() >= config.targetAltitude.get()) {
+            debug("Target altitude Y=" + config.targetAltitude.get() + " reached! Resuming monitoring.");
+            returnToMonitoring();
+            return;
+        }
+        PitchSteering.steer(player, config.targetPitch.get(), config.rotationSpeed.get());
+        if (counters.rocketTicks() < config.rocketDelay.get()) return;
+        if (useRocketOrDisable("Out of rockets during ascent! Disabling.") == RocketOutcome.FIRED) {
+            counters.restartRocketTimer();
+        }
+    }
 
-            this.adjustPitchUp();
-            if (this.rocketTickCounter >= (Integer)this.rocketDelay.get()) {
-               if (this.useRocket()) {
-                  this.rocketTickCounter = 0;
-               } else if (!this.rocketWaiting && (Boolean)this.disableIfNoRockets.get()) {
-                  this.error("Out of rockets during ascent! Disabling.", new Object[0]);
-                  this.toggle();
-                  return;
-               }
-            }
-         }
-      }
-   }
+    private RocketOutcome useRocketOrDisable(String exhaustedMessage) {
+        if (rocketLauncher.use()) return RocketOutcome.FIRED;
+        if (rocketLauncher.isWaiting() || !config.disableIfNoRockets.get()) return RocketOutcome.UNAVAILABLE;
+        disableWithError(exhaustedMessage);
+        return RocketOutcome.DISABLED;
+    }
 
-   private void adjustPitchUp() {
-      float currentPitch = this.mc.player.getPitch();
-      float target = ((Double)this.targetPitch.get()).floatValue();
-      float speed = ((Double)this.rotationSpeed.get()).floatValue();
-      float diff = target - currentPitch;
-      if (!(Math.abs(diff) < 0.5F)) {
-         float adjustment;
-         if (Math.abs(diff) <= speed) {
-            adjustment = diff;
-         } else {
-            adjustment = diff > 0.0F ? speed : -speed;
-         }
+    private void disableWithError(String message) {
+        error(message);
+        toggle();
+    }
 
-         float newPitch = currentPitch + adjustment;
-         newPitch = Math.max(-89.0F, Math.min(89.0F, newPitch));
-         this.mc.player.setPitch(newPitch);
-      }
-   }
+    private void debug(String message) {
+        if (config.debugMessages.get()) info(message);
+    }
 
-   private boolean hasRockets() {
-      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
-      if (hotbar.found()) {
-         return true;
-      }
+    private void debugWarning(String message) {
+        if (config.debugMessages.get()) warning(message);
+    }
 
-      FindItemResult inv = InvUtils.find(Rockets::isPlain);
-      return inv.found();
-   }
+    private String monitoringInfo(ClientPlayerEntity player) {
+        String altitude = String.format("Y=%.0f", player.getY());
+        if (FlightGear.isNether(mc.world)) return altitude;
+        return altitude + String.format(" (min:%.0f)", minimumAltitude());
+    }
 
-   private boolean useRocket() {
-      return this.useRocketWhileGliding();
-   }
+    private String ascendingInfo(ClientPlayerEntity player) {
+        String altitude = UP_ARROW + String.format("%.0f", player.getY());
+        if (FlightGear.isNether(mc.world)) return altitude;
+        return altitude + "/" + config.targetAltitude.get();
+    }
 
-   private boolean useRocketWhileGliding() {
-      this.rocketWaiting = false;
-      if (this.mc.player == null || this.mc.interactionManager == null) {
-         return false;
-      }
+    private final class TakeoffOutcome implements ElytraTakeoff.Listener {
+        @Override
+        public void onTakeoffSuccess(double speedBps) {
+            enterAscending();
+            debug(String.format("Recovery takeoff complete at %.1f b/s", speedBps));
+        }
 
-      if (!this.mc.player.isGliding()) {
-         return false;
-      }
+        @Override
+        public void onTakeoffFailed(String reason) {
+            state = State.MONITORING;
+            counters.pause(RecastCounters.FAILED_TAKEOFF_PAUSE_TICKS);
+            counters.restartTicks();
+            debugWarning("Recovery takeoff failed: " + reason);
+        }
 
-      FindItemResult hotbar = InvUtils.findInHotbar(Rockets::isPlain);
-      if (!hotbar.found()) {
-         FindItemResult inv = InvUtils.find(Rockets::isPlain);
-         if (!inv.found()) {
-            return false;
-         }
-
-         int hotbarSlot = this.findEmptyHotbarSlot();
-         if (hotbarSlot != -1) {
-            if (!QuietClicks.readyOrSettle()) {
-               this.rocketWaiting = true;
-               return false;
-            }
-
-            InvUtils.move().from(inv.slot()).to(hotbarSlot);
-            hotbar = InvUtils.findInHotbar(Rockets::isPlain);
-         }
-      }
-
-      if (!hotbar.found()) {
-         return false;
-      }
-
-      if (hotbar.isOffhand()) {
-         this.mc.interactionManager.interactItem(this.mc.player, Hand.OFF_HAND);
-         this.mc.player.swingHand(Hand.OFF_HAND);
-         return true;
-      }
-
-      ItemStack selected = this.mc.player.getMainHandStack();
-      if (Rockets.isPlain(selected)) {
-         this.mc.interactionManager.interactItem(this.mc.player, Hand.MAIN_HAND);
-         this.mc.player.swingHand(Hand.MAIN_HAND);
-         return true;
-      }
-
-      return Utils.firework(this.mc, false) != -1;
-   }
-
-   private int findEmptyHotbarSlot() {
-      for (int i = 0; i < 9; i++) {
-         if (this.mc.player.getInventory().getStack(i).isEmpty()) {
-            return i;
-         }
-      }
-
-      return -1;
-   }
-
-   private boolean hasElytraEquipped() {
-      return this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() == Items.ELYTRA
-         || com.hunterbuddy.util.GliderSwap.hasGlider(this.mc.player);
-   }
-
-   private boolean isInNether() {
-      return this.mc.world == null ? false : this.mc.world.getRegistryKey() == World.NETHER;
-   }
-
-   public String getInfoString() {
-      if (this.state == null) {
-         return null;
-      }
-
-      if (this.mc.player == null) {
-         return this.state.name();
-      }
-
-      double minAlt = this.isInNether() ? 0.0 : this.getEffectiveMinAltitude();
-
-      if (this.takeoff.isActive()) {
-         return "TAKEOFF " + this.takeoff.getPhase();
-      }
-
-      return switch (this.state) {
-         case MONITORING -> this.isInNether()
-            ? String.format("Y=%.0f", this.mc.player.getY())
-            : String.format("Y=%.0f (min:%.0f)", this.mc.player.getY(), minAlt);
-         case JUMPING, ACTIVATING -> "TAKEOFF";
-         case ASCENDING -> this.isInNether()
-            ? String.format("\u2191%.0f", this.mc.player.getY())
-            : String.format("\u2191%.0f/%d", this.mc.player.getY(), this.overworldTargetAltitude.get());
-      };
-   }
-
-   private enum State {
-      MONITORING,
-      JUMPING,
-      ACTIVATING,
-      ASCENDING;
-   }
+        @Override
+        public void onTakeoffDebug(String message) {
+            debug(message);
+        }
+    }
 }
