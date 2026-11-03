@@ -15,7 +15,7 @@ public record Sensors(
     boolean baritonePathing, boolean baritoneHasPath, boolean baritoneGoalActive,
     boolean baritoneCalcInProgress, boolean baritoneInControl, String lastPathEvent,
     boolean elytraActive, boolean elytraDestinationSet, long blocksMined,
-    long pickups, long setbacks, boolean mlepMining, boolean regearRunning,
+    long pickups, long setbacks, boolean hMining, boolean regearRunning,
     boolean regearPending, boolean eating, boolean combatTarget, String movementHolder,
     int rockets, int obsidian, int enderChests, int playersVisible
 ) {

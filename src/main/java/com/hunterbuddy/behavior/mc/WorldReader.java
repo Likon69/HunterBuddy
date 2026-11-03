@@ -7,8 +7,8 @@ import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.ElytraBounce;
 import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.ElytraSwap;
-import com.hunterbuddy.modules.MlepAirPlace;
-import com.hunterbuddy.modules.MlepScaffold;
+import com.hunterbuddy.modules.GrimAirPlace;
+import com.hunterbuddy.modules.GrimScaffold;
 import com.hunterbuddy.modules.Pitch40;
 import com.hunterbuddy.modules.Pitch40Classic;
 import com.hunterbuddy.modules.RocketFly;
@@ -41,7 +41,7 @@ import net.minecraft.world.Heightmap;
 public final class WorldReader {
     private static final Set<Class<? extends Module>> REFUSED = Set.of(SpawnerDetector.class, WaypointFollower.class,
         TrailFollower.class, AreaLoader.class, RocketFly.class, Pitch40.class, Pitch40Classic.class, ElytraRecast.class,
-        ElytraBounce.class, ElytraSwap.class, AutoPortal.class, MlepScaffold.class, MlepAirPlace.class, PearlButler.class, ShulkerSorter.class,
+        ElytraBounce.class, ElytraSwap.class, AutoPortal.class, GrimScaffold.class, GrimAirPlace.class, PearlButler.class, ShulkerSorter.class,
         ExperienceTraderModule.class, ExperienceTraderStarterModule.class, ElytraFly.class);
     private final MinecraftClient client;
 

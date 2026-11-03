@@ -3256,7 +3256,7 @@ public class SpawnerDetector extends Module {
     }
     private Pitch40 pitch40Module() { return Modules.get().get(Pitch40.class); }
     private ElytraRecast elytraRecastModule() { return Modules.get().get(ElytraRecast.class); }
-    private HMine mlepMineModule() { return Modules.get().get(HMine.class); }
+    private HMine hMineModule() { return Modules.get().get(HMine.class); }
     private AutoFlyingRegear autoFlyingRegearModule() { return Modules.get().get(AutoFlyingRegear.class); }
     private WaypointFollower waypointFollowerModule() { return Modules.get().get(WaypointFollower.class); }
     private AutoEatSync autoEatSyncModule() { return Modules.get().get(AutoEatSync.class); }
@@ -4514,8 +4514,8 @@ public class SpawnerDetector extends Module {
         TrailFollower tf = Modules.get().get(TrailFollower.class);
         if (tf != null && tf.isActive() && flightModule.get() != FlightModule.TrailFollower) return QualResult.reject("TrailFollower active");
         if (fly300kmActiveButNotSelected()) return QualResult.reject("300kmfly active");
-        HMine mine = mlepMineModule();
-        if (mine == null || !mine.isActive()) return QualResult.reject("MlepMine inactive");
+        HMine mine = hMineModule();
+        if (mine == null || !mine.isActive()) return QualResult.reject("HMine inactive");
         if (!BaritoneHelper.isAvailable()) return QualResult.reject("Baritone unavailable");
         if (!walkChain && autoWatchdogRetryBlocked(site)) return QualResult.reject("watchdog: leave in flight before retry");
         if (!walkChain && otherPlayerPresent()) return QualResult.reject("player nearby");
@@ -5461,8 +5461,8 @@ public class SpawnerDetector extends Module {
             return QualResult.reject("300kmfly active");
         }
 
-        HMine mine = mlepMineModule();
-        if (mine == null || !mine.isActive()) return QualResult.reject("MlepMine inactive");
+        HMine mine = hMineModule();
+        if (mine == null || !mine.isActive()) return QualResult.reject("HMine inactive");
         if (!BaritoneHelper.isAvailable()) return QualResult.reject("Baritone unavailable");
 
         if (autoWatchdogRetryBlocked(site)) return QualResult.reject("watchdog: leave in flight before retry");

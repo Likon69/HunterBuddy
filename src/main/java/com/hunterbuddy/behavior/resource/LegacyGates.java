@@ -25,7 +25,7 @@ public final class LegacyGates {
         if (sensors.regearRunning() || sensors.regearPending()) next.add(new GateOwner("AutoFlyingRegear", Hook.REGEAR, Set.of(Resource.values()), GatePolicy.LEGACY));
         if (sensors.eating()) next.add(new GateOwner("AutoEatSync", Hook.SURVIVAL, Set.of(Resource.SLOT), GatePolicy.LEGACY));
         if (sensors.combatTarget()) next.add(new GateOwner("KillAuraPlus", Hook.COMBAT, Set.of(Resource.LOOK, Resource.SLOT), GatePolicy.LEGACY));
-        if (sensors.mlepMining() && !ownMining.getAsBoolean() && !ownBaritone.getAsBoolean()) {
+        if (sensors.hMining() && !ownMining.getAsBoolean() && !ownBaritone.getAsBoolean()) {
             next.add(new GateOwner("HMine", Hook.BOT_PRE, Set.of(Resource.MINING), GatePolicy.LEGACY));
         }
         active = List.copyOf(next);

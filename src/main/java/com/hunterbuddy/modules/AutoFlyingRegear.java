@@ -498,9 +498,9 @@ public class AutoFlyingRegear extends Module {
    private final int maxStateTimeout = 600;
    private final Map<String, Module> flightModules = new HashMap<>();
    private final Set<String> disabledModules = new HashSet<>();
-   private MlepScaffold mlepScaffold = null;
-   private Module mlepMine = null;
-   private boolean mlepMineWasActive = false;
+   private GrimScaffold grimScaffold = null;
+   private Module hMine = null;
+   private boolean hMineWasActive = false;
    private int scaffoldWaitTicks = 0;
    private float savedYaw = 0.0F;
    private float savedPitch = 0.0F;
@@ -614,18 +614,18 @@ public class AutoFlyingRegear extends Module {
       this.offPlatformTicks = 0;
       this.shulkerPickupAttempts = 0;
       this.shulkerPlacementRetry = false;
-      this.mlepMineWasActive = false;
+      this.hMineWasActive = false;
       this.startupDelayTicks = 0;
       this.startupComplete = false;
-      this.mlepScaffold = Modules.get().get(MlepScaffold.class);
-      if (this.mlepScaffold == null && (Boolean)this.debugMessages.get()) {
-         this.error("MlepScaffold module not found - regear scaffolding will not work!", new Object[0]);
+      this.grimScaffold = Modules.get().get(GrimScaffold.class);
+      if (this.grimScaffold == null && (Boolean)this.debugMessages.get()) {
+         this.error("GrimScaffold module not found - regear scaffolding will not work!", new Object[0]);
       }
-      this.mlepMine = Modules.get().get(HMine.class);
+      this.hMine = Modules.get().get(HMine.class);
       this.autoEatModule = (AutoEat)Modules.get().get(AutoEat.class);
       this.autoEatSyncModule = Modules.get().get(AutoEatSync.class);
-      if (this.mlepMine != null) {
-         this.mlepMineWasActive = this.mlepMine.isActive();
+      if (this.hMine != null) {
+         this.hMineWasActive = this.hMine.isActive();
       }
 
       this.flightModules.put("hotbar-refill", Modules.get().get(HotbarRefill.class));
@@ -656,9 +656,9 @@ public class AutoFlyingRegear extends Module {
         this.restoreChestplate();
       }
 
-      if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
-         this.mlepScaffold.setRegearMode(false);
-         this.mlepScaffold.toggle();
+      if (this.grimScaffold != null && this.grimScaffold.isActive()) {
+         this.grimScaffold.setRegearMode(false);
+         this.grimScaffold.toggle();
       }
 
       // Switched off mid-mending, AutoEXPPlus would otherwise stay on for good — this module
@@ -1286,7 +1286,7 @@ public class AutoFlyingRegear extends Module {
          Utils.setPressed(this.mc.options.sneakKey, true);
       }
 
-      if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
+      if (this.grimScaffold != null && this.grimScaffold.isActive()) {
          this.handleActiveScaffold(isNether);
          return;
       }
@@ -1355,7 +1355,7 @@ public class AutoFlyingRegear extends Module {
          return;
       }
 
-      if (!canStartScaffold || this.mlepScaffold == null) {
+      if (!canStartScaffold || this.grimScaffold == null) {
          return;
       }
 
@@ -1363,11 +1363,11 @@ public class AutoFlyingRegear extends Module {
          return;
       }
 
-      this.mlepScaffold.setRegearHotbarSlot((Integer)this.obsidianHotbarSlot.get());
-      this.mlepScaffold.setRegearMode(true);
-      this.mlepScaffold.toggle();
+      this.grimScaffold.setRegearHotbarSlot((Integer)this.obsidianHotbarSlot.get());
+      this.grimScaffold.setRegearMode(true);
+      this.grimScaffold.toggle();
       if ((Boolean)this.debugMessages.get()) {
-         this.info("MlepScaffold activated at Y=" + playerY + (isNether ? " (Nether)" : " (below build limit)"), new Object[0]);
+         this.info("GrimScaffold activated at Y=" + playerY + (isNether ? " (Nether)" : " (below build limit)"), new Object[0]);
       }
 
       this.scaffoldWaitTicks = 0;
@@ -1382,7 +1382,7 @@ public class AutoFlyingRegear extends Module {
       int playerY = (int)Math.floor(this.mc.player.getY());
 
       if (!this.mc.world.getBlockState(checkPos).isReplaceable()) {
-         this.finishScaffoldLanding(checkPos, "MlepScaffold placed initial block at " + checkPos.toShortString());
+         this.finishScaffoldLanding(checkPos, "GrimScaffold placed initial block at " + checkPos.toShortString());
          return;
       }
 
@@ -1411,14 +1411,14 @@ public class AutoFlyingRegear extends Module {
       }
 
       if (this.scaffoldWaitTicks > 120) {
-         this.finishScaffoldLanding(checkPos, "MlepScaffold timeout at Y=" + playerY);
+         this.finishScaffoldLanding(checkPos, "GrimScaffold timeout at Y=" + playerY);
       }
    }
 
    private void finishScaffoldLanding(BlockPos platform, String debugMessage) {
-      if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
-         this.mlepScaffold.setRegearMode(false);
-         this.mlepScaffold.toggle();
+      if (this.grimScaffold != null && this.grimScaffold.isActive()) {
+         this.grimScaffold.setRegearMode(false);
+         this.grimScaffold.toggle();
       }
 
       RotationUtils.getInstance().clearRotations();
@@ -1614,11 +1614,11 @@ public class AutoFlyingRegear extends Module {
 
       this.holdBaritonePlacement();
       if (this.stateTickCounter == 1) {
-         if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
-            this.mlepScaffold.setRegearMode(false);
-            this.mlepScaffold.toggle();
+         if (this.grimScaffold != null && this.grimScaffold.isActive()) {
+            this.grimScaffold.setRegearMode(false);
+            this.grimScaffold.toggle();
             if ((Boolean)this.debugMessages.get()) {
-               this.info("Disabled MlepScaffold for centering", new Object[0]);
+               this.info("Disabled GrimScaffold for centering", new Object[0]);
             }
          }
 
@@ -1790,8 +1790,8 @@ public class AutoFlyingRegear extends Module {
                this.info("2x2 platform already complete", new Object[0]);
             }
 
-            if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
-               this.mlepScaffold.toggle();
+            if (this.grimScaffold != null && this.grimScaffold.isActive()) {
+               this.grimScaffold.toggle();
             }
 
             this.wallsStarted = false;
@@ -1868,7 +1868,7 @@ public class AutoFlyingRegear extends Module {
             if (totalAttempts >= MAX_PLATFORM_PLACEMENT_ATTEMPTS) {
                BlockPos above = pos.up();
                BlockState aboveState = this.mc.world.getBlockState(above);
-               if (!aboveState.isReplaceable() && !aboveState.isAir() && this.mlepMine != null && this.mlepMine.isActive()) {
+               if (!aboveState.isReplaceable() && !aboveState.isAir() && this.hMine != null && this.hMine.isActive()) {
                   Vec3d playerPos = this.mc.player.getEntityPos();
                   Vec3d blockCenter = Vec3d.ofCenter(above);
                   double dx = playerPos.x - blockCenter.x;
@@ -1883,7 +1883,7 @@ public class AutoFlyingRegear extends Module {
                      breakDirection = dy > 0.0 ? Direction.UP : Direction.DOWN;
                   }
 
-                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(above, breakDirection));
+                  ((HMine)this.hMine).queueMiningData(((HMine)this.hMine).new MiningData(above, breakDirection));
                   if ((Boolean)this.debugMessages.get()) {
                      this.info("Platform spot " + pos.toShortString() + " stuck after " + totalAttempts + " attempts, mining " + above.toShortString(), new Object[0]);
                   }
@@ -1926,8 +1926,8 @@ public class AutoFlyingRegear extends Module {
                   this.info("2x2 platform verified complete", new Object[0]);
                }
 
-               if (this.mlepScaffold != null && this.mlepScaffold.isActive()) {
-                  this.mlepScaffold.toggle();
+               if (this.grimScaffold != null && this.grimScaffold.isActive()) {
+                  this.grimScaffold.toggle();
                }
 
                this.pendingBlocks.clear();
@@ -2100,8 +2100,8 @@ public class AutoFlyingRegear extends Module {
             BlockState inTheWay = this.mc.world.getBlockState(pos);
             if (!inTheWay.isReplaceable()
                && !inTheWay.isAir()
-               && this.mlepMine != null
-               && this.mlepMine.isActive()
+               && this.hMine != null
+               && this.hMine.isActive()
                && this.wallMineQueued.add(pos.toImmutable())) {
                if ((Boolean)this.debugMessages.get()) {
                   this.warning(
@@ -2110,7 +2110,7 @@ public class AutoFlyingRegear extends Module {
                   );
                }
 
-               ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(pos.toImmutable(), this.faceFromEye(pos)));
+               ((HMine)this.hMine).queueMiningData(((HMine)this.hMine).new MiningData(pos.toImmutable(), this.faceFromEye(pos)));
             }
 
             if (this.placementAttempts >= 10) {
@@ -2324,11 +2324,11 @@ public class AutoFlyingRegear extends Module {
             float[] rotations = RotationUtils.getRotationsTo(this.mc.player.getEyePos(), targetVec);
             this.mc.player.setYaw(rotations[0]);
             this.mc.player.setPitch(rotations[1]);
-            if (this.mlepMine != null && this.mlepMine.isActive()) {
+            if (this.hMine != null && this.hMine.isActive()) {
                if (this.clearingProgress == 0 || this.clearingProgress % 40 == 0) {
-                  ((HMine)this.mlepMine)
+                  ((HMine)this.hMine)
                      .queueMiningData(
-                        ((HMine)this.mlepMine).new MiningData(this.currentClearingPos.toImmutable(), this.faceFromEye(this.currentClearingPos))
+                        ((HMine)this.hMine).new MiningData(this.currentClearingPos.toImmutable(), this.faceFromEye(this.currentClearingPos))
                      );
                }
 
@@ -2597,14 +2597,14 @@ public class AutoFlyingRegear extends Module {
             float[] rotations = RotationUtils.getRotationsTo(this.mc.player.getEyePos(), target);
             this.mc.player.setYaw(rotations[0]);
             this.mc.player.setPitch(rotations[1]);
-            if (this.mlepMine != null && this.mlepMine.isActive()) {
-               ((HMine)this.mlepMine)
-                  .queueMiningData(((HMine)this.mlepMine).new MiningData(above.toImmutable(), this.faceFromEye(above)));
+            if (this.hMine != null && this.hMine.isActive()) {
+               ((HMine)this.hMine)
+                  .queueMiningData(((HMine)this.hMine).new MiningData(above.toImmutable(), this.faceFromEye(above)));
             } else {
                this.mc.interactionManager.attackBlock(above, this.faceFromEye(above));
                this.mc.player.swingHand(Hand.MAIN_HAND);
             }
-         } else if (this.mlepMine == null || !this.mlepMine.isActive()) {
+         } else if (this.hMine == null || !this.hMine.isActive()) {
             this.mc.interactionManager.updateBlockBreakingProgress(above, this.faceFromEye(above));
             this.mc.player.swingHand(Hand.MAIN_HAND);
          }
@@ -4324,7 +4324,7 @@ public class AutoFlyingRegear extends Module {
                return;
             }
 
-            if (this.mlepMine != null && this.mlepMine.isActive()) {
+            if (this.hMine != null && this.hMine.isActive()) {
                // HMine takes the chest the way the cleanup hands it the box: queued once, then left to it. The
                // pickaxe goes in hand first, for an auto-swap that is off and mines with whatever is held; the
                // game's own tick sends the slot on before the break can finish, so the drop is the pickaxe's.
@@ -4334,7 +4334,7 @@ public class AutoFlyingRegear extends Module {
 
                // the queue drops a repeat of a block it is still working on, so this nudge only matters if it let go
                if (!this.topUpBreakStarted || this.topUpStepTicks % 40 == 0) {
-                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(this.echestPos, Direction.UP));
+                  ((HMine)this.hMine).queueMiningData(((HMine)this.hMine).new MiningData(this.echestPos, Direction.UP));
                   this.topUpBreakStarted = true;
                }
 
@@ -4530,8 +4530,8 @@ public class AutoFlyingRegear extends Module {
          // it packet-mines the box for us. It holds the pickaxe itself for each block, so the regear no
          // longer grabs the selected hotbar slot every tick - which is what used to keep AutoEat from
          // ever holding a gap and eating.
-         if (this.mlepMineWasActive && this.mlepMine != null && !this.mlepMine.isActive()) {
-            this.mlepMine.toggle();
+         if (this.hMineWasActive && this.hMine != null && !this.hMine.isActive()) {
+            this.hMine.toggle();
             if ((Boolean)this.debugMessages.get()) {
                this.info("Re-enabled h-mine for cleanup teardown", new Object[0]);
             }
@@ -4589,13 +4589,13 @@ public class AutoFlyingRegear extends Module {
                breakDirection = dy > 0.0 ? Direction.UP : Direction.DOWN;
             }
 
-            if (this.mlepMine != null && this.mlepMine.isActive()) {
+            if (this.hMine != null && this.hMine.isActive()) {
                // Click once and let the mine module do the rest. queueMiningData holds the pickaxe
                // itself for the packet mine, so we never touch the selected hotbar slot here - that
                // is what lets AutoEat keep a gap in hand and actually eat when a ghast hits us. The
                // queue dedups by position, so re-issuing it while it is still working is a no-op.
                if (this.cleanupBlockAttempts == 0) {
-                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(pos, breakDirection));
+                  ((HMine)this.hMine).queueMiningData(((HMine)this.hMine).new MiningData(pos, breakDirection));
                   if ((Boolean)this.debugMessages.get()) {
                      this.info("Mining block " + (this.cleanupBlockIndex + 1) + "/" + this.cleanupBlocks.size() + " via mine module", new Object[0]);
                   }
@@ -4605,7 +4605,7 @@ public class AutoFlyingRegear extends Module {
                // Backstop only: if the module has not taken the block down after a while, nudge it
                // back into the queue. Still no hotbar grab, still no per-tick spam.
                if (this.cleanupBlockAttempts % 40 == 0) {
-                  ((HMine)this.mlepMine).queueMiningData(((HMine)this.mlepMine).new MiningData(pos, breakDirection));
+                  ((HMine)this.hMine).queueMiningData(((HMine)this.hMine).new MiningData(pos, breakDirection));
                }
 
                this.timer = 2;
@@ -4908,8 +4908,8 @@ public class AutoFlyingRegear extends Module {
          }
       }
 
-      if (this.stateTickCounter == 12 && this.mlepMineWasActive && this.mlepMine != null && !this.mlepMine.isActive()) {
-         this.mlepMine.toggle();
+      if (this.stateTickCounter == 12 && this.hMineWasActive && this.hMine != null && !this.hMine.isActive()) {
+         this.hMine.toggle();
          if ((Boolean)this.debugMessages.get()) {
             this.info("Re-enabled h-mine", new Object[0]);
          }
@@ -4934,7 +4934,7 @@ public class AutoFlyingRegear extends Module {
          this.savedBaritoneCommand = null;
          this.reEnableStage = 0;
          this.processedShulkers.clear();
-         this.mlepMineWasActive = false;
+         this.hMineWasActive = false;
          this.cleanupBlockIndex = 0;
          this.cleanupBlockAttempts = 0;
       }

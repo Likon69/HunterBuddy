@@ -409,7 +409,7 @@ public final class TreeJava extends Module {
         if (!sensors.gliding() && sensors.eating()) return "AutoEatSync eating";
         if (!sensors.gliding() && sensors.combatTarget()) return "KillAuraPlus combat target";
         if (sensors.regearRunning() || sensors.regearPending()) return "AutoFlyingRegear running or pending";
-        if (!sensors.gliding() && sensors.mlepMining() && !mining.ownsMining()) return "HMine foreign mining";
+        if (!sensors.gliding() && sensors.hMining() && !mining.ownsMining()) return "HMine foreign mining";
         if (!sensors.gliding() && pauseOnPlayer() && sensors.playersVisible() > 0) return "another player visible";
         if (engine.outputs().foreignMovement()) return "foreign forced movement";
         return null;

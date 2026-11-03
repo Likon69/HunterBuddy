@@ -11,7 +11,9 @@ public final class LegacyNames {
         "replenish", "hotbar-refill",
         "elytraswap", "elytra-keeper",
         "sign-render", "sign-reader",
-        "pearlloader", "pearl-butler"
+        "pearlloader", "pearl-butler",
+        "mlep-scaffold", "grim-scaffold",
+        "mlep-air-place", "grim-air-place"
     );
 
     private static final Map<String, String> HUD = Map.of(

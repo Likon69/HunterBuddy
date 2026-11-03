@@ -13,17 +13,17 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.SpawnEggItem;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 
-public class MlepAirPlace extends Module {
+public class GrimAirPlace extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRange = settings.createGroup("range");
 
@@ -83,8 +83,8 @@ public class MlepAirPlace extends Module {
     private int delay = 0;
     private boolean wasPressed = false;
 
-    public MlepAirPlace() {
-        super(HunterBuddyAddon.UTILITY_CATEGORY, "mlep-air-place", "Places a block in air where your crosshair is pointing.");
+    public GrimAirPlace() {
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "grim-air-place", "Places a block in air where your crosshair is pointing.");
     }
 
     @Override
@@ -96,45 +96,39 @@ public class MlepAirPlace extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
-
         if (delay < placeDelay.get()) delay++;
-
-        double r = customRange.get() ? range.get() : mc.player.getBlockInteractionRange();
-        hitResult = mc.getCameraEntity().raycast(r, 0.0F, false);
-
-        if (hitResult instanceof BlockHitResult blockHitResult
-            && (mc.player.getMainHandStack().getItem() instanceof BlockItem
-                || mc.player.getMainHandStack().getItem() instanceof SpawnEggItem)) {
-
-            boolean isPressed = mc.options.useKey.isPressed();
-            if (mc.currentScreen != null) {
-                wasPressed = isPressed;
-            } else {
-                if (isPressed && !wasPressed && delay >= placeDelay.get()) {
-                    BlockPos targetPos = blockHitResult.getBlockPos();
-                    if (!mc.world.getBlockState(targetPos).isReplaceable()) {
-                        wasPressed = isPressed;
-                        return;
-                    }
-                    PlacementUtils.grimPlace(blockHitResult);
-                    mc.player.swingHand(Hand.MAIN_HAND);
-                    delay = 0;
-                }
-                wasPressed = isPressed;
-            }
+        double reach = customRange.get() ? range.get() : mc.player.getBlockInteractionRange();
+        hitResult = mc.getCameraEntity().raycast(reach, 0.0F, false);
+        if (hitResult instanceof BlockHitResult blockHit && isHoldingPlaceable()) {
+            handleClick(blockHit);
         } else {
             wasPressed = false;
         }
+    }
+
+    private void handleClick(BlockHitResult blockHit) {
+        boolean isPressed = mc.options.useKey.isPressed();
+        boolean fresh = isPressed && !wasPressed;
+        wasPressed = isPressed;
+        if (mc.currentScreen != null || !fresh || delay < placeDelay.get()) return;
+        if (!mc.world.getBlockState(blockHit.getBlockPos()).isReplaceable()) return;
+        PlacementUtils.grimPlace(blockHit);
+        mc.player.swingHand(Hand.MAIN_HAND);
+        delay = 0;
+    }
+
+    private boolean isHoldingPlaceable() {
+        Item held = mc.player.getMainHandStack().getItem();
+        return held instanceof BlockItem || held instanceof SpawnEggItem;
     }
 
     @EventHandler
     private void onRender(Render3DEvent event) {
         if (hitResult instanceof BlockHitResult blockHitResult
             && mc.world.getBlockState(blockHitResult.getBlockPos()).isReplaceable()
-            && (mc.player.getMainHandStack().getItem() instanceof BlockItem
-                || mc.player.getMainHandStack().getItem() instanceof SpawnEggItem)
+            && isHoldingPlaceable()
             && render.get()) {
-            event.renderer.box(blockHitResult.getBlockPos(), (Color) sideColor.get(), (Color) lineColor.get(), (ShapeMode) shapeMode.get(), 0);
+            event.renderer.box(blockHitResult.getBlockPos(), sideColor.get(), lineColor.get(), shapeMode.get(), 0);
         }
     }
 }
