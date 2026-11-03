@@ -11,8 +11,8 @@ A Meteor Client addon for hunting, flight, visuals, inventory logistics, and uti
 Created by **Texy** and **DragonFood**, for their own 2b2t hunting. Texy started it to get off FutureClient and
 RusherHack and build everything on Meteor instead — that mostly worked out; the only piece of either one still
 around is code that ended up ported into this addon rather than run from its original client (RusherHack's elytra
-flight shape in `elytra-auto-fly`, Future's totem swap in `f-totem`). mlep's code was the base a lot of the rest
-grew from, and bits of Jeff mod's code went in without much hesitation where they were useful. Have
+flight shape in `elytra-auto-fly`, Future's totem swap in `f-totem`). Bits of Jeff mod's code went in where they
+were useful; modules that started from other addons were later rewritten from written specifications. Have
 fun with it, and open a GitHub issue if you hit a problem.
 
 Target: **Minecraft 1.21.11 only** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
@@ -88,8 +88,8 @@ Restocking and inventory handling tools.
 | `kick-alarm` | Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed. |
 | `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. |
 | `messenger` | Private messages in movable windows with Classic, Bubbles, Slate or Compact chat styles and an unread badge. Replies go out through `reply-command` (`msg` by default), spaced by `send-interval`. `hide-from-main-chat`, `friends-only`, `ignored-names` and `stream-mode` keep the chat clean, and `keep-history` brings conversations back next session. |
-| `mlep-air-place` | Places a block in air where your crosshair is pointing. |
-| `mlep-scaffold` | Places blocks under you as you move, ahead of your motion, with `tower`, `air-place` and `safewalk` options. |
+| `grim-air-place` | Places a block in air where your crosshair is pointing. |
+| `grim-scaffold` | Places blocks under you as you move, ahead of your motion, with `tower`, `air-place` and `safewalk` options. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatic `speed-multiplier`, and can brake near terrain. Can trace every boosted tick to a CSV for tuning. |
 | `Villager Trading` | Buys experience bottles from clerics with emeralds, visiting each cleric in range with Baritone while the price stays under `experience-max-price`. Restocks emeralds from a chest, drops bottles in another, then switches off and walks home. |
@@ -166,7 +166,6 @@ The built addon JAR is written to `build/libs/hunterbuddy-1.0.0.jar`.
 Several modules started as ports from other addons rather than being written from scratch, credited where the code itself says so:
 
 - **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
-- **mlep** (globalelitehooper) — `ElytraTakeoff`, and the modules named after it (`MlepScaffold`, `MlepAirPlace`). Its code is used under the MIT License, see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 - **[Jeff mod](https://github.com/miles352/meteor-stashhunting-addon)** (miles352) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
 - **riths** — Hunting Utilities ([Tim](https://github.com/rithsgit/Tim)).
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
