@@ -764,6 +764,12 @@ public class SpawnerDetector extends Module {
     private boolean autoWalkStuckBreaking;
     private BlockPos autoWalkStuckBreakPos;
     private String autoWalkStuckBreakLabel;
+    private Vec3d autoStuckRefPos;
+    private int autoStuckRefTicks;
+    private BlockPos autoStuckBreakPos;
+    private String autoStuckBreakLabel;
+    private int autoStuckBreakTicks;
+    private final Set<BlockPos> autoStuckGivenUp = new HashSet<>();
     private double autoWalkBestDist;
     private int autoWalkBestDistTick;
     private int autoWalkSinkBestY;
@@ -6990,6 +6996,8 @@ public class SpawnerDetector extends Module {
             && !isContainerPresent(obstacle)
             && !isLava(obstacleState)
             && !isLavaNearShaft(obstacle, obstacle.up())
+            && obstacleState.getHardness(mc.world, obstacle) >= 0
+            && !autoStuckGivenUp.contains(obstacle)
             && obstacle.getY() >= mc.player.getBlockPos().getY()
             && mc.player.getEyePos().distanceTo(Vec3d.ofCenter(obstacle)) <= 4.2;
     }
@@ -6997,13 +7005,96 @@ public class SpawnerDetector extends Module {
     private BlockPos walkStuckCandidate(BlockPos feet, int stepX, int stepZ) {
         BlockPos cell = feet.add(stepX, 0, stepZ);
         BlockPos headCell = cell.up();
-        if (!isOpenState(mc.world.getBlockState(headCell), headCell) && canBreakWalkStuckObstacle(headCell)) {
+        if (hasCollision(headCell) && canBreakWalkStuckObstacle(headCell)) {
             return headCell;
         }
-        if (!isOpenState(mc.world.getBlockState(cell), cell) && canBreakWalkStuckObstacle(cell)) {
+        if (hasCollision(cell) && canBreakWalkStuckObstacle(cell)) {
             return cell;
         }
         return null;
+    }
+
+    private boolean hasCollision(BlockPos pos) {
+        return !mc.world.getBlockState(pos).getCollisionShape(mc.world, pos).isEmpty();
+    }
+
+    private boolean standsInside(BlockPos pos) {
+        return hasCollision(pos)
+            && pos.getY() + mc.world.getBlockState(pos).getCollisionShape(mc.world, pos).getMax(Direction.Axis.Y) > mc.player.getY() + 0.1
+            && canBreakWalkStuckObstacle(pos);
+    }
+
+    private BlockPos findStuckObstacle(BlockPos goal) {
+        BlockPos own = mc.player.getBlockPos();
+        if (standsInside(own)) return own;
+        if (standsInside(own.up())) return own.up();
+        BlockPos side = findWalkStuckObstacle(goal.getX(), goal.getZ());
+        if (side != null) return side;
+        BlockPos ceiling = mc.player.getBlockPos().up(2);
+        if (goal.getY() > mc.player.getBlockPos().getY() && hasCollision(ceiling) && canBreakWalkStuckObstacle(ceiling)) {
+            return ceiling;
+        }
+        return null;
+    }
+
+    private void startStuckBreak(String stateLabel, BlockPos obstacle, String suffix) {
+        autoStuckBreakPos = obstacle;
+        autoStuckBreakLabel = Registries.BLOCK.getId(mc.world.getBlockState(obstacle).getBlock()).getPath();
+        autoStuckBreakTicks = 0;
+        autoLog(stateLabel, autoSite.center, String.format("%s stuck, breaking %d,%d,%d block=%s%s", stateLabel,
+            obstacle.getX(), obstacle.getY(), obstacle.getZ(), autoStuckBreakLabel, suffix));
+    }
+
+    private void resetStuckBreak() {
+        autoStuckRefPos = null;
+        autoStuckRefTicks = 0;
+        autoStuckBreakPos = null;
+        autoStuckBreakLabel = null;
+        autoStuckBreakTicks = 0;
+    }
+
+    private boolean tickStuckBreak(String stateLabel, BlockPos goal, boolean repath) {
+        Vec3d pos = mc.player.getEntityPos();
+        IBaritone bt = repath ? primaryBaritone() : null;
+        if (autoStuckBreakPos == null) {
+            if (autoStuckRefPos == null || Math.hypot(pos.x - autoStuckRefPos.x, pos.z - autoStuckRefPos.z) > 0.3
+                || Math.abs(pos.y - autoStuckRefPos.y) > 1.5) {
+                autoStuckRefPos = pos;
+                autoStuckRefTicks = 0;
+                return false;
+            }
+            if (++autoStuckRefTicks < 50) return false;
+            autoStuckRefTicks = 0;
+            BlockPos obstacle = findStuckObstacle(goal);
+            if (obstacle == null) return false;
+            if (bt != null) bt.getPathingBehavior().cancelEverything();
+            startStuckBreak(stateLabel, obstacle, "");
+        }
+        releaseAllAutoKeys();
+        if (!hasCollision(autoStuckBreakPos)) {
+            autoLog(stateLabel, autoSite.center, String.format("%s stuck, broken %d,%d,%d block=%s", stateLabel,
+                autoStuckBreakPos.getX(), autoStuckBreakPos.getY(), autoStuckBreakPos.getZ(), autoStuckBreakLabel));
+            BlockPos next = findStuckObstacle(goal);
+            if (next != null) {
+                startStuckBreak(stateLabel, next, " (next)");
+                autoMineTick(stateLabel, next, false);
+                return true;
+            }
+            resetStuckBreak();
+            autoStuckRefPos = pos;
+            if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+            return false;
+        }
+        if (++autoStuckBreakTicks > 300) {
+            autoStuckGivenUp.add(autoStuckBreakPos);
+            autoLog(stateLabel, autoSite.center, String.format("%s stuck, gave up %d,%d,%d block=%s", stateLabel,
+                autoStuckBreakPos.getX(), autoStuckBreakPos.getY(), autoStuckBreakPos.getZ(), autoStuckBreakLabel));
+            resetStuckBreak();
+            if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(buildAscendGoal());
+            return false;
+        }
+        autoMineTick(stateLabel, autoStuckBreakPos, false);
+        return true;
     }
 
     private BlockPos findWalkStuckObstacle(int keyX, int keyZ) {
@@ -11486,6 +11577,17 @@ public class SpawnerDetector extends Module {
             autoExitPathCell = null;
             autoExitPathStep = 0;
             autoSwimUpMouthY = Integer.MIN_VALUE;
+            resetStuckBreak();
+        }
+
+        BlockPos swimUpStuckGoal = autoExitPathCell != null
+            ? new BlockPos(autoExitPathCell.getX(), autoExitShaft != null ? autoExitShaft.exitY() : autoColumn.exitY(), autoExitPathCell.getZ())
+            : new BlockPos(autoExitShaft != null ? autoExitShaft.x() : autoColumn.x(),
+                autoExitShaft != null ? autoExitShaft.exitY() : autoColumn.exitY(),
+                autoExitShaft != null ? autoExitShaft.z() : autoColumn.z());
+        if (tickStuckBreak("SWIM_UP", swimUpStuckGoal, false)) {
+            autoSwimUpProgressTick = stateTicks;
+            return;
         }
 
         if (stateTicks - autoSwimUpProgressTick > 20 * 20) {
@@ -12426,6 +12528,7 @@ public class SpawnerDetector extends Module {
             autoAscendStuckTicks = 0;
             autoAscendTimeoutBaseTick = stateTicks;
             autoTakeoffRetries = 0;
+            resetStuckBreak();
             int ascendRadius = autoAscendRadius > 0 ? autoAscendRadius : (autoColumn.water() ? 48 : 16);
             autoAscendRadius = ascendRadius;
             autoAscendTargets = findAscendTakeoffPoints(mc.player.getBlockX(), mc.player.getBlockZ(), ascendRadius);
@@ -12509,6 +12612,16 @@ public class SpawnerDetector extends Module {
 
             autoAscendArrivedAt = arrivedAt;
             enterState(AutoState.TAKEOFF, "");
+            return;
+        }
+
+        BlockPos ascendStuckGoal = autoAscendTargets.isEmpty()
+            ? new BlockPos(autoColumn.x(), autoColumn.exitY(), autoColumn.z())
+            : autoAscendTargets.get(0);
+        if (tickStuckBreak("ASCEND", ascendStuckGoal, true)) {
+            autoAscendTimeoutBaseTick++;
+            autoAscendStuckPos = null;
+            autoAscendStuckTicks = 0;
             return;
         }
 
