@@ -44,19 +44,21 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `visual-range-notifier` | Alerts when players enter or leave visual range, when chosen items lie on the ground, and on nearby end crystal or respawn anchor activity. Sends to chat, sound or Discord, which can also report your death and disconnects. |
 | `waypoint-follower` | Follows Xaero waypoints whose name starts with `waypoint-prefix` (`Hunt_` by default), in order or closest first, with a flight mode per dimension. At the end it stops, switches off or leaves the server. `seed-route` can lay the waypoints along a mapped trail for you. |
 
-### Visuals (9)
+### Visuals (11)
 
 ESP, overlays, and render helpers.
 
 | Meteor name | Description |
 |---|---|
 | `cave-air` | Highlights portal-shaped holes of air inside cave air, a sign of a broken nether portal, with a beacon line and an optional sound. Scans per dimension between `min-y` and `max-y`; `strict-portal-shape` and the max portal size tune false positives. |
+| `drone-camera` | Films you from outside while you glide and through a whole SpawnerDetector run: it picks its own shots, follows you down the hole, around the room and back out, and never sticks to your back. Only changes what is drawn. |
 | `entity-view` | Rescales mobs and players, shows their gear above them through walls, names dropped items on the ground, and outlines nether portals with a tracer to the nearest one. |
 | `FlightTrail` | A light two-trail wake behind the elytra while gliding, with speed-reactive flames at the wingtips, instead of dbrighthd's heavier particle trail. |
 | `flow-esp` | Marks chunks where lava (in the Nether) or water (in the Overworld) is still flowing, a hint that something was built or changed there. Colors can fade from fresh to mature flows; `render-distance` and the size limits tune it. |
 | `rotation-detector` | Highlights logs, basalt, purpur pillars, hay bales and deepslate lying sideways, since in nature they only generate upright. Block types, `min-y`/`max-y` and `ignore-near-air` (skips surface builds) are configurable. |
 | `shader` | Draws a crisp outline, an optional glow and an optional fill around entities (players, mobs, items, pearls...), nether portals, storage blocks and spawners, each with its own color. `outline-width`, `glow` and `filled` set the look. |
 | `sign-reader` | Shows the text of nearby signs on screen, through walls, grouping the ones that overlap. |
+| `speed-blur` | A radial motion blur that grows with your flight speed and keeps you sharp in the middle. Never shows on the ground. |
 | `SpawnerDetector` | Finds classic monster-room dungeons (with or without spawner), activated trial spawners and shipwrecks, and scores the player traces around each room. With `auto-farm` it flies to a traced room (`auto-farm-all`: any room with a chest), digs down, mines the spawner, loots the chests and climbs out. Runs need at least `auto-min-health` and `auto-min-rockets`. |
 | `VanityESP` | Highlights map and shulker item frames, banners, ominous vaults, buried treasure, endermen holding blocks, XP orbs and stacked chest minecarts. Each type has its own colors and tracers; buried treasure can alert in chat and add temporary waypoints. |
 
@@ -83,13 +85,13 @@ Restocking and inventory handling tools.
 | `client-side-time` | Sets the displayed client-side time of day; server time and mob spawning are unaffected. |
 | `Experience Trader Starter` | Switches Villager Trading on once per in-game day, at the time you choose (13:00 by default), with a fresh list of clerics to visit. |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
+| `grim-air-place` | Places a block in air where your crosshair is pointing. |
+| `grim-scaffold` | Places blocks under you as you move, ahead of your motion, with `tower`, `air-place` and `safewalk` options. |
 | `h-mine` | Breaks blocks with packets, faster than holding the button. Click several blocks to queue them (`queue`, `queue-through` lines up a row), `instant` re-breaks a cleared spot, `double-break` works two blocks at once, `auto-mine` clears around enemies and `anti-crawl` stands you up. |
 | `inventory-cleaner` | Throws out every item not on its list (or only the listed ones in blacklist mode), one stack every `delay` ticks. The hotbar is optional; works in the inventory, a crafting table or a container. |
 | `kick-alarm` | Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed. |
 | `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. |
 | `messenger` | Private messages in movable windows with Classic, Bubbles, Slate or Compact chat styles and an unread badge. Replies go out through `reply-command` (`msg` by default), spaced by `send-interval`. `hide-from-main-chat`, `friends-only`, `ignored-names` and `stream-mode` keep the chat clean, and `keep-history` brings conversations back next session. |
-| `grim-air-place` | Places a block in air where your crosshair is pointing. |
-| `grim-scaffold` | Places blocks under you as you move, ahead of your motion, with `tower`, `air-place` and `safewalk` options. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window with a fixed or automatic `speed-multiplier`, and can brake near terrain. Can trace every boosted tick to a CSV for tuning. |
 | `Villager Trading` | Buys experience bottles from clerics with emeralds, visiting each cleric in range with Baritone while the price stays under `experience-max-price`. Restocks emeralds from a chest, drops bottles in another, then switches off and walks home. |
@@ -143,7 +145,7 @@ You need **Minecraft 1.21.11**, **Java 21**, **Fabric Loader** and a **Meteor Cl
 - **Baritone** is required for automatic dungeon farming, pathfinding and travel. We recommend [HunterBuddy Baritone](https://github.com/Likon69/hunterbuddy-baritone), our fork for Minecraft 1.21.11. The elytra flight and regear helpers use fixes and APIs from this fork.
 - **Xaero's Minimap, Xaero's World Map and XaeroPlus** are required for map and waypoint features, including `waypoint-follower`, chunk-radar's waypoint marks and the `Travel` HUD. Install the Fabric versions for Minecraft 1.21.11.
 
-These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.0.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
+These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.4.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
 
 ## Files and network
 
@@ -159,7 +161,7 @@ Java 21 is required. Use the included Gradle wrapper:
 .\gradlew.bat build
 ```
 
-The built addon JAR is written to `build/libs/hunterbuddy-1.0.0.jar`.
+The built addon JAR is written to `build/libs/hunterbuddy-1.0.4.jar`.
 
 ## Credits and provenance
 
