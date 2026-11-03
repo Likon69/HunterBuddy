@@ -1,15 +1,12 @@
 package com.hunterbuddy.modules.regear.util;
 
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
-import meteordevelopment.meteorclient.MeteorClient;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import org.jetbrains.annotations.Nullable;
-import xaero.map.mods.SupportMods;
-import xaeroplus.feature.waypoint.WaypointAPI;
 import xaero.common.minimap.waypoints.Waypoint;
 import xaero.hud.minimap.BuiltInHudModules;
 import xaero.hud.minimap.module.MinimapSession;
@@ -17,27 +14,28 @@ import xaero.hud.minimap.waypoint.WaypointColor;
 import xaero.hud.minimap.waypoint.WaypointPurpose;
 import xaero.hud.minimap.waypoint.set.WaypointSet;
 import xaero.hud.minimap.world.MinimapWorld;
-import xaero.hud.minimap.world.container.MinimapWorldRootContainer;
+import xaero.map.mods.SupportMods;
+import xaeroplus.feature.waypoint.WaypointAPI;
 import xaeroplus.settings.Settings;
 
 public class MapUtil {
+    private static final String TAG = "MapUtil";
+    private static final String NETHER = "the_nether";
+    private static final String OVERWORLD = "overworld";
+    private static final int NETHER_SCALE = 8;
 
     public static void addWaypoint(BlockPos pos, String name, String initials, Purpose purpose, WpColor color, boolean temp) {
-        if (Utils.XAERO_AVAILABLE) {
-            XaeroIntegration.addWaypoint(pos, name, initials, purpose, color, temp, null);
-        }
+        addWaypoint(pos, name, initials, purpose, color, temp, null);
     }
 
     public static void addWaypoint(BlockPos pos, String name, String initials, Purpose purpose, WpColor color, boolean temp, String dimension) {
-        if (Utils.XAERO_AVAILABLE) {
-            XaeroIntegration.addWaypoint(pos, name, initials, purpose, color, temp, dimension);
-        }
+        if (!Utils.XAERO_AVAILABLE) return;
+        XaeroBackend.add(pos, new Label(name, initials), new Style(purpose, color, temp), dimension);
     }
 
     public static void removeWaypoints(String name, Predicate<BlockPos> posPredicate, Optional<Integer> yOverride) {
-        if (Utils.XAERO_AVAILABLE) {
-            XaeroIntegration.removeWaypoints(name, posPredicate, yOverride);
-        }
+        if (!Utils.XAERO_AVAILABLE) return;
+        XaeroBackend.remove(name, posPredicate, yOverride);
     }
 
     public enum Purpose {
@@ -46,245 +44,156 @@ public class MapUtil {
     }
 
     public enum WpColor {
-        Black, Dark_Blue, Dark_Green, Dark_Aqua, Dark_Red, Dark_Purple,
-        Gold, Gray, Dark_Gray, Blue, Green, Aqua, Red, Purple, Yellow, White, Random
+        Black,
+        Dark_Blue,
+        Dark_Green,
+        Dark_Aqua,
+        Dark_Red,
+        Dark_Purple,
+        Gold,
+        Gray,
+        Dark_Gray,
+        Blue,
+        Green,
+        Aqua,
+        Red,
+        Purple,
+        Yellow,
+        White,
+        Random
     }
 
-    private static class XaeroIntegration {
+    private record Label(String name, String initials) {
+    }
 
-        static void addWaypoint(BlockPos pos, String name, String initials, Purpose purpose,
-                                WpColor color, boolean temp, @Nullable String dimension) {
-            try {
-                int waypointX = pos.getX();
-                int waypointY = pos.getY();
-                int waypointZ = pos.getZ();
+    private record Style(Purpose purpose, WpColor color, boolean temp) {
+    }
 
-                MinimapWorld targetWorld = getWaypointWorld();
-
-                // Nether to Overworld scaling support (XaeroPlus)
-                if (usesNetherOverworldScaling(dimension)) {
-                    waypointX = pos.getX() * 8;
-                    waypointZ = pos.getZ() * 8;
-                    MinimapWorld overworld = findOverworldMinimapWorld();
-                    if (overworld != null) {
-                        targetWorld = overworld;
-                    }
-                }
-
-                if (targetWorld == null) {
-                    LogUtil.warn("Cancelling waypoint \"" + name + "\" because target world is null", "MapUtil");
-                    return;
-                }
-
-                WaypointSet set = targetWorld.getCurrentWaypointSet();
-                if (set == null) {
-                    LogUtil.warn("Cancelling waypoint \"" + name + "\" because waypoint set is null", "MapUtil");
-                    return;
-                }
-
-                // Prevent duplicates
-                for (Waypoint wp : set.getWaypoints()) {
-                    if (wp.getX() == waypointX && wp.getZ() == waypointZ) {
-                        LogUtil.warn("Skipping duplicate waypoint: " + name, "MapUtil");
-                        return;
-                    }
-                }
-
-                Waypoint waypoint = new Waypoint(
-                    waypointX, waypointY, waypointZ,
-                    name, initials,
-                    getColor(color),
-                    getPurpose(purpose),
-                    temp
-                );
-
-                set.add(waypoint);
-                saveWaypoints(targetWorld);
-                requestWaypointsRefresh();
-
-            } catch (Exception e) {
-                LogUtil.error("Error adding waypoint to Xaero: " + e.getMessage(), "MapUtil");
+    private static final class XaeroBackend {
+        private record Removal(String name, Predicate<BlockPos> positionTest, Optional<Integer> yOverride) {
+            boolean matches(Waypoint waypoint, int divisor) {
+                if (!waypoint.getName().trim().startsWith(name.trim())) return false;
+                int y = yOverride.orElse(waypoint.getY());
+                return positionTest.test(new BlockPos(waypoint.getX() / divisor, y, waypoint.getZ() / divisor));
             }
         }
 
-        static void removeWaypoints(String name, Predicate<BlockPos> posPredicate, Optional<Integer> yOverride) {
-            try {
-                boolean removed;
-                if (usesNetherOverworldScalingForCurrentWorld()) {
-                    removed = removeWaypointsFromWorld(findOverworldMinimapWorld(), name, posPredicate, yOverride, true);
-                    removed |= removeWaypointsFromWorld(getWaypointWorld(), name, posPredicate, yOverride, false);
-                } else {
-                    removed = removeWaypointsFromWorld(getWaypointWorld(), name, posPredicate, yOverride, false);
-                }
-
-                if (removed) {
-                    requestWaypointsRefresh();
-                }
-            } catch (Exception e) {
-                LogUtil.error("Error removing waypoints from Xaero: " + e.getMessage(), "MapUtil");
-            }
+        private static MinimapSession session() {
+            return BuiltInHudModules.MINIMAP.getCurrentSession();
         }
 
-        static boolean removeWaypointsFromWorld(@Nullable MinimapWorld targetWorld, String name,
-                                                Predicate<BlockPos> posPredicate, Optional<Integer> yOverride,
-                                                boolean unscaleStoredCoords) {
-            if (targetWorld == null) {
-                return false;
-            }
-
-            WaypointSet set = targetWorld.getCurrentWaypointSet();
-            if (set == null) {
-                return false;
-            }
-
-            BlockPos.Mutable mutablePos = new BlockPos.Mutable();
-            List<Waypoint> toRemove = new ObjectArrayList<>();
-
-            for (Waypoint wp : set.getWaypoints()) {
-                if (wp.getName().trim().startsWith(name.trim())) {
-                    int checkX = unscaleStoredCoords ? wp.getX() / 8 : wp.getX();
-                    int checkZ = unscaleStoredCoords ? wp.getZ() / 8 : wp.getZ();
-                    int y = yOverride.orElseGet(wp::getY);
-                    mutablePos.set(checkX, y, checkZ);
-
-                    if (posPredicate.test(mutablePos)) {
-                        toRemove.add(wp);
-                    }
-                }
-            }
-
-            if (toRemove.isEmpty()) {
-                return false;
-            }
-
-            for (Waypoint wp : toRemove) {
-                set.remove(wp);
-            }
-
-            saveWaypoints(targetWorld);
-            return true;
-        }
-
-        static void requestWaypointsRefresh() {
-            try {
-                SupportMods.xaeroMinimap.requestWaypointsRefresh();
-            } catch (Exception ignored) {}
-        }
-
-        // ==================== Helper Methods ====================
-
-        static boolean usesNetherOverworldScaling(@Nullable String dimension) {
-            if (dimension == null || !dimension.equals("the_nether")) {
-                return false;
-            }
-
-            try {
-                return Settings.REGISTRY.owAutoWaypointDimension.get();
-            } catch (Exception ignored) {
-                return false;
-            }
-        }
-
-        static boolean usesNetherOverworldScalingForCurrentWorld() {
-            if (MeteorClient.mc.world == null) {
-                return false;
-            }
-
-            return usesNetherOverworldScaling(MeteorClient.mc.world.getRegistryKey().getValue().getPath());
-        }
-
-        @Nullable
-        static MinimapWorld findOverworldMinimapWorld() {
-            try {
-                MinimapWorld overworld = WaypointAPI.getMinimapWorld(World.OVERWORLD);
-                if (overworld != null) {
-                    return overworld;
-                }
-            } catch (Exception ignored) {}
-
-            try {
-                MinimapSession session = getMinimapSession();
-                if (session == null) {
-                    return null;
-                }
-
-                MinimapWorldRootContainer rootContainer = session.getWorldManager().getCurrentRootContainer();
-                if (rootContainer == null) {
-                    return null;
-                }
-
-                for (MinimapWorld world : rootContainer.getWorlds()) {
-                    try {
-                        String dimPath = world.getDimId().getValue().getPath();
-                        if ("overworld".equals(dimPath)) {
-                            return world;
-                        }
-                    } catch (Exception ignored) {}
-                }
-            } catch (Exception ignored) {}
-
-            return null;
-        }
-
-        @Nullable
-        static MinimapSession getMinimapSession() {
-            return (MinimapSession) BuiltInHudModules.MINIMAP.getCurrentSession();
-        }
-
-        @Nullable
-        static MinimapWorld getWaypointWorld() {
-            MinimapSession session = getMinimapSession();
+        private static MinimapWorld currentWorld() {
+            MinimapSession session = session();
             return session == null ? null : session.getWorldManager().getCurrentWorld();
         }
 
-        @Nullable
-        static WaypointSet getWaypointSet() {
-            MinimapWorld world = getWaypointWorld();
-            return world == null ? null : world.getCurrentWaypointSet();
-        }
-
-        static void saveWaypoints() {
-            saveWaypoints(getWaypointWorld());
-        }
-
-        static void saveWaypoints(@Nullable MinimapWorld world) {
+        private static boolean scalesNetherToOverworld() {
             try {
-                MinimapSession session = getMinimapSession();
-                if (world != null && session != null) {
-                    session.getWorldManagerIO().saveWorld(world);
-                }
-            } catch (Exception e) {
-                LogUtil.error("Failed to save Xaero waypoints: " + e.getMessage(), "MapUtil");
+                return Settings.REGISTRY.owAutoWaypointDimension.get();
+            } catch (Throwable ignored) {
+                return false;
             }
         }
 
-        static WaypointPurpose getPurpose(Purpose purpose) {
-            return switch (purpose) {
-                case Normal -> WaypointPurpose.NORMAL;
-                case Destination -> WaypointPurpose.DESTINATION;
-            };
+        private static MinimapWorld overworldWorld(MinimapSession session, MinimapWorld fallback) {
+            try {
+                MinimapWorld world = WaypointAPI.getMinimapWorld(World.OVERWORLD);
+                if (world != null) return world;
+            } catch (Throwable ignored) {
+            }
+            try {
+                for (MinimapWorld world : session.getWorldManager().getCurrentRootContainer().getAllWorldsIterable()) {
+                    if (OVERWORLD.equals(world.getDimId().getValue().getPath())) return world;
+                }
+            } catch (Throwable ignored) {
+            }
+            return fallback;
         }
 
-        static WaypointColor getColor(WpColor color) {
-            return switch (color) {
-                case Black -> WaypointColor.BLACK;
-                case Dark_Blue -> WaypointColor.DARK_BLUE;
-                case Dark_Green -> WaypointColor.DARK_GREEN;
-                case Dark_Aqua -> WaypointColor.DARK_AQUA;
-                case Dark_Red -> WaypointColor.DARK_RED;
-                case Dark_Purple -> WaypointColor.DARK_PURPLE;
-                case Gold -> WaypointColor.GOLD;
-                case Gray -> WaypointColor.GRAY;
-                case Dark_Gray -> WaypointColor.DARK_GRAY;
-                case Blue -> WaypointColor.BLUE;
-                case Green -> WaypointColor.GREEN;
-                case Aqua -> WaypointColor.AQUA;
-                case Red -> WaypointColor.RED;
-                case Purple -> WaypointColor.PURPLE;
-                case Yellow -> WaypointColor.YELLOW;
-                case White -> WaypointColor.WHITE;
-                case Random -> WaypointColor.getRandom();
-            };
+        private static void add(BlockPos pos, Label label, Style style, String dimension) {
+            try {
+                place(pos, label, style, dimension);
+            } catch (Throwable t) {
+                LogUtil.error("Could not add waypoint '" + label.name() + "': " + t, TAG);
+            }
+        }
+
+        private static void place(BlockPos pos, Label label, Style style, String dimension) throws Exception {
+            boolean scaled = NETHER.equals(dimension) && scalesNetherToOverworld();
+            MinimapWorld world = scaled ? overworldWorld(session(), currentWorld()) : currentWorld();
+            int factor = scaled ? NETHER_SCALE : 1;
+            addTo(world, new Waypoint(pos.getX() * factor, pos.getY(), pos.getZ() * factor, label.name(), label.initials(),
+                toColor(style.color()), toPurpose(style.purpose()), style.temp()));
+        }
+
+        private static void addTo(MinimapWorld world, Waypoint waypoint) throws Exception {
+            WaypointSet set = world == null ? null : world.getCurrentWaypointSet();
+            if (set == null) {
+                LogUtil.warn("No waypoint set available for '" + waypoint.getName() + "'", TAG);
+            } else if (hasWaypointAt(set, waypoint.getX(), waypoint.getZ())) {
+                LogUtil.warn("Waypoint '" + waypoint.getName() + "' skipped, one already exists at " + waypoint.getX() + ", "
+                    + waypoint.getZ(), TAG);
+            } else {
+                set.add(waypoint);
+                session().getWorldManagerIO().saveWorld(world);
+                refresh();
+            }
+        }
+
+        private static boolean hasWaypointAt(WaypointSet set, int x, int z) {
+            for (Waypoint existing : set.getWaypoints()) {
+                if (existing.getX() == x && existing.getZ() == z) return true;
+            }
+            return false;
+        }
+
+        private static void remove(String name, Predicate<BlockPos> positionTest, Optional<Integer> yOverride) {
+            Removal removal = new Removal(name, positionTest, yOverride);
+            try {
+                MinecraftClient mc = MinecraftClient.getInstance();
+                if (mc.world == null) return;
+                if (removeFromWorlds(mc, removal)) refresh();
+            } catch (Throwable t) {
+                LogUtil.error("Could not remove waypoints '" + removal.name() + "': " + t, TAG);
+            }
+        }
+
+        private static boolean removeFromWorlds(MinecraftClient mc, Removal removal) throws Exception {
+            boolean inScaledNether = NETHER.equals(mc.world.getRegistryKey().getValue().getPath()) && scalesNetherToOverworld();
+            boolean removed = inScaledNether && purge(overworldWorld(session(), null), removal, NETHER_SCALE);
+            return purge(currentWorld(), removal, 1) || removed;
+        }
+
+        private static boolean purge(MinimapWorld world, Removal removal, int divisor) throws Exception {
+            WaypointSet set = world == null ? null : world.getCurrentWaypointSet();
+            if (set == null) return false;
+            List<Waypoint> doomed = new ArrayList<>();
+            for (Waypoint waypoint : set.getWaypoints()) {
+                if (removal.matches(waypoint, divisor)) {
+                    doomed.add(waypoint);
+                }
+            }
+            doomed.forEach(set::remove);
+            if (!doomed.isEmpty()) {
+                session().getWorldManagerIO().saveWorld(world);
+            }
+            return !doomed.isEmpty();
+        }
+
+        private static void refresh() {
+            try {
+                SupportMods.xaeroMinimap.requestWaypointsRefresh();
+            } catch (Throwable ignored) {
+            }
+        }
+
+        private static WaypointPurpose toPurpose(Purpose purpose) {
+            return purpose == Purpose.Destination ? WaypointPurpose.DESTINATION : WaypointPurpose.NORMAL;
+        }
+
+        private static WaypointColor toColor(WpColor color) {
+            if (color == WpColor.Random) return WaypointColor.getRandom();
+            return WaypointColor.valueOf(color.name().toUpperCase());
         }
     }
 }

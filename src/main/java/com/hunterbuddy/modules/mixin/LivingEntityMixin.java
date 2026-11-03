@@ -6,122 +6,94 @@ import com.hunterbuddy.modules.ElytraRecast;
 import com.hunterbuddy.modules.Fly300km;
 import com.hunterbuddy.modules.NoJumpDelay;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
+import com.hunterbuddy.util.CachedModule;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import meteordevelopment.meteorclient.MeteorClient;
-import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.ai.brain.Brain;
+import net.minecraft.util.math.Vec3d;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.ai.brain.Brain;
-import net.minecraft.util.math.Vec3d;
 
 @Mixin(LivingEntity.class)
 public abstract class LivingEntityMixin {
-   @Shadow
-   private int jumpingCooldown;
-   private Module noJumpDelay;
-   private ElytraBounce efly;
-   private Fly300km fly300km;
+    @Shadow
+    private int jumpingCooldown;
 
-   @Shadow
-   public abstract Brain<?> getBrain();
+    @Shadow
+    public abstract Brain<?> getBrain();
 
-   private Module getNoJumpDelay() {
-      if (this.noJumpDelay == null) {
-         this.noJumpDelay = Modules.get().get(NoJumpDelay.class);
-      }
+    @Unique
+    private final CachedModule<ElytraBounce> hunterBuddy$bounce = new CachedModule<>(ElytraBounce.class);
+    @Unique
+    private final CachedModule<NoJumpDelay> hunterBuddy$noJumpDelay = new CachedModule<>(NoJumpDelay.class);
+    @Unique
+    private final CachedModule<Fly300km> hunterBuddy$fly300 = new CachedModule<>(Fly300km.class);
 
-      return this.noJumpDelay;
-   }
+    @Inject(at = @At("HEAD"), method = "tickMovement")
+    private void hunterBuddy$clearJumpCooldown(CallbackInfo ci) {
+        if (hunterBuddy$isLocalPlayer() && hunterBuddy$cooldownBlocked()) {
+            this.jumpingCooldown = 0;
+        }
+    }
 
-   private ElytraBounce getEfly() {
-      if (this.efly == null) {
-         this.efly = (ElytraBounce)Modules.get().get(ElytraBounce.class);
-      }
+    @Inject(at = @At("RETURN"), method = "isGliding", cancellable = true)
+    private void hunterBuddy$alterGliding(CallbackInfoReturnable<Boolean> cir) {
+        if (!hunterBuddy$isLocalPlayer()) return;
+        ElytraBounce bounce = hunterBuddy$bounce.get();
+        if (bounce == null || !bounce.enabled()) return;
+        boolean real = cir.getReturnValue();
+        boolean altered = bounce.modifyIsGliding(real);
+        if (altered != real) cir.setReturnValue(altered);
+    }
 
-      return this.efly;
-   }
+    @WrapOperation(
+        method = "calcGlidingVelocity(Lnet/minecraft/util/math/Vec3d;)Lnet/minecraft/util/math/Vec3d;",
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/LivingEntity;getPitch()F")
+    )
+    private float hunterBuddy$sustainedPitch(LivingEntity entity, Operation<Float> original) {
+        if (entity != MeteorClient.mc.player) return original.call(entity);
+        Float pitch = RotationUtils.getInstance().getMovementPitch();
+        return pitch != null ? pitch : original.call(entity);
+    }
 
-   private Fly300km getFly300km() {
-      if (this.fly300km == null) {
-         this.fly300km = Modules.get().get(Fly300km.class);
-      }
+    @WrapOperation(
+        method = "travelGliding",
+        at = @At(
+            value = "INVOKE",
+            target = "Lnet/minecraft/entity/LivingEntity;calcGlidingVelocity(Lnet/minecraft/util/math/Vec3d;)Lnet/minecraft/util/math/Vec3d;"
+        )
+    )
+    private Vec3d hunterBuddy$windowedVelocity(LivingEntity entity, Vec3d oldVelocity, Operation<Vec3d> original) {
+        Vec3d vanilla = original.call(entity, oldVelocity);
+        if (entity != MeteorClient.mc.player) return vanilla;
+        Fly300km fly = hunterBuddy$fly300.get();
+        if (fly == null || !fly.isActive()) return vanilla;
+        Vec3d ride = fly.windowVelocity(vanilla);
+        return ride != null ? ride : vanilla;
+    }
 
-      return this.fly300km;
-   }
+    @Unique
+    private boolean hunterBuddy$isLocalPlayer() {
+        return MeteorClient.mc.player != null && MeteorClient.mc.player.getBrain().equals(this.getBrain());
+    }
 
-   @Inject(at = @At("HEAD"), method = "tickMovement")
-   private void tickMovement(CallbackInfo ci) {
-      ElytraBounce eflyModule = this.getEfly();
-      Module noJumpDelayModule = this.getNoJumpDelay();
-      ElytraRecast elytraRecast = (ElytraRecast)Modules.get().get(ElytraRecast.class);
-      AutoFlyingRegear autoFlyingRegear = (AutoFlyingRegear)Modules.get().get(AutoFlyingRegear.class);
-      if (MeteorClient.mc.player != null
-         && MeteorClient.mc.player.getBrain().equals(this.getBrain())
-         && ((eflyModule != null && eflyModule.enabled())
-            || (noJumpDelayModule != null && noJumpDelayModule.isActive())
-            || (elytraRecast != null && elytraRecast.isRecovering())
-            || (autoFlyingRegear != null && autoFlyingRegear.isTakingOff()))) {
-         this.jumpingCooldown = 0;
-      }
-   }
-
-   @Inject(at = @At("RETURN"), method = "isGliding", cancellable = true)
-   private void isGliding(CallbackInfoReturnable<Boolean> cir) {
-      ElytraBounce eflyModule = this.getEfly();
-      if (MeteorClient.mc.player != null
-         && MeteorClient.mc.player.getBrain().equals(this.getBrain())
-         && eflyModule != null
-         && eflyModule.enabled()) {
-         // Injecting at RETURN gives us the real flag value; the module latches it
-         // (Lambda-style) instead of blindly forcing true. Runs in fakefly too,
-         // on purpose: the hook doesn't touch the return value there either
-         // way (modifyIsGliding passes it through unchanged outside plain
-         // bounce), but it's the only thing that keeps realGliding current —
-         // gating it out in fakefly used to leave the tap alternating every
-         // tick in flight instead of holding released through the glide.
-         boolean modified = eflyModule.modifyIsGliding(cir.getReturnValueZ());
-         if (modified != cir.getReturnValueZ()) {
-            cir.setReturnValue(modified);
-         }
-      }
-   }
-
-   @WrapOperation(
-      method = "calcGlidingVelocity(Lnet/minecraft/util/math/Vec3d;)Lnet/minecraft/util/math/Vec3d;",
-      at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/LivingEntity;getPitch()F")
-   )
-   private float mlep$wrapGlidingPitch(LivingEntity entity, Operation<Float> original) {
-      if (entity != MeteorClient.mc.player) {
-         return (Float)original.call(new Object[]{entity});
-      }
-
-      Float pitch = RotationUtils.getInstance().getMovementPitch();
-      return pitch != null ? pitch : (Float)original.call(new Object[]{entity});
-   }
-
-   @WrapOperation(
-      method = "travelGliding",
-      at = @At(value = "INVOKE", target = "Lnet/minecraft/entity/LivingEntity;calcGlidingVelocity(Lnet/minecraft/util/math/Vec3d;)Lnet/minecraft/util/math/Vec3d;")
-   )
-   private Vec3d hunterBuddy$windowGlide(LivingEntity entity, Vec3d oldVelocity, Operation<Vec3d> original) {
-      Vec3d vanilla = (Vec3d)original.call(new Object[]{entity, oldVelocity});
-      if (entity != MeteorClient.mc.player) {
-         return vanilla;
-      }
-
-      Fly300km fly = this.getFly300km();
-      if (fly == null || !fly.isActive()) {
-         return vanilla;
-      }
-
-      Vec3d ride = fly.windowVelocity(vanilla);
-      return ride != null ? ride : vanilla;
-   }
+    @Unique
+    private boolean hunterBuddy$cooldownBlocked() {
+        ElytraBounce bounce = hunterBuddy$bounce.get();
+        NoJumpDelay noJumpDelay = hunterBuddy$noJumpDelay.get();
+        ElytraRecast recast = Modules.get().get(ElytraRecast.class);
+        AutoFlyingRegear regear = Modules.get().get(AutoFlyingRegear.class);
+        return (bounce != null && bounce.enabled())
+            || (noJumpDelay != null && noJumpDelay.isActive())
+            || (recast != null && recast.isRecovering())
+            || (regear != null && regear.isTakingOff());
+    }
 }

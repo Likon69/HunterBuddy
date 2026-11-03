@@ -1,148 +1,43 @@
 package com.hunterbuddy.modules.regear.util;
 
-import com.hunterbuddy.util.QuietClicks;
-import com.hunterbuddy.util.Rockets;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
-import java.io.File;
-import java.io.OutputStream;
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URL;
-import java.util.Random;
-import javax.net.ssl.HttpsURLConnection;
-import meteordevelopment.meteorclient.MeteorClient;
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.InvUtils;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.GameOptions;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.network.packet.c2s.play.*;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket.Mode;
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.Nullable;
 
 public class Utils {
-
-    private static final Random RANDOM = new Random();
     public static final boolean XAERO_AVAILABLE = FabricLoader.getInstance().isModLoaded("xaeroworldmap")
         && FabricLoader.getInstance().isModLoaded("xaerominimap");
 
-    public static String rCC() {
-        String color = "§7";
-        TextColor[] colors = TextColor.values();
+    private static final List<String> COLORS = List.of(
+        "\u00a70", "\u00a7f", "\u00a78", "\u00a77", "\u00a72", "\u00a7a", "\u00a73", "\u00a7b",
+        "\u00a71", "\u00a79", "\u00a74", "\u00a7c", "\u00a75", "\u00a7d", "\u00a76", "\u00a7e", "");
+    private static final List<String> DULL_COLORS = List.of("\u00a70", "\u00a78", "\u00a77");
+    private static final int MAX_QUEUE_PLAYERS = 1;
 
-        while (color.equals("§0") || color.equals("§8") || color.equals("§7")) {
-            int luckyIndex = RANDOM.nextInt(colors.length);
-            color = colors[luckyIndex].label;
-        }
+    public static String rCC() {
+        String color;
+        do {
+            color = COLORS.get(ThreadLocalRandom.current().nextInt(COLORS.size()));
+        } while (DULL_COLORS.contains(color));
         return color;
     }
 
-    public static boolean checkOrCreateFile(MinecraftClient mc, String fileName) {
-        File file = FabricLoader.getInstance().getGameDir().resolve(fileName).toFile();
-        if (!file.exists()) {
-            try {
-                if (file.createNewFile()) {
-                    if (mc.player != null) {
-                        MsgUtil.sendMsg("Created " + file.getName() + " in your meteor-client folder.");
-                        Style style = Style.EMPTY.withClickEvent(new ClickEvent.OpenFile(file.getAbsolutePath()));
-                        MsgUtil.sendMsg("Click §2§lhere §r§7to open the file.", style);
-                    }
-                    return true;
-                }
-            } catch (Exception err) {
-                LogUtil.error("Error creating " + file.getAbsolutePath() + "! - Why:\n" + err, "Utils#checkOrCreateFile");
-            }
-            return false;
-        }
-        return true;
-    }
-
-    public static void openFile(String fileName) {
-        File file = FabricLoader.getInstance().getGameDir().resolve(fileName).toFile();
-        try {
-            Runtime runtime = Runtime.getRuntime();
-            String os = System.getenv("OS");
-            if (os == null) return;
-
-            if (os.contains("Windows")) {
-                runtime.exec(new String[]{"rundll32", "url.dll,", "FileProtocolHandler", file.getAbsolutePath()});
-            } else {
-                runtime.exec(new String[]{"xdg-open", file.getAbsolutePath()});
-            }
-        } catch (Exception err) {
-            MsgUtil.sendMsg("Failed to open " + file.getName() + "§c..!");
-            LogUtil.error("Failed to open " + file.getAbsolutePath() + "! - Why:\n" + err, "Utils#openFile");
-        }
-    }
-
     public static boolean isIn2b2tQueue() {
-        return MeteorClient.mc.player != null && MeteorClient.mc.getNetworkHandler() != null
-            && PlayerUtils.getDimension().equals(Dimension.End)
-            && MeteorClient.mc.player.getAbilities().flying
-            && MeteorClient.mc.getNetworkHandler().getPlayerList().size() <= 1;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.getNetworkHandler() == null) return false;
+        return PlayerUtils.getDimension() == Dimension.End
+            && mc.player.getAbilities().flying
+            && mc.getNetworkHandler().getPlayerList().size() <= MAX_QUEUE_PLAYERS;
     }
 
     public static int firework(MinecraftClient mc, boolean elytraRequired) {
-        if (mc.player == null || mc.interactionManager == null) return -1;
-
-        int elytraSwapSlot = -1;
-
-        if (elytraRequired && !mc.player.getInventory().getStack(38).isOf(Items.ELYTRA)) {
-            FindItemResult itemResult = InvUtils.findInHotbar(Items.ELYTRA);
-            if (!itemResult.found()) return -1;
-
-            elytraSwapSlot = itemResult.slot();
-            InvUtils.swap(itemResult.slot(), true);
-            mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-            InvUtils.swapBack();
-            mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, Mode.START_FALL_FLYING));
-        }
-
-        FindItemResult firework = InvUtils.findInHotbar(Rockets::isPlain);
-        if (firework.found()) {
-            if (firework.isOffhand()) {
-                mc.interactionManager.interactItem(mc.player, Hand.OFF_HAND);
-                mc.player.swingHand(Hand.OFF_HAND);
-            } else {
-                InvUtils.swap(firework.slot(), true);
-                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                mc.player.swingHand(Hand.MAIN_HAND);
-                InvUtils.swapBack();
-            }
-            return elytraSwapSlot != -1 ? elytraSwapSlot : 200;
-        }
-
-        // Try moving from main inventory
-        PlayerInventoryAccessor inv = (PlayerInventoryAccessor) mc.player.getInventory();
-        for (int i = 9; i < inv.getMain().size(); i++) {
-            if (Rockets.isPlain(mc.player.getInventory().getStack(i))) {
-                if (!QuietClicks.readyOrSettle()) return -1;
-
-                int selected = inv.getSelectedSlot();
-                InvUtils.move().from(i).to(selected);
-                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                mc.player.swingHand(Hand.MAIN_HAND);
-                InvUtils.move().from(selected).to(i);
-                return elytraSwapSlot != -1 ? elytraSwapSlot : 200;
-            }
-        }
-
-        return -1;
+        return FireworkUse.use(mc, elytraRequired);
     }
 
     public static void setPressed(KeyBinding key, boolean pressed) {
@@ -150,219 +45,40 @@ public class Utils {
     }
 
     public static void holdJump(MinecraftClient mc) {
-        if (mc.player == null) {
-            return;
-        }
-
-        BaritoneHelper.setJumpPressed(true);
-        mc.options.jumpKey.setPressed(true);
+        setJump(mc, true);
     }
 
     public static void releaseJump(MinecraftClient mc) {
-        if (mc.player == null) {
-            return;
-        }
-
-        BaritoneHelper.setJumpPressed(false);
-        mc.options.jumpKey.setPressed(false);
-    }
-
-    public static int emptyInvSlots(MinecraftClient mc) {
-        if (mc.player == null) return 0;
-        int count = 0;
-        for (int i = 0; i < 36; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) count++;
-        }
-        return count;
+        setJump(mc, false);
     }
 
     public static Vec3d positionInDirection(Vec3d pos, double yaw, double distance) {
-        Vec3d offset = yawToDirection(yaw).multiply(distance);
-        return pos.add(offset);
+        return YawMath.positionInDirection(pos, yaw, distance);
     }
 
     public static Vec3d yawToDirection(double yaw) {
-        yaw = Math.toRadians(yaw);
-        double x = -Math.sin(yaw);
-        double z = Math.cos(yaw);
-        return new Vec3d(x, 0, z);
+        return YawMath.yawToDirection(yaw);
     }
 
     public static double distancePointToDirection(Vec3d point, Vec3d direction, @Nullable Vec3d start) {
-        if (start == null) start = Vec3d.ZERO;
-        Vec3d dir = direction.normalize();
-        Vec3d diff = point.subtract(start);
-        double projectionLength = diff.dotProduct(dir);
-        Vec3d projection = dir.multiply(projectionLength);
-        Vec3d perp = diff.subtract(projection);
-        return perp.length();
+        return YawMath.distancePointToDirection(point, direction, start);
     }
 
     public static double angleOnAxis(double yaw) {
-        if (yaw < 0) yaw += 360;
-        return Math.round(yaw / 45.0) * 45;
+        return YawMath.angleOnAxis(yaw);
     }
 
-    public static Vec3d normalizedPositionOnAxis(Vec3d pos) {
-        double angle = -Math.atan2(pos.x, pos.z);
-        double angleDeg = Math.toDegrees(angle);
-        return positionInDirection(Vec3d.ZERO, angleOnAxis(angleDeg), 1.0);
-    }
-
-    public static int totalInvCount(MinecraftClient mc, Item item) {
-        if (mc.player == null) return 0;
-        int count = 0;
-        for (int i = 0; i < 36; i++) {
-            if (mc.player.getInventory().getStack(i).isOf(item)) {
-                count += mc.player.getInventory().getStack(i).getCount();
-            }
-        }
-        return count;
-    }
-
-    public static float smoothRotation(double current, double target, double scaling) {
-        double diff = angleDifference(target, current);
-        return (float) (current + diff * scaling);
-    }
-
-    public static double angleDifference(double target, double current) {
-        double diff = (target - current + 180) % 360 - 180;
-        return diff < -180 ? diff + 360 : diff;
-    }
-
-    /**
-     * Posts an embed to a Discord webhook.
-     *
-     * <p>Built through Gson rather than by pasting strings together. Nearly every notification
-     * carries a real newline — a position on its own line, a timestamp under a reason — and a
-     * raw newline inside a JSON string is not legal JSON: Discord answered 400 and dropped it.
-     * That is why the disconnect and death notices never arrived while the one message written
-     * with an escaped {@code \n} did. A quotation mark in a kick reason broke it the same way.
-     * Gson escapes all of it and the question stops being ours.
-     */
     public static void sendWebhook(String webhookURL, String title, String message, String pingID, String playerName) {
-        JsonObject embed = new JsonObject();
-        embed.addProperty("title", title);
-        embed.addProperty("description", message);
-        embed.addProperty("color", 15258703);
-
-        JsonObject footer = new JsonObject();
-        footer.addProperty("text", "From: " + playerName);
-        embed.add("footer", footer);
-
-        JsonArray embeds = new JsonArray();
-        embeds.add(embed);
-
-        JsonObject payload = new JsonObject();
-        payload.add("embeds", embeds);
-
-        sendRequest(webhookURL, payload.toString());
-
-        if (pingID != null) {
-            JsonObject ping = new JsonObject();
-            ping.addProperty("content", "<@" + pingID + ">");
-            sendRequest(webhookURL, ping.toString());
-        }
+        DiscordWebhook.sendEmbed(webhookURL, title, message, pingID, playerName);
     }
 
     public static void sendWebhook(String webhookURL, String jsonObject, String pingID) {
-        sendRequest(webhookURL, jsonObject);
-
-        if (pingID != null) {
-            JsonObject ping = new JsonObject();
-            ping.addProperty("content", "<@" + pingID + ">");
-            sendRequest(webhookURL, ping.toString());
-        }
+        DiscordWebhook.send(webhookURL, jsonObject, pingID);
     }
 
-    private static void sendRequest(String webhookURL, String json) {
-        try {
-            URL url = URI.create(webhookURL).toURL();
-            HttpsURLConnection con = (HttpsURLConnection) url.openConnection();
-            con.setRequestProperty("Content-Type", "application/json");
-            con.setRequestProperty("User-Agent", "Mozilla/5.0");
-            con.setDoOutput(true);
-            con.setConnectTimeout(5000);
-            con.setReadTimeout(5000);
-            con.setRequestMethod("POST");
-
-            try (OutputStream os = con.getOutputStream()) {
-                // Explicitly UTF-8. The platform default is Windows-1252 here, and an accent in a
-                // player name or a kick reason would go out as bytes Discord cannot read.
-                os.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                os.flush();
-            }
-
-            int code = con.getResponseCode();
-
-            // getInputStream throws on any 4xx, so reading it was itself what hid every rejection
-            // behind the empty catch below. The error stream is where Discord explains itself.
-            if (code >= 400) {
-                String detail = "";
-                try (java.io.InputStream err = con.getErrorStream()) {
-                    if (err != null) detail = new String(err.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-                }
-
-                com.hunterbuddy.HunterBuddyAddon.LOG.error("[HB] webhook refused: HTTP {} {}", code, detail);
-            }
-
-            con.disconnect();
-        } catch (Exception e) {
-            com.hunterbuddy.HunterBuddyAddon.LOG.error("[HB] webhook failed", e);
-        }
-    }
-
-    public enum TextColor {
-        Black("§0"), White("§f"), Gray("§8"), Light_Gray("§7"),
-        Dark_Green("§2"), Green("§a"), Dark_Aqua("§3"), Aqua("§b"),
-        Dark_Blue("§1"), Blue("§9"), Dark_Red("§4"), Red("§c"),
-        Dark_Purple("§5"), Purple("§d"), Gold("§6"), Yellow("§e"),
-        Random("");
-
-        public final String label;
-
-        TextColor(String label) {
-            this.label = label;
-        }
-    }
-
-    public enum RainbowColor {
-        Red(new String[]{"§c", "§4"}),
-        Yellow(new String[]{"§e", "§6"}),
-        Green(new String[]{"§a", "§2"}),
-        Aqua(new String[]{"§b", "§3"}),
-        Blue(new String[]{"§9", "§1"}),
-        Purple(new String[]{"§d", "§5"}),
-        White(new String[]{"§f", "§7"});
-
-        public final String[] labels;
-
-        RainbowColor(String[] labels) {
-            this.labels = labels;
-        }
-
-        public static RainbowColor getFirst() {
-            return values()[0];
-        }
-
-        public static RainbowColor getNext(RainbowColor current) {
-            RainbowColor[] values = values();
-            return values[(current.ordinal() + 1) % values.length];
-        }
-    }
-
-    public enum TextFormat {
-        Bold("§l"),
-        Italic("§o"),
-        Underline("§n"),
-        Strikethrough("§m"),
-        Obfuscated("§k"),
-        None("");
-
-        public final String label;
-
-        TextFormat(String label) {
-            this.label = label;
-        }
+    private static void setJump(MinecraftClient mc, boolean pressed) {
+        if (mc.player == null) return;
+        BaritoneHelper.setJumpPressed(pressed);
+        setPressed(mc.options.jumpKey, pressed);
     }
 }

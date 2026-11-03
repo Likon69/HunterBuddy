@@ -1,128 +1,57 @@
 package com.hunterbuddy.modules.regear.util;
 
-import com.hunterbuddy.HunterBuddyAddon;
 import java.util.HashMap;
 import java.util.Map;
-import meteordevelopment.meteorclient.MeteorClient;
-import meteordevelopment.meteorclient.mixininterface.IChatHud;
-import meteordevelopment.meteorclient.systems.modules.Module;
-import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Style;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
-public class MsgUtil {
-   private static final Map<String, String> modulePrefixes = new HashMap<>();
+public final class MsgUtil {
+    private static final String RAW_PREFIX = "[HunterBuddy]";
+    private static final String SPARKLE = "✨";
 
-   public static String getPrefix() {
-      return Formatting.DARK_GRAY + "<" + Utils.rCC() + Formatting.ITALIC + "\u2728" + Formatting.DARK_GRAY + ">";
-   }
+    private static final Map<String, String> MODULE_COLORS = new HashMap<>();
 
-   public static String getRawPrefix() {
-      return "[Mlep]";
-   }
+    private MsgUtil() {
+    }
 
-   public static String getRawPrefix(String module) {
-      return "[" + module + "]";
-   }
+    public static String getRawPrefix() {
+        return RAW_PREFIX;
+    }
 
-   public static void initModulePrefixes() {
-      for (Module module : Modules.get().getGroup(HunterBuddyAddon.HUNT_CATEGORY)) {
-         String name = module.name;
-         String color = Utils.rCC();
-         modulePrefixes.put(name, color);
-      }
-   }
+    public static String getRawPrefix(String module) {
+        return "[" + module + "]";
+    }
 
-   public static String getModulePrefix(String module) {
-      return !modulePrefixes.containsKey(module)
-         ? Formatting.DARK_GRAY
-            + "["
-            + Utils.rCC()
-            + Formatting.ITALIC
-            + meteordevelopment.meteorclient.utils.Utils.nameToTitle(module)
-            + Formatting.DARK_GRAY
-            + "]"
-         : Formatting.DARK_GRAY
-            + "["
-            + modulePrefixes.get(module)
-            + Formatting.ITALIC
-            + meteordevelopment.meteorclient.utils.Utils.nameToTitle(module)
-            + Formatting.DARK_GRAY
-            + "]";
-   }
+    public static void sendMsg(String msg) {
+        deliver(randomPrefix(), msg, Style.EMPTY);
+    }
 
-   public static void sendRawMsg(String msg) {
-      if (MeteorClient.mc.player != null) {
-         MeteorClient.mc.player.sendMessage(Text.literal(msg), false);
-      }
-   }
+    public static void sendMsg(String msg, Style style) {
+        deliver(randomPrefix(), msg, style);
+    }
 
-   public static void sendMsg(String msg) {
-      if (MeteorClient.mc.player != null) {
-         try {
-            StringBuilder sb = new StringBuilder();
-            MeteorClient.mc
-               .player
-               .sendMessage(Text.literal(sb.append(getPrefix()).append(' ').append(Formatting.GRAY).append(msg).toString()), false);
-         } catch (Exception var2) {
-         }
-      }
-   }
+    public static void sendModuleMsg(String msg, String module) {
+        deliver(modulePrefix(module), msg, Style.EMPTY);
+    }
 
-   public static void sendMsg(String msg, Style style) {
-      if (MeteorClient.mc.player != null) {
-         try {
-            String message = getPrefix() + " " + Formatting.GRAY + msg;
-            MeteorClient.mc.player.sendMessage(Text.literal(message).setStyle(style), false);
-         } catch (Exception var3) {
-         }
-      }
-   }
+    private static String randomPrefix() {
+        return Formatting.DARK_GRAY + "<" + Utils.rCC() + Formatting.ITALIC + SPARKLE + Formatting.DARK_GRAY + ">";
+    }
 
-   public static void sendModuleMsg(String msg, String module) {
-      if (MeteorClient.mc.player != null) {
-         try {
-            StringBuilder sb = new StringBuilder();
-            MeteorClient.mc
-               .player
-               .sendMessage(Text.literal(sb.append(getModulePrefix(module)).append(' ').append(Formatting.GRAY).append(msg).toString()), false);
-         } catch (Exception var3) {
-         }
-      }
-   }
+    private static String modulePrefix(String module) {
+        String title = meteordevelopment.meteorclient.utils.Utils.nameToTitle(module);
+        return Formatting.DARK_GRAY + "[" + MODULE_COLORS.computeIfAbsent(module, name -> Utils.rCC()) + Formatting.ITALIC + title + Formatting.DARK_GRAY + "]";
+    }
 
-   public static void sendModuleMsg(String msg, Style style, String module) {
-      if (MeteorClient.mc.player != null) {
-         try {
-            String message = getModulePrefix(module) + " " + Formatting.GRAY + msg;
-            MeteorClient.mc.player.sendMessage(Text.literal(message).setStyle(style), false);
-         } catch (Exception var4) {
-         }
-      }
-   }
-
-   public static void updateMsg(String msg, int hashcode) {
-      if (MeteorClient.mc.player != null) {
-         try {
-            StringBuilder sb = new StringBuilder();
-            ((IChatHud)MeteorClient.mc.inGameHud.getChatHud())
-               .meteor$add(Text.literal(sb.append(getPrefix()).append(' ').append(Formatting.GRAY).append(msg).toString()), hashcode);
-         } catch (Exception var3) {
-         }
-      }
-   }
-
-   public static void updateModuleMsg(String msg, String module, int hashcode) {
-      if (MeteorClient.mc.player != null) {
-         try {
-            StringBuilder sb = new StringBuilder();
-            ((IChatHud)MeteorClient.mc.inGameHud.getChatHud())
-               .meteor$add(
-                  Text.literal(sb.append(getModulePrefix(module)).append(' ').append(Formatting.GRAY).append(msg).toString()), hashcode
-               );
-         } catch (Exception var4) {
-         }
-      }
-   }
+    private static void deliver(String prefix, String msg, Style style) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null) return;
+        try {
+            Text text = Text.literal(prefix + " " + Formatting.GRAY + msg).setStyle(style);
+            mc.player.sendMessage(text, false);
+        } catch (Exception ignored) {
+        }
+    }
 }
