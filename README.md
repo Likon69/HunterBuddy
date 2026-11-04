@@ -15,6 +15,12 @@ flight shape in `elytra-auto-fly`, Future's totem swap in `f-totem`). Bits of Je
 were useful; modules that started from other addons were later rewritten from written specifications. Have
 fun with it, and open a GitHub issue if you hit a problem.
 
+Support, updates and the community are on Discord: [discord.gg/v5B78esCEu](https://discord.gg/v5B78esCEu)
+
+<p align="center">
+  <a href="https://discord.gg/v5B78esCEu"><img src=".github/hunterbuddy-discord.png" alt="Join the HunterBuddy Discord"></a>
+</p>
+
 Target: **Minecraft 1.21.11 only** (Yarn `1.21.11+build.3`, Fabric Loader `0.18.2`, Meteor `1.21.11-SNAPSHOT`).
 
 ## Categories and modules
