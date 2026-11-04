@@ -7973,20 +7973,21 @@ public class SpawnerDetector extends Module {
 
         mc.player.closeHandledScreen();
 
-        statShulkersFound += fullShulkers;
+        int shulkers = isShulkerScreen ? 1 : fullShulkers;
+        statShulkersFound += shulkers;
 
         String kindLabel = isShulkerScreen ? "shulker_box" : Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
-        boolean keep = fullShulkers > 0;
+        boolean keep = shulkers > 0;
         if (keep) {
             playAutoSound("shulker_found", soundShulker);
-            autoRoomFoundShulkers += fullShulkers;
+            autoRoomFoundShulkers += shulkers;
             autoRoomFoundItems += piles;
             if (isShipwreck()) {
-                XaeroWaypointManager.addWaypoint("SpawnerDetector", target, "Shipwreck shulkers " + fullShulkers, "SW", MapUtil.WpColor.Purple, false);
-                info("Shipwreck shulkers found: %d at %d %d %d", fullShulkers, target.getX(), target.getY(), target.getZ());
+                XaeroWaypointManager.addWaypoint("SpawnerDetector", target, "Shipwreck shulkers " + shulkers, "SW", MapUtil.WpColor.Purple, false);
+                info("Shipwreck shulkers found: %d at %d %d %d", shulkers, target.getX(), target.getY(), target.getZ());
             } else {
-            XaeroWaypointManager.addWaypoint("SpawnerDetector", target, "Dungeon shulkers " + fullShulkers, "DS", MapUtil.WpColor.Purple, false);
-            info("Dungeon shulkers found: %d at %d %d %d", fullShulkers, target.getX(), target.getY(), target.getZ());
+            XaeroWaypointManager.addWaypoint("SpawnerDetector", target, "Dungeon shulkers " + shulkers, "DS", MapUtil.WpColor.Purple, false);
+            info("Dungeon shulkers found: %d at %d %d %d", shulkers, target.getX(), target.getY(), target.getZ());
             }
         }
 
