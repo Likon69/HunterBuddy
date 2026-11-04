@@ -532,6 +532,7 @@ public class AutoFlyingRegear extends Module {
    private int clearingAttempts;
    private int stepAsideTicks;
    private int shulkerPickupAttempts = 0;
+   private boolean[] carriedShulkerSlots = new boolean[0];
    private boolean shulkerPlacementRetry = false;
    private int cleanupBlockIndex = 0;
    private int cleanupBlockAttempts = 0;
@@ -1563,17 +1564,40 @@ public class AutoFlyingRegear extends Module {
          }
       }
 
+      return this.shulkerOnGround() ? "ground" : "MISSING";
+   }
+
+   private boolean shulkerOnGround() {
       for (ItemEntity entity : this.itemEntitiesNear(this.shulkerPlacePos, 3.0)) {
          if (this.isShulkerBox(entity.getStack().getItem())) {
-            return "ground";
+            return true;
          }
       }
 
-      return "MISSING";
+      return false;
    }
 
-   private boolean shulkerAccountedFor() {
-      return !"MISSING".equals(this.locateShulkerState());
+   private void rememberCarriedShulkers() {
+      int size = this.mc.player.getInventory().size();
+      this.carriedShulkerSlots = new boolean[size];
+
+      for (int i = 0; i < size; i++) {
+         this.carriedShulkerSlots[i] = this.isShulkerBox(this.mc.player.getInventory().getStack(i).getItem());
+      }
+   }
+
+   private boolean isPickedUpShulker(int slot) {
+      boolean carried = slot < this.carriedShulkerSlots.length && this.carriedShulkerSlots[slot];
+      return !carried && this.isShulkerBox(this.mc.player.getInventory().getStack(slot).getItem());
+   }
+
+   private void movePickedUpShulkerToHotbar(int from) {
+      int to = (Integer)this.shulkerHotbarSlot.get();
+      this.moveStack(from, to);
+      if (from < this.carriedShulkerSlots.length && to < this.carriedShulkerSlots.length) {
+         this.carriedShulkerSlots[from] = this.carriedShulkerSlots[to];
+         this.carriedShulkerSlots[to] = false;
+      }
    }
 
    private void logShulkerState(String step) {
@@ -3465,6 +3489,7 @@ public class AutoFlyingRegear extends Module {
             this.info("Breaking shulker manually", new Object[0]);
          }
 
+         this.rememberCarriedShulkers();
          this.state = AutoFlyingRegear.FlyingRegearState.WAIT_SHULKER_BREAK;
          this.timer = (Integer)this.breakDelay.get();
          this.placementAttempts = 0;
@@ -3532,8 +3557,7 @@ public class AutoFlyingRegear extends Module {
          this.logShulkerState("pickup-start");
       }
 
-      ItemStack hotbarStack = this.mc.player.getInventory().getStack((Integer)this.shulkerHotbarSlot.get());
-      if (this.isShulkerBox(hotbarStack.getItem())) {
+      if (this.isPickedUpShulker((Integer)this.shulkerHotbarSlot.get())) {
          if ((Boolean)this.debugMessages.get()) {
             this.info("Shulker picked up in hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
          }
@@ -3557,8 +3581,7 @@ public class AutoFlyingRegear extends Module {
          }
       } else {
          for (int i = 0; i < this.mc.player.getInventory().size(); i++) {
-            ItemStack stack = this.mc.player.getInventory().getStack(i);
-            if (this.isShulkerBox(stack.getItem())) {
+            if (this.isPickedUpShulker(i)) {
                if (!QuietClicks.readyOrSettle()) {
                   return;
                }
@@ -3567,7 +3590,7 @@ public class AutoFlyingRegear extends Module {
                   this.info("Shulker found in slot " + i + ", moving to hotbar slot " + this.shulkerHotbarSlot.get(), new Object[0]);
                }
 
-               this.moveStack(i, (Integer)this.shulkerHotbarSlot.get());
+               this.movePickedUpShulkerToHotbar(i);
                this.timer = (Integer)this.clickDelay.get() * 2;
                this.shulkerPickupAttempts = 0;
                IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
@@ -3647,7 +3670,7 @@ public class AutoFlyingRegear extends Module {
             }
          }
 
-         if (this.stateTickCounter > 200 && !this.shulkerAccountedFor()) {
+         if (this.stateTickCounter > 200 && !this.shulkerOnGround()) {
             this.warning("shulker lost — no shulker in hand, inventory or on the ground; aborting shulker return", new Object[0]);
             this.shulkerPickupAttempts = 0;
 
