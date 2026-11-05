@@ -132,7 +132,7 @@ public class AutoFlyingRegear extends Module {
          new meteordevelopment.meteorclient.settings.EnumSetting.Builder<AutoFlyingRegear.ElytraMode>()
                      .name("elytra-mode")
                   .description("REPLACE swaps worn elytras for fresh ones out of the shulker. REPAIR keeps the ones you fly and mends them with experience bottles, which only works while they carry Mending.")
-               .defaultValue(AutoFlyingRegear.ElytraMode.REPAIR)
+               .defaultValue(AutoFlyingRegear.ElytraMode.REPLACE)
             .build()
       );
    private final Setting<AutoFlyingRegear.OutOfSuppliesAction> outOfSupplies = this.sgTriggers
