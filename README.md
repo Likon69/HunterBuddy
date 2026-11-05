@@ -152,7 +152,7 @@ You need **Minecraft 1.21.11**, **Java 21**, **Fabric Loader** and a **Meteor Cl
 - **Baritone** is required for automatic dungeon farming, pathfinding and travel. We recommend [HunterBuddy Baritone](https://github.com/Likon69/hunterbuddy-baritone), our fork for Minecraft 1.21.11. The elytra flight and regear helpers use fixes and APIs from this fork.
 - **Xaero's Minimap, Xaero's World Map and XaeroPlus** are required for map and waypoint features, including `waypoint-follower`, chunk-radar's waypoint marks and the `Travel` HUD. Install the Fabric versions for Minecraft 1.21.11.
 
-These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.4.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
+These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.5.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
 
 ## Files and network
 
@@ -169,7 +169,7 @@ Java 21 is required. Use the included Gradle wrapper:
 .\gradlew.bat build
 ```
 
-The built addon JAR is written to `build/libs/hunterbuddy-1.0.4.jar`.
+The built addon JAR is written to `build/libs/hunterbuddy-1.0.5.jar`.
 
 ## Credits and provenance
 
