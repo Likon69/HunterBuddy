@@ -675,6 +675,9 @@ public class SpawnerDetector extends Module {
     private long autoRoomSubStateStartMs;
     private int autoRoomOpenAttempts;
     private int autoRoomContainerFails;
+    private Site autoRoomClockSite;
+    private final Set<BlockPos> autoRoomSkippedContainers = new java.util.HashSet<>();
+    private int autoRoomActiveTicks;
     private int autoRoomWaitTicks;
     private long autoRoomBreakStartMs;
     private boolean autoRoomSpawnerHandled;
@@ -716,6 +719,10 @@ public class SpawnerDetector extends Module {
     private BlockPos autoApproachTarget;
     private BlockPos autoApproachCell;
     private int autoApproachTicks;
+    private long autoApproachBaritoneStartMs;
+    private long autoApproachBaritoneTick;
+    private int autoApproachBaritoneRetries;
+    private BlockPos autoApproachBaritoneFailedTarget;
     private double autoApproachBaselineDist;
     private BlockPos autoApproachBreakPos;
     private String autoApproachBreakLabel;
@@ -1142,6 +1149,11 @@ public class SpawnerDetector extends Module {
         autoApproachBreakPos = null;
         autoApproachBreakLabel = null;
         autoApproachBreakCount = 0;
+        autoApproachBaritoneStartMs = 0;
+        autoApproachBaritoneFailedTarget = null;
+        autoRoomClockSite = null;
+        autoRoomActiveTicks = 0;
+        autoRoomSkippedContainers.clear();
         autoLastHurtTime = 0;
         autoLastHitMs = 0;
         autoHostileIds.clear();
@@ -3369,6 +3381,7 @@ public class SpawnerDetector extends Module {
         }
         if (state == AutoState.EXIT && next != AutoState.EXIT) restoreExitReturnSettings();
         if (state == AutoState.TUNNEL && next != AutoState.TUNNEL) restoreTunnelSettings();
+        if (state == AutoState.ROOM && next != AutoState.ROOM) stopApproachBaritone();
         if (autoSite != null && next != AutoState.RESUME && next != AutoState.FAILED) protectAutoThrowawayItems();
         state = next;
         stateTicks = 0;
@@ -8081,10 +8094,14 @@ public class SpawnerDetector extends Module {
             autoApproachBreakPos = null;
             autoApproachBreakLabel = null;
             autoApproachBreakCount = 0;
+            autoApproachBaritoneFailedTarget = null;
+            stopApproachBaritone();
         }
 
         Set<BlockPos> bad = autoApproachBadCells.computeIfAbsent(target, t -> new java.util.HashSet<>());
         autoApproachTicks++;
+
+        if (autoApproachBaritoneStartMs != 0 && tickApproachBaritone(target)) return;
 
         double eyeDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(target));
 
@@ -8190,6 +8207,9 @@ public class SpawnerDetector extends Module {
         Vec3d cellCenter = Vec3d.ofCenter(aimAt);
         double dx = cellCenter.x - mc.player.getX();
         double dz = cellCenter.z - mc.player.getZ();
+        if (!target.equals(autoApproachBaritoneFailedTarget) && approachWouldWalkOverMissingFloor(dx, dz)
+            && tickApproachBaritone(target)) return;
+
         mc.player.setYaw((float) Math.toDegrees(Math.atan2(-dx, dz)));
         Utils.setPressed(mc.options.forwardKey, true);
 
@@ -8210,6 +8230,96 @@ public class SpawnerDetector extends Module {
                 aimAt.getX(), aimAt.getY(), aimAt.getZ(), eyeDist, inWater,
                 mc.player.isSubmergedInWater(), mc.player.isOnGround(), mc.player.horizontalCollision));
         }
+    }
+
+    private boolean approachWouldWalkOverMissingFloor(double dx, double dz) {
+        if (!mc.player.isOnGround() || mc.player.isTouchingWater()) return false;
+        double length = Math.hypot(dx, dz);
+        if (length < 0.3) return false;
+        double scale = Math.min(1.0, length) / length;
+        BlockPos ahead = BlockPos.ofFloored(mc.player.getX() + dx * scale, mc.player.getY(), mc.player.getZ() + dz * scale);
+        BlockPos floor = ahead.down();
+        BlockState floorState = mc.world.getBlockState(floor);
+        return isOpenState(floorState, floor) || isLava(floorState);
+    }
+
+    private boolean tickApproachBaritone(BlockPos target) {
+        long now = System.currentTimeMillis();
+        IBaritone bt = primaryBaritone();
+        if (autoApproachBaritoneStartMs == 0) {
+            autoApproachBaritoneStartMs = now;
+            autoApproachBaritoneRetries = 0;
+            releaseAllAutoKeys();
+            BaritoneAPI.getSettings().allowPlace.value = true;
+            autoLog("ROOM", target, "missing floor ahead, baritone approach");
+            if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalNear(target, 3));
+        }
+        autoApproachBaritoneTick = mc.world.getTime();
+
+        if (now - autoApproachBaritoneStartMs > 30_000L) {
+            failApproachBaritone(target, "timeout");
+            return true;
+        }
+
+        boolean busy = bt != null && (bt.getPathingBehavior().isPathing() || bt.getCustomGoalProcess().isActive());
+        if (!busy && now - autoApproachBaritoneStartMs > 1000L) {
+            if (new GoalNear(target, 3).isInGoal(mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ())) {
+                stopApproachBaritone();
+                autoApproachBaritoneFailedTarget = target;
+                return false;
+            }
+            autoApproachBaritoneRetries++;
+            if (autoApproachBaritoneRetries >= 3) {
+                failApproachBaritone(target, "no path");
+                return true;
+            }
+            if (bt != null) bt.getCustomGoalProcess().setGoalAndPath(new GoalNear(target, 3));
+        }
+        return true;
+    }
+
+    private void stopApproachBaritone() {
+        if (autoApproachBaritoneStartMs == 0) return;
+        autoApproachBaritoneStartMs = 0;
+        BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
+        BaritoneHelper.stopAllPathing();
+    }
+
+    private void failApproachBaritone(BlockPos target, String reason) {
+        stopApproachBaritone();
+        autoLog("ROOM", target, "baritone approach failed: " + reason);
+        if (autoRoomIndex < autoRoomQueue.size() && target.equals(autoRoomQueue.get(autoRoomIndex))) {
+            skipRoomContainer(target);
+        } else {
+            autoApproachBaritoneFailedTarget = target;
+        }
+    }
+
+    private void skipRoomContainer(BlockPos target) {
+        autoRoomSkippedContainers.add(target);
+        autoRoomIndex++;
+        autoRoomContainerFails = 0;
+        autoRoomPillarTarget = null;
+        autoRoomPillarPhase = 0;
+        autoRoomSubState = 0;
+        autoRoomBreakRepositioning = false;
+        autoLog("ROOM", target, "container skipped after failed baritone approach");
+    }
+
+    private void syncRoomClockToSite() {
+        if (autoRoomClockSite == autoSite) return;
+        autoRoomClockSite = autoSite;
+        autoRoomActiveTicks = 0;
+        autoRoomSkippedContainers.clear();
+        autoRoomNotOpened = false;
+    }
+
+    private boolean belowRoomFloor() {
+        return mc.player.getBlockPos().getY() < autoSite.room.cy() - 2;
+    }
+
+    private boolean roomTimedOut() {
+        return autoRoomActiveTicks > 180 * 20;
     }
 
     private boolean canBreakApproachObstacle(BlockPos obstacle, BlockPos target, BlockPos aimAt) {
@@ -8526,6 +8636,7 @@ public class SpawnerDetector extends Module {
                 autoRoomBreakRepositioning = false;
                 autoRoomContainerFails++;
                 if (autoRoomContainerFails >= 2) {
+                    autoRoomSkippedContainers.add(target);
                     autoRoomIndex++;
                     autoRoomContainerFails = 0;
                     autoRoomPillarTarget = null;
@@ -9295,16 +9406,19 @@ public class SpawnerDetector extends Module {
             return;
         }
         stateTicks++;
+        syncRoomClockToSite();
+
+        if (autoApproachBaritoneStartMs != 0 && mc.world.getTime() - autoApproachBaritoneTick > 2) stopApproachBaritone();
 
         if (stateTicks == 1) {
-            int feetY = mc.player.getBlockPos().getY();
-            if (feetY < autoSite.room.cy() - 2) {
+            if (belowRoomFloor()) {
                 enterState(AutoState.ROOM_CLIMB, "feet below room floor");
                 return;
             }
 
             autoSite.roomContainers = computeRoomContainers(autoSite.room);
             autoRoomQueue = new ArrayList<>(autoSite.roomContainers);
+            autoRoomQueue.removeAll(autoRoomSkippedContainers);
             autoRoomQueue.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(mc.player.getBlockPos())));
             autoRoomFoundShulkers = 0;
             autoRoomNotOpened = false;
@@ -9337,14 +9451,14 @@ public class SpawnerDetector extends Module {
             autoPausedTicks = 0;
         }
 
-        if ((stateTicks - autoPausedTicks) > 180 * 20) {
+        if (roomTimedOut()) {
             autoLog("ROOM", autoSite.center, "room timeout 180s, leaving");
             releaseAllAutoKeys();
             finishRoomAndAscend();
             return;
         }
 
-        if ((mc.player.isOnGround() || mc.player.isSubmergedInWater()) && mc.player.getBlockPos().getY() < autoSite.room.cy() - 2) {
+        if ((mc.player.isOnGround() || mc.player.isSubmergedInWater()) && belowRoomFloor()) {
             if (mc.currentScreen instanceof GenericContainerScreen || mc.currentScreen instanceof ShulkerBoxScreen) {
                 mc.player.closeHandledScreen();
             }
@@ -9355,6 +9469,7 @@ public class SpawnerDetector extends Module {
         }
 
         if (handleAutoPause(true)) return;
+        autoRoomActiveTicks++;
 
         if (autoSite.pot) {
             tickRoomPot();
@@ -9437,6 +9552,7 @@ public class SpawnerDetector extends Module {
 
     private void tickRoomClimb() {
         stateTicks++;
+        syncRoomClockToSite();
 
         if (stateTicks == 1) {
             autoRoomClimbMode = 0;
@@ -9457,6 +9573,16 @@ public class SpawnerDetector extends Module {
         }
 
         if (handleAutoPause(true)) return;
+        autoRoomActiveTicks++;
+
+        if (roomTimedOut()) {
+            autoLog("ROOM_CLIMB", autoSite.center, "room timeout 180s, leaving");
+            releaseAllAutoKeys();
+            BaritoneHelper.stopAllPathing();
+            BaritoneAPI.getSettings().allowPlace.value = autoSavedAllowPlace;
+            finishRoomAndAscend();
+            return;
+        }
 
         if (autoRoomClimbMode == 0) {
             tickRoomClimbPillar();
@@ -9570,7 +9696,7 @@ public class SpawnerDetector extends Module {
                 }
             }
 
-            if ((mc.player.isOnGround() && !mc.player.isTouchingWater())
+            if ((mc.player.isOnGround() && !mc.player.isTouchingWater() && !belowRoomFloor())
                 || (feet.getY() >= autoSite.room.cy() && feet.getX() == autoRoomClimbSwimTarget.getX()
                     && feet.getZ() == autoRoomClimbSwimTarget.getZ())) {
                 releaseAllAutoKeys();
