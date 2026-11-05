@@ -7,6 +7,7 @@
     "InputMixin",
     "QuietClicksMixin",
     "accessors.InputMovementAccessor",
+    "accessors.SignEditScreenAccessor",
     "AuraMoveFixMixin",
     "MixinGuiMapWaypointFollower",
     "LivingEntityMixin",

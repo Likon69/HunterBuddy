@@ -42,6 +42,7 @@ import com.hunterbuddy.modules.RocketBoost;
 import com.hunterbuddy.modules.RocketFly;
 import com.hunterbuddy.modules.RotationDetector;
 import com.hunterbuddy.modules.ShulkerPeek;
+import com.hunterbuddy.modules.SignHistory;
 import com.hunterbuddy.modules.SignReader;
 import com.hunterbuddy.modules.SpawnerDetector;
 import com.hunterbuddy.modules.StashFinder;
@@ -152,6 +153,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new GrimAirPlace());
         Modules.get().add(new RotationDetector());
         Modules.get().add(new SignReader());
+        Modules.get().add(new SignHistory());
         Modules.get().add(new FlowESP());
         Modules.get().add(new CaveAirESP());
         Modules.get().add(new VanityESP());
