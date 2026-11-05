@@ -38,7 +38,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `auto-portal` | Builds a nether portal frame with obsidian, lights it, and highlights it as it goes up. With `baritone-path-to-portal` it then walks you into the portal. |
 | `chunk-radar` | Follows the 1.12 trail from the blocks in each arriving chunk, fits a line through the hits, and tells you when the trail is acquired, lost, turning or a stash. Remembers trails between sessions, marks them on Xaero, and can alert Discord. |
 | `elytra-auto-fly` | Elytra flight cycle: Pitch40 climb up to `max-altitude`, then a manual-pitch descent (`descend-pitch`) with optional auto fireworks until `min-altitude`, looped. |
-| `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer and portal-trap avoidance. `solve-pitch` picks the fastest bounce angle for the ceiling above you. `chestplate-fakefly` keeps a chest piece worn and swaps the elytra in only for take-off. |
+| `ElytraBounce` | Bounce-style elytra travel with speed and rotation locks, a highway obstacle passer and portal-trap avoidance. `solve-pitch` picks the fastest bounce angle for the ceiling above you. `chestplate-fakefly` keeps a chest piece worn and swaps the elytra in only for take-off. `stop-near-entities` turns it off when a warden, TNT minecart or primed TNT is ahead on the highway (`hazard-range`, `hazard-width`, `hazard-height`), against highway traps. |
 | `ElytraRecast` | Flight recovery fallback: when you stop flying or drop below `min-altitude`, it jumps, reopens the elytra and climbs back with rockets. It can switch itself off when you run out of rockets. |
 | `heading-lock` | Holds your yaw on the nearest multiple of 45 degrees. `2b2t-bypass` adds a tiny random wobble so the yaw is never perfectly constant. |
 | `old-chunk-notifier` | Detects 1.12 and/or 1.19+ old chunks (`chunk-type`) in chosen dimensions and sends a Discord webhook, an Xaero marker, or both. Only groups of at least `min-cluster-size` adjacent chunks count, and it can ping you. |
@@ -50,7 +50,7 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `visual-range-notifier` | Alerts when players enter or leave visual range, when chosen items lie on the ground, and on nearby end crystal or respawn anchor activity. Sends to chat, sound or Discord, which can also report your death and disconnects. |
 | `waypoint-follower` | Follows Xaero waypoints whose name starts with `waypoint-prefix` (`Hunt_` by default), in order or closest first, with a flight mode per dimension. At the end it stops, switches off or leaves the server. `seed-route` can lay the waypoints along a mapped trail for you. |
 
-### Visuals (11)
+### Visuals (12)
 
 ESP, overlays, and render helpers.
 
@@ -64,6 +64,7 @@ ESP, overlays, and render helpers.
 | `rotation-detector` | Highlights logs, basalt, purpur pillars, hay bales and deepslate lying sideways, since in nature they only generate upright. Block types, `min-y`/`max-y` and `ignore-near-air` (skips surface builds) are configurable. |
 | `shader` | Draws a crisp outline, an optional glow and an optional fill around entities (players, mobs, items, pearls...), nether portals, storage blocks and spawners, each with its own color. `outline-width`, `glow` and `filled` set the look. |
 | `sign-reader` | Shows the text of nearby signs on screen, through walls, grouping the ones that overlap. |
+| `sign-history` | Remembers every sign you see, per server and dimension, and marks the ones destroyed (red) or changed (yellow) since, with their original text above. Place a sign where one was destroyed, or open a changed one, and it writes the original text back on that face, then its dye color and glow from your hotbar. Signs you break or edit yourself update the history. Multiplayer only. |
 | `speed-blur` | A radial motion blur that grows with your flight speed and keeps you sharp in the middle. Never shows on the ground. |
 | `SpawnerDetector` | Finds classic monster-room dungeons (with or without spawner), activated trial spawners and shipwrecks, and scores the player traces around each room. With `auto-farm` it flies to a traced room (`auto-farm-all`: any room with a chest), digs down, mines the spawner, loots the chests and climbs out. Runs need at least `auto-min-health` and `auto-min-rockets`. |
 | `VanityESP` | Highlights map and shulker item frames, banners, ominous vaults, buried treasure, endermen holding blocks, XP orbs and stacked chest minecarts. Each type has its own colors and tracers; buried treasure can alert in chat and add temporary waypoints. |
@@ -157,6 +158,7 @@ These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.
 
 - `chunk-radar` persists its trail memory to `hunterbuddy/trails.json` (plus a backup) under the Meteor folder; `rocket-boost` can append a per-tick trace to `hunterbuddy/rocketboost-trace.csv` when its trace setting is on.
 - AreaLoader routes and the lifetime odometer stats are also stored as JSON.
+- `sign-history` keeps the signs it has seen in `sign-history/<server>/signs.json` under the Meteor folder; a file that fails to load is set aside as `signs.json.corrupt-<time>`.
 - `old-chunk-notifier` and `visual-range-notifier` post to a Discord webhook if one is configured.
 
 ## Build
