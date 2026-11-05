@@ -19,7 +19,7 @@ public final class EntityDetections {
     public void record(ChunkPos chunk, StashType type, int count) {
         if (spawnGate.isTooCloseToSpawn(chunk)) return;
         if (oldChunkGate.defersScans() && !oldChunkGate.isOld(chunk.x, chunk.z)) return;
-        StashChunk existing = ledger.find(chunk);
+        StashChunk existing = ledger.find(StashDimensions.current(), chunk);
         StashChunk before = existing == null ? null : existing.copyOfCounters();
         StashChunk target = existing != null ? existing : freshChunk(chunk);
         target.setCount(type, Math.max(target.countOf(type), count));

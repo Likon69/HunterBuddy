@@ -5,6 +5,7 @@ import net.minecraft.util.math.ChunkPos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public final class StashLedger {
     private final StashFileStore store = new StashFileStore();
@@ -29,9 +30,9 @@ public final class StashLedger {
         loaded = true;
     }
 
-    public StashChunk find(ChunkPos position) {
+    public StashChunk find(String dimension, ChunkPos position) {
         for (StashChunk chunk : chunks) {
-            if (chunk.chunkPos.equals(position)) return chunk;
+            if (Objects.equals(chunk.dimension, dimension) && chunk.chunkPos.equals(position)) return chunk;
         }
         return null;
     }

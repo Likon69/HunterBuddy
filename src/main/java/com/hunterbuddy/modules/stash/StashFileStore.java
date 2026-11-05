@@ -7,7 +7,6 @@ import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.StashFinder.StashChunk;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.utils.Utils;
-import net.minecraft.util.math.ChunkPos;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -56,9 +55,9 @@ public final class StashFileStore {
     }
 
     public static List<StashChunk> mergeByPosition(List<StashChunk> base, List<StashChunk> winners) {
-        Map<ChunkPos, StashChunk> merged = new LinkedHashMap<>();
-        for (StashChunk chunk : base) merged.put(chunk.chunkPos, chunk);
-        for (StashChunk chunk : winners) merged.put(chunk.chunkPos, chunk);
+        Map<StashChunk, StashChunk> merged = new LinkedHashMap<>();
+        for (StashChunk chunk : base) merged.put(chunk, chunk);
+        for (StashChunk chunk : winners) merged.put(chunk, chunk);
         return new ArrayList<>(merged.values());
     }
 

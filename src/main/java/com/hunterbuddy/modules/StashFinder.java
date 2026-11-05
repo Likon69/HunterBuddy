@@ -50,6 +50,7 @@ import net.minecraft.world.chunk.WorldChunk;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Objects;
 
 public class StashFinder extends Module {
     public enum NotificationMode {
@@ -170,12 +171,13 @@ public class StashFinder extends Module {
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof StashChunk chunk && chunkPos.equals(chunk.chunkPos);
+            return other instanceof StashChunk chunk
+                && Objects.equals(dimension, chunk.dimension) && chunkPos.equals(chunk.chunkPos);
         }
 
         @Override
         public int hashCode() {
-            return chunkPos.hashCode();
+            return Objects.hash(dimension, chunkPos);
         }
     }
 
@@ -284,6 +286,6 @@ public class StashFinder extends Module {
 
     private void scan(WorldChunk chunk) {
         StashChunk fresh = scanner.scan(chunk);
-        if (fresh != null) recorder.commit(fresh, ledger.find(fresh.chunkPos));
+        if (fresh != null) recorder.commit(fresh, ledger.find(fresh.dimension, fresh.chunkPos));
     }
 }
