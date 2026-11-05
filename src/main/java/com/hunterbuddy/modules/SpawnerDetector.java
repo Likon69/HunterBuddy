@@ -1060,6 +1060,7 @@ public class SpawnerDetector extends Module {
     @Override
     public void onActivate() {
         purgeAllState();
+        autoSavedAllowPlace = BaritoneAPI.getSettings().allowPlace.value;
         totalTicks = 0;
         scanCooldown = 0;
         autoShipwreckAgeSkipped.clear();
@@ -5739,7 +5740,6 @@ public class SpawnerDetector extends Module {
             autoShipwreckPlatformTried = false;
             autoShipwreckChestOutcome = null;
             autoShipwreckDeferred = false;
-            autoSavedAllowPlace = BaritoneAPI.getSettings().allowPlace.value;
             autoLog("PREPARE", site.center, "shipwreck target model=" + site.shipwreck.key().model());
             logShipwreckChest(site);
         } else {
@@ -6101,8 +6101,6 @@ public class SpawnerDetector extends Module {
             ElytraRecast er = elytraRecastModule();
             if (er != null && er.isActive()) er.toggle();
         }
-
-        autoSavedAllowPlace = BaritoneAPI.getSettings().allowPlace.value;
 
         if (mc.player.isGliding()) {
             autoLandSpotAttempts = 0;
@@ -12663,7 +12661,7 @@ public class SpawnerDetector extends Module {
         if (takeoffIfSkyClear()) return;
 
         if (stateTicks == 1) {
-            BaritoneAPI.getSettings().allowPlace.value = true;
+            BaritoneAPI.getSettings().allowPlace.value = false;
             autoBaritoneRetries = 0;
             autoAscendStuckPos = null;
             autoAscendStuckTicks = 0;
