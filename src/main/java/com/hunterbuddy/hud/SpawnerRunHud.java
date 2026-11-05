@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -22,6 +23,7 @@ import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.math.BlockPos;
 
@@ -269,7 +271,7 @@ public class SpawnerRunHud extends HudElement {
     private int doneRunCount;
     private long doneRunSumMs;
     private long activeMs;
-    private long lastLiveFrameMs;
+    private long lastLiveTickMs;
     private double frameDt = 0.016;
 
     private String consoleLabel = "";
@@ -318,8 +320,39 @@ public class SpawnerRunHud extends HudElement {
 
     public SpawnerRunHud() {
         super(INFO);
+        MeteorClient.EVENT_BUS.subscribe(this);
         displayedWordColor = new SettingColor(255, 255, 255, 255);
         outgoingWordColor = new SettingColor(255, 255, 255, 255);
+    }
+
+    @EventHandler
+    private void onTick(TickEvent.Post event) {
+        SpawnerDetector detector = Modules.get().get(SpawnerDetector.class);
+        long now = System.currentTimeMillis();
+
+        if (!isLive(detector)) {
+            wasLive = false;
+            lastLiveTickMs = 0L;
+            if (detector != null && runStartMs != 0L) {
+                finishRun(detector, now, false);
+                lastSiteRef = null;
+            }
+            return;
+        }
+
+        if (!wasLive) {
+            moduleActivatedMs = now;
+            wasLive = true;
+        }
+        if (lastLiveTickMs != 0L) activeMs += Math.min(2_000L, Math.max(0L, now - lastLiveTickMs));
+        lastLiveTickMs = now;
+
+        updateRun(detector, detector.getAutoSite(), detector.getAutoStateName(), now);
+    }
+
+    private static boolean isLive(SpawnerDetector detector) {
+        return MeteorClient.mc.player != null && MeteorClient.mc.world != null
+            && detector != null && detector.isActive();
     }
 
     @Override
@@ -331,16 +364,8 @@ public class SpawnerRunHud extends HudElement {
         frameDt = dt;
 
         SpawnerDetector detector = Modules.get().get(SpawnerDetector.class);
-        boolean live = MeteorClient.mc.player != null && MeteorClient.mc.world != null
-            && detector != null && detector.isActive();
 
-        if (!live) {
-            wasLive = false;
-            lastLiveFrameMs = 0L;
-            if (detector != null && runStartMs != 0L) {
-                finishRun(detector, System.currentTimeMillis(), false);
-                lastSiteRef = null;
-            }
+        if (!isLive(detector)) {
             if (isInEditor()) {
                 renderEditorDemo(renderer);
                 return;
@@ -350,18 +375,10 @@ public class SpawnerRunHud extends HudElement {
         }
 
         long now = System.currentTimeMillis();
-        if (!wasLive) {
-            moduleActivatedMs = now;
-            wasLive = true;
-        }
-        if (lastLiveFrameMs != 0L) activeMs += Math.min(2_000L, Math.max(0L, now - lastLiveFrameMs));
-        lastLiveFrameMs = now;
-
         Object site = detector.getAutoSite();
         String stateName = detector.getAutoStateName();
         boolean idleNow = "IDLE".equals(stateName) && site == null;
 
-        updateRun(detector, site, stateName, now);
         insertion = updateInsertion(now);
 
         StepInfo step = computeStep(detector, stateName);
