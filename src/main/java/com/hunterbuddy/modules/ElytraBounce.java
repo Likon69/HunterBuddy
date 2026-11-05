@@ -7,10 +7,12 @@ import com.hunterbuddy.modules.regear.util.BaritoneHelper;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.util.GliderSwap;
 import com.hunterbuddy.util.PlanSlot;
+import com.hunterbuddy.util.BounceHazards;
 import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.util.HopPlanner;
 import com.hunterbuddy.util.SwapWindow;
 import java.util.ArrayDeque;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
@@ -37,6 +39,8 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.EnchantmentEffectComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.enchantment.EnchantmentHelper;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.MovementType;
@@ -56,6 +60,7 @@ import net.minecraft.util.math.Vec3d;
 public class ElytraBounce extends Module {
    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
    private final SettingGroup sgObstaclePasser = this.settings.createGroup("Obstacle Passer");
+   private final SettingGroup sgHazards = this.settings.createGroup("Hazards");
    private final Setting<Boolean> bounce = this.sgGeneral
       .add(new Builder().name("bounce").description("Automatically does bounce efly.").defaultValue(true).build());
    private final Setting<Boolean> motionYBoost = this.sgGeneral
@@ -291,6 +296,50 @@ public class ElytraBounce extends Module {
                .sliderMax(10)
                .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.highwayObstaclePasser.get() && (Boolean)this.avoidPortalTraps.get())
                .build()
+      );
+   private final Setting<Boolean> stopNearEntities = this.sgHazards
+      .add(new Builder().name("stop-near-entities").description("Turns the module off when a hazard entity is near.").defaultValue(true).build());
+   private final Setting<Set<EntityType<?>>> hazardEntities = this.sgHazards
+      .add(
+         new meteordevelopment.meteorclient.settings.EntityTypeListSetting.Builder()
+            .name("hazard-entities")
+            .description("The entities that stop the module when they are within range.")
+            .defaultValue(EntityType.WARDEN, EntityType.TNT_MINECART, EntityType.TNT)
+            .visible(() -> (Boolean)this.stopNearEntities.get())
+            .build()
+      );
+   private final Setting<Double> hazardRange = this.sgHazards
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+            .name("hazard-range")
+            .description("The distance ahead at which a hazard entity stops the module. Limited by the server entity tracking distance, often 48 for monsters and 32 for minecarts and TNT.")
+            .defaultValue(96.0)
+            .min(4.0)
+            .sliderMax(128.0)
+            .visible(() -> (Boolean)this.stopNearEntities.get())
+            .build()
+      );
+   private final Setting<Double> hazardWidth = this.sgHazards
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+            .name("hazard-width")
+            .description("The sideways distance from the bounce heading within which a hazard entity counts.")
+            .defaultValue(16.0)
+            .min(2.0)
+            .sliderMax(48.0)
+            .visible(() -> (Boolean)this.stopNearEntities.get())
+            .build()
+      );
+   private final Setting<Double> hazardHeight = this.sgHazards
+      .add(
+         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+            .name("hazard-height")
+            .description("The vertical distance from you within which a hazard entity counts.")
+            .defaultValue(12.0)
+            .min(2.0)
+            .sliderMax(48.0)
+            .visible(() -> (Boolean)this.stopNearEntities.get())
+            .build()
       );
    private final Setting<Boolean> logDurability = this.sgGeneral
       .add(
@@ -762,6 +811,23 @@ public class ElytraBounce extends Module {
       if (this.mc.player != this.timerPlayer) {
          this.timerPlayer = this.mc.player;
          this.resetPlayerTimers();
+      }
+      if ((Boolean)this.stopNearEntities.get()) {
+         float heading = (Boolean)this.lockYaw.get() ? ((Double)this.yaw.get()).floatValue() : this.mc.player.getYaw();
+         Entity hazard = BounceHazards.nearest(
+            this.mc.world,
+            this.mc.player,
+            Utils.yawToDirection(heading),
+            this.hazardEntities.get(),
+            this.hazardRange.get(),
+            this.hazardWidth.get(),
+            this.hazardHeight.get()
+         );
+         if (hazard != null) {
+            this.info("Hazard near: %s at %d blocks, stopping.", hazard.getType().getName().getString(), Math.round(hazard.distanceTo(this.mc.player)));
+            this.toggle();
+            return;
+         }
       }
       this.airTicks = this.mc.player.isOnGround() ? 0 : this.airTicks + 1;
       this.logGliderWear();
