@@ -7,6 +7,8 @@ import com.hunterbuddy.modules.visualrange.DisconnectMemory;
 import com.hunterbuddy.modules.visualrange.DiscordActivitySettings;
 import com.hunterbuddy.modules.visualrange.DiscordReporter;
 import com.hunterbuddy.modules.visualrange.DiscordSettings;
+import com.hunterbuddy.modules.visualrange.GroundItemBeam;
+import com.hunterbuddy.modules.visualrange.GroundItemLabels;
 import com.hunterbuddy.modules.visualrange.GroundItemSettings;
 import com.hunterbuddy.modules.visualrange.GroundItemWatch;
 import com.hunterbuddy.modules.visualrange.LeaveClassifier;
@@ -22,6 +24,8 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
+import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -45,6 +49,8 @@ public class VisualRangeNotifier extends Module {
     private final AlertSink alerts = new AlertSink(playerSettings, new RangeSound(soundSettings), reporter);
     private final PlayerRangeWatch playerWatch = new PlayerRangeWatch(playerSettings, discordSettings, alerts);
     private final GroundItemWatch itemWatch = new GroundItemWatch(itemSettings, discordSettings, alerts);
+    private final GroundItemBeam itemBeam = new GroundItemBeam(itemSettings);
+    private final GroundItemLabels itemLabels = new GroundItemLabels(itemSettings);
     private final PvpWatch pvpWatch = new PvpWatch(
         pvpSettings, new PvpAnnouncer(pvpSettings, playerSettings, activitySettings, alerts));
     private final WatchGuard guard = new WatchGuard();
@@ -96,6 +102,19 @@ public class VisualRangeNotifier extends Module {
         }
         if (itemSettings.itemNotify.get()) guard.run("items", itemWatch::tick);
         if (pvpSettings.anchorPop.get()) guard.run("anchors", pvpWatch::forgetVanishedAnchors);
+    }
+
+    @EventHandler
+    private void onRender3D(Render3DEvent event) {
+        if (mc.player == null || mc.world == null || !itemSettings.itemBeam.get()) return;
+        guard.run("item-beams", () -> itemBeam.render(event));
+    }
+
+    @EventHandler
+    private void onRender2D(Render2DEvent event) {
+        if (mc.player == null || mc.world == null) return;
+        if (!itemSettings.itemBeam.get() || !itemSettings.beamLabels.get()) return;
+        guard.run("item-labels", () -> itemLabels.render(event));
     }
 
     @EventHandler
