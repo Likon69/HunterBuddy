@@ -28,6 +28,7 @@ public final class PetMonitor {
     public boolean combatQuiet;
     public boolean regearQuiet;
     public boolean landingQuiet;
+    public boolean danger;
 
     public void reset() {
         Modules modules = Modules.get();
@@ -43,6 +44,7 @@ public final class PetMonitor {
         combatQuiet = false;
         regearQuiet = false;
         landingQuiet = false;
+        danger = false;
     }
 
     public void update() {
@@ -59,6 +61,7 @@ public final class PetMonitor {
             if (player == mc.player || Friends.get().get(player.getGameProfile().name()) != null) continue;
             if (mc.player.squaredDistanceTo(player) <= 250 * 250) { close = true; break; }
         }
+        danger = close || combatQuiet;
         int rockets = 0;
         int totems = 0;
         var inventory = mc.player.getInventory();

@@ -11,6 +11,8 @@ public final class PetDialogue {
     private final PetResources.Line[] recent = new PetResources.Line[4];
     private final Random random = new Random();
     public PetResources.Line current;
+    public PetResources.Line queued;
+    private PetEvent queuedEvent;
     private SoundInstance voice;
     private PetEvent speaking;
     private int recentIndex;
@@ -24,7 +26,7 @@ public final class PetDialogue {
         pending[index] = now + (event.important() ? 180000 : 15000);
     }
 
-    public void update(long now, boolean focused, boolean quiet, boolean sounds, double gapSeconds) {
+    public void update(long now, boolean focused, boolean quiet, boolean sounds, double gapSeconds, PetFullPose poses, PetResources.Rig rig) {
         if (revision != PetResources.INSTANCE.revision) {
             reset();
             revision = PetResources.INSTANCE.revision;
@@ -41,6 +43,11 @@ public final class PetDialogue {
         }
         if (current != null && (now - startedAt > 30000 || (voice == null && now - startedAt > 4500)
             || (voice != null && now - startedAt > 600 && !MeteorClient.mc.getSoundManager().isPlaying(voice)))) stop();
+        if (quiet && queuedEvent != null && !queuedEvent.important()) {
+            queued = null;
+            queuedEvent = null;
+        }
+        if (queued != null && (PetFullPose.find(rig, queued.pose) == null || poses.ready(queued.pose))) start(now, sounds);
         PetEvent best = null;
         for (PetEvent event : PetEvent.ALL) {
             int index = event.ordinal();
@@ -54,6 +61,7 @@ public final class PetDialogue {
         }
         if (best == null || now - lastSpoken < gapSeconds * 1000) return;
         if (current != null && (speaking == null || best.priority <= speaking.priority)) return;
+        if (queuedEvent != null && best.priority <= queuedEvent.priority) return;
         PetResources.Line[] group = PetResources.INSTANCE.lines[best.ordinal()];
         pending[best.ordinal()] = 0;
         if (group == null || group.length == 0) return;
@@ -67,10 +75,20 @@ public final class PetDialogue {
             }
         }
         nextAllowed[best.ordinal()] = now + best.cooldownMs;
+        if (chosen == null && best == PetEvent.SLEEP) chosen = group[start];
         if (chosen == null) return;
         stop();
+        queued = chosen;
+        queuedEvent = best;
+        if (PetFullPose.find(rig, chosen.pose) == null || poses.ready(chosen.pose)) start(now, sounds);
+    }
+
+    private void start(long now, boolean sounds) {
+        PetResources.Line chosen = queued;
         current = chosen;
-        speaking = best;
+        speaking = queuedEvent;
+        queued = null;
+        queuedEvent = null;
         startedAt = now;
         lastSpoken = now;
         recent[recentIndex] = chosen;
@@ -92,6 +110,8 @@ public final class PetDialogue {
         if (voice != null) MeteorClient.mc.getSoundManager().stop(voice);
         voice = null;
         current = null;
+        queued = null;
+        queuedEvent = null;
         speaking = null;
     }
 

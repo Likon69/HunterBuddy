@@ -7,7 +7,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
@@ -24,6 +23,7 @@ public final class PetResources implements SynchronousResourceReloader {
     public static final String[] ANCHOR_NAMES = {"cigar_tip", "bottle_mouth", "mouth", "eyes", "feet"};
     public static final PetResources INSTANCE = new PetResources();
     public volatile Rig rig;
+    public volatile PetSfxBank sfx = PetSfxBank.EMPTY;
     public volatile Line[][] lines = new Line[PetEvent.ALL.length][];
     public volatile int revision;
     public volatile String status = "Resource pack not loaded";
@@ -53,7 +53,7 @@ public final class PetResources implements SynchronousResourceReloader {
                             String text = value.get("text").getAsString();
                             if (text.isBlank() || text.length() > 512) continue;
                             Identifier sound = Identifier.of(value.get("sound").getAsString());
-                            entries[count++] = new Line(sound, text, volume);
+                            entries[count++] = new Line(sound, text, value.has("pose") ? value.get("pose").getAsString() : null, volume);
                         } catch (RuntimeException ignored) {
                         }
                     }
@@ -64,6 +64,7 @@ public final class PetResources implements SynchronousResourceReloader {
             }
         } catch (Exception ignored) {
         }
+        sfx = PetSfxBank.load(manager);
         rig = loaded;
         lines = loadedLines;
         status = loadedStatus;
@@ -90,15 +91,16 @@ public final class PetResources implements SynchronousResourceReloader {
             Identifier texture = Identifier.of(value.get("texture").getAsString());
             int imageWidth;
             int imageHeight;
+            float[] outline;
             try (InputStream stream = manager.getResourceOrThrow(texture).getInputStream(); NativeImage image = NativeImage.read(stream)) {
                 imageWidth = image.getWidth();
                 imageHeight = image.getHeight();
+                outline = PetOutline.read(image);
             }
             ordered[i] = new Part(i, texture, coordinate(value.getAsJsonArray("offset"), 0),
                 coordinate(value.getAsJsonArray("offset"), 1), coordinate(value.getAsJsonArray("pivot"), 0),
-                coordinate(value.getAsJsonArray("pivot"), 1), imageWidth, imageHeight, value.get("z").getAsInt());
+                coordinate(value.getAsJsonArray("pivot"), 1), imageWidth, imageHeight, outline);
         }
-        Arrays.sort(ordered, Comparator.comparingInt(Part::z));
         float[] anchors = new float[ANCHOR_NAMES.length * 2];
         JsonObject points = data.getAsJsonObject("anchors");
         for (int i = 0; i < ANCHOR_NAMES.length; i++) {
@@ -113,8 +115,82 @@ public final class PetResources implements SynchronousResourceReloader {
         int bottleWidth = Math.round(coordinate(prop.getAsJsonArray("size"), 0));
         int bottleHeight = Math.round(coordinate(prop.getAsJsonArray("size"), 1));
         if (bottleWidth <= 0 || bottleHeight <= 0 || bottleWidth > 4096 || bottleHeight > 4096) throw new IllegalArgumentException();
+        FullPose[] poses = new FullPose[0];
+        if (data.has("poses")) {
+            JsonObject definitions = data.getAsJsonObject("poses");
+            FullPose[] candidates = new FullPose[definitions.size()];
+            int count = 0;
+            for (String name : definitions.keySet()) {
+                if (count == candidates.length) break;
+                try {
+                    JsonObject value = definitions.getAsJsonObject(name);
+                    Identifier texture = Identifier.of(value.get("texture").getAsString());
+                    int pw = Math.round(coordinate(value.getAsJsonArray("size"), 0));
+                    int ph = Math.round(coordinate(value.getAsJsonArray("size"), 1));
+                    float fx = coordinate(value.getAsJsonArray("feet"), 0);
+                    float fy = coordinate(value.getAsJsonArray("feet"), 1);
+                    float poseScale = value.get("scale").getAsFloat();
+                    float eyesX = coordinate(value.getAsJsonArray("eyes"), 0);
+                    float eyesY = coordinate(value.getAsJsonArray("eyes"), 1);
+                    if (!Float.isFinite(poseScale) || poseScale <= 0 || poseScale > 16 || eyesX < 0 || eyesX > pw || eyesY < 0 || eyesY > ph) continue;
+                    if (pw < 1 || ph < 1 || pw > 4096 || ph > 4096 || fx < 0 || fx > pw || fy < 0 || fy > ph) continue;
+                    long hangingSum = 0;
+                    int hangingCount = 0;
+                    float shineX = fx;
+                    float shineY = ph * 0.55f;
+                    try (InputStream stream = manager.getResourceOrThrow(texture).getInputStream(); NativeImage image = NativeImage.read(stream)) {
+                        if (image.getWidth() != pw || image.getHeight() != ph) continue;
+                        for (int py = Math.max(0, (int) Math.ceil(fy)); py < ph; py++) {
+                            for (int px = 0; px < pw; px++) {
+                                if ((image.getColorArgb(px, py) >>> 24) < 128) continue;
+                                hangingSum += px;
+                                hangingCount++;
+                            }
+                        }
+                        int best = -1;
+                        for (int py = ph / 3; py < ph * 3 / 4; py++) {
+                            for (int px = 0; px < pw; px++) {
+                                int color = image.getColorArgb(px, py);
+                                if ((color >>> 24) < 240) continue;
+                                int brightness = Math.min((color >> 16) & 255, Math.min((color >> 8) & 255, color & 255));
+                                if (brightness > best) {
+                                    best = brightness;
+                                    shineX = px;
+                                    shineY = py;
+                                }
+                            }
+                        }
+                    }
+                    candidates[count++] = new FullPose(name, texture, pw, ph, fx, fy, shineX, shineY, poseScale, eyesX, eyesY, hangingCount == 0 ? 0 : (float) hangingSum / hangingCount - fx);
+                } catch (Exception ignored) {
+                }
+            }
+            poses = Arrays.copyOf(candidates, count);
+        }
+        FullPose[] dances = danceFrames(poses);
         return new Rig(width, height, ordered, anchors, bottle, bottleWidth, bottleHeight,
-            coordinate(prop.getAsJsonArray("neck"), 0), coordinate(prop.getAsJsonArray("neck"), 1));
+            coordinate(prop.getAsJsonArray("neck"), 0), coordinate(prop.getAsJsonArray("neck"), 1), poses, dances,
+            new int[dances.length], new int[dances.length]);
+    }
+
+    static FullPose[] danceFrames(FullPose[] poses) {
+        int count = 0;
+        for (FullPose pose : poses) if (danceNumber(pose.name()) > 0) count++;
+        FullPose[] frames = new FullPose[count];
+        count = 0;
+        for (FullPose pose : poses) if (danceNumber(pose.name()) > 0) frames[count++] = pose;
+        return frames;
+    }
+
+    static int danceNumber(String name) {
+        if (!name.startsWith("dance_") || name.length() <= 6) return 0;
+        int number = 0;
+        for (int i = 6; i < name.length(); i++) {
+            int digit = name.charAt(i) - '0';
+            if (digit < 0 || digit > 9 || number > (Integer.MAX_VALUE - digit) / 10) return 0;
+            number = number * 10 + digit;
+        }
+        return number;
     }
 
     private static float coordinate(JsonArray array, int index) {
@@ -130,23 +206,29 @@ public final class PetResources implements SynchronousResourceReloader {
         }
     }
 
-    public record Part(int index, Identifier texture, float x, float y, float pivotX, float pivotY, int width, int height, int z) {
+    public record Part(int index, Identifier texture, float x, float y, float pivotX, float pivotY, int width, int height, float[] outline) {
     }
 
     public record Rig(float width, float height, Part[] parts, float[] anchors, Identifier bottle, int bottleWidth,
-                      int bottleHeight, float neckX, float neckY) {
+                      int bottleHeight, float neckX, float neckY, FullPose[] poses, FullPose[] dances, int[] danceOrder, int[] previousDanceOrder) {
+    }
+
+    public record FullPose(String name, Identifier texture, int width, int height, float feetX, float feetY,
+                           float shineX, float shineY, float scale, float eyesX, float eyesY, float hangingX) {
     }
 
     public static final class Line {
         public final Identifier sound;
         public final String value;
+        public final String pose;
         public final OrderedText[] text;
         public final int width;
         public PositionedSoundInstance voice;
 
-        private Line(Identifier sound, String value, float volume) {
+        private Line(Identifier sound, String value, String pose, float volume) {
             this.sound = sound;
             this.value = value;
+            this.pose = pose;
             List<OrderedText> wrapped = MeteorClient.mc.textRenderer.wrapLines(Text.literal(value), 210);
             text = wrapped.toArray(OrderedText[]::new);
             int longest = 0;

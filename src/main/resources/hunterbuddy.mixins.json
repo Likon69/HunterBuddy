@@ -49,7 +49,10 @@
     "render.InGameHudDroneCrosshairMixin",
     "accessors.GameRendererFovAccessor",
     "accessors.GuiThemeNameAccessor",
-    "accessors.GuiRendererScissorAccessor"
+    "accessors.GuiRendererScissorAccessor",
+    "accessors.PetHudAccess",
+    "render.PetHudFrameMixin",
+    "render.PetHudTextureMixin"
   ],
   "injectors": {
     "defaultRequire": 1

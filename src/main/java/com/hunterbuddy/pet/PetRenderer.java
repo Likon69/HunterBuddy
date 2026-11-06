@@ -2,61 +2,66 @@ package com.hunterbuddy.pet;
 
 import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gl.RenderPipelines;
 import org.joml.Matrix3x2fStack;
 
 public final class PetRenderer {
     public float anchorX;
     public float anchorY;
 
-    public void anchor(PetResources.Rig rig, PetMotion motion, PetPose pose, float size, int anchor, int owner) {
-        float x = rig.anchors()[anchor * 2];
-        float y = rig.anchors()[anchor * 2 + 1];
-        for (PetResources.Part part : rig.parts()) {
-            if (part.index() != owner) continue;
-            float sin = (float) Math.sin(pose.angles[owner]);
-            float cos = (float) Math.cos(pose.angles[owner]);
-            float dx = x - part.pivotX();
-            float dy = y - part.pivotY();
-            x = part.pivotX() + dx * cos - dy * sin;
-            y = part.pivotY() + dx * sin + dy * cos;
-            break;
-        }
-        float dx = x - rig.anchors()[8];
-        float dy = y - rig.anchors()[9];
-        float sin = (float) Math.sin(pose.lean);
-        float cos = (float) Math.cos(pose.lean);
-        float scale = size / rig.height();
-        anchorX = motion.x + motion.direction * scale * (dx * cos - dy * sin);
-        anchorY = motion.y + pose.bob * scale + size * pose.crouch + scale * (dx * sin + dy * cos);
+    private final PetSkeleton skeleton = new PetSkeleton();
+    private final PetImageTransform image = new PetImageTransform();
+
+    public void prepare(PetResources.Rig rig, PetMotion motion, PetPose pose, float size, float delta) {
+        skeleton.update(rig, motion, pose, size, delta);
     }
 
-    public void render(DrawContext context, PetResources.Rig rig, PetMotion motion, PetPose pose, PetBrain brain,
-                       PetEffects effects, PetDialogue dialogue, float size, float delta, float guiScale) {
+    public void anchor(PetResources.Rig rig, int anchor) {
+        skeleton.anchor(rig, anchor);
+        anchorX = skeleton.anchorX;
+        anchorY = skeleton.anchorY;
+    }
+
+    public void eyes(PetResources.Rig rig, PetMotion motion, PetFullPose poses, float size, float delta) {
+        anchor(rig, 3);
+        float blend = poses.previousBlend + (poses.blend - poses.previousBlend) * delta;
+        if (poses.current == null || blend == 0) return;
+        float x = motion.previousX + (motion.x - motion.previousX) * delta;
+        float y = motion.previousY + (motion.y - motion.previousY) * delta;
+        float mix = poses.previousMix + (poses.mix - poses.previousMix) * delta;
+        float eyeX = anchorX * (1 - blend);
+        float eyeY = anchorY * (1 - blend);
+        image.update(poses.current, rig.height(), size, poses.age, motion.direction, blend, x, y);
+        eyeX += image.eyesX * blend * (1 - mix);
+        eyeY += image.eyesY * blend * (1 - mix);
+        if (poses.alternate != null && mix > 0) {
+            image.update(poses.alternate, rig.height(), size, poses.age, motion.direction, blend, x, y);
+            eyeX += image.eyesX * blend * mix;
+            eyeY += image.eyesY * blend * mix;
+        }
+        anchorX = eyeX;
+        anchorY = eyeY;
+    }
+
+    public void render(DrawContext context, PetResources.Rig rig, PetMotion motion, PetPose pose,
+                       PetEffects effects, PetDialogue dialogue, PetFullPose fullPose, float size, float delta) {
         Matrix3x2fStack matrices = context.getMatrices();
         float x = motion.previousX + (motion.x - motion.previousX) * delta;
         float y = motion.previousY + (motion.y - motion.previousY) * delta;
-        if (brain.state == PetState.HIDE) {
-            int left = Math.round(motion.width * 0.5f - 92 * guiScale);
-            int right = Math.round(motion.width * 0.5f + 92 * guiScale);
-            int top = Math.max(0, Math.round(motion.height - 24 * guiScale));
-            context.enableScissor(0, 0, motion.width, top);
-            puppet(context, rig, motion, pose, size, delta, x, y);
-            context.disableScissor();
-            context.enableScissor(x < motion.width * 0.5f ? 0 : right, top,
-                x < motion.width * 0.5f ? Math.max(0, left) : motion.width, motion.height);
-            puppet(context, rig, motion, pose, size, delta, x, y);
-            context.disableScissor();
-        } else puppet(context, rig, motion, pose, size, delta, x, y);
+        float blend = fullPose.previousBlend + (fullPose.blend - fullPose.previousBlend) * delta;
+        prepare(rig, motion, pose, size, delta);
+        if (blend < 1) puppet(context, rig, motion.direction, 1 - blend);
+        float mix = fullPose.previousMix + (fullPose.mix - fullPose.previousMix) * delta;
+        if (fullPose.current != null && blend > 0) whole(context, rig, fullPose.current, fullPose.age, motion.direction, size, blend, blend * (1 - mix), x, y);
+        if (fullPose.alternate != null && mix > 0 && blend > 0) whole(context, rig, fullPose.alternate, fullPose.age, motion.direction, size, blend, blend * mix, x, y);
         effects.render(context, rig, size);
         PetResources.Line line = dialogue.current;
         if (line == null) return;
         int bubbleWidth = line.width + 12;
         int bubbleHeight = line.text.length * 10 + 10;
         float textScale = Math.min(1, (motion.width - 8f) / bubbleWidth);
-        anchor(rig, motion, pose, size, 3, 0);
+        eyes(rig, motion, fullPose, size, delta);
         int left = Math.round(Math.max(4, Math.min(motion.width - bubbleWidth * textScale - 4, anchorX - bubbleWidth * textScale / 2)));
-        int top = Math.round(Math.max(4, Math.min(y - size, anchorY - size * 0.2f) - bubbleHeight * textScale - 12));
+        int top = Math.round(Math.max(4, anchorY - bubbleHeight * textScale - 12));
         matrices.pushMatrix();
         matrices.translate(left, top);
         matrices.scale(textScale, textScale);
@@ -65,27 +70,41 @@ public final class PetRenderer {
         matrices.popMatrix();
     }
 
-    private static void puppet(DrawContext context, PetResources.Rig rig, PetMotion motion, PetPose pose,
-                               float size, float delta, float x, float y) {
+    private void whole(DrawContext context, PetResources.Rig rig, PetResources.FullPose pose, float age, int direction,
+                       float size, float breathing, float alpha, float x, float y) {
         Matrix3x2fStack matrices = context.getMatrices();
-        float scale = size / rig.height();
-        float bob = pose.previousBob + (pose.bob - pose.previousBob) * delta;
-        float lean = pose.previousLean + (pose.lean - pose.previousLean) * delta;
-        float crouch = pose.previousCrouch + (pose.crouch - pose.previousCrouch) * delta;
+        image.update(pose, rig.height(), size, age, direction, breathing, x, y);
         matrices.pushMatrix();
-        matrices.translate(x, y + bob * scale + size * crouch);
-        matrices.scale(motion.direction * scale, scale);
-        matrices.rotate(lean);
-        matrices.translate(-rig.anchors()[8], -rig.anchors()[9]);
-        for (PetResources.Part part : rig.parts()) {
-            matrices.pushMatrix();
-            matrices.translate(part.pivotX(), part.pivotY());
-            int index = part.index();
-            matrices.rotate(pose.previousAngles[index] + (pose.angles[index] - pose.previousAngles[index]) * delta);
-            context.drawTexture(RenderPipelines.GUI_TEXTURED, part.texture(), Math.round(part.x() - part.pivotX()),
-                Math.round(part.y() - part.pivotY()), 0, 0, part.width(), part.height(), part.width(), part.height());
-            matrices.popMatrix();
+        matrices.mul(image.matrix);
+        if (direction < 0) matrices.scale(-1, 1);
+        PetImages.draw(context, pose.texture(), 0, 0, pose.width(), pose.height(), direction, ((int) (alpha * 255) << 24) | 0xffffff);
+        float sparkle = Math.max(0, (float) Math.sin(age * 4));
+        if (pose.name().equals("moon") && sparkle > 0.65f) {
+            int sx = direction * Math.round(pose.shineX());
+            int sy = Math.round(pose.shineY());
+            int radius = Math.round(5 + sparkle * 9);
+            int color = ((int) (alpha * 255) << 24) | 0xffffdf;
+            context.fill(sx - radius, sy - 2, sx + radius, sy + 2, color);
+            context.fill(sx - 2, sy - radius, sx + 2, sy + radius, color);
         }
+        matrices.popMatrix();
+    }
+
+    private void puppet(DrawContext context, PetResources.Rig rig, int direction, float alpha) {
+        for (int layer = 0; layer < 6; layer++) {
+            for (PetResources.Part part : rig.parts()) {
+                if (part.index() == PetSkeleton.layer(layer)) part(context, part, direction, alpha);
+            }
+        }
+    }
+
+    private void part(DrawContext context, PetResources.Part part, int direction, float alpha) {
+        Matrix3x2fStack matrices = context.getMatrices();
+        matrices.pushMatrix();
+        matrices.mul(skeleton.matrices[part.index()]);
+        if (direction < 0) matrices.scale(-1, 1);
+        PetImages.draw(context, part.texture(), Math.round(part.x()), Math.round(part.y()), part.width(), part.height(),
+            direction, ((int) (alpha * 255) << 24) | 0xffffff);
         matrices.popMatrix();
     }
 }

@@ -6,8 +6,11 @@ import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gl.RenderPipelines;
 import org.joml.Matrix3x2fStack;
+import net.minecraft.text.OrderedText;
+import net.minecraft.text.Style;
 
 public final class PetEffects {
+    private final PetSfx sfx;
     private static final int BOTTLES = 6;
     private static final int PARTICLES = 96;
     private final float[] bx = new float[BOTTLES];
@@ -28,7 +31,18 @@ public final class PetEffects {
     private float wordTimer;
     private float clock;
     private int nextParticle;
-    private static final String[] WORDS = {"*BURP*", "*hic*", "*pschht*", "*cough*", "ZZZ", "CLANG!"};
+    private static final OrderedText[] WORDS = {
+        OrderedText.styledForwardsVisitedString("*BURP*", Style.EMPTY),
+        OrderedText.styledForwardsVisitedString("*hic*", Style.EMPTY),
+        OrderedText.styledForwardsVisitedString("*pschht*", Style.EMPTY),
+        OrderedText.styledForwardsVisitedString("*cough*", Style.EMPTY),
+        OrderedText.styledForwardsVisitedString("Zzz", Style.EMPTY),
+        OrderedText.styledForwardsVisitedString("CLANG!", Style.EMPTY)
+    };
+
+    public PetEffects(PetSfx sfx) {
+        this.sfx = sfx;
+    }
 
     public void reset() {
         Arrays.fill(life, 0);
@@ -55,27 +69,38 @@ public final class PetEffects {
             rotation[i] = direction;
             life[i] = 8;
             bounces[i] = 0;
+            sfx.play(PetSfxAction.THROW);
             return;
         }
     }
 
     public void word(int index, float x, float y) {
+        sfx.play(switch (index) {
+            case 0 -> PetSfxAction.BURP;
+            case 1 -> PetSfxAction.HIC;
+            case 2 -> PetSfxAction.BEER_OPEN;
+            case 3 -> PetSfxAction.COUGH;
+            case 4 -> PetSfxAction.SNORE;
+            case 5 -> PetSfxAction.BOTTLE_SHATTER;
+            default -> throw new IllegalArgumentException();
+        });
         emit((byte) (index + 2), x, y, (random.nextFloat() - 0.5f) * 8, -18, 2.2f);
     }
 
-    public void update(float dt, PetBrain brain, PetMotion motion, PetResources.Rig rig, float size, float cigarX, float cigarY) {
+    public void update(float dt, PetBrain brain, PetMotion motion, PetResources.Rig rig, float size, float cigarX, float cigarY, float headX, float headY, boolean puppet) {
         clock += dt;
         smokeTimer += dt;
         wordTimer += dt;
-        if (brain.state == PetState.SMOKE && smokeTimer > 0.13f) {
+        if (puppet && brain.state == PetState.SMOKE && smokeTimer > 0.13f) {
             smokeTimer = 0;
+            sfx.play(PetSfxAction.SMOKE_PUFF);
             emit((byte) 0, cigarX, cigarY, (random.nextFloat() - 0.5f) * 6, -size * 0.22f, 2.7f);
         }
-        if (wordTimer > 7 / (1 + brain.drunkenness * 3)) {
+        if (wordTimer > (brain.state == PetState.SLEEP ? 1.8f : 7 / (1 + brain.drunkenness * 3))) {
             wordTimer = 0;
-            if (brain.state == PetState.SLEEP) word(4, motion.x, motion.y - size);
-            else if (brain.state == PetState.SMOKE) word(3, motion.x, motion.y - size);
-            else if (brain.drunkenness > 0.1f) word(random.nextBoolean() ? 0 : 1, motion.x, motion.y - size);
+            if (brain.grounded && brain.state == PetState.SLEEP) word(4, headX, headY);
+            else if (brain.state == PetState.SMOKE) word(3, headX, headY);
+            else if (!brain.resting() && brain.drunkenness > 0.1f) word(random.nextBoolean() ? 0 : 1, headX, headY);
         }
         float radius = Math.max(2, size / rig.height() * (float) Math.hypot(
             Math.max(rig.neckX(), rig.bottleWidth() - rig.neckX()), Math.max(rig.neckY(), rig.bottleHeight() - rig.neckY())));
@@ -100,11 +125,12 @@ public final class PetEffects {
                 impact = true;
             }
             if (impact) {
-                word(5, bx[i], by[i]);
+                sfx.play(PetSfxAction.BOTTLE_BOUNCE);
                 bounces[i]++;
             }
             if (bounces[i] >= 3 || life[i] <= 0) {
                 life[i] = 0;
+                word(5, bx[i], by[i]);
                 for (int j = 0; j < 7; j++) emit((byte) 1, bx[i], by[i], (random.nextFloat() - 0.5f) * size,
                     -random.nextFloat() * size, 1.1f);
             }
