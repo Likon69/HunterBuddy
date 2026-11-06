@@ -50,8 +50,7 @@ import static meteordevelopment.meteorclient.MeteorClient.mc;
 public class HbGuiTheme extends MeteorGuiTheme {
     private final HbStyle style;
     private final HbTypography typography;
-    private final double layoutScale;
-    private final double textScale;
+    private final HbMetrics metrics = new HbMetrics();
     public final Setting<String> fontFamily;
     public final Setting<List<Module>> riskModules;
     public final Setting<List<Module>> separatorBeforeModules;
@@ -59,9 +58,6 @@ public class HbGuiTheme extends MeteorGuiTheme {
     private final Color highlight = new Color();
 
     public HbGuiTheme(String name, HbStyle style) {
-        double meteorTextHeight = super.textRenderer().getHeight();
-        layoutScale = (meteorTextHeight + 8) / 20;
-        textScale = meteorTextHeight / (12 * layoutScale);
         ((GuiThemeNameAccessor) (Object) this).hunterbuddy$setName(name);
         this.style = style;
         style.palette().apply(this);
@@ -102,11 +98,11 @@ public class HbGuiTheme extends MeteorGuiTheme {
 
     @Override
     public double scale(double value) {
-        return super.scale(value * layoutScale);
+        return super.scale(value * metrics.layoutScale());
     }
 
     public double textSize(double size) {
-        return size * textScale;
+        return size * metrics.textScale();
     }
 
     @Override
@@ -117,6 +113,7 @@ public class HbGuiTheme extends MeteorGuiTheme {
     @Override
     public void beforeRender() {
         super.beforeRender();
+        if (metrics.refresh()) invalidateScreen();
         categories.update();
         HbAnim.beginFrame();
         if (style.inverted()) textColor.get().set(accent());
