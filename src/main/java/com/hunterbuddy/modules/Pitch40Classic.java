@@ -16,21 +16,19 @@ public class Pitch40Classic extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     private final SettingGroup sgFirework = this.settings.createGroup("Auto Firework");
 
-    public final Setting<Double> lowerBound = this.sgGeneral.add(new DoubleSetting.Builder()
-        .name("lower-bound")
-        .description("Hauteur Y où on repart en pitch up.")
+    public final Setting<Double> upperBound = this.sgGeneral.add(new DoubleSetting.Builder()
+        .name("upper-bound")
+        .description("Height where the climb stops and the glide pitches back down.")
         .defaultValue(220.0)
-        .min(220.0)
-        .sliderMax(500000.0)
+        .sliderRange(-64.0, 500.0)
         .build()
     );
 
-    public final Setting<Double> upperBound = this.sgGeneral.add(new DoubleSetting.Builder()
-        .name("upper-bound")
-        .description("Hauteur Y où on repart en pitch down.")
+    public final Setting<Double> lowerBound = this.sgGeneral.add(new DoubleSetting.Builder()
+        .name("lower-bound")
+        .description("Height where the descent stops and the glide pitches back up.")
         .defaultValue(120.0)
-        .min(-128.0)
-        .sliderMax(360.0)
+        .sliderRange(-64.0, 500.0)
         .build()
     );
 
