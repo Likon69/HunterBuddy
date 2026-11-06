@@ -1,6 +1,8 @@
 package com.hunterbuddy.render;
 
+import com.hunterbuddy.HunterBuddyAddon;
 import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.CompiledRenderPipeline;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.systems.GpuDevice;
@@ -70,6 +72,17 @@ public final class HbRenderPipelines {
         .withCull(false)
         .build());
 
+    public static final RenderPipeline SKYBOX = RenderPipeline.builder()
+        .withLocation(id("pipeline/skybox"))
+        .withVertexFormat(MeteorVertexFormats.POS2, VertexFormat.DrawMode.TRIANGLES)
+        .withVertexShader(id("shaders/skybox/skybox.vert"))
+        .withFragmentShader(id("shaders/skybox/skybox.frag"))
+        .withUniform("SkyData", UniformType.UNIFORM_BUFFER)
+        .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+        .withDepthWrite(false)
+        .withCull(false)
+        .build();
+
     private HbRenderPipelines() {}
 
     public static Identifier id(String path) {
@@ -82,19 +95,38 @@ public final class HbRenderPipelines {
     }
 
     public static void precompile() {
+        for (RenderPipeline pipeline : PIPELINES) {
+            compile(pipeline);
+        }
+
+        precompileSkybox();
+    }
+
+    private static void precompileSkybox() {
+        boolean valid = false;
+
+        try {
+            valid = compile(SKYBOX).isValid();
+        } catch (RuntimeException e) {
+            HunterBuddyAddon.LOG.error("Skybox shader failed to load", e);
+        }
+
+        if (!valid) HunterBuddyAddon.LOG.error("Skybox shader is unavailable, the vanilla sky is used instead");
+        SkyboxRenderer.setAvailable(valid);
+    }
+
+    private static CompiledRenderPipeline compile(RenderPipeline pipeline) {
         GpuDevice device = RenderSystem.getDevice();
         ResourceManager resources = MinecraftClient.getInstance().getResourceManager();
 
-        for (RenderPipeline pipeline : PIPELINES) {
-            device.precompilePipeline(pipeline, (identifier, shaderType) -> {
-                var resource = resources.getResource(identifier).orElseThrow();
+        return device.precompilePipeline(pipeline, (identifier, shaderType) -> {
+            var resource = resources.getResource(identifier).orElseThrow();
 
-                try (var in = resource.getInputStream()) {
-                    return IOUtils.toString(in, StandardCharsets.UTF_8);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
-        }
+            try (var in = resource.getInputStream()) {
+                return IOUtils.toString(in, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 }
