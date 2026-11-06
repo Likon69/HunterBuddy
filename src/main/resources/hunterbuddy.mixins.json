@@ -47,7 +47,9 @@
     "render.GameRendererDroneHandMixin",
     "render.GameRendererSpeedBlurMixin",
     "render.InGameHudDroneCrosshairMixin",
-    "accessors.GameRendererFovAccessor"
+    "accessors.GameRendererFovAccessor",
+    "accessors.GuiThemeNameAccessor",
+    "accessors.GuiRendererScissorAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
