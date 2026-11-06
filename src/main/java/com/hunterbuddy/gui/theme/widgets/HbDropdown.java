@@ -32,6 +32,17 @@ public class HbDropdown<T> extends WDropdown<T> implements HbWidget {
     @Override
     public double pad() { return theme.scale(2); }
 
+    public boolean containsPopup(double mouseX, double mouseY) {
+        return expanded && root.isOver(mouseX, mouseY);
+    }
+
+    @Override
+    protected void onCalculateWidgetPositions() {
+        root.width = width;
+        super.onCalculateWidgetPositions();
+        tooltip = caption(get());
+    }
+
     @Override
     protected WDropdownRoot createRootWidget() { return new Root(); }
 
@@ -54,7 +65,7 @@ public class HbDropdown<T> extends WDropdown<T> implements HbWidget {
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
         style().drawDropdownHeader(renderer, theme(), this, expanded, pressed || mouseOver);
-        theme().typography().draw(renderer, caption(get()), x + theme.scale(style().dropdownInset()),
+        theme().typography().draw(renderer, theme().typography().fit(caption(get()), 11, false, Math.max(0, width - theme.scale(style().dropdownInset() + 18))), x + theme.scale(style().dropdownInset()),
             y + (height - theme.scale(11)) / 2, 11, style().dropdownText(theme(), true), false);
     }
 
@@ -72,7 +83,8 @@ public class HbDropdown<T> extends WDropdown<T> implements HbWidget {
         protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
             boolean selected = value.equals(HbDropdown.this.value);
             style().drawDropdownValue(renderer, theme(), this, selected, pressed || mouseOver);
-            theme().typography().draw(renderer, caption(value), x + theme.scale(6), y + theme.scale(3),
+            tooltip = caption(value);
+            theme().typography().draw(renderer, theme().typography().fit(caption(value), 11, false, Math.max(0, width - theme.scale(12))), x + theme.scale(6), y + theme.scale(3),
                 11, style().dropdownText(theme(), selected), false);
         }
     }

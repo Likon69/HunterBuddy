@@ -25,6 +25,12 @@ public class HbModuleEntry extends WVerticalList {
         add(new HbModule(module, title, this)).expandX();
     }
 
+    @Override
+    protected void onCalculateSize() {
+        super.onCalculateSize();
+        width = cells.getFirst().widget().width;
+    }
+
     public Module module() {
         return module;
     }

@@ -2,10 +2,13 @@ package com.hunterbuddy.gui.theme.screens;
 
 import com.hunterbuddy.gui.theme.HbGuiTheme;
 import com.hunterbuddy.gui.theme.widgets.HbModuleEntry;
+import com.hunterbuddy.gui.theme.widgets.HbWindow;
 import meteordevelopment.meteorclient.events.meteor.ActiveModulesChangedEvent;
 import meteordevelopment.meteorclient.events.meteor.ModuleBindChangedEvent;
 import meteordevelopment.meteorclient.gui.screens.ModulesScreen;
+import meteordevelopment.meteorclient.gui.renderer.GuiRenderer;
 import meteordevelopment.meteorclient.gui.utils.Cell;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WContainer;
 import meteordevelopment.meteorclient.gui.widgets.containers.WWindow;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -24,6 +27,13 @@ public class HbModulesScreen extends ModulesScreen {
 
     public HbModulesScreen(HbGuiTheme theme) {
         super(theme);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <W extends WWidget> Cell<W> add(W widget) {
+        if (widget instanceof WCategoryController) return (Cell<W>) super.add(new HbCategoryController());
+        return super.add(widget);
     }
 
     @Override
@@ -66,6 +76,7 @@ public class HbModulesScreen extends ModulesScreen {
     }
 
     public void toggle(HbModuleEntry entry) {
+        if (categoryController instanceof HbCategoryController controller) controller.raise(entry.window());
         prune();
         if (entry.isExpanded()) {
             entry.collapse();
@@ -144,5 +155,78 @@ public class HbModulesScreen extends ModulesScreen {
     public boolean fromClipboard() {
         prune();
         return clipboardTarget == null ? super.fromClipboard() : clipboardTarget.settings().fromClipboard();
+    }
+
+    private class HbCategoryController extends WCategoryController {
+        private WWindow captured;
+        private double pointerX;
+        private double pointerY;
+
+        void raise(WWindow window) {
+            if (windows.remove(window)) windows.add(window);
+        }
+
+        private WWindow hit(double mouseX, double mouseY) {
+            for (int i = windows.size() - 1; i >= 0; i--) {
+                WWindow window = windows.get(i);
+                if (window instanceof HbWindow hb && hb.containsInteraction(mouseX, mouseY)) return window;
+            }
+            return null;
+        }
+
+        @Override
+        protected void renderWidget(WWidget widget, GuiRenderer renderer, double mouseX, double mouseY, double delta) {}
+
+        @Override
+        public boolean render(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
+            if (super.render(renderer, mouseX, mouseY, delta)) return true;
+            WWindow hovered = hit(mouseX, mouseY);
+            for (WWindow window : windows) {
+                window.render(renderer, window == hovered ? mouseX : Double.NaN, window == hovered ? mouseY : Double.NaN, delta);
+            }
+            return false;
+        }
+
+        @Override
+        public boolean mouseClicked(Click click, boolean doubled) {
+            captured = hit(click.x(), click.y());
+            if (captured != null) raise(captured);
+            mouseMoved(click.x(), click.y(), click.x(), click.y());
+            for (WWindow window : windows) {
+                if (window != captured && window.isFocused()) window.mouseClicked(click, doubled);
+            }
+            if (captured == null) return false;
+            captured.mouseClicked(click, doubled);
+            return true;
+        }
+
+        @Override
+        public boolean mouseReleased(Click click) {
+            if (captured == null) return false;
+            WWindow window = captured;
+            captured = null;
+            window.mouseReleased(click);
+            return true;
+        }
+
+        @Override
+        public void mouseMoved(double mouseX, double mouseY, double lastMouseX, double lastMouseY) {
+            pointerX = mouseX;
+            pointerY = mouseY;
+            WWindow hovered = captured != null ? captured : hit(mouseX, mouseY);
+            for (WWindow window : windows) {
+                boolean active = window == hovered;
+                window.mouseMoved(active ? mouseX : Double.NaN, active ? mouseY : Double.NaN, lastMouseX, lastMouseY);
+            }
+        }
+
+        @Override
+        public boolean mouseScrolled(double amount) {
+            WWindow window = hit(pointerX, pointerY);
+            if (window == null) return false;
+            raise(window);
+            window.mouseScrolled(amount);
+            return true;
+        }
     }
 }

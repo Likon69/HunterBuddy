@@ -40,16 +40,30 @@ public class HbSettingTable extends WTable implements HbWidget {
             List<Cell<?>> row = getRow(index);
             double height = rowHeight(row);
             double right = x + width - rightInset();
+            double available = Math.max(0, width - leftInset() - rightInset());
+            double gap = theme.scale(8);
+            double fixed = gap * Math.max(0, row.size() - 1);
+            for (int column = 2; column < row.size(); column++) fixed += row.get(column).widget().width;
+            double labelWidth = Math.min(row.getFirst().widget().width, Math.max(0, Math.min(available * 0.35, available - fixed - theme.scale(86))));
+            double controlWidth = Math.max(0, available - labelWidth - fixed);
             for (int column = row.size() - 1; column >= 0; column--) {
                 Cell<?> cell = row.get(column);
+                if (column == 0) cell.widget().width = labelWidth;
+                else if (column == 1) cell.widget().width = Math.min(cell.widget().width, controlWidth);
                 cell.x = column == 0 ? x + leftInset() : right - cell.widget().width;
                 cell.y = top;
                 cell.width = cell.widget().width;
                 cell.height = height;
                 cell.centerY().alignWidget();
-                right = cell.x - theme.scale(8);
+                right = cell.x - gap;
             }
             top += height;
         }
+    }
+
+    @Override
+    public void calculateWidgetPositions() {
+        super.calculateWidgetPositions();
+        for (Cell<?> cell : cells) HbWidthLayout.fit(cell.widget(), cell.width);
     }
 }

@@ -102,15 +102,15 @@ public class HbNumericSetting extends WContainer implements HbWidget {
     protected void onCalculateWidgetPositions() {
         slider.x = x;
         slider.y = y + theme.scale(style().inverted() ? 2 : 5);
-        slider.width = theme.scale(style().inverted() ? 120 : 90);
+        field.width = Math.min(width * 0.4, Math.max(theme.scale(style().inverted() ? 24 : 30), theme().typography().width(field.get(), field.fontSize(), false) + field.pad() * 2));
+        slider.width = style().inverted() ? width : Math.max(theme.scale(40), width - field.width - theme.scale(8));
         slider.height = theme.scale(style().inverted() ? 18 : 12);
-        field.width = Math.max(theme.scale(style().inverted() ? 24 : 30), theme().typography().width(field.get(), field.fontSize(), false) + field.pad() * 2);
-        field.x = style().inverted() ? x + slider.fraction() * slider.width - field.width / 2 : x + theme.scale(98);
+        field.x = style().inverted() ? x + slider.fraction() * Math.max(0, width - field.width) : x + width - field.width;
         field.y = style().inverted() ? y - theme.scale(2) : y + theme.scale(4);
     }
 
     @Override
     protected void onRender(meteordevelopment.meteorclient.gui.renderer.GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        if (style().inverted()) field.x = x + slider.fraction() * slider.width - field.width / 2;
+        if (style().inverted()) field.x = x + slider.fraction() * Math.max(0, width - field.width);
     }
 }

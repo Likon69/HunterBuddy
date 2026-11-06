@@ -2,22 +2,17 @@ package com.hunterbuddy.gui.theme;
 
 import it.unimi.dsi.fastutil.objects.Object2DoubleLinkedOpenHashMap;
 import meteordevelopment.meteorclient.gui.renderer.GuiRenderer;
-import meteordevelopment.meteorclient.renderer.Fonts;
-import meteordevelopment.meteorclient.renderer.text.CustomTextRenderer;
-import meteordevelopment.meteorclient.renderer.text.FontFamily;
-import meteordevelopment.meteorclient.renderer.text.FontInfo;
 import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-
-import java.io.IOException;
 
 public final class HbTypography implements TextRenderer {
     private final HbGuiTheme theme;
     private final HbTextBatches batches;
+    private final HbFontLoader fonts = new HbFontLoader();
     private final Object2DoubleLinkedOpenHashMap<String> regularWidths = widths();
     private final Object2DoubleLinkedOpenHashMap<String> boldWidths = widths();
-    private CustomTextRenderer regular;
-    private CustomTextRenderer bold;
+    private TextRenderer regular;
+    private TextRenderer bold;
     private double regularHeight;
     private double boldHeight;
     private String requested;
@@ -37,11 +32,10 @@ public final class HbTypography implements TextRenderer {
         return widths;
     }
 
-    CustomTextRenderer font(boolean strong) {
+    TextRenderer font(boolean strong) {
         String familyName = theme.fontFamily.get();
         if (!familyName.equals(requested)) {
-            if (regular != null) regular.destroy();
-            if (bold != null) bold.destroy();
+            fonts.reset();
             regular = null;
             bold = null;
             regularWidths.clear();
@@ -49,19 +43,13 @@ public final class HbTypography implements TextRenderer {
             requested = familyName;
         }
         if (strong ? bold == null : regular == null) {
-            FontFamily family = Fonts.getFamily(familyName);
-            if (family == null) family = Fonts.getFamily("JetBrains Mono");
-            try {
-                CustomTextRenderer renderer = new CustomTextRenderer(family.get(strong ? FontInfo.Type.Bold : FontInfo.Type.Regular));
-                if (strong) {
-                    bold = renderer;
-                    boldHeight = renderer.getHeight();
-                } else {
-                    regular = renderer;
-                    regularHeight = renderer.getHeight();
-                }
-            } catch (IOException exception) {
-                throw new IllegalStateException("Unable to load the theme font.", exception);
+            TextRenderer renderer = fonts.load(familyName, strong);
+            if (strong) {
+                bold = renderer;
+                boldHeight = renderer.getHeight();
+            } else {
+                regular = renderer;
+                regularHeight = renderer.getHeight();
             }
         }
         return strong ? bold : regular;
@@ -73,7 +61,7 @@ public final class HbTypography implements TextRenderer {
     }
 
     private double relativeWidth(String text, boolean strong) {
-        CustomTextRenderer font = font(strong);
+        TextRenderer font = font(strong);
         Object2DoubleLinkedOpenHashMap<String> cache = strong ? boldWidths : regularWidths;
         double measured = cache.getDouble(text);
         if (measured >= 0) return measured;
@@ -84,11 +72,24 @@ public final class HbTypography implements TextRenderer {
     }
 
     public double width(String text, double size, boolean strong) {
-        return theme.scale(relativeWidth(text, strong) * size);
+        return theme.scale(relativeWidth(text, strong) * theme.textSize(size));
+    }
+
+    public String fit(String text, double size, boolean strong, double available) {
+        if (width(text, size, strong) <= available) return text;
+        String ellipsis = "…";
+        if (width(ellipsis, size, strong) > available) return "";
+        int end = text.length();
+        while (end > 0) {
+            end = text.offsetByCodePoints(end, -1);
+            String shortened = text.substring(0, end) + ellipsis;
+            if (width(shortened, size, strong) <= available) return shortened;
+        }
+        return ellipsis;
     }
 
     public void draw(GuiRenderer gui, String text, double x, double y, double size, Color color, boolean strong) {
-        batches.add(gui, text, x, y, size, color, strong, alpha);
+        batches.add(gui, text, x, y, theme.textSize(size), color, strong, alpha);
     }
 
     @Override
@@ -107,14 +108,14 @@ public final class HbTypography implements TextRenderer {
     @Override
     public double getWidth(String text, int length, boolean shadow) {
         if (fontStarted) return font(false).getWidth(text, length, shadow);
-        double width = length == text.length() && !shadow ? relativeWidth(text, false) * 11
-            : font(false).getWidth(text, length, shadow) * 11 / baseHeight(false);
+        double width = length == text.length() && !shadow ? relativeWidth(text, false) * theme.textSize(11)
+            : font(false).getWidth(text, length, shadow) * theme.textSize(11) / baseHeight(false);
         return building ? width * nativeScale : width;
     }
 
     @Override
     public double getHeight(boolean shadow) {
-        return building ? 11 * nativeScale : 11;
+        return theme.textSize(11) * (building ? nativeScale : 1);
     }
 
     @Override
@@ -122,9 +123,9 @@ public final class HbTypography implements TextRenderer {
         if (text.isEmpty()) return x;
         boolean standalone = !building;
         if (standalone) begin(1, false, false);
-        CustomTextRenderer font = font(false);
+        TextRenderer font = font(false);
         if (!fontStarted) {
-            font.begin(nativeScale * 11 / regularHeight);
+            font.begin(nativeScale * theme.textSize(11) / regularHeight);
             fontStarted = true;
         }
         font.setAlpha(alpha);

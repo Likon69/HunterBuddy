@@ -21,6 +21,24 @@ public class HbWindow extends WWindow implements HbWidget {
         return activity != null || "search".equals(id) || "favorites".equals(id);
     }
 
+    public boolean containsInteraction(double mouseX, double mouseY) {
+        if (!visible) return false;
+        double visibleHeight = header.height + (height - header.height) * animProgress;
+        return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + visibleHeight
+            || expanded && containsPopup(view, mouseX, mouseY);
+    }
+
+    private boolean containsPopup(WWidget widget, double mouseX, double mouseY) {
+        if (!widget.visible) return false;
+        if (widget instanceof HbDropdown<?> dropdown && dropdown.containsPopup(mouseX, mouseY)) return true;
+        if (widget instanceof WContainer container) {
+            for (Cell<?> cell : container.cells) {
+                if (containsPopup(cell.widget(), mouseX, mouseY)) return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public void init() {
         super.init();
@@ -71,11 +89,14 @@ public class HbWindow extends WWindow implements HbWidget {
 
     @Override
     public boolean render(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
+        if (!visible) return true;
+        renderer.scissorStart(x, y, width, header.height + (height - header.height) * animProgress);
         boolean hidden = super.render(renderer, mouseX, mouseY, delta);
         if (!hidden) {
             double visibleHeight = header.height + (height - header.height) * animProgress;
             style().drawWindowFrame(renderer, theme(), x, y, width, visibleHeight);
         }
+        renderer.scissorEnd();
         return hidden;
     }
 

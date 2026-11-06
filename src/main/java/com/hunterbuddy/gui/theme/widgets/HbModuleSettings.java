@@ -57,8 +57,7 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
         WWidget widget = module.getWidget(theme);
         if (widget != null) {
             add(theme.horizontalSeparator()).expandX();
-            Cell<WWidget> cell = add(widget);
-            if (widget instanceof WContainer) cell.expandX();
+            add(new HbHorizontalViewport(widget)).expandX();
         }
 
         WSection section = add(theme.section("Bind", true)).expandX().widget();
@@ -128,6 +127,14 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
         width += inset * 2;
         x -= inset;
         y -= inset;
+    }
+
+    @Override
+    public void calculateWidgetPositions() {
+        super.calculateWidgetPositions();
+        for (Cell<?> cell : cells) {
+            HbWidthLayout.fit(cell.widget(), width - theme.scale(12) - cell.padLeft() - cell.padRight());
+        }
     }
 
     @Override

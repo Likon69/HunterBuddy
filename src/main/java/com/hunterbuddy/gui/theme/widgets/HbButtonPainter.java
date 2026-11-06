@@ -19,9 +19,11 @@ public final class HbButtonPainter {
         theme.style().drawButton(renderer, theme, button, filled, button.mouseOver);
         Color color = theme.style().buttonText(theme, filled);
         if (text != null) {
-            double width = theme.typography().width(text, 10, false);
-            theme.typography().draw(renderer, text, button.x + (button.width - width) / 2,
-                button.y + (button.height - theme.scale(10)) / 2, 10, color, false);
+            String display = theme.typography().fit(text, 10, false, Math.max(0, button.width - theme.scale(8)));
+            if (!display.equals(text)) button.tooltip = text;
+            double width = theme.typography().width(display, 10, false);
+            theme.typography().draw(renderer, display, button.x + (button.width - width) / 2,
+                button.y + (button.height - theme.scale(theme.textSize(10))) / 2, 10, color, false);
         } else if (texture != null) {
             double size = theme.scale(10);
             renderer.quad(button.x + (button.width - size) / 2, button.y + (button.height - size) / 2, size, size, texture, color);
