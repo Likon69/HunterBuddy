@@ -13,6 +13,8 @@ import com.hunterbuddy.modules.regear.util.PlacementUtils;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.modules.regear.util.XaeroWaypointManager;
+import com.hunterbuddy.pet.PetEvent;
+import com.hunterbuddy.pet.PetEvents;
 import com.hunterbuddy.util.DugHoles;
 import com.hunterbuddy.util.GlideEscape;
 import com.hunterbuddy.util.ShipwreckDetector;
@@ -2129,6 +2131,7 @@ public class SpawnerDetector extends Module {
         recomputeScoreAndCategory(site);
 
         sites.put(center, site);
+        if (site.hasSpawner) com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.SPAWNER_FOUND);
 
         long evalMs = (System.nanoTime() - t0) / 1_000_000;
         logSite(site, evalMs);
@@ -6307,6 +6310,7 @@ public class SpawnerDetector extends Module {
             }
             boolean burning = mc.player.isOnFire() || mc.player.isInLava();
             if (approachEscape.update(speedH, burning, yaw)) {
+                PetEvents.publish(PetEvent.LAVA_CAST);
                 autoLog("APPROACH", autoSite.center, String.format("blocked speedH=%.2f burning=%s, backing off", speedH, burning));
             }
             if (approachEscape.turning()) applyGlideRotation(approachEscape.yaw(), APPROACH_ESCAPE_TURN_PITCH);
@@ -13810,6 +13814,7 @@ public class SpawnerDetector extends Module {
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
         boolean burning = mc.player.isOnFire() || mc.player.isInLava();
         if (soloEscape.update(speedH, burning, yaw)) {
+            PetEvents.publish(PetEvent.LAVA_CAST);
             autoSoloCruiseAltitude = Math.min(SOLO_MAX_ALTITUDE, Math.max(autoSoloCruiseAltitude, y + SOLO_ESCAPE_CLIMB));
             autoLog("SOLO", target.center, String.format("blocked speedH=%.2f burning=%s, backing off and climbing to altitude=%.1f",
                 speedH, burning, autoSoloCruiseAltitude));

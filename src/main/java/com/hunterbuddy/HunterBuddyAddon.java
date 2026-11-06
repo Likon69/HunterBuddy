@@ -163,6 +163,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new com.hunterbuddy.modules.DroneCamera());
         Modules.get().add(new com.hunterbuddy.modules.SpeedBlur());
         Modules.get().add(new com.hunterbuddy.modules.Skybox());
+        Modules.get().add(new com.hunterbuddy.modules.Pet());
 
 
         Modules.get().add(new ElytraAutoFly());

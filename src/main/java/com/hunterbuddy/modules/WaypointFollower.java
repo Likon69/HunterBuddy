@@ -1049,6 +1049,7 @@ public class WaypointFollower extends Module {
         boolean processActive = this.elytraProcessActive();
         this.landingProcessSeen |= processActive;
         if (this.landingProcessSeen && !processActive) {
+            com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.LANDING_OK);
             this.endLanding();
             this.say("All waypoints reached");
             this.playCompletionSound();
@@ -1075,6 +1076,7 @@ public class WaypointFollower extends Module {
     }
 
     private void abandonLanding(String reason) {
+        com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.LANDING_FAIL);
         this.endLanding();
         this.say(reason);
     }

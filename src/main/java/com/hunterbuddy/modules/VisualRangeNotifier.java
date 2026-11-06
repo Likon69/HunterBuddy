@@ -65,11 +65,13 @@ public class VisualRangeNotifier extends Module {
     }
 
     public static void notifyDeath(Text message) {
+        com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.PLAYER_DEATH);
         VisualRangeNotifier module = activeModule();
         if (module != null) module.reportDeath(message);
     }
 
     public static void notifyDisconnect(Text reason) {
+        com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.DISCONNECT);
         DisconnectMemory.remember(reason);
     }
 

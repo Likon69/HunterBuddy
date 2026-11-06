@@ -81,6 +81,13 @@ public final class HuntFeed {
             ? null
             : MeteorClient.mc.world.getRegistryKey().getValue().toString();
 
+        switch (type) {
+            case PLAYER_ENTER -> com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.PLAYER_ARRIVE);
+            case PLAYER_LEAVE -> com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.PLAYER_LEAVE);
+            case ITEM -> com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.ITEM_SPOTTED);
+            case STASH -> com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.STASH_FOUND);
+            default -> { }
+        }
         entries.addFirst(new Entry(type, System.currentTimeMillis(), label,
             pos == null ? null : pos.toImmutable(), dimension));
 

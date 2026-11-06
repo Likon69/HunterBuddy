@@ -1,0 +1,159 @@
+package com.hunterbuddy.pet;
+
+import java.util.Arrays;
+import java.util.Random;
+import meteordevelopment.meteorclient.MeteorClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gl.RenderPipelines;
+import org.joml.Matrix3x2fStack;
+
+public final class PetEffects {
+    private static final int BOTTLES = 6;
+    private static final int PARTICLES = 96;
+    private final float[] bx = new float[BOTTLES];
+    private final float[] by = new float[BOTTLES];
+    private final float[] bvx = new float[BOTTLES];
+    private final float[] bvy = new float[BOTTLES];
+    private final float[] rotation = new float[BOTTLES];
+    private final float[] life = new float[BOTTLES];
+    private final int[] bounces = new int[BOTTLES];
+    private final float[] px = new float[PARTICLES];
+    private final float[] py = new float[PARTICLES];
+    private final float[] vx = new float[PARTICLES];
+    private final float[] vy = new float[PARTICLES];
+    private final float[] remaining = new float[PARTICLES];
+    private final byte[] kind = new byte[PARTICLES];
+    private final Random random = new Random();
+    private float smokeTimer;
+    private float wordTimer;
+    private float clock;
+    private int nextParticle;
+    private static final String[] WORDS = {"*BURP*", "*hic*", "*pschht*", "*cough*", "ZZZ", "CLANG!"};
+
+    public void reset() {
+        Arrays.fill(life, 0);
+        Arrays.fill(remaining, 0);
+        smokeTimer = 0;
+        wordTimer = 0;
+        clock = 0;
+    }
+
+    public void clearBottles() {
+        Arrays.fill(life, 0);
+    }
+
+    public void throwBottle(float x, float y, int direction, boolean crosshair, int width, int height, float size) {
+        for (int i = 0; i < BOTTLES; i++) {
+            if (life[i] > 0) continue;
+            bx[i] = x;
+            by[i] = y;
+            float targetX = crosshair ? width * 0.5f : random.nextFloat() * width;
+            float targetY = crosshair ? height * 0.5f : height * (0.1f + random.nextFloat() * 0.5f);
+            float time = 0.8f + random.nextFloat() * 0.6f;
+            bvx[i] = (targetX - x) / time;
+            bvy[i] = (targetY - y - 0.5f * size * 5 * time * time) / time;
+            rotation[i] = direction;
+            life[i] = 8;
+            bounces[i] = 0;
+            return;
+        }
+    }
+
+    public void word(int index, float x, float y) {
+        emit((byte) (index + 2), x, y, (random.nextFloat() - 0.5f) * 8, -18, 2.2f);
+    }
+
+    public void update(float dt, PetBrain brain, PetMotion motion, PetResources.Rig rig, float size, float cigarX, float cigarY) {
+        clock += dt;
+        smokeTimer += dt;
+        wordTimer += dt;
+        if (brain.state == PetState.SMOKE && smokeTimer > 0.13f) {
+            smokeTimer = 0;
+            emit((byte) 0, cigarX, cigarY, (random.nextFloat() - 0.5f) * 6, -size * 0.22f, 2.7f);
+        }
+        if (wordTimer > 7 / (1 + brain.drunkenness * 3)) {
+            wordTimer = 0;
+            if (brain.state == PetState.SLEEP) word(4, motion.x, motion.y - size);
+            else if (brain.state == PetState.SMOKE) word(3, motion.x, motion.y - size);
+            else if (brain.drunkenness > 0.1f) word(random.nextBoolean() ? 0 : 1, motion.x, motion.y - size);
+        }
+        float radius = Math.max(2, size / rig.height() * (float) Math.hypot(
+            Math.max(rig.neckX(), rig.bottleWidth() - rig.neckX()), Math.max(rig.neckY(), rig.bottleHeight() - rig.neckY())));
+        for (int i = 0; i < BOTTLES; i++) {
+            if (life[i] <= 0) continue;
+            life[i] -= dt;
+            bx[i] += bvx[i] * dt;
+            by[i] += bvy[i] * dt;
+            bvy[i] += size * 5 * dt;
+            rotation[i] += bvx[i] * dt * 0.05f;
+            boolean impact = false;
+            if (bx[i] < radius || bx[i] > motion.width - radius) {
+                bx[i] = Math.max(radius, Math.min(motion.width - radius, bx[i]));
+                bvx[i] *= -0.65f;
+                impact = true;
+            }
+            if (by[i] < radius) { by[i] = radius; bvy[i] = Math.abs(bvy[i]) * 0.6f; impact = true; }
+            if (by[i] > motion.height - radius) {
+                by[i] = motion.height - radius;
+                bvy[i] = -Math.abs(bvy[i]) * 0.52f;
+                bvx[i] *= 0.8f;
+                impact = true;
+            }
+            if (impact) {
+                word(5, bx[i], by[i]);
+                bounces[i]++;
+            }
+            if (bounces[i] >= 3 || life[i] <= 0) {
+                life[i] = 0;
+                for (int j = 0; j < 7; j++) emit((byte) 1, bx[i], by[i], (random.nextFloat() - 0.5f) * size,
+                    -random.nextFloat() * size, 1.1f);
+            }
+        }
+        for (int i = 0; i < PARTICLES; i++) {
+            if (remaining[i] <= 0) continue;
+            remaining[i] -= dt;
+            px[i] += vx[i] * dt;
+            py[i] += vy[i] * dt;
+            if (kind[i] == 0) px[i] += (float) Math.sin(clock * 3 + i) * dt * 8;
+            if (kind[i] == 1) vy[i] += size * 3 * dt;
+        }
+    }
+
+    public void render(DrawContext context, PetResources.Rig rig, float size) {
+        Matrix3x2fStack matrices = context.getMatrices();
+        float scale = size / rig.height();
+        for (int i = 0; i < BOTTLES; i++) {
+            if (life[i] <= 0) continue;
+            matrices.pushMatrix();
+            matrices.translate(bx[i], by[i]);
+            matrices.rotate(rotation[i]);
+            matrices.scale(scale, scale);
+            context.drawTexture(RenderPipelines.GUI_TEXTURED, rig.bottle(), -Math.round(rig.neckX()), -Math.round(rig.neckY()),
+                0, 0, rig.bottleWidth(), rig.bottleHeight(), rig.bottleWidth(), rig.bottleHeight());
+            matrices.popMatrix();
+        }
+        for (int i = 0; i < PARTICLES; i++) {
+            if (remaining[i] <= 0) continue;
+            int alpha = Math.min(255, (int) (remaining[i] * 110));
+            int x = (int) px[i];
+            int y = (int) py[i];
+            if (kind[i] == 0) {
+                int radius = 1 + (int) ((2.7f - remaining[i]) * 2);
+                context.fill(x - radius, y - radius, x + radius, y + radius, (alpha << 24) | 0x999999);
+            } else if (kind[i] == 1) context.fill(x, y, x + 2, y + 3, (alpha << 24) | 0x7aab78);
+            else context.drawTextWithShadow(MeteorClient.mc.textRenderer,
+                WORDS[kind[i] - 2], x, y, (alpha << 24) | 0xffefbb);
+        }
+    }
+
+    private void emit(byte type, float x, float y, float speedX, float speedY, float seconds) {
+        int i = nextParticle;
+        nextParticle = (nextParticle + 1) % PARTICLES;
+        kind[i] = type;
+        px[i] = x;
+        py[i] = y;
+        vx[i] = speedX;
+        vy[i] = speedY;
+        remaining[i] = seconds;
+    }
+}
