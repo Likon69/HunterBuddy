@@ -114,7 +114,7 @@ public class RocketBoost extends Module {
    public final Setting<Boolean> autoSpeed = sgAuto.add(new BoolSetting.Builder()
       .name("auto-speed")
       .description("Compute the highest multiplier Grim still accepts for your current look direction, every tick, instead of using the fixed slider. Grim checks each axis separately, so a fixed multiplier is either too slow at some angles or a setback at others.")
-      .defaultValue(false)
+      .defaultValue(true)
       .build()
    );
 
