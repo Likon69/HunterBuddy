@@ -9,4 +9,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface InputMovementAccessor {
    @Accessor("movementVector")
    void hunterBuddy$setMovementVector(Vec2f vector);
+
+   @Accessor("movementVector")
+   Vec2f hunterBuddy$getMovementVector();
 }

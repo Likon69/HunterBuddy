@@ -3,6 +3,7 @@ package com.hunterbuddy.modules;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.elytraboost.FireworkBoostTracker;
 import com.hunterbuddy.modules.mixin.accessors.EntityVelocityUpdateS2CPacketAccessor;
+import com.hunterbuddy.util.BaritoneNextRotation;
 import com.hunterbuddy.util.GlideWindow;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -370,7 +371,7 @@ public class RocketBoost extends Module {
    }
 
    private Vec3d computeNextLook(Vec3d look) {
-      float[] baritoneNext = nextBaritoneRotation();
+      float[] baritoneNext = BaritoneNextRotation.get();
       if (baritoneNext != null && baritoneNext.length == 2 && Float.isFinite(baritoneNext[0]) && Float.isFinite(baritoneNext[1])) {
          return Vec3d.fromPolar(baritoneNext[1], baritoneNext[0]);
       }
@@ -381,25 +382,6 @@ public class RocketBoost extends Module {
       float nextYaw = currentYaw + MathHelper.wrapDegrees(currentYaw - lastYaw);
       float nextPitch = MathHelper.clamp(currentPitch + (currentPitch - lastPitch), -90.0F, 90.0F);
       return Vec3d.fromPolar(nextPitch, nextYaw);
-   }
-
-   private float[] nextBaritoneRotation() {
-      if (this.baritoneRotationUnavailable) return null;
-      try {
-         baritone.api.IBaritone primary = baritone.api.BaritoneAPI.getProvider().getPrimaryBaritone();
-         if (primary == null) return null;
-         Object lookBehavior = primary.getLookBehavior();
-         if (lookBehavior == null) return null;
-         java.lang.reflect.Method method = this.baritoneNextRotationMethod;
-         if (method == null) {
-            method = lookBehavior.getClass().getMethod("hunterbuddyNextRotation");
-            this.baritoneNextRotationMethod = method;
-         }
-         return (float[]) method.invoke(lookBehavior);
-      } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-         this.baritoneRotationUnavailable = true;
-         return null;
-      }
    }
 
    private double solveMaxMultiplier(Vec3d velocity, Vec3d look, Vec3d pairLook, double threshold) {
@@ -705,8 +687,6 @@ public class RocketBoost extends Module {
    private java.lang.reflect.Field baritoneSettingValue;
    private boolean baritoneUnavailable;
    private boolean baritoneSyncAnnounced;
-   private java.lang.reflect.Method baritoneNextRotationMethod;
-   private boolean baritoneRotationUnavailable;
 
    /**
     * Keeps Baritone's flight simulation in step with how the boost actually behaves.

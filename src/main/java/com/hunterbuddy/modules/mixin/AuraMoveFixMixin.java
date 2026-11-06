@@ -1,9 +1,9 @@
 package com.hunterbuddy.modules.mixin;
 
 import com.hunterbuddy.modules.KillAuraPlus;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.input.Input;
-import net.minecraft.client.input.KeyboardInput;
+import com.hunterbuddy.modules.mixin.accessors.InputMovementAccessor;
+import com.hunterbuddy.util.BaritoneNextRotation;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec2f;
 import org.spongepowered.asm.mixin.Mixin;
@@ -46,24 +46,31 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * follow it, forward is toward the target rather than toward the camera. Outside
  * that window nothing is touched.
  */
-@Mixin(KeyboardInput.class)
-public abstract class AuraMoveFixMixin extends Input {
-    @Inject(method = "tick", at = @At("TAIL"))
+@Mixin(ClientPlayerEntity.class)
+public abstract class AuraMoveFixMixin {
+    @Inject(
+        method = "tickMovement",
+        at = @At(value = "INVOKE", target = "Lnet/minecraft/client/input/Input;tick()V", shift = At.Shift.AFTER)
+    )
     private void hunterBuddy$turnMovementWithTheAim(CallbackInfo ci) {
         float aim = KillAuraPlus.moveFixYaw();
         if (Float.isNaN(aim)) return;
 
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null || movementVector == null) return;
+        ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
+        InputMovementAccessor input = (InputMovementAccessor) player.input;
+        Vec2f movementVector = input.hunterBuddy$getMovementVector();
+        if (movementVector == null) return;
 
         float sideways = movementVector.x;
         float forward = movementVector.y;
         if (sideways == 0.0F && forward == 0.0F) return;
 
         // Vanilla has already normalised what the keys gave, and the yaw here is
-        // still the camera's: Meteor writes the aim onto the movement packet at
+        // the one travel() uses: the camera's, or the target's while Baritone
+        // walks. Meteor writes the aim onto the movement packet at
         // the end of the tick, long after this and after travel().
-        double delta = Math.toRadians(MathHelper.wrapDegrees(aim - mc.player.getYaw()));
+        float[] next = BaritoneNextRotation.get();
+        double delta = Math.toRadians(MathHelper.wrapDegrees(aim - (next == null ? player.getYaw() : next[0])));
         float cos = (float) Math.cos(delta);
         float sin = (float) Math.sin(delta);
 
@@ -75,7 +82,7 @@ public abstract class AuraMoveFixMixin extends Input {
         // Written straight onto the field. The addon's Input mixin renormalises to
         // one when both components are set through it, which would throw the scale
         // above away and leave the speed wrong in exactly the case it fixes.
-        movementVector = new Vec2f(turnedSideways * scale, turnedForward * scale);
+        input.hunterBuddy$setMovementVector(new Vec2f(turnedSideways * scale, turnedForward * scale));
     }
 
     /** The direction factor of {@code getDirectionalMovementSpeedMultiplier}, same formula. */
