@@ -2,6 +2,7 @@ package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.util.HudGlowPanel;
+import com.hunterbuddy.util.TravelFormat;
 import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.modules.WaypointFollower;
 import java.util.List;
@@ -287,10 +288,11 @@ public class FollowerRouteHud extends HudElement {
         }
 
         int overflow = remaining - shown;
-        int eta = quantiseEta(follower.hudEtaSeconds());
+        int eta = TravelFormat.quantiseEta(follower.hudEtaSeconds());
 
         WaypointFollower.HudState state = follower.hudState();
         boolean paused = state == WaypointFollower.HudState.PAUSED
+            || state == WaypointFollower.HudState.MANUAL
             || state == WaypointFollower.HudState.AREA_LOADER;
 
         // The deposits sliding off behind you are every recent exit; the fanfare — the halo
@@ -369,8 +371,8 @@ public class FollowerRouteHud extends HudElement {
         float targetFresh = pulse.freshness("target", target.toShortString(), 600L);
 
         renderLane(renderer, dt, cumulative, overflow, follower.hudReach(),
-            formatDistance(d0),
-            paused ? "--" : eta < 0 ? "--" : "~" + formatTime(eta),
+            TravelFormat.formatDistance(d0),
+            paused ? "--" : eta < 0 ? "--" : "~" + TravelFormat.formatTime(eta),
             modeInitials(follower.hudModeName()), paused, doneFade,
             follower.hudSpeed(), targetFresh, removals);
     }
@@ -844,24 +846,5 @@ public class FollowerRouteHud extends HudElement {
             case "BARITONE" -> "BAR";
             default -> "MAN";
         };
-    }
-
-    private static int quantiseEta(int seconds) {
-        if (seconds < 0) return seconds;
-        if (seconds >= 3600) return seconds / 60 * 60;
-        if (seconds >= 60) return seconds / 10 * 10;
-        return seconds / 5 * 5;
-    }
-
-    private static String formatDistance(double blocks) {
-        return blocks >= 1000.0
-            ? String.format(Locale.ROOT, "%.1f km", blocks / 1000.0)
-            : String.format(Locale.ROOT, "%.0f m", blocks);
-    }
-
-    private static String formatTime(int seconds) {
-        if (seconds >= 3600) return String.format(Locale.ROOT, "%dh %02dm", seconds / 3600, (seconds % 3600) / 60);
-        if (seconds >= 60) return String.format(Locale.ROOT, "%dm %02ds", seconds / 60, seconds % 60);
-        return seconds + "s";
     }
 }

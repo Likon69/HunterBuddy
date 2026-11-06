@@ -2,6 +2,7 @@ package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.util.HudGlowPanel;
+import com.hunterbuddy.util.TravelFormat;
 import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.modules.WaypointFollower;
 import java.util.List;
@@ -148,19 +149,20 @@ public class FollowerHeadingHud extends HudElement {
         int done = follower.hudCompleted();
         int total = done + follower.hudRemaining();
         double distance = follower.hudDistance();
-        int eta = quantiseEta(follower.hudEtaSeconds());
+        int eta = TravelFormat.quantiseEta(follower.hudEtaSeconds());
 
         // A held follower is not steering, and a tape in its flying colours
         // would say it is. Greyed, it still shows where the line sits — worth
         // having while deciding whether to resume — without claiming anything.
         WaypointFollower.HudState state = follower.hudState();
         boolean held = state == WaypointFollower.HudState.PAUSED
+            || state == WaypointFollower.HudState.MANUAL
             || state == WaypointFollower.HudState.AREA_LOADER;
 
         renderTape(renderer, yaw, MathHelper.wrapDegrees(targetYaw), ghostYaws,
             String.format(Locale.ROOT, "wp %d/%d", Math.min(done + 1, total), total),
-            distance < 0.0 ? "--" : formatDistance(distance),
-            eta < 0 ? "--" : "~" + formatTime(eta),
+            distance < 0.0 ? "--" : TravelFormat.formatDistance(distance),
+            eta < 0 ? "--" : "~" + TravelFormat.formatTime(eta),
             follower.hudYawDeadzone(), held);
     }
 
@@ -339,24 +341,5 @@ public class FollowerHeadingHud extends HudElement {
 
         if (cross > 0.0) renderer.triangle(x1, y1, x3, y3, x2, y2, colour);
         else renderer.triangle(x1, y1, x2, y2, x3, y3, colour);
-    }
-
-    private static int quantiseEta(int seconds) {
-        if (seconds < 0) return seconds;
-        if (seconds >= 3600) return seconds / 60 * 60;
-        if (seconds >= 60) return seconds / 10 * 10;
-        return seconds / 5 * 5;
-    }
-
-    private static String formatDistance(double blocks) {
-        return blocks >= 1000.0
-            ? String.format(Locale.ROOT, "%.1f km", blocks / 1000.0)
-            : String.format(Locale.ROOT, "%.0f m", blocks);
-    }
-
-    private static String formatTime(int seconds) {
-        if (seconds >= 3600) return String.format(Locale.ROOT, "%dh %02dm", seconds / 3600, (seconds % 3600) / 60);
-        if (seconds >= 60) return String.format(Locale.ROOT, "%dm %02ds", seconds / 60, seconds % 60);
-        return seconds + "s";
     }
 }

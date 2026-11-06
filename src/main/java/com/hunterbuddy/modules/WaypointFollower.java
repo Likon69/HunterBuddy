@@ -10,10 +10,12 @@ import com.hunterbuddy.modules.waypointfollow.BotWaypoints;
 import com.hunterbuddy.modules.waypointfollow.ElytraRecastStarter;
 import com.hunterbuddy.modules.waypointfollow.ElytraRecastStarter.Ascent;
 import com.hunterbuddy.modules.waypointfollow.FlightModules;
+import com.hunterbuddy.modules.waypointfollow.ManualOverride;
 import com.hunterbuddy.modules.waypointfollow.FollowerRocket;
 import com.hunterbuddy.modules.waypointfollow.FollowerWaypointWorld;
 import com.hunterbuddy.modules.waypointfollow.LavaEscapeTerrain;
 import com.hunterbuddy.modules.waypointfollow.WaypointLoader;
+import com.hunterbuddy.modules.waypointfollow.WaypointLabel;
 import com.hunterbuddy.modules.waypointfollow.WaypointOrdering;
 import com.hunterbuddy.modules.waypointfollow.XaeroMapFocus;
 import com.hunterbuddy.modules.waypointfollow.YawSteering;
@@ -23,11 +25,13 @@ import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.modules.regear.util.XaeroWaypointManager;
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
+import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.BlockState;
@@ -75,6 +79,7 @@ import xaeroplus.util.ChunkUtils;
 public class WaypointFollower extends Module {
     private static final long SEED_SAVE_MS = 15000L;
     private static final int BARITONE_RESTART_DELAY_TICKS = 100;
+    private static final long LANDING_HANDOFF_GRACE_MS = 2000L;
     private static final int BARITONE_RESTART_MAX_ATTEMPTS = 3;
     private static final int LAVA_ESCAPE_REPATH_TICKS = 80;
     private static final int LAVA_ESCAPE_ARM_TICKS = 20;
@@ -92,6 +97,7 @@ public class WaypointFollower extends Module {
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     private final SettingGroup sgFlight = this.settings.createGroup("Flight");
     private final SettingGroup sgControl = this.settings.createGroup("Control");
+    private final SettingGroup sgLabel = this.settings.createGroup("Label");
 
     private final Setting<String> waypointPrefix = this.sgGeneral.add(new StringSetting.Builder()
         .name("waypoint-prefix")
@@ -165,6 +171,21 @@ public class WaypointFollower extends Module {
         .action(this::togglePause)
         .build());
 
+    private final Setting<Boolean> manualOverride = this.sgControl.add(new BoolSetting.Builder()
+        .name("manual-override")
+        .description("Hands control back while you move the mouse or movement keys, and resumes once you stop.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Double> manualOverrideDelay = this.sgControl.add(new DoubleSetting.Builder()
+        .name("manual-override-delay")
+        .description("Seconds without input before the follower takes control back.")
+        .defaultValue(2.0)
+        .min(0.5)
+        .sliderMax(30.0)
+        .visible(this.manualOverride::get)
+        .build());
+
     private final Setting<Integer> seedSpacing = this.sgControl.add(new IntSetting.Builder()
         .name("seed-spacing")
         .description("Overworld blocks between two seeded waypoints. Two overworld portals closer than 128 blocks link to each other.")
@@ -223,13 +244,13 @@ public class WaypointFollower extends Module {
 
     private final Setting<FlightMode> overworldFlightMode = this.sgFlight.add(new EnumSetting.Builder<FlightMode>()
         .name("overworld-flight-mode")
-        .description("How the Overworld is crossed.")
+        .description("How the Overworld is crossed: RocketFly, Pitch40, Baritone elytra, or None for manual.")
         .defaultValue(FlightMode.Pitch40)
         .build());
 
     private final Setting<FlightMode> endFlightMode = this.sgFlight.add(new EnumSetting.Builder<FlightMode>()
         .name("end-flight-mode")
-        .description("How the End is crossed.")
+        .description("How the End is crossed: RocketFly, Pitch40, Baritone elytra, or None for manual.")
         .defaultValue(FlightMode.Pitch40)
         .build());
 
@@ -283,8 +304,55 @@ public class WaypointFollower extends Module {
         .visible(this.autoStartFlight::get)
         .build());
 
+    private final Setting<Boolean> landOnArrival = this.sgFlight.add(new BoolSetting.Builder()
+        .name("land-on-arrival")
+        .description("Lands at the last waypoint instead of gliding on, using Baritone's safe landing.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Integer> landingTimeout = this.sgFlight.add(new IntSetting.Builder()
+        .name("landing-timeout")
+        .description("Seconds to wait for the landing before giving up.")
+        .defaultValue(120)
+        .min(10)
+        .max(600)
+        .sliderRange(10, 600)
+        .visible(this.landOnArrival::get)
+        .build());
+
+    private final Setting<Boolean> waypointLabel = this.sgLabel.add(new BoolSetting.Builder()
+        .name("waypoint-label")
+        .description("Shows distance and time left above the current waypoint.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Boolean> labelFinalDestination = this.sgLabel.add(new BoolSetting.Builder()
+        .name("label-final-destination")
+        .description("Adds the distance and time left to the last waypoint.")
+        .defaultValue(true)
+        .visible(this.waypointLabel::get)
+        .build());
+
+    private final Setting<Double> labelScale = this.sgLabel.add(new DoubleSetting.Builder()
+        .name("label-scale")
+        .description("Size of the label.")
+        .defaultValue(1.0)
+        .min(0.5)
+        .sliderMax(3.0)
+        .visible(this.waypointLabel::get)
+        .build());
+
+    private final Setting<SettingColor> labelColor = this.sgLabel.add(new ColorSetting.Builder()
+        .name("label-color")
+        .description("Color of the label text.")
+        .defaultValue(new SettingColor(255, 255, 255, 255))
+        .visible(this.waypointLabel::get)
+        .build());
+
     private final List<BlockPos> waypointsToFollow = new ArrayList<>();
     private final FlightModules flightModules = new FlightModules();
+    private final ManualOverride manualInput = new ManualOverride();
+    private boolean autoPaused;
     private final FollowerRocket rocket = new FollowerRocket();
     private final WaypointLoader loader = new WaypointLoader(
         () -> this.waypointsFullyLoaded, this::attemptWaypointLoad, this::reportLoadStalled, this::reportLoadError);
@@ -331,6 +399,10 @@ public class WaypointFollower extends Module {
     private long activatedAtMs;
     private long lastCompletedAtMs;
     private boolean routeEndPending;
+    private boolean landingStarted;
+    private BlockPos landingWaypoint;
+    private boolean landingProcessSeen;
+    private long landingStartedAt;
 
     public WaypointFollower() {
         super(HunterBuddyAddon.HUNT_CATEGORY, "waypoint-follower",
@@ -341,6 +413,7 @@ public class WaypointFollower extends Module {
     public void onActivate() {
         if (mc.world == null || mc.player == null) return;
         this.flightModules.bind();
+        this.clearManualOverride();
         if (FollowerWaypointWorld.enablePreferOverworld()) this.say("Enabled XaeroPlus 'Prefer Overworld Waypoints'");
         this.resetSession();
         this.startAsyncWaypointLoad();
@@ -351,6 +424,7 @@ public class WaypointFollower extends Module {
     public void onDeactivate() {
         this.flushSeedSave();
         this.isDeactivating = true;
+        this.clearManualOverride();
         this.areaLoaderSteering = false;
         this.stopFlightMode();
         this.stopBaritone();
@@ -375,6 +449,7 @@ public class WaypointFollower extends Module {
         this.areaLoaderSteering = this.isAreaLoaderActive();
         this.refreshDimensionFlags();
         this.isPaused = false;
+        this.clearLanding();
         this.waypointsCompletedThisSession = 0;
         this.totalDistanceTraveled = 0.0;
         this.lastPlayerPos = mc.player.getEntityPos();
@@ -512,6 +587,7 @@ public class WaypointFollower extends Module {
 
     private void togglePause() {
         if (XaeroMapFocus.textFieldFocused() || !this.isActive()) return;
+        this.autoPaused = false;
         this.isPaused = !this.isPaused;
         if (!this.isPaused) {
             this.say("Resumed");
@@ -530,6 +606,7 @@ public class WaypointFollower extends Module {
     }
 
     public void pause() {
+        this.autoPaused = false;
         if (this.isPaused) return;
         this.isPaused = true;
         this.stopFlightMode();
@@ -826,7 +903,21 @@ public class WaypointFollower extends Module {
     }
 
     private FlightMode dimensionFlightMode() {
-        return this.isInEnd ? this.endFlightMode.get() : this.overworldFlightMode.get();
+        return this.flightModeIn(this.isInNether, this.isInEnd);
+    }
+
+    private FlightMode flightModeIn(boolean nether, boolean end) {
+        if (nether) return this.netherFlightMode.get() == NetherFlightMode.Baritone ? FlightMode.Baritone : FlightMode.None;
+        return end ? this.endFlightMode.get() : this.overworldFlightMode.get();
+    }
+
+    private boolean usesBaritone() {
+        return this.dimensionFlightMode() == FlightMode.Baritone;
+    }
+
+    private void releaseFlight() {
+        if (this.activeFlightMode != FlightMode.None) this.stopFlightMode();
+        if (this.currentBaritoneTarget != null) this.stopBaritone();
     }
 
     private Direction directionToward(BlockPos from, BlockPos to) {
@@ -842,17 +933,22 @@ public class WaypointFollower extends Module {
     }
 
     private void handleNetherPathfinding() {
-        if (this.netherFlightMode.get() == NetherFlightMode.Baritone) {
-            this.handleNetherBaritonePathfinding();
+        if (this.usesBaritone()) {
+            this.handleBaritonePathfinding();
             return;
         }
         this.handleNetherManualPathfinding();
     }
 
-    private void handleNetherBaritonePathfinding() {
+    private void handleBaritonePathfinding() {
         BlockPos nextWaypoint = this.getNextWaypoint();
         if (nextWaypoint == null) return;
-        if (this.handleLavaFootEscape(nextWaypoint)) return;
+        if (this.landingStarted) {
+            this.awaitLanding();
+            return;
+        }
+        if (this.activeFlightMode != FlightMode.None) this.stopFlightMode();
+        if (this.isInNether && this.handleLavaFootEscape(nextWaypoint)) return;
         if (!this.driveBaritoneToward(nextWaypoint)) return;
         this.completeBaritoneArrival(nextWaypoint);
     }
@@ -901,8 +997,8 @@ public class WaypointFollower extends Module {
     }
 
     private void giveBaritoneGoal(IBaritone baritone, BlockPos waypoint) {
-        int goalX = this.toNetherCoord(waypoint.getX());
-        int goalZ = this.toNetherCoord(waypoint.getZ());
+        int goalX = this.toGoalCoord(waypoint.getX());
+        int goalZ = this.toGoalCoord(waypoint.getZ());
         this.currentBaritoneTarget = waypoint;
         baritone.getElytraProcess().pathTo(new GoalXZ(goalX, goalZ));
         this.say("Baritone elytra goal set to " + goalX + ", " + goalZ);
@@ -911,15 +1007,85 @@ public class WaypointFollower extends Module {
     private void completeBaritoneArrival(BlockPos waypoint) {
         if (mc.player == null) return;
         Vec3d at = mc.player.getEntityPos();
-        double distance = Math.hypot(at.getX() - this.toNetherCoord(waypoint.getX()),
-            at.getZ() - this.toNetherCoord(waypoint.getZ()));
-        if (distance > this.netherReach()) return;
+        double distance = Math.hypot(at.getX() - this.toGoalCoord(waypoint.getX()),
+            at.getZ() - this.toGoalCoord(waypoint.getZ()));
+        if (distance > this.reach()) return;
+        if (this.landsAt(waypoint)) {
+            this.beginLanding(waypoint);
+            return;
+        }
         this.removeCurrentWaypoint(waypoint);
         this.currentBaritoneTarget = null;
     }
 
-    private double netherReach() {
-        return this.reachDistance.get() * this.netherReachMultiplier.get();
+    private boolean landsAt(BlockPos waypoint) {
+        return this.landOnArrival.get() && this.waypointsToFollow.size() == 1 && this.waypointsToFollow.contains(waypoint);
+    }
+
+    private void beginLanding(BlockPos waypoint) {
+        this.landingStarted = true;
+        this.landingWaypoint = waypoint;
+        this.landingProcessSeen = false;
+        this.landingStartedAt = System.currentTimeMillis();
+        this.say("Last waypoint reached, landing");
+    }
+
+    private void clearLanding() {
+        this.landingStarted = false;
+        this.landingWaypoint = null;
+        this.landingProcessSeen = false;
+        this.landingStartedAt = 0L;
+    }
+
+    private void awaitLanding() {
+        if (!BaritoneHelper.hasElytraProcess()) {
+            this.abandonLanding("Landing handoff failed");
+            return;
+        }
+        if (this.landingTimedOut()) {
+            this.abandonLanding("Landing timed out");
+            return;
+        }
+        boolean processActive = this.elytraProcessActive();
+        this.landingProcessSeen |= processActive;
+        if (this.landingProcessSeen && !processActive) {
+            this.endLanding();
+            this.say("All waypoints reached");
+            this.playCompletionSound();
+        } else if (this.landingHandoffFailed(processActive)) {
+            this.abandonLanding("Landing handoff failed");
+        }
+    }
+
+    private boolean landingTimedOut() {
+        return System.currentTimeMillis() - this.landingStartedAt > this.landingTimeout.get() * 1000L;
+    }
+
+    private boolean landingHandoffFailed(boolean processActive) {
+        return !this.landingProcessSeen && !processActive
+            && System.currentTimeMillis() - this.landingStartedAt > LANDING_HANDOFF_GRACE_MS;
+    }
+
+    private boolean elytraProcessActive() {
+        try {
+            return BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().isActive();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void abandonLanding(String reason) {
+        this.endLanding();
+        this.say(reason);
+    }
+
+    private void endLanding() {
+        this.removeCurrentWaypoint(this.landingWaypoint);
+        this.stopBaritone();
+    }
+
+    private double reach() {
+        return this.reachDistance.get() * (this.isInNether ? this.netherReachMultiplier.get() : 1.0);
     }
 
     private void handleNetherManualPathfinding() {
@@ -927,7 +1093,7 @@ public class WaypointFollower extends Module {
         if (waypoint == null || mc.player == null) return;
         Vec3d target = new Vec3d(this.toNetherCoord(waypoint.getX()), waypoint.getY(), this.toNetherCoord(waypoint.getZ()));
         this.rotateYawTowards(target);
-        if (this.getHorizontalDistance(mc.player.getEntityPos(), target) >= this.netherReach()) return;
+        if (this.getHorizontalDistance(mc.player.getEntityPos(), target) >= this.reach()) return;
         this.removeCurrentWaypoint(waypoint);
         this.celebrateWhenManualRouteEnds();
     }
@@ -935,7 +1101,13 @@ public class WaypointFollower extends Module {
     private void handleDimensionPathfinding(FlightMode mode) {
         BlockPos nextWaypoint = this.getNextWaypoint();
         if (nextWaypoint == null) return;
+        if (this.landingStarted) {
+            this.awaitLanding();
+            return;
+        }
+        if (mode != FlightMode.Baritone && this.currentBaritoneTarget != null) this.stopBaritone();
         switch (mode) {
+            case Baritone -> this.handleBaritonePathfinding();
             case RocketFly -> this.handleRocketFlyPathfinding(nextWaypoint);
             case Pitch40 -> this.handlePitch40Pathfinding(nextWaypoint);
             case None -> this.handleManualPathfinding(nextWaypoint);
@@ -978,11 +1150,20 @@ public class WaypointFollower extends Module {
     private void finishIfArrived(BlockPos waypoint) {
         Vec3d target = this.getAdjustedWaypointPos(waypoint);
         if (this.getHorizontalDistance(mc.player.getEntityPos(), target) >= this.reachDistance.get()) return;
+        if (this.handOverLanding(waypoint)) return;
         this.removeCurrentWaypoint(waypoint);
         if (!this.waypointsToFollow.isEmpty()) return;
         this.stopFlightMode();
         this.say("All waypoints reached");
         this.playCompletionSound();
+    }
+
+    private boolean handOverLanding(BlockPos waypoint) {
+        if (!this.landsAt(waypoint) || !BaritoneHelper.hasElytraProcess()) return false;
+        this.stopFlightMode();
+        if (!this.driveBaritoneToward(waypoint)) return false;
+        this.beginLanding(waypoint);
+        return true;
     }
 
     private void handleManualPathfinding(BlockPos nextWaypoint) {
@@ -1006,6 +1187,12 @@ public class WaypointFollower extends Module {
     }
 
     @EventHandler
+    private void onRender2D(Render2DEvent event) {
+        if (!this.isActive() || mc.player == null || mc.world == null || !this.waypointLabel.get()) return;
+        WaypointLabel.render(event, this, this.labelScale.get(), this.labelColor.get(), this.labelFinalDestination.get());
+    }
+
+    @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (!this.isActive() || this.isDeactivating || mc.player == null || mc.world == null) return;
         if (this.consumeRouteEnd()) return;
@@ -1020,6 +1207,7 @@ public class WaypointFollower extends Module {
     }
 
     private void followRoute() {
+        this.applyManualOverride();
         this.trackTravel();
         this.checkAndReloadWaypoints();
         this.pruneUntrackableWaypoints();
@@ -1029,6 +1217,31 @@ public class WaypointFollower extends Module {
         this.handBackRecast();
         this.dispatchPathfinding();
         this.showStatisticsBar();
+    }
+
+    private void applyManualOverride() {
+        if (this.autoPaused && !this.isPaused) this.autoPaused = false;
+        boolean steering = this.manualOverride.get() && this.isPlayerSteering();
+        if (steering && !this.isPaused) {
+            this.pause();
+            this.autoPaused = true;
+        } else if (!steering && this.autoPaused) {
+            this.resume();
+        }
+    }
+
+    private boolean isPlayerSteering() {
+        this.manualInput.poll(mc);
+        return this.manualInput.steering(Math.round(this.manualOverrideDelay.get() * 1000.0));
+    }
+
+    private void clearManualOverride() {
+        this.autoPaused = false;
+        this.manualInput.reset();
+    }
+
+    public void noteManualLook(double dx, double dy) {
+        if (this.isActive() && this.manualOverride.get()) this.manualInput.noteLook(dx, dy);
     }
 
     private boolean holdsRoute() {
@@ -1052,6 +1265,7 @@ public class WaypointFollower extends Module {
         this.lastSeedOwX = Double.NaN;
         this.lastSeedOwZ = Double.NaN;
         this.say("Dimension changed, reloading the waypoints");
+        this.releaseFlight();
         this.waypointsToFollow.clear();
         this.waypointLoadRetries = 0;
         this.waypointsFullyLoaded = false;
@@ -1060,8 +1274,7 @@ public class WaypointFollower extends Module {
     }
 
     private void recordRoutePass(ClientPlayerEntity player) {
-        if (this.activeFlightMode != FlightMode.None) this.stopFlightMode();
-        if (this.currentBaritoneTarget != null) this.stopBaritone();
+        this.releaseFlight();
         if (this.isInNether) {
             this.recordBreadcrumb(player);
             return;
@@ -1105,7 +1318,7 @@ public class WaypointFollower extends Module {
     }
 
     private boolean baritoneTakesOffByItself() {
-        return this.isInNether && this.netherFlightMode.get() == NetherFlightMode.Baritone
+        return this.usesBaritone()
             && BaritoneAPI.getSettings().elytraAutoJump.value;
     }
 
@@ -1162,17 +1375,12 @@ public class WaypointFollower extends Module {
         StringBuilder info = new StringBuilder();
         if (this.isPaused) info.append("[PAUSED] ");
         info.append(this.waypointsToFollow.size()).append(" waypoints");
-        info.append(" [").append(this.flightModeLabel()).append("]");
+        info.append(" [").append(this.dimensionFlightMode()).append("]");
         this.appendDistance(info);
         if (this.showStatistics.get() && this.waypointsCompletedThisSession > 0) {
             info.append(" | ").append(this.waypointsCompletedThisSession).append(" completed");
         }
         return info.toString();
-    }
-
-    private Object flightModeLabel() {
-        if (this.isInNether) return this.netherFlightMode.get();
-        return this.dimensionFlightMode();
     }
 
     private void appendDistance(StringBuilder info) {
@@ -1200,6 +1408,7 @@ public class WaypointFollower extends Module {
 
     private void stopBaritone() {
         BaritoneHelper.stopAllPathing();
+        this.clearLanding();
         this.currentBaritoneTarget = null;
         this.baritoneRestartAttempts = 0;
         this.baritoneRestartCooldown = 0;
@@ -1228,6 +1437,7 @@ public class WaypointFollower extends Module {
     }
 
     public void resume() {
+        this.autoPaused = false;
         this.isPaused = false;
     }
 
@@ -1317,6 +1527,10 @@ public class WaypointFollower extends Module {
 
     private int toNetherCoord(int coord) {
         return this.isPreferOverworldWaypointsEnabled() ? coord / 8 : coord;
+    }
+
+    private int toGoalCoord(int coord) {
+        return this.isInNether ? this.toNetherCoord(coord) : this.toPlayerDimensionCoord(coord);
     }
 
     private int toPlayerDimensionCoord(int waypointCoord) {
@@ -2551,8 +2765,10 @@ public class WaypointFollower extends Module {
         RECORDING,
         LOADING,
         PAUSED,
+        MANUAL,
         AREA_LOADER,
         NO_WAYPOINTS,
+        LANDING,
         NO_ELYTRA,
         NO_ROCKETS,
         STARTING,
@@ -2563,9 +2779,10 @@ public class WaypointFollower extends Module {
     public HudState hudState() {
         if (this.recordRoute.get()) return HudState.RECORDING;
         if (!this.waypointsFullyLoaded) return HudState.LOADING;
-        if (this.isPaused) return HudState.PAUSED;
+        if (this.isPaused) return this.autoPaused ? HudState.MANUAL : HudState.PAUSED;
         if (this.areaLoaderSteering) return HudState.AREA_LOADER;
         if (this.waypointsToFollow.isEmpty()) return HudState.NO_WAYPOINTS;
+        if (this.landingStarted) return HudState.LANDING;
         if (this.flightNeedsElytra() && !this.hasElytraEquipped()) return HudState.NO_ELYTRA;
         if (this.flightNeedsElytra() && this.rocketCount == 0) return HudState.NO_ROCKETS;
         if (this.autoStartFlight.get() && !this.startupRecastTriggered) return HudState.STARTING;
@@ -2576,20 +2793,19 @@ public class WaypointFollower extends Module {
     /** Whether, where we are now, this module flies by handing Baritone the goal. */
     public boolean fliesWithBaritone() {
         // Read off the world, not the cached flag: this is asked while the module is switched off.
-        return mc.world != null && this.isInNether(mc.world) && this.netherFlightMode.get() == NetherFlightMode.Baritone;
+        return mc.world != null
+            && this.flightModeIn(this.isInNether(mc.world), this.isInEnd(mc.world)) == FlightMode.Baritone;
     }
 
     /** Whether the way this dimension is flown involves wings at all. */
     private boolean flightNeedsElytra() {
-        if (this.isInNether) return this.netherFlightMode.get() == NetherFlightMode.Baritone;
-        FlightMode mode = this.isInEnd ? this.endFlightMode.get() : this.overworldFlightMode.get();
-        return mode != FlightMode.None || this.autoStartFlight.get();
+        if (this.usesBaritone()) return true;
+        return !this.isInNether && (this.dimensionFlightMode() != FlightMode.None || this.autoStartFlight.get());
     }
 
     /** The flight mode this dimension actually uses, for the state line. */
     public String hudModeName() {
-        if (this.isInNether) return this.netherFlightMode.get() == NetherFlightMode.Baritone ? "BARITONE" : "MANUAL";
-        FlightMode mode = this.isInEnd ? this.endFlightMode.get() : this.overworldFlightMode.get();
+        FlightMode mode = this.dimensionFlightMode();
         return mode == FlightMode.None ? "MANUAL" : mode.toString().toUpperCase(java.util.Locale.ROOT);
     }
 
@@ -2609,12 +2825,7 @@ public class WaypointFollower extends Module {
         BlockPos next = this.getNextWaypoint();
         if (next == null) return null;
 
-        if (this.isInNether) {
-            return new Vec3d(this.toNetherCoord(next.getX()) + 0.5, next.getY() + 0.5,
-                this.toNetherCoord(next.getZ()) + 0.5);
-        }
-
-        return this.getAdjustedWaypointPos(next);
+        return this.hudPosOf(next);
     }
 
     /** Horizontal blocks to the current waypoint, or -1 without one. */
@@ -2633,10 +2844,8 @@ public class WaypointFollower extends Module {
 
     /** Any waypoint of the list, in the player's own dimension. */
     public Vec3d hudPosOf(BlockPos waypoint) {
-        return this.isInNether
-            ? new Vec3d(this.toNetherCoord(waypoint.getX()) + 0.5, waypoint.getY() + 0.5,
-                this.toNetherCoord(waypoint.getZ()) + 0.5)
-            : this.getAdjustedWaypointPos(waypoint);
+        return new Vec3d(this.toGoalCoord(waypoint.getX()) + 0.5, waypoint.getY() + 0.5,
+            this.toGoalCoord(waypoint.getZ()) + 0.5);
     }
 
     /** Yaw toward any waypoint of the list, dimension conversion included. */
@@ -2652,7 +2861,7 @@ public class WaypointFollower extends Module {
 
     /** The reach that will count as arrived, in the player's dimension. */
     public double hudReach() {
-        return this.reachDistance.get() * (this.isInNether ? this.netherReachMultiplier.get() : 1.0);
+        return this.reach();
     }
 
     public double hudYawDeadzone() {
@@ -2666,9 +2875,27 @@ public class WaypointFollower extends Module {
 
     /** Seconds to the current waypoint, or -1 while there is no speed to divide by. */
     public int hudEtaSeconds() {
-        double distance = this.hudDistance();
+        return this.etaSecondsFor(this.hudDistance());
+    }
+
+    private int etaSecondsFor(double distance) {
         if (distance < 0.0 || this.smoothedSpeed < 2.0) return -1;
         return (int) (distance / this.smoothedSpeed);
+    }
+
+    public double hudRouteDistance() {
+        double distance = this.hudDistance();
+        int index = this.hudRouteIndex();
+        if (distance < 0.0 || index < 0) return -1.0;
+        List<BlockPos> route = this.hudRoute();
+        for (int i = index; i < route.size() - 1; i++) {
+            distance += this.getHorizontalDistance(this.hudPosOf(route.get(i)), this.hudPosOf(route.get(i + 1)));
+        }
+        return distance;
+    }
+
+    public int hudRouteEtaSeconds() {
+        return this.etaSecondsFor(this.hudRouteDistance());
     }
 
     /** The remaining route, in following order. Read-only, never copied per frame. */
@@ -2746,6 +2973,7 @@ public class WaypointFollower extends Module {
     public enum FlightMode {
         RocketFly,
         Pitch40,
+        Baritone,
         None
     }
 

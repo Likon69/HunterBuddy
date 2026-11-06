@@ -30,7 +30,7 @@ public final class FlightModules {
         return switch (mode) {
             case RocketFly -> rocketFly;
             case Pitch40 -> pitch40;
-            case None -> null;
+            case Baritone, None -> null;
         };
     }
 

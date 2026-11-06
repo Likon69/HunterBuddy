@@ -31,6 +31,7 @@
     "ServerDisconnectMixin",
     "KeyBindingMixin",
     "ElytraBounceEntityMixin",
+    "PlayerLookInputMixin",
     "ElytraBounceCameraMixin",
     "CatchUpPacingMixin",
     "EntityScaleMixin",
