@@ -4,7 +4,8 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 
-public record HbPalette(Color window, Color row, Color hover, Color accent, Color text, Color dim, Color border) {
+public record HbPalette(Color window, Color row, Color hover, Color accent, Color text, Color dim, Color border,
+                        Color input, Color risk, Color onAccent) {
     public static Color rgb(int hex, double alpha) {
         return new Color((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF, (int) Math.round(alpha * 255));
     }
@@ -17,6 +18,8 @@ public record HbPalette(Color window, Color row, Color hover, Color accent, Colo
         paint(theme.accentColor, accent);
         paint(theme.checkboxColor, accent);
         paint(theme.favoriteColor, accent);
+        paint(theme.plusColor, accent);
+        paint(theme.minusColor, accent);
 
         paint(theme.textColor, text);
         paint(theme.titleTextColor, text);
@@ -25,7 +28,7 @@ public record HbPalette(Color window, Color row, Color hover, Color accent, Colo
         paint(theme.textHighlightColor, HbDraw.withAlpha(accent, 0.4));
 
         paintThreeState(theme, "background", window, hover, border);
-        paint(theme.moduleBackground, hover);
+        paint(theme.moduleBackground, row);
 
         paintThreeState(theme, "outline", border, dim, accent);
 
@@ -38,6 +41,10 @@ public record HbPalette(Color window, Color row, Color hover, Color accent, Colo
         paint(theme.sliderLeft, accent);
         paint(theme.sliderRight, border);
         paintThreeState(theme, "slider-handle", text, text, accent);
+
+        paint(theme.inputColor, input);
+        paint(theme.riskColor, risk);
+        paint(theme.onAccentColor, onAccent);
     }
 
     private static void paint(Setting<SettingColor> setting, Color color) {

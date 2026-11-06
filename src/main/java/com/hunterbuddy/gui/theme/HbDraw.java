@@ -8,12 +8,18 @@ public final class HbDraw {
     }
 
     public static Color withAlpha(Color color, double factor) {
-        return new Color(color.r, color.g, color.b, (int) Math.round(color.a * factor));
+        return new Color(color.r, color.g, color.b, (int) Math.round(color.a * Math.clamp(factor, 0, 1)));
     }
 
     public static Color withAlpha(Color target, Color color, double factor) {
         target.set(color);
-        target.a = (int) Math.round(color.a * factor);
+        target.a = (int) Math.round(color.a * Math.clamp(factor, 0, 1));
+        return target;
+    }
+
+    public static Color textColor(Color target, Color color) {
+        target.set(color);
+        target.a = Math.max(160, color.a);
         return target;
     }
 

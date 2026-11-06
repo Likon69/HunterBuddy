@@ -93,20 +93,20 @@ public class HbNumericSetting extends WContainer implements HbWidget {
 
     @Override
     protected void onCalculateSize() {
-        width = style().inverted() ? theme.scale(120)
-            : theme.scale(98) + Math.max(theme.scale(30), theme().typography().width(field.get(), field.fontSize(), false) + field.pad() * 2);
-        height = theme.scale(22);
+        width = style().inverted() ? theme().hbScale(120)
+            : theme().hbScale(98) + Math.max(theme().hbScale(30), theme().typography().width(field.get(), field.fontSize(), false) + field.pad() * 2);
+        height = theme().hbScale(22);
     }
 
     @Override
     protected void onCalculateWidgetPositions() {
         slider.x = x;
-        slider.y = y + theme.scale(style().inverted() ? 2 : 5);
-        field.width = Math.min(width * 0.4, Math.max(theme.scale(style().inverted() ? 24 : 30), theme().typography().width(field.get(), field.fontSize(), false) + field.pad() * 2));
-        slider.width = style().inverted() ? width : Math.max(theme.scale(40), width - field.width - theme.scale(8));
-        slider.height = theme.scale(style().inverted() ? 18 : 12);
+        slider.y = y + theme().hbScale(style().inverted() ? 2 : 5);
+        field.width = Math.min(width * 0.4, Math.max(theme().hbScale(style().inverted() ? 24 : 30), theme().typography().width(field.get(), field.fontSize(), false) + field.pad() * 2));
+        slider.width = style().inverted() ? width : Math.max(theme().hbScale(40), width - field.width - theme().hbScale(8));
+        slider.height = theme().hbScale(style().inverted() ? 18 : 12);
         field.x = style().inverted() ? x + slider.fraction() * Math.max(0, width - field.width) : x + width - field.width;
-        field.y = style().inverted() ? y - theme.scale(2) : y + theme.scale(4);
+        field.y = style().inverted() ? y - theme().hbScale(2) : y + theme().hbScale(4);
     }
 
     @Override

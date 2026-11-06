@@ -20,8 +20,11 @@ import meteordevelopment.meteorclient.settings.Settings;
 import java.util.Locale;
 
 public class HbSettingsWidgetFactory extends DefaultSettingsWidgetFactory {
+    private final DefaultSettingsWidgetFactory nativeFactory;
+
     public HbSettingsWidgetFactory(HbGuiTheme theme) {
         super(theme);
+        nativeFactory = new DefaultSettingsWidgetFactory(theme);
         Factory integer = factories.get(IntSetting.class);
         Factory decimal = factories.get(DoubleSetting.class);
         factories.put(IntSetting.class, (table, setting) -> {
@@ -48,6 +51,7 @@ public class HbSettingsWidgetFactory extends DefaultSettingsWidgetFactory {
 
     @Override
     public WWidget create(GuiTheme theme, Settings settings, String filter) {
+        if (!((HbGuiTheme) theme).useHbWidgets()) return nativeFactory.create(theme, settings, filter);
         WVerticalList list = theme.verticalList();
         list.spacing = 0;
         for (SettingGroup group : settings.groups) {

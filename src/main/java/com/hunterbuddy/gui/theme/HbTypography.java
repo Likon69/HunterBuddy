@@ -6,6 +6,8 @@ import meteordevelopment.meteorclient.renderer.text.TextRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 
 public final class HbTypography implements TextRenderer {
+    private static final String ELLIPSIS = "...";
+    private static final double FIT_TOLERANCE = 0.5;
     private final HbGuiTheme theme;
     private final HbTextBatches batches;
     private final HbFontLoader fonts = new HbFontLoader();
@@ -72,20 +74,19 @@ public final class HbTypography implements TextRenderer {
     }
 
     public double width(String text, double size, boolean strong) {
-        return theme.scale(relativeWidth(text, strong) * theme.textSize(size));
+        return theme.hbScale(relativeWidth(text, strong) * theme.textSize(size));
     }
 
     public String fit(String text, double size, boolean strong, double available) {
-        if (width(text, size, strong) <= available) return text;
-        String ellipsis = "…";
-        if (width(ellipsis, size, strong) > available) return "";
+        if (width(text, size, strong) <= available + FIT_TOLERANCE) return text;
+        if (width(ELLIPSIS, size, strong) > available + FIT_TOLERANCE) return "";
         int end = text.length();
         while (end > 0) {
             end = text.offsetByCodePoints(end, -1);
-            String shortened = text.substring(0, end) + ellipsis;
-            if (width(shortened, size, strong) <= available) return shortened;
+            String shortened = text.substring(0, end) + ELLIPSIS;
+            if (width(shortened, size, strong) <= available + FIT_TOLERANCE) return shortened;
         }
-        return ellipsis;
+        return ELLIPSIS;
     }
 
     public void draw(GuiRenderer gui, String text, double x, double y, double size, Color color, boolean strong) {

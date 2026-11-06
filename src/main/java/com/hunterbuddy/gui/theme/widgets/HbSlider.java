@@ -25,8 +25,8 @@ public class HbSlider extends WSlider implements HbWidget {
 
     @Override
     protected void onCalculateSize() {
-        width = theme.scale(style().inverted() ? 120 : 90);
-        height = theme.scale(style().inverted() ? 18 : 12);
+        width = theme().hbScale(style().inverted() ? 120 : 90);
+        height = theme().hbScale(style().inverted() ? 18 : 12);
     }
 
     @Override

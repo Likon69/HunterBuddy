@@ -23,7 +23,7 @@ public final class HbHorizontalViewport extends WContainer implements HbWidget {
     @Override
     protected void onCalculateSize() {
         width = content.width;
-        height = content.height + theme.scale(8);
+        height = content.height + theme().hbScale(8);
     }
 
     private double overflow() {
@@ -44,8 +44,8 @@ public final class HbHorizontalViewport extends WContainer implements HbWidget {
         boolean hidden = super.render(renderer, mouseX, mouseY, delta);
         if (overflow() > 0) {
             double handle = width * width / content.width;
-            renderer.quad(x, y + height - theme.scale(5), width, theme.scale(3), style().palette().border());
-            renderer.quad(x + offset / overflow() * (width - handle), y + height - theme.scale(5), handle, theme.scale(3), theme().accent());
+            renderer.quad(x, y + height - theme().hbScale(5), width, theme().hbScale(3), theme().colors().border());
+            renderer.quad(x + offset / overflow() * (width - handle), y + height - theme().hbScale(5), handle, theme().hbScale(3), theme().accent());
         }
         renderer.scissorEnd();
         return hidden;
@@ -58,7 +58,7 @@ public final class HbHorizontalViewport extends WContainer implements HbWidget {
 
     @Override
     public boolean onMouseClicked(Click click, boolean doubled) {
-        if (click.button() != 0 || !mouseOver || overflow() == 0 || click.y() < y + height - theme.scale(8)) return false;
+        if (click.button() != 0 || !mouseOver || overflow() == 0 || click.y() < y + height - theme().hbScale(8)) return false;
         dragging = true;
         setFocused(true);
         scrollTo(click.x());
@@ -92,7 +92,7 @@ public final class HbHorizontalViewport extends WContainer implements HbWidget {
     @Override
     public boolean mouseScrolled(double amount) {
         if (mouseOver && overflow() > 0) {
-            setOffset(offset - theme.scale(amount * 24));
+            setOffset(offset - theme().hbScale(amount * 24));
             return true;
         }
         return super.mouseScrolled(amount);

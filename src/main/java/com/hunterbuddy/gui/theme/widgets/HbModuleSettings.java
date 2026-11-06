@@ -35,6 +35,7 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
 
     @Override
     public void init() {
+        spacing = theme().layoutUnits(6);
         WHorizontalList heading = add(theme.horizontalList()).expandX().widget();
         WFavorite favorite = heading.add(theme.favorite(module.favorite)).widget();
         favorite.action = () -> {
@@ -113,13 +114,13 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
     @Override
     protected void onCalculateSize() {
         super.onCalculateSize();
-        width += theme.scale(12);
-        height += theme.scale(12);
+        width += theme().hbScale(12);
+        height += theme().hbScale(12);
     }
 
     @Override
     protected void onCalculateWidgetPositions() {
-        double inset = theme.scale(6);
+        double inset = theme().hbScale(6);
         x += inset;
         y += inset;
         width -= inset * 2;
@@ -133,7 +134,7 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
     public void calculateWidgetPositions() {
         super.calculateWidgetPositions();
         for (Cell<?> cell : cells) {
-            HbWidthLayout.fit(cell.widget(), width - theme.scale(12) - cell.padLeft() - cell.padRight());
+            HbWidthLayout.fit(cell.widget(), width - theme().hbScale(12) - cell.padLeft() - cell.padRight());
         }
     }
 

@@ -29,7 +29,7 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
 
     @Override
     public double pad() {
-        return theme.scale(floating || number && !style().hasCounter() ? 0 : style().inverted() ? 2 : 4);
+        return theme().hbScale(floating || number && !style().hasCounter() ? 0 : style().inverted() ? 2 : 4);
     }
 
     public double fontSize() {
@@ -39,14 +39,14 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
     @Override
     protected void onCalculateSize() {
         super.onCalculateSize();
-        width = theme.scale(number ? 30 : 110);
-        height = theme.scale(floating ? 10 : number && style().hasCounter() ? 13 : 14);
-        if (customRenderer) height = Math.max(height, theme.textHeight() + theme.scale(2));
+        width = theme().hbScale(number ? 30 : 110);
+        height = theme().hbScale(floating ? 10 : number && style().hasCounter() ? 13 : 14);
+        if (customRenderer) height = Math.max(height, theme().hbScale(theme().textSize(11) + 2));
     }
 
     @Override
     protected double getTextWidth(int position) {
-        return super.getTextWidth(position) * fontSize() / 11;
+        return theme().layoutUnits(super.getTextWidth(position)) * fontSize() / 11;
     }
 
     @Override
@@ -59,7 +59,7 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
         cursorTime += delta;
         if (!floating && (!number || style().hasCounter())) style().drawInput(gui, theme(), this, focused);
         double offset = getOverflowWidthForRender();
-        double textY = y + (height - theme.scale(fontSize())) / 2;
+        double textY = y + (height - theme().hbScale(fontSize())) / 2;
         double textX = x + pad() - offset;
         if (number && !focused) {
             double textWidth = theme().typography().width(text, fontSize(), false);
@@ -73,15 +73,15 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
             if (customRenderer) renderer.render(gui, textX, textY, text, color);
             else theme().typography().draw(gui, text, textX, textY, fontSize(), color, false);
         } else if (placeholder != null) {
-            theme().typography().draw(gui, placeholder, textX, textY, 10, style().palette().dim(), false);
+            theme().typography().draw(gui, placeholder, textX, textY, 10, theme().placeholderColor.get(), false);
         }
         if (focused && selectionStart != selectionEnd) {
             double left = Math.min(getTextWidth(selectionStart), getTextWidth(selectionEnd));
             double right = Math.max(getTextWidth(selectionStart), getTextWidth(selectionEnd));
-            gui.quad(textX + left, textY, right - left, theme.scale(fontSize()), theme().textHighlightColor.get());
+            gui.quad(textX + left, textY, right - left, theme().hbScale(fontSize()), theme().textHighlightColor.get());
         }
         if (focused && cursorTime % 1.2 < 0.6) {
-            gui.quad(textX + getTextWidth(cursor), textY, theme.scale(1), theme.scale(fontSize()), theme().accent());
+            gui.quad(textX + getTextWidth(cursor), textY, theme().hbScale(1), theme().hbScale(fontSize()), theme().accent());
         }
         if (clipped) gui.scissorEnd();
     }

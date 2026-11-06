@@ -72,7 +72,7 @@ final class HbTextBatches {
                 Group group = groups.get(i);
                 if (group.first == null) continue;
                 TextRenderer font = typography.font(group.strong);
-                font.begin(theme.scale(group.size / typography.baseHeight(group.strong)));
+                font.begin(theme.hbScale(group.size / typography.baseHeight(group.strong)));
                 Operation operation = group.first;
                 while (operation != null) {
                     font.setAlpha(operation.alpha);

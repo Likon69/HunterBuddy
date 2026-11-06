@@ -9,13 +9,20 @@ public class HbMultiLabel extends WMultiLabel implements HbWidget {
     }
 
     @Override
+    protected void onCalculateSize() {
+        super.onCalculateSize();
+        width = theme().layoutUnits(width);
+        height = theme().layoutUnits(height);
+    }
+
+    @Override
     protected void onCalculateWidgetPositions() {
         tooltip = text;
     }
 
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        double lineHeight = theme.textHeight(title);
+        double lineHeight = theme().hbScale(theme().textSize(title ? 13.75 : 11));
         for (int i = 0; i < lines.size(); i++) {
             theme().typography().draw(renderer, theme().typography().fit(lines.get(i), 11, false, width), x, y + lineHeight * i, 11,
                 color != null ? color : theme().textColor.get(), false);

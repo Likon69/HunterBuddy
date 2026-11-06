@@ -6,28 +6,36 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import java.util.List;
 
 public class HbSettingTable extends WTable implements HbWidget {
+    private static final double LABEL_MIN_SHARE = 0.35;
+
     public HbSettingTable() {
         horizontalSpacing = 8;
         verticalSpacing = 0;
     }
 
     private double rowHeight(List<Cell<?>> row) {
-        double height = theme.scale(22);
+        double height = theme().hbScale(22);
         for (int i = 0; i < row.size(); i++) height = Math.max(height, row.get(i).widget().height);
         return height;
     }
 
     private double leftInset() {
-        return theme.scale(style().settingInset() - 12 + (style().hasCounter() ? 6 : 0));
+        return theme().hbScale(style().settingInset() - 12 + (style().hasCounter() ? 6 : 0));
     }
 
     private double rightInset() {
-        return theme.scale(style().hasCounter() ? 10 : style().inverted() ? 4 : 2);
+        return theme().hbScale(style().hasCounter() ? 10 : style().inverted() ? 4 : 2);
     }
 
     @Override
     protected void onCalculateSize() {
-        super.onCalculateSize();
+        double spacing = horizontalSpacing;
+        horizontalSpacing = theme().layoutUnits(spacing);
+        try {
+            super.onCalculateSize();
+        } finally {
+            horizontalSpacing = spacing;
+        }
         width += leftInset() + rightInset();
         height = 0;
         for (int index = 0; getRow(index) != null; index++) height += rowHeight(getRow(index));
@@ -41,10 +49,12 @@ public class HbSettingTable extends WTable implements HbWidget {
             double height = rowHeight(row);
             double right = x + width - rightInset();
             double available = Math.max(0, width - leftInset() - rightInset());
-            double gap = theme.scale(8);
+            double gap = theme().hbScale(8);
             double fixed = gap * Math.max(0, row.size() - 1);
             for (int column = 2; column < row.size(); column++) fixed += row.get(column).widget().width;
-            double labelWidth = Math.min(row.getFirst().widget().width, Math.max(0, Math.min(available * 0.35, available - fixed - theme.scale(86))));
+            double controlNatural = row.size() > 1 ? row.get(1).widget().width : 0;
+            double labelWidth = Math.min(row.getFirst().widget().width, Math.max(available * LABEL_MIN_SHARE, available - fixed - controlNatural));
+            labelWidth = Math.max(0, Math.min(labelWidth, available - fixed));
             double controlWidth = Math.max(0, available - labelWidth - fixed);
             for (int column = row.size() - 1; column >= 0; column--) {
                 Cell<?> cell = row.get(column);

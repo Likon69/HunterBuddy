@@ -4,6 +4,7 @@ import meteordevelopment.meteorclient.gui.renderer.GuiRenderer;
 import meteordevelopment.meteorclient.gui.widgets.input.WDropdown;
 
 public class HbDropdown<T> extends WDropdown<T> implements HbWidget {
+    private final HbPressLatch latch = new HbPressLatch();
     private String[] captions;
     private T cachedValue;
     private String cachedCaption;
@@ -30,7 +31,7 @@ public class HbDropdown<T> extends WDropdown<T> implements HbWidget {
     }
 
     @Override
-    public double pad() { return theme.scale(2); }
+    public double pad() { return theme().hbScale(2); }
 
     public boolean containsPopup(double mouseX, double mouseY) {
         return expanded && root.isOver(mouseX, mouseY);
@@ -57,34 +58,48 @@ public class HbDropdown<T> extends WDropdown<T> implements HbWidget {
             captions[i] = values[i].toString();
             maxValueWidth = Math.max(maxValueWidth, theme().typography().width(captions[i], 11, false));
         }
-        width = maxValueWidth + theme.scale(style().dropdownInset() + 18);
-        height = theme.scale(style().inverted() ? 13 : 15);
+        width = maxValueWidth + theme().hbScale(style().dropdownInset() + 18);
+        height = theme().hbScale(style().inverted() ? 13 : 15);
         root.width = width;
     }
 
     @Override
+    protected void onPressed(int button) {
+        latch.release();
+        super.onPressed(button);
+    }
+
+    @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        style().drawDropdownHeader(renderer, theme(), this, expanded, pressed || mouseOver);
-        theme().typography().draw(renderer, theme().typography().fit(caption(get()), 11, false, Math.max(0, width - theme.scale(style().dropdownInset() + 18))), x + theme.scale(style().dropdownInset()),
-            y + (height - theme.scale(11)) / 2, 11, style().dropdownText(theme(), true), false);
+        style().drawDropdownHeader(renderer, theme(), this, expanded, latch.held(pressed), mouseOver);
+        theme().typography().draw(renderer, theme().typography().fit(caption(get()), 11, false, Math.max(0, width - theme().hbScale(style().dropdownInset() + 18))), x + theme().hbScale(style().dropdownInset()),
+            y + (height - theme().hbScale(11)) / 2, 11, style().dropdownText(theme(), true), false);
     }
 
     private static class Root extends WDropdownRoot {
     }
 
     private class Value extends WDropdownValue implements HbWidget {
+        private final HbPressLatch valueLatch = new HbPressLatch();
+
+        @Override
+        protected void onPressed(int button) {
+            valueLatch.release();
+            super.onPressed(button);
+        }
+
         @Override
         protected void onCalculateSize() {
-            width = theme().typography().width(caption(value), 11, false) + theme.scale(12);
-            height = theme.scale(18);
+            width = theme().typography().width(caption(value), 11, false) + theme().hbScale(12);
+            height = theme().hbScale(18);
         }
 
         @Override
         protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
             boolean selected = value.equals(HbDropdown.this.value);
-            style().drawDropdownValue(renderer, theme(), this, selected, pressed || mouseOver);
+            style().drawDropdownValue(renderer, theme(), this, selected, valueLatch.held(pressed), mouseOver);
             tooltip = caption(value);
-            theme().typography().draw(renderer, theme().typography().fit(caption(value), 11, false, Math.max(0, width - theme.scale(12))), x + theme.scale(6), y + theme.scale(3),
+            theme().typography().draw(renderer, theme().typography().fit(caption(value), 11, false, Math.max(0, width - theme().hbScale(12))), x + theme().hbScale(6), y + theme().hbScale(3),
                 11, style().dropdownText(theme(), selected), false);
         }
     }

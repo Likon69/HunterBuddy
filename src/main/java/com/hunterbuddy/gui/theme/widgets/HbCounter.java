@@ -13,13 +13,13 @@ public class HbCounter extends WWidget implements HbWidget {
     @Override
     protected void onCalculateSize() {
         width = theme().typography().width(activity.capacity(), 11, false);
-        height = theme.scale(11);
+        height = theme().hbScale(11);
     }
 
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
         String text = activity.counter();
         double textWidth = theme().typography().width(text, 11, false);
-        theme().typography().draw(renderer, text, x + width - textWidth, y, 11, style().palette().dim(), false);
+        theme().typography().draw(renderer, text, x + width - textWidth, y, 11, theme().colors().dim(), false);
     }
 }

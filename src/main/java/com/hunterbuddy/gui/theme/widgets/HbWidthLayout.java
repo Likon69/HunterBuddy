@@ -7,6 +7,8 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WContainer;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 
 final class HbWidthLayout {
+    private static final double LABEL_SHARE = 0.45;
+
     private HbWidthLayout() {}
 
     static void fit(WWidget widget, double available) {
@@ -41,7 +43,7 @@ final class HbWidthLayout {
         for (Cell<?> cell : list.cells) {
             WWidget child = cell.widget();
             double width = child.width * ratio;
-            if (child instanceof WLabel) width = Math.min(width, available * 0.45);
+            if (ratio < 1 && child instanceof WLabel) width = Math.min(width, available * LABEL_SHARE);
             cell.x = left + cell.padLeft();
             cell.y = list.y + cell.padTop();
             cell.width = width;

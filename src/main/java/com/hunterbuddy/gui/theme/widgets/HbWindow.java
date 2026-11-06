@@ -45,10 +45,10 @@ public class HbWindow extends WWindow implements HbWidget {
         if (!moduleWindow()) return;
         minWidth = activity != null && activity.name().equals("Hunt") ? (style().hasCounter() || style().inverted() ? 262 : 258) : 228;
         Cell<?> content = cells.getLast();
-        content.padTop(style().contentTop()).padBottom(style().contentBottom());
+        content.padTop(theme().layoutUnits(style().contentTop())).padBottom(theme().layoutUnits(style().contentBottom()));
         if (style().inverted()) {
-            cells.getFirst().padHorizontal(1).padTop(1);
-            content.padHorizontal(1);
+            cells.getFirst().padHorizontal(theme().layoutUnits(1)).padTop(theme().layoutUnits(1));
+            content.padHorizontal(theme().layoutUnits(1));
         }
         updateNumber();
     }
@@ -75,9 +75,15 @@ public class HbWindow extends WWindow implements HbWidget {
     public void calculateSize() {
         updateNumber();
         if (moduleWindow() && view != null) {
-            view.maxHeight = Math.max(theme.scale(22), getWindowHeight() - theme.scale("search".equals(id) ? 148 : 128));
+            view.maxHeight = Math.max(theme().hbScale(22), getWindowHeight() - theme().hbScale("search".equals(id) ? 148 : 128));
         }
-        super.calculateSize();
+        double minimum = minWidth;
+        if (moduleWindow()) minWidth = theme().layoutUnits(minimum);
+        try {
+            super.calculateSize();
+        } finally {
+            minWidth = minimum;
+        }
     }
 
     @Override
@@ -131,16 +137,16 @@ public class HbWindow extends WWindow implements HbWidget {
                 super.onCalculateSize();
                 return;
             }
-            width = theme().typography().width(display, 12, !style().hasCounter()) + theme.scale(80);
+            width = theme().typography().width(display, 12, !style().hasCounter()) + theme().hbScale(80);
             if (style().hasCounter()) {
                 double offset = 0;
                 for (int i = 0; i < letters.length; i++) {
                     offsets[i] = offset;
-                    offset += theme().typography().width(letters[i], 12, false) + theme.scale(3);
+                    offset += theme().typography().width(letters[i], 12, false) + theme().hbScale(3);
                 }
-                width += theme.scale(Math.max(0, display.length() - 1) * 3);
+                width += theme().hbScale(Math.max(0, display.length() - 1) * 3);
             }
-            height = theme.scale(style().headerHeight());
+            height = theme().hbScale(style().headerHeight());
         }
 
         @Override
@@ -152,8 +158,8 @@ public class HbWindow extends WWindow implements HbWidget {
             for (int i = 0; i < cells.size(); i++) {
                 Cell<?> cell = cells.get(i);
                 WWidget widget = cell.widget();
-                cell.x = widget instanceof HbCounter ? x + width - theme.scale(10) - widget.width : x + theme.scale(10);
-                cell.y = y + theme.scale(11) - widget.height / 2;
+                cell.x = widget instanceof HbCounter ? x + width - theme().hbScale(10) - widget.width : x + theme().hbScale(10);
+                cell.y = y + theme().hbScale(11) - widget.height / 2;
                 cell.width = widget.width;
                 cell.height = widget.height;
                 cell.alignWidget();
@@ -176,19 +182,19 @@ public class HbWindow extends WWindow implements HbWidget {
             double phase = "Visuals".equals(title) ? 2.5 : "Utility".equals(title) ? 4.2 : 0;
             style().drawWindowHeader(renderer, theme(), this, active, phase);
             if (!moduleWindow()) return;
-            double textX = x + theme.scale(style().hasCounter() || style().inverted() ? 10 : 24);
+            double textX = x + theme().hbScale(style().hasCounter() || style().inverted() ? 10 : 24);
             if (style().inverted() && activity != null) {
                 String number = activity.number();
-                theme().typography().draw(renderer, number, textX, y + theme.scale(5), 12, style().palette().dim(), false);
-                textX += theme().typography().width(number, 12, false) + theme.scale(10);
+                theme().typography().draw(renderer, number, textX, y + theme().hbScale(5), 12, theme().colors().dim(), false);
+                textX += theme().typography().width(number, 12, false) + theme().hbScale(10);
             }
             if (style().hasCounter()) {
                 for (int i = 0; i < letters.length; i++) {
-                    theme().typography().draw(renderer, letters[i], textX + offsets[i], y + theme.scale(5), 12, style().palette().text(), false);
+                    theme().typography().draw(renderer, letters[i], textX + offsets[i], y + theme().hbScale(5), 12, theme().titleTextColor.get(), false);
                 }
             } else {
-                theme().typography().draw(renderer, title, textX, y + theme.scale(5), 12,
-                    style().inverted() ? theme().accent() : style().palette().text(), true);
+                theme().typography().draw(renderer, title, textX, y + theme().hbScale(5), 12,
+                    theme().titleTextColor.get(), true);
             }
         }
     }

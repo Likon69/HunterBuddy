@@ -9,7 +9,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
-public class HbModuleEntry extends WVerticalList {
+public class HbModuleEntry extends WVerticalList implements HbWidget {
     private final Module module;
     private final String title;
     private HbModuleSettings settings;
@@ -68,7 +68,7 @@ public class HbModuleEntry extends WVerticalList {
     public void expand() {
         if (settings != null) return;
         settings = new HbModuleSettings(module);
-        add(settings).expandX().padLeft(6).padBottom(4);
+        add(settings).expandX().padLeft(theme().layoutUnits(6)).padBottom(theme().layoutUnits(4));
     }
 
     public void collapse() {
