@@ -11567,6 +11567,7 @@ public class SpawnerDetector extends Module {
                     autoLog("SHAFT_FLY", autoSite.center, "pivot done");
                     autoShaftFlyLastRocketTick = stateTicks - 20;
                     autoShaftFlyStuck = false;
+                    autoShaftFlySlowClimb = false;
                     autoShaftFlyStuckSinceTick = 0;
                     autoShaftFlyStuckWindowY = y;
                     autoShaftFlyStuckWindowTick = stateTicks;
