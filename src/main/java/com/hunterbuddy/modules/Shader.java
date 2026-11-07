@@ -2,6 +2,7 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.render.HbGlowShader;
+import com.hunterbuddy.render.HbRenderPipelines;
 import com.hunterbuddy.util.DugHoles;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,7 +21,6 @@ import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent.Post;
 import meteordevelopment.meteorclient.renderer.MeshBuilder;
 import meteordevelopment.meteorclient.renderer.MeshRenderer;
-import meteordevelopment.meteorclient.renderer.MeteorRenderPipelines;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.utils.render.MeshBuilderVertexConsumerProvider;
 import meteordevelopment.meteorclient.utils.render.SimpleBlockRenderer;
@@ -326,7 +326,7 @@ public class Shader extends Module {
     private final Set<BlockPos> portalPositions = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     /** Block geometry for the current frame, blitted into the silhouette buffer. */
-    private final MeshBuilder blockMesh = new MeshBuilder(MeteorRenderPipelines.WORLD_COLORED);
+    private final MeshBuilder blockMesh = new MeshBuilder(HbRenderPipelines.WORLD_SILHOUETTE);
     private final MeshBuilderVertexConsumerProvider blockMeshProvider = new MeshBuilderVertexConsumerProvider(blockMesh);
     private final Color storageScratch = new Color();
 
@@ -420,12 +420,16 @@ public class Shader extends Module {
     /** ARGB outline colour for the first-person hand. */
     public int handGlowColor() {
         SettingColor c = selfColor.get();
-        return 0xFF000000 | (clamp(c.r) << 16) | (clamp(c.g) << 8) | clamp(c.b);
+        return (clamp(c.a) << 24) | (clamp(c.r) << 16) | (clamp(c.g) << 8) | clamp(c.b);
     }
 
     public int outlineRgb(Entity e) {
         SettingColor c = getColorForEntity(e);
         return (clamp(c.r) << 16) | (clamp(c.g) << 8) | clamp(c.b);
+    }
+
+    public int outlineArgb(Entity e) {
+        return (clamp(getColorForEntity(e).a) << 24) | outlineRgb(e);
     }
 
     private SettingColor getColorForEntity(Entity e) {
@@ -659,15 +663,9 @@ public class Shader extends Module {
         else if (be instanceof BrewingStandBlockEntity) c = brewingStandColor.get();
         else c = otherStorageColor.get();
 
-        // Forced opaque. WORLD_COLORED blends translucently with no depth test, so
-        // a colour with alpha would write darkened RGB and let overlapping faces
-        // of the same block re-blend into each other — the composite would then
-        // read a marbled, dimmed silhouette instead of a flat one. Softness is the
-        // job of glow-intensity and fill-opacity, not of the silhouette buffer.
-        //
         // Reused rather than allocated per block per frame: the mesh bakes the
         // colour into the vertices during the render call that follows.
-        return storageScratch.set(c.r, c.g, c.b, 255);
+        return storageScratch.set(c.r, c.g, c.b, c.a);
     }
 
     /**
@@ -712,7 +710,7 @@ public class Shader extends Module {
 
         if (portals.get()) {
             SettingColor p = portalColor.get();
-            Color pc = storageScratch.set(p.r, p.g, p.b, 255);
+            Color pc = storageScratch.set(p.r, p.g, p.b, p.a);
 
             for (BlockPos pos : portalPositions) {
                 BlockState state = mc.world.getBlockState(pos);
@@ -735,7 +733,7 @@ public class Shader extends Module {
 
         MeshRenderer.begin()
             .attachments(target)
-            .pipeline(MeteorRenderPipelines.WORLD_COLORED)
+            .pipeline(HbRenderPipelines.WORLD_SILHOUETTE)
             .mesh(blockMesh, event.matrices)
             .end();
     }

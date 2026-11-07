@@ -14,6 +14,7 @@
     "ShulkerSlotOverlayMixin",
     "EntityGlowMixin",
     "EntityTeamColorMixin",
+    "render.EntityOutlineAlphaMixin",
     "render.WorldRendererGlowMixin",
     "render.WorldRendererOutlineMixin",
     "render.ShaderLoaderGlowMixin",

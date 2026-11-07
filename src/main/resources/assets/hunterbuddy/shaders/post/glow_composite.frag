@@ -115,7 +115,7 @@ void main() {
         }
     }
 
-    vec3 rgb = texture(u_Origin, v_TexCoord + vec2(float(bestX), float(bestY)) * v_OneTexel).rgb;
+    vec4 source = texture(u_Origin, v_TexCoord + vec2(float(bestX), float(bestY)) * v_OneTexel);
 
     // ── The two zones, blended by whichever is stronger ──────────────────────
     // Taking the max rather than branching keeps the line and the glow
@@ -131,8 +131,8 @@ void main() {
         }
     }
 
-    float alpha = max(outlineA, glowA);
+    float alpha = max(outlineA, glowA) * source.a;
     if (alpha <= 0.004) discard;
 
-    color = vec4(rgb, alpha);
+    color = vec4(source.rgb, alpha);
 }

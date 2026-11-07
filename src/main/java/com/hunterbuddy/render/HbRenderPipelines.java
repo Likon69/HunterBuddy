@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import meteordevelopment.meteorclient.renderer.MeteorRenderPipelines;
 import meteordevelopment.meteorclient.renderer.MeteorVertexFormats;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.UniformType;
@@ -59,6 +60,8 @@ public final class HbRenderPipelines {
         .withCull(false)
         .build());
 
+    public static final RenderPipeline WORLD_SILHOUETTE = add(silhouette(MeteorRenderPipelines.WORLD_COLORED));
+
     public static final RenderPipeline SPEED_BLUR = add(RenderPipeline.builder()
         .withLocation(id("pipeline/post/speed_blur"))
         .withVertexFormat(MeteorVertexFormats.POS2, VertexFormat.DrawMode.TRIANGLES)
@@ -87,6 +90,23 @@ public final class HbRenderPipelines {
 
     public static Identifier id(String path) {
         return Identifier.of("hunterbuddy", path);
+    }
+
+    private static RenderPipeline silhouette(RenderPipeline base) {
+        RenderPipeline.Builder builder = RenderPipeline.builder()
+            .withLocation(id("pipeline/world_silhouette"))
+            .withVertexFormat(base.getVertexFormat(), base.getVertexFormatMode())
+            .withVertexShader(base.getVertexShader())
+            .withFragmentShader(base.getFragmentShader())
+            .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+            .withDepthWrite(false)
+            .withCull(false);
+
+        for (RenderPipeline.UniformDescription uniform : base.getUniforms()) {
+            builder.withUniform(uniform.name(), uniform.type());
+        }
+
+        return builder.build();
     }
 
     private static RenderPipeline add(RenderPipeline pipeline) {
