@@ -23,8 +23,12 @@ import static meteordevelopment.meteorclient.utils.Utils.getWindowWidth;
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 public class HbModuleSettings extends WVerticalList implements HbWidget {
+    private static final int MAX_WRAP_PASSES = 4;
     private final Module module;
     private WContainer settingsContainer;
+    private WHorizontalList heading;
+    private WFavorite favorite;
+    private HbMultiLabel description;
     private WKeybind keybind;
     private WCheckbox active;
     private boolean binding;
@@ -36,13 +40,13 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
     @Override
     public void init() {
         spacing = theme().layoutUnits(6);
-        WHorizontalList heading = add(theme.horizontalList()).expandX().widget();
-        WFavorite favorite = heading.add(theme.favorite(module.favorite)).widget();
+        heading = add(theme.horizontalList()).expandX().widget();
+        favorite = heading.add(theme.favorite(module.favorite)).widget();
         favorite.action = () -> {
             module.favorite = favorite.checked;
             if (mc.currentScreen instanceof HbModulesScreen screen) screen.refreshFavorites();
         };
-        heading.add(theme.label(module.description, getWindowWidth() / 2.0)).expandX();
+        description = (HbMultiLabel) heading.add(theme.label(module.description, getWindowWidth() / 2.0)).expandX().widget();
 
         if (module.addon != null && module.addon != MeteorClient.ADDON) {
             WHorizontalList addon = add(theme.horizontalList()).expandX().widget();
@@ -109,6 +113,19 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
         WButton paste = sharing.add(theme.button(GuiRenderer.PASTE)).widget();
         paste.action = this::fromClipboard;
         paste.tooltip = "Paste config";
+    }
+
+    @Override
+    public void calculateSize() {
+        super.calculateSize();
+        if (!(parent instanceof HbModuleEntry entry) || !theme().clickGui()) return;
+        for (int pass = 0; pass < MAX_WRAP_PASSES && description.rewrap(wrapTarget(entry)); pass++) super.calculateSize();
+    }
+
+    private double wrapTarget(HbModuleEntry entry) {
+        Cell<?> cell = cells.getFirst();
+        double headingWidth = entry.settle(width) - theme().hbScale(12) - cell.padLeft() - cell.padRight();
+        return headingWidth - favorite.width - theme.scale(heading.spacing);
     }
 
     @Override

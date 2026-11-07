@@ -112,7 +112,7 @@ public class HbModule extends WPressable implements HbWidget {
 
     private void drawTitle(GuiRenderer renderer, double textX, double textY, double textWidth, boolean active, boolean hover) {
         var color = style().moduleTextColor(theme(), active, hover);
-        theme().typography().draw(renderer, title, textX, textY, 12, color, false);
+        style().drawModuleTitle(renderer, theme(), title, textX, textY, color, active);
         if (style().inverted() && hover) {
             renderer.quad(textX, textY + theme().hbScale(11), textWidth, theme().hbScale(1),
                 active ? color : theme().accent());

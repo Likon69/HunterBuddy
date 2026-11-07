@@ -1,15 +1,25 @@
 package com.hunterbuddy.gui.theme.widgets;
 
+import com.hunterbuddy.gui.theme.HbAlignmentGrid;
 import meteordevelopment.meteorclient.gui.renderer.GuiRenderer;
+import meteordevelopment.meteorclient.gui.utils.WindowConfig;
+import meteordevelopment.meteorclient.utils.misc.input.Input;
+import net.minecraft.client.gui.Click;
+import org.lwjgl.glfw.GLFW;
 import meteordevelopment.meteorclient.gui.utils.Cell;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WWindow;
 import meteordevelopment.meteorclient.gui.widgets.containers.WContainer;
 import net.minecraft.util.math.MathHelper;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static meteordevelopment.meteorclient.utils.Utils.getWindowHeight;
+import static meteordevelopment.meteorclient.utils.Utils.getWindowWidth;
 
 public class HbWindow extends WWindow implements HbWidget {
+    private static final double DRAG_THRESHOLD = 3;
     private final HbCategoryActivity activity;
 
     public HbWindow(WWidget icon, String title, HbCategoryActivity activity) {
@@ -17,8 +27,33 @@ public class HbWindow extends WWindow implements HbWidget {
         this.activity = activity;
     }
 
+    private List<HbWindowSnap.Guide> guides = List.of();
+
+    public boolean snapping() {
+        return dragging && dragged;
+    }
+
+    public List<HbWindowSnap.Guide> guides() {
+        return guides;
+    }
+
+    private double visibleHeight() {
+        return header.height + (height - header.height) * animProgress;
+    }
+
+    private List<HbWindowSnap.Box> siblingBoxes() {
+        List<HbWindowSnap.Box> boxes = new ArrayList<>();
+        if (!(parent instanceof WContainer container)) return boxes;
+        for (Cell<?> cell : container.cells) {
+            if (cell.widget() instanceof HbWindow window && window != this && window.visible) {
+                boxes.add(new HbWindowSnap.Box(window.x, window.y, window.width, window.visibleHeight()));
+            }
+        }
+        return boxes;
+    }
+
     private boolean moduleWindow() {
-        return activity != null || "search".equals(id) || "favorites".equals(id);
+        return theme().clickGui() && (activity != null || "search".equals(id) || "favorites".equals(id));
     }
 
     public boolean containsInteraction(double mouseX, double mouseY) {
@@ -96,6 +131,7 @@ public class HbWindow extends WWindow implements HbWidget {
     @Override
     public boolean render(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
         if (!visible) return true;
+        if (!moduleWindow()) return renderNative(renderer, mouseX, mouseY, delta);
         renderer.scissorStart(x, y, width, header.height + (height - header.height) * animProgress);
         boolean hidden = super.render(renderer, mouseX, mouseY, delta);
         if (!hidden) {
@@ -103,6 +139,15 @@ public class HbWindow extends WWindow implements HbWidget {
             style().drawWindowFrame(renderer, theme(), x, y, width, visibleHeight);
         }
         renderer.scissorEnd();
+        return hidden;
+    }
+
+    private boolean renderNative(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
+        boolean hidden = super.render(renderer, mouseX, mouseY, delta);
+        if (!hidden) {
+            double visibleHeight = header.height + (height - header.height) * animProgress;
+            theme().fitted(header, style().headerHeight(), () -> style().drawWindowFrame(renderer, theme(), x, y, width, visibleHeight));
+        }
         return hidden;
     }
 
@@ -115,29 +160,97 @@ public class HbWindow extends WWindow implements HbWidget {
             super(icon);
         }
 
+        private boolean moduleLook;
+        private double rawX;
+        private double rawY;
+        private double travelX;
+        private double travelY;
+        private boolean engaged;
+
+        @Override
+        public boolean onMouseClicked(Click click, boolean doubled) {
+            boolean handled = super.onMouseClicked(click, doubled);
+            if (dragging) {
+                rawX = HbWindow.this.x;
+                rawY = HbWindow.this.y;
+                travelX = 0;
+                travelY = 0;
+                engaged = false;
+            }
+            return handled;
+        }
+
+        @Override
+        public boolean onMouseReleased(Click click) {
+            boolean handled = super.onMouseReleased(click);
+            guides = List.of();
+            return handled;
+        }
+
+        @Override
+        public void onMouseMoved(double mouseX, double mouseY, double lastMouseX, double lastMouseY) {
+            if (!moduleLook) {
+                super.onMouseMoved(mouseX, mouseY, lastMouseX, lastMouseY);
+                return;
+            }
+            if (!dragging) return;
+            rawX += mouseX - lastMouseX;
+            rawY += mouseY - lastMouseY;
+            if (!engaged) {
+                travelX += mouseX - lastMouseX;
+                travelY += mouseY - lastMouseY;
+                engaged = Math.hypot(travelX, travelY) > theme().hbScale(DRAG_THRESHOLD);
+                if (!engaged) return;
+            }
+            double targetX = rawX;
+            double targetY = rawY;
+            if (Input.isKeyPressed(GLFW.GLFW_KEY_LEFT_ALT) || Input.isKeyPressed(GLFW.GLFW_KEY_RIGHT_ALT)) {
+                guides = List.of();
+            } else {
+                HbWindowSnap.Result snap = HbWindowSnap.snap(
+                    new HbWindowSnap.Box(rawX, rawY, HbWindow.this.width, visibleHeight()), siblingBoxes(),
+                    getWindowWidth(), getWindowHeight(), theme().hbScale(HbAlignmentGrid.MINOR_SPACING),
+                    theme().hbScale(10), theme().hbScale(4));
+                targetX = snap.x();
+                targetY = snap.y();
+                guides = snap.guides();
+            }
+            HbWindow.this.move(targetX - HbWindow.this.x, targetY - HbWindow.this.y);
+            moved = true;
+            movedX = HbWindow.this.x;
+            movedY = HbWindow.this.y;
+            if (id != null) {
+                WindowConfig config = theme().getWindowConfig(id);
+                config.x = HbWindow.this.x;
+                config.y = HbWindow.this.y;
+            }
+            dragged = true;
+        }
+
         @Override
         public void init() {
-            if (!moduleWindow()) {
+            moduleLook = moduleWindow();
+            if (!moduleLook) {
                 super.init();
                 return;
             }
-            display = style().hasCounter() ? String.join(" ", title.toUpperCase(java.util.Locale.ROOT).split("")) : title;
+            display = style().hasCounter() ? String.join(" ", title.toUpperCase(java.util.Locale.ROOT).split("")) : style().windowTitle(title);
             if (style().hasCounter()) {
                 letters = new String[display.length()];
                 offsets = new double[display.length()];
                 for (int i = 0; i < display.length(); i++) letters[i] = display.substring(i, i + 1);
             }
-            if (!style().inverted() && !style().hasCounter()) add(new HbLamp(() -> true));
-            if (style().hasCounter() && activity != null) add(new HbCounter(activity));
+            if (style().lamp()) add(new HbLamp(() -> true));
+            if (style().counter() && activity != null) add(new HbCounter(activity));
         }
 
         @Override
         protected void onCalculateSize() {
-            if (!moduleWindow()) {
+            if (!moduleLook) {
                 super.onCalculateSize();
                 return;
             }
-            width = theme().typography().width(display, 12, !style().hasCounter()) + theme().hbScale(80);
+            width = theme().typography().width(display, 12, style().strongTitle()) + theme().hbScale(80);
             if (style().hasCounter()) {
                 double offset = 0;
                 for (int i = 0; i < letters.length; i++) {
@@ -151,7 +264,7 @@ public class HbWindow extends WWindow implements HbWidget {
 
         @Override
         protected void onCalculateWidgetPositions() {
-            if (!moduleWindow()) {
+            if (!moduleLook) {
                 super.onCalculateWidgetPositions();
                 return;
             }
@@ -168,7 +281,7 @@ public class HbWindow extends WWindow implements HbWidget {
 
         @Override
         public boolean render(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-            if (!moduleWindow()) return super.render(renderer, mouseX, mouseY, delta);
+            if (!moduleLook) return super.render(renderer, mouseX, mouseY, delta);
             if (!visible) return true;
             animProgress = MathHelper.clamp(animProgress + (expanded ? 1 : -1) * delta * 14, 0, 1);
             onRender(renderer, mouseX, mouseY, delta);
@@ -180,9 +293,9 @@ public class HbWindow extends WWindow implements HbWidget {
         protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
             boolean active = activity != null && activity.any();
             double phase = "Visuals".equals(title) ? 2.5 : "Utility".equals(title) ? 4.2 : 0;
-            style().drawWindowHeader(renderer, theme(), this, active, phase);
-            if (!moduleWindow()) return;
-            double textX = x + theme().hbScale(style().hasCounter() || style().inverted() ? 10 : 24);
+            theme().fitted(this, style().headerHeight(), () -> style().drawWindowHeader(renderer, theme(), this, active, phase));
+            if (!moduleLook) return;
+            double textX = x + theme().hbScale(style().titleInset());
             if (style().inverted() && activity != null) {
                 String number = activity.number();
                 theme().typography().draw(renderer, number, textX, y + theme().hbScale(5), 12, theme().colors().dim(), false);
@@ -193,8 +306,9 @@ public class HbWindow extends WWindow implements HbWidget {
                     theme().typography().draw(renderer, letters[i], textX + offsets[i], y + theme().hbScale(5), 12, theme().titleTextColor.get(), false);
                 }
             } else {
-                theme().typography().draw(renderer, title, textX, y + theme().hbScale(5), 12,
-                    theme().titleTextColor.get(), true);
+                theme().typography().draw(renderer, display, textX, y + theme().hbScale(5), 12,
+                    style().titleColor(theme()), style().strongTitle());
+                style().drawTitleTail(renderer, theme(), this, textX + theme().typography().width(display, 12, style().strongTitle()), active);
             }
         }
     }

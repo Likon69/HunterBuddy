@@ -13,6 +13,10 @@ public class HbFavorite extends WFavorite implements HbWidget {
 
     @Override
     protected void onCalculateSize() {
+        if (!theme().clickGui()) {
+            super.onCalculateSize();
+            return;
+        }
         width = theme().hbScale(10);
         height = theme().hbScale(10);
     }
@@ -25,7 +29,7 @@ public class HbFavorite extends WFavorite implements HbWidget {
 
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        style().drawFavorite(renderer, theme(), this, checked, latch.held(pressed), mouseOver);
+        theme().fitted(this, 10, () -> style().drawFavorite(renderer, theme(), this, checked, latch.held(pressed), mouseOver));
     }
 
     @Override

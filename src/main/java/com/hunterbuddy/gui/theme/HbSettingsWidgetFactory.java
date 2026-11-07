@@ -51,7 +51,7 @@ public class HbSettingsWidgetFactory extends DefaultSettingsWidgetFactory {
 
     @Override
     public WWidget create(GuiTheme theme, Settings settings, String filter) {
-        if (!((HbGuiTheme) theme).useHbWidgets()) return nativeFactory.create(theme, settings, filter);
+        if (!((HbGuiTheme) theme).clickGui()) return nativeFactory.create(theme, settings, filter);
         WVerticalList list = theme.verticalList();
         list.spacing = 0;
         for (SettingGroup group : settings.groups) {
@@ -61,7 +61,7 @@ public class HbSettingsWidgetFactory extends DefaultSettingsWidgetFactory {
                 boolean visible = setting.isVisible();
                 setting.lastWasVisible = visible;
                 if (!visible || !setting.title.toLowerCase(Locale.ROOT).contains(filter.toLowerCase(Locale.ROOT))) continue;
-                WLabel label = table.add(theme.label(setting.title).color(theme.textSecondaryColor())).widget();
+                WLabel label = table.add(theme.label(setting.title)).widget();
                 label.tooltip = setting.description;
                 Factory factory = getFactory(setting.getClass());
                 if (factory != null) factory.create(table, setting);

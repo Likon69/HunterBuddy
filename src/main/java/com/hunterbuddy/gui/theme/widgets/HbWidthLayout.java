@@ -43,7 +43,7 @@ final class HbWidthLayout {
         for (Cell<?> cell : list.cells) {
             WWidget child = cell.widget();
             double width = child.width * ratio;
-            if (ratio < 1 && child instanceof WLabel) width = Math.min(width, available * LABEL_SHARE);
+            if (ratio < 1 && child instanceof WLabel && !(child instanceof HbMultiLabel)) width = Math.min(width, available * LABEL_SHARE);
             cell.x = left + cell.padLeft();
             cell.y = list.y + cell.padTop();
             cell.width = width;

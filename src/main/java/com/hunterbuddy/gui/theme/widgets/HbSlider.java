@@ -4,7 +4,6 @@ import meteordevelopment.meteorclient.gui.renderer.GuiRenderer;
 import meteordevelopment.meteorclient.gui.widgets.input.WSlider;
 
 public class HbSlider extends WSlider implements HbWidget {
-    public double step;
     public HbSlider(double value, double min, double max) {
         super(value, min, max);
     }
@@ -25,22 +24,22 @@ public class HbSlider extends WSlider implements HbWidget {
 
     @Override
     protected void onCalculateSize() {
+        if (!theme().clickGui()) {
+            width = theme().textHeight();
+            height = width;
+            return;
+        }
         width = theme().hbScale(style().inverted() ? 120 : 90);
         height = theme().hbScale(style().inverted() ? 18 : 12);
     }
 
     @Override
     public boolean onMouseScrolled(double amount) {
-        if (step == 0) return super.onMouseScrolled(amount);
-        if (!handleMouseOver && !scrollHandleMouseOver) return false;
-        set(get() + amount * step);
-        if (action != null) action.run();
-        if (actionOnRelease != null) actionOnRelease.run();
-        return true;
+        return !theme().clickGui() && super.onMouseScrolled(amount);
     }
 
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        style().drawSlider(renderer, theme(), this, fraction());
+        theme().fitted(this, style().inverted() ? 18 : 12, () -> style().drawSlider(renderer, theme(), this, fraction()));
     }
 }

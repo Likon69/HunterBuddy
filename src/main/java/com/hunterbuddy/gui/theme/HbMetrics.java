@@ -22,6 +22,10 @@ final class HbMetrics {
         return true;
     }
 
+    double meteorTextHeight() {
+        return meteorTextHeight;
+    }
+
     double layoutScale() {
         return layoutScale;
     }

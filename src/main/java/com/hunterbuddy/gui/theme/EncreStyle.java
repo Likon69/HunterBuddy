@@ -11,6 +11,7 @@ public final class EncreStyle implements HbStyle {
         HbPalette.rgb(0x111214), HbPalette.rgb(0xD7472F), HbPalette.rgb(0x0B0B0E)
     );
     private static final double INACTIVE_RISK_ALPHA = 0.5;
+    private static final double DOT_STEP = 6;
     private final Color wash = new Color();
 
     @Override
@@ -27,6 +28,16 @@ public final class EncreStyle implements HbStyle {
     public double settingInset() { return 18; }
     @Override
     public Color inputText(HbGuiTheme theme) { return theme.accent(); }
+
+    @Override
+    public void drawGridLine(HbQuadSink sink, double x, double y, double length, boolean vertical, double thickness, boolean major, Color color) {
+        if (!major) return;
+        double step = thickness * DOT_STEP;
+        for (double offset = 0; offset < length; offset += step) {
+            if (vertical) sink.quad(x, y + offset, thickness, thickness, color);
+            else sink.quad(x + offset, y, thickness, thickness, color);
+        }
+    }
 
     @Override
     public void drawWindowFrame(GuiRenderer renderer, HbGuiTheme theme, double x, double y, double width, double height) {
@@ -107,6 +118,17 @@ public final class EncreStyle implements HbStyle {
         if (pressed) HbDraw.border(renderer, row.x + theme.hbScale(1), row.y + theme.hbScale(1), row.width - theme.hbScale(2), row.height - theme.hbScale(2), theme.hbScale(1), theme.colors().onAccent());
         if (selected || hover) renderer.quad(row.x + theme.hbScale(6), row.y + row.height - theme.hbScale(2),
             Math.max(0, row.width - theme.hbScale(12)), theme.hbScale(hover ? 2 : 1), theme.colors().onAccent());
+    }
+
+    @Override
+    public void drawTab(GuiRenderer renderer, HbGuiTheme theme, WWidget tab, boolean active, boolean pressed, boolean hover) {
+        if (active || hover) renderer.quad(tab, theme.accent());
+        else HbDraw.border(renderer, tab.x, tab.y, tab.width, tab.height, theme.hbScale(1), theme.colors().border());
+    }
+
+    @Override
+    public Color tabText(HbGuiTheme theme, boolean active, boolean hover) {
+        return active || hover ? theme.colors().onAccent() : theme.accent();
     }
 
     @Override

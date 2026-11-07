@@ -49,7 +49,6 @@ public class HbNumericSetting extends WContainer implements HbWidget {
         field.number(style().inverted());
         add(field);
         slider = add(new HbSlider(preview, min, max)).widget();
-        slider.step = decimals == 0 ? 1 : 0.05;
         slider.action = () -> {
             preview = decimals == 0 ? Math.round(slider.get()) : slider.get();
             updateField();

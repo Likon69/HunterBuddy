@@ -35,6 +35,15 @@ public final class HbDraw {
         renderer.quad(x + width - thickness, y + thickness, thickness, height - thickness * 2, color);
     }
 
+    public static void bracket(GuiRenderer renderer, double x, double y, double width, double height, double thickness, double serif, Color color) {
+        renderer.quad(x, y, thickness, height, color);
+        renderer.quad(x, y, serif, thickness, color);
+        renderer.quad(x, y + height - thickness, serif, thickness, color);
+        renderer.quad(x + width - thickness, y, thickness, height, color);
+        renderer.quad(x + width - serif, y, serif, thickness, color);
+        renderer.quad(x + width - serif, y + height - thickness, serif, thickness, color);
+    }
+
     public static void chamferedTop(GuiRenderer renderer, double x, double y, double width, double height, double chamfer, Color color) {
         renderer.quad(x + chamfer, y, width - chamfer * 2, chamfer, color);
         renderer.triangle(x + chamfer, y, x, y + chamfer, x + chamfer, y + chamfer, color);

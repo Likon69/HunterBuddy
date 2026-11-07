@@ -14,6 +14,10 @@ public class HbConfirmedButton extends WConfirmedButton implements HbWidget {
 
     @Override
     protected void onCalculateSize() {
+        if (!theme().clickGui()) {
+            super.onCalculateSize();
+            return;
+        }
         width = HbButtonPainter.width(theme(), getText());
         height = theme().hbScale(16);
     }
@@ -26,6 +30,6 @@ public class HbConfirmedButton extends WConfirmedButton implements HbWidget {
 
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        HbButtonPainter.draw(renderer, theme(), this, getText(), texture, latch.held(pressed) || pressedOnce);
+        HbButtonPainter.draw(renderer, theme(), this, getText(), textWidth, texture, latch.held(pressed) || pressedOnce);
     }
 }

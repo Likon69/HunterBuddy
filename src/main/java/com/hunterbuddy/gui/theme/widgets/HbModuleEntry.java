@@ -8,8 +8,10 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WWindow;
 import meteordevelopment.meteorclient.systems.modules.Module;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
+import static meteordevelopment.meteorclient.utils.Utils.getWindowWidth;
 
 public class HbModuleEntry extends WVerticalList implements HbWidget {
+    private static final double MAX_WINDOW_SHARE = 0.45;
     private final Module module;
     private final String title;
     private HbModuleSettings settings;
@@ -28,7 +30,11 @@ public class HbModuleEntry extends WVerticalList implements HbWidget {
     @Override
     protected void onCalculateSize() {
         super.onCalculateSize();
-        width = cells.getFirst().widget().width;
+        width = settle(width);
+    }
+
+    public double settle(double natural) {
+        return Math.max(cells.getFirst().widget().width, Math.min(natural, getWindowWidth() * MAX_WINDOW_SHARE));
     }
 
     public Module module() {

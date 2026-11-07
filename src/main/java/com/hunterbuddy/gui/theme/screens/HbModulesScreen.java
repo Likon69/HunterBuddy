@@ -1,5 +1,6 @@
 package com.hunterbuddy.gui.theme.screens;
 
+import com.hunterbuddy.gui.theme.HbAlignmentGrid;
 import com.hunterbuddy.gui.theme.HbGuiTheme;
 import com.hunterbuddy.gui.theme.widgets.HbModuleEntry;
 import com.hunterbuddy.gui.theme.widgets.HbWindow;
@@ -12,8 +13,10 @@ import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.containers.WContainer;
 import meteordevelopment.meteorclient.gui.widgets.containers.WWindow;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.Click;
+import net.minecraft.client.gui.DrawContext;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -130,6 +133,11 @@ public class HbModulesScreen extends ModulesScreen {
     }
 
     @Override
+    public void renderCustom(DrawContext context, int mouseX, int mouseY, float delta) {
+        ((HbGuiTheme) theme).inClickGui(() -> super.renderCustom(context, mouseX, mouseY, delta));
+    }
+
+    @Override
     public void removed() {
         cancelBindings();
         super.removed();
@@ -158,6 +166,7 @@ public class HbModulesScreen extends ModulesScreen {
     }
 
     private class HbCategoryController extends WCategoryController {
+        private final HbAlignmentGrid alignment = new HbAlignmentGrid();
         private WWindow captured;
         private double pointerX;
         private double pointerY;
@@ -181,9 +190,17 @@ public class HbModulesScreen extends ModulesScreen {
         public boolean render(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
             if (super.render(renderer, mouseX, mouseY, delta)) return true;
             WWindow hovered = hit(mouseX, mouseY);
+            HbWindow snapping = null;
+            for (WWindow window : windows) {
+                if (window instanceof HbWindow hb && hb.snapping()) snapping = hb;
+            }
+            alignment.advance(snapping != null, delta);
+            HbGuiTheme hbTheme = (HbGuiTheme) theme;
+            alignment.drawGrid(renderer::quad, hbTheme, Utils.getWindowWidth(), Utils.getWindowHeight());
             for (WWindow window : windows) {
                 window.render(renderer, window == hovered ? mouseX : Double.NaN, window == hovered ? mouseY : Double.NaN, delta);
             }
+            if (snapping != null) alignment.drawGuides(renderer::quad, hbTheme, snapping.guides(), Utils.getWindowWidth(), Utils.getWindowHeight());
             return false;
         }
 

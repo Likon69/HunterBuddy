@@ -29,6 +29,7 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
 
     @Override
     public double pad() {
+        if (!theme().clickGui()) return super.pad();
         return theme().hbScale(floating || number && !style().hasCounter() ? 0 : style().inverted() ? 2 : 4);
     }
 
@@ -39,6 +40,7 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
     @Override
     protected void onCalculateSize() {
         super.onCalculateSize();
+        if (!theme().clickGui()) return;
         width = theme().hbScale(number ? 30 : 110);
         height = theme().hbScale(floating ? 10 : number && style().hasCounter() ? 13 : 14);
         if (customRenderer) height = Math.max(height, theme().hbScale(theme().textSize(11) + 2));
@@ -46,6 +48,7 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
 
     @Override
     protected double getTextWidth(int position) {
+        if (!theme().clickGui()) return super.getTextWidth(position);
         return theme().layoutUnits(super.getTextWidth(position)) * fontSize() / 11;
     }
 
@@ -57,6 +60,10 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
     @Override
     protected void onRender(GuiRenderer gui, double mouseX, double mouseY, double delta) {
         cursorTime += delta;
+        if (!theme().clickGui()) {
+            renderNative(gui);
+            return;
+        }
         if (!floating && (!number || style().hasCounter())) style().drawInput(gui, theme(), this, focused);
         double offset = getOverflowWidthForRender();
         double textY = y + (height - theme().hbScale(fontSize())) / 2;
@@ -84,5 +91,24 @@ public class HbTextBox extends WMeteorTextBox implements HbWidget {
             gui.quad(textX + getTextWidth(cursor), textY, theme().hbScale(1), theme().hbScale(fontSize()), theme().accent());
         }
         if (clipped) gui.scissorEnd();
+    }
+
+    private void renderNative(GuiRenderer gui) {
+        theme().fitted(this, 14, () -> style().drawInput(gui, theme(), this, focused));
+        double pad = pad();
+        double textX = x + pad - getOverflowWidthForRender();
+        double textHeight = theme().textHeight();
+        gui.scissorStart(x + pad, y + pad, width - pad * 2, height - pad * 2);
+        if (!text.isEmpty()) renderer.render(gui, textX, y + pad, text, style().inputText(theme()));
+        else if (placeholder != null) renderer.render(gui, textX, y + pad, placeholder, theme().placeholderColor.get());
+        if (focused && selectionStart != selectionEnd) {
+            double left = Math.min(getTextWidth(selectionStart), getTextWidth(selectionEnd));
+            double right = Math.max(getTextWidth(selectionStart), getTextWidth(selectionEnd));
+            gui.quad(textX + left, y + pad, right - left, textHeight, theme().textHighlightColor.get());
+        }
+        if (focused && cursorTime % 1.2 < 0.6) {
+            gui.quad(textX + getTextWidth(cursor), y + pad, theme().scale(1), textHeight, theme().accent());
+        }
+        gui.scissorEnd();
     }
 }

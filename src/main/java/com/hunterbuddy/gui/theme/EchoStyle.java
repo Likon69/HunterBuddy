@@ -136,6 +136,12 @@ public final class EchoStyle implements HbStyle {
     }
 
     @Override
+    public void drawDropdownBox(GuiRenderer renderer, HbGuiTheme theme, WWidget dropdown, boolean expanded, boolean pressed, boolean hover) {
+        HbStyle.super.drawDropdownHeader(renderer, theme, dropdown, expanded, pressed, hover);
+        if (pressed || hover) renderer.quad(dropdown.x, dropdown.y, theme.hbScale(2), dropdown.height, theme.accent());
+    }
+
+    @Override
     public void drawInput(GuiRenderer renderer, HbGuiTheme theme, WWidget input, boolean focused) {
         renderer.quad(input, theme.colors().input());
     }

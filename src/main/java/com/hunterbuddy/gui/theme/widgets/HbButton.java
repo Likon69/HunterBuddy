@@ -14,6 +14,10 @@ public class HbButton extends WButton implements HbWidget {
 
     @Override
     protected void onCalculateSize() {
+        if (!theme().clickGui()) {
+            super.onCalculateSize();
+            return;
+        }
         width = HbButtonPainter.width(theme(), getText()) - (parent instanceof WKeybind ? theme().hbScale(4) : 0);
         height = theme().hbScale(parent instanceof WKeybind ? 14 : 16);
     }
@@ -26,6 +30,6 @@ public class HbButton extends WButton implements HbWidget {
 
     @Override
     protected void onRender(GuiRenderer renderer, double mouseX, double mouseY, double delta) {
-        HbButtonPainter.draw(renderer, theme(), this, getText(), texture, latch.held(pressed));
+        HbButtonPainter.draw(renderer, theme(), this, getText(), textWidth, texture, latch.held(pressed));
     }
 }

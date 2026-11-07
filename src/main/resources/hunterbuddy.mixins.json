@@ -42,6 +42,7 @@
     "MeteorNametagsHeightMixin",
     "LegacyModuleNameMixin",
     "LegacyHudNameMixin",
+    "HudEditorScreenMixin",
     "ChatScreenOverlayMixin",
     "KeyboardCharMixin",
     "DroneCameraMixin",
