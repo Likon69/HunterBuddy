@@ -209,7 +209,7 @@ vec3 stormNight(vec3 dir, float t) {
     vec2 flow = vec2(t * 0.08, t * 0.03);
     float warp = fbm2(plane * 0.5 - flow * 0.6);
     float density = fbm2(plane * 0.9 + flow + warp * 1.5);
-    float cloud = smoothstep(0.35, 0.8, density);
+    float cloud = smoothstep(0.35, 0.8, density) * smoothstep(-0.05, 0.15, dir.y);
 
     vec3 col = mix(vec3(0.02, 0.025, 0.05), vec3(0.005, 0.008, 0.02), smoothstep(0.0, 0.9, dir.y));
     col = mix(col, Color0.rgb * (0.15 + 0.35 * density), cloud);
