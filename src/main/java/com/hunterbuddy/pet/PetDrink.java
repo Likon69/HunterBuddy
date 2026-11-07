@@ -1,6 +1,7 @@
 package com.hunterbuddy.pet;
 
 public final class PetDrink {
+    private static final float MAX_HEAD_TILT = 0.52f;
     public boolean available;
     public float headAngle;
     public float armAngle;
@@ -34,8 +35,8 @@ public final class PetDrink {
             float ha = wrap((float) Math.atan2(y, x) - (float) Math.atan2(my, mx));
             float aa = wrap((float) Math.atan2(y - dy, x - dx) - (float) Math.atan2(by, bx));
             if (ha > -0.25f || ha < -1.5f || aa > -0.4f || aa < -2.2f) continue;
-            headAngle = ha;
-            armAngle = aa;
+            headAngle = Math.max(ha, -MAX_HEAD_TILT);
+            armAngle = headAngle == ha ? aa : PetPose.towardMouth(rig, 3, 1, headAngle);
             available = true;
             return;
         }

@@ -7,18 +7,29 @@ public final class PetSfx {
         boolean active(int slot);
         boolean start(PetSfxAction action, int slot, float volume);
         void stop(int slot);
+
+        default String refusal() {
+            return "backend refused";
+        }
     }
 
     private final Backend backend;
+    private final PetSfxLog log;
     private final long[] next = new long[PetSfxAction.ALL.length];
     private final PetSfxAction[] playing = new PetSfxAction[3];
     private long now;
     private boolean enabled;
     private boolean quiet;
+    private boolean shown = true;
     private float volume;
 
     public PetSfx(Backend backend) {
+        this(backend, new PetSfxLog(null));
+    }
+
+    public PetSfx(Backend backend, PetSfxLog log) {
         this.backend = backend;
+        this.log = log;
     }
 
     public void update(long now, boolean enabled, boolean quiet, float volume) {
@@ -35,21 +46,43 @@ public final class PetSfx {
         }
     }
 
+    public void shown(boolean value) {
+        shown = value;
+    }
+
     public void play(PetSfxAction action) {
-        if (!enabled || volume <= 0 || quiet && action != PetSfxAction.SCARED || now < next[action.ordinal()]) return;
+        if (!enabled) {
+            if (!shown) return;
+            log.skipped(action, now, "disabled (setting off or pack missing)");
+            return;
+        }
+        if (volume <= 0) {
+            log.skipped(action, now, "volume is zero");
+            return;
+        }
+        if (quiet && action != PetSfxAction.SCARED) {
+            log.skipped(action, now, "silenced by combat, regear or landing");
+            return;
+        }
+        if (now < next[action.ordinal()]) return;
+        int busy = 0;
+        for (PetSfxAction value : playing) if (value != null) busy++;
+        if (action.priority == 0 && busy >= playing.length - 1) return;
         for (int i = 0; i < playing.length; i++) {
             if (playing[i] != null) continue;
             if (backend.start(action, i, volume)) {
                 playing[i] = action;
                 next[action.ordinal()] = now + action.interval;
-            }
+            } else if (backend.refusal() != null) log.skipped(action, now, backend.refusal());
             return;
         }
-        if (action == PetSfxAction.SCARED) {
-            backend.stop(0);
-            playing[0] = null;
+        int weakest = 0;
+        for (int i = 1; i < playing.length; i++) if (playing[i].priority < playing[weakest].priority) weakest = i;
+        if (playing[weakest].priority < action.priority) {
+            backend.stop(weakest);
+            playing[weakest] = null;
             play(action);
-        }
+        } else log.skipped(action, now, "no free voice");
     }
 
     public void reset() {

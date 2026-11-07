@@ -3,22 +3,32 @@ package com.hunterbuddy.pet;
 import java.util.Arrays;
 
 public final class PetPose {
+    private static final float LIE_CROUCH = 0.35f;
+    private static final float SMOKE_REACH = 0.55f;
+    private static final float THROW_WIND_UP = 0.9f;
+    private static final float THROW_RELEASE = -0.3f;
     public final float[] angles = new float[6];
     public final float[] previousAngles = new float[6];
     private final float[] target = new float[6];
+    private final float[] custom = new float[PetAnimation.JOINTS.length];
+    private final float[] liftTarget = new float[2];
+    public final float[] legLift = new float[2];
+    public final float[] previousLegLift = new float[2];
     public final PetDrink drink = new PetDrink();
     public float fold;
     public float previousFold;
-    public float recline;
-    public float previousRecline;
     public float seated;
     public float previousSeated;
     public float crouch;
     public float previousCrouch;
-    public float wall;
-    public float previousWall;
     public float turn;
     public float previousTurn;
+    public float shift;
+    public float previousShift;
+    public float bob;
+    public float previousBob;
+    public float lean;
+    public float previousLean;
     public boolean turned;
     private int direction = 1;
     private float clock;
@@ -27,12 +37,15 @@ public final class PetPose {
     public void reset() {
         Arrays.fill(angles, 0);
         Arrays.fill(previousAngles, 0);
+        Arrays.fill(legLift, 0);
+        Arrays.fill(previousLegLift, 0);
         fold = previousFold = 0;
-        recline = previousRecline = 0;
         seated = previousSeated = 0;
         crouch = previousCrouch = 0;
-        wall = previousWall = 0;
         turn = previousTurn = 0;
+        bob = previousBob = 0;
+        shift = previousShift = 0;
+        lean = previousLean = 0;
         clock = 0;
         loaded = null;
         turned = false;
@@ -40,8 +53,10 @@ public final class PetPose {
     }
 
     public boolean calm() {
-        if (fold > 0.01f || recline > 0.01f || seated > 0.01f || Math.abs(wall) > 0.02f) return false;
+        if (fold > 0.01f || seated > 0.01f) return false;
+        if (Math.abs(bob) > 0.3f || Math.abs(shift) > 0.3f || Math.abs(lean) > 0.01f) return false;
         for (float angle : angles) if (Math.abs(angle) > 0.035f) return false;
+        for (float lift : legLift) if (Math.abs(lift) > 0.5f) return false;
         return true;
     }
 
@@ -51,59 +66,62 @@ public final class PetPose {
             loaded = rig;
         }
         System.arraycopy(angles, 0, previousAngles, 0, angles.length);
+        System.arraycopy(legLift, 0, previousLegLift, 0, legLift.length);
         previousFold = fold;
-        previousRecline = recline;
         previousSeated = seated;
         previousCrouch = crouch;
-        previousWall = wall;
         previousTurn = turn;
+        previousBob = bob;
+        previousShift = shift;
+        previousLean = lean;
         turned = direction != motion.direction;
         direction = motion.direction;
         clock += dt;
         Arrays.fill(target, 0);
+        Arrays.fill(liftTarget, 0);
         float step = (float) Math.sin(clock * 6);
+        float breathing = (float) Math.sin(brain.age * 2);
         float nextFold = 0;
-        float nextRecline = 0;
         float nextSeat = 0;
         float nextCrouch = motion.landing * 0.12f;
-        float nextTurn = brain.poseTurn;
-        PetState state = brain.preparingPose || brain.imagePose ? PetState.REST : brain.state;
+        float nextTurn = 0;
+        float nextBob = 0;
+        float nextShift = 0;
+        boolean still = (brain.preparingPose || brain.imagePose) && !brain.sitDrink && !brain.keepSeated;
+        PetState state = still ? PetState.REST : brain.state;
+        float nextLean = still || brain.resting() || state == PetState.SIT ? 0
+            : (float) Math.sin(brain.age * 2.7) * brain.drunkenness * 0.16f;
+        PetAnimation playing = state == PetState.CUSTOM ? brain.animation : null;
         switch (state) {
             case WALK, STAGGER, HIDE -> {
-                target[4] = step * 0.28f;
+                target[4] = step * 0.4f;
                 target[5] = -target[4];
-                target[2] = step * 0.07f;
-                target[3] = -step * 0.05f;
+                target[2] = -step * 0.23f;
+                target[3] = -target[2];
+                if (state == PetState.WALK) nextBob = -Math.abs(step) * 3;
                 target[1] = state == PetState.STAGGER ? step * brain.drunkenness * 0.12f : 0;
                 if (state == PetState.HIDE) nextCrouch = 0.18f;
             }
-            case SMOKE -> target[0] = 0.04f;
-            case DRINK -> {
-                if (drink.available) {
-                    float t = brain.age / brain.duration;
-                    float head = smooth(Math.min(t / 0.22f, (1 - t) / 0.10f));
-                    float arm = smooth(Math.min((t - 0.22f) / 0.18f, (0.88f - t) / 0.13f));
-                    target[0] = drink.headAngle * head;
-                    target[3] = drink.armAngle * arm;
-                }
+            case SMOKE -> {
+                float t = brain.age / brain.duration;
+                target[0] = 0.1f;
+                target[2] = towardMouth(rig, 2, 0, target[0]) * SMOKE_REACH * smooth(Math.min(t / 0.2f, (1 - t) / 0.2f));
             }
+            case DRINK -> drinkMotion(rig, brain.drinkProgress());
             case SIT -> {
                 nextSeat = motion.atEdge ? 1 : 0;
                 target[4] = step * 0.10f;
                 target[5] = -target[4];
+                if (brain.sitDrink) drinkMotion(rig, brain.drinkProgress());
             }
-            case SETTLE -> nextFold = smooth(brain.age / brain.duration);
-            case LIE_DOWN -> {
-                nextFold = 1;
-                nextRecline = smooth(brain.age / brain.duration);
-            }
-            case SLEEP -> { nextFold = 1; nextRecline = 1; }
+            case SETTLE -> nextCrouch = LIE_CROUCH * smooth(brain.age / brain.duration);
+            case LIE_DOWN, SLEEP -> nextCrouch = LIE_CROUCH;
             case RISE -> {
                 float t = brain.age / brain.duration;
-                nextFold = 1 - smooth((t - 0.60f) / 0.40f);
-                nextRecline = 1 - smooth(t / 0.60f);
+                nextCrouch = LIE_CROUCH * (1 - smooth((t - 0.45f) / 0.55f));
             }
             case DANCE -> {
+                if (playing != null) break;
                 float rhythm = switch (brain.danceStyle) {
                     case 1 -> (float) Math.sin(clock * 9);
                     case 2 -> (float) Math.sin(clock * 3.5);
@@ -114,20 +132,46 @@ public final class PetPose {
                 target[4] = rhythm * (brain.danceStyle == 1 ? 0.22f : brain.danceStyle == 3 ? 0.18f : 0.12f);
                 target[5] = brain.danceStyle == 2 ? (float) Math.sin(clock * 3.5f + 1.2f) * 0.15f : -target[4];
                 target[0] = brain.danceStyle == 3 ? -rhythm * 0.05f : 0;
+                target[2] = rhythm * 0.45f;
+                target[3] = -target[2];
                 nextCrouch = Math.abs(rhythm) * (brain.danceStyle == 1 ? 0.12f : 0.08f);
             }
             case WAVE -> {
                 target[2] = 0.5f + step * 0.1f;
                 target[0] = 0.04f;
             }
-            case CELEBRATE, PANIC -> target[0] = step * 0.08f;
+            case PANIC -> {
+                target[0] = step * 0.08f;
+                target[2] = 0.5f + step * 0.15f;
+                target[3] = -0.55f - step * 0.15f;
+                nextBob = step * 2;
+            }
+            case CELEBRATE -> {
+                target[0] = step * 0.08f;
+                target[2] = 0.5f;
+                target[3] = -0.55f;
+                nextBob = -Math.abs(step) * 14;
+            }
             case TURN -> nextTurn = (float) Math.sin(Math.PI * Math.min(1, brain.age / brain.duration));
             case STUMBLE -> nextFold = 0.9f * (float) Math.sin(Math.PI * Math.min(1, brain.age / brain.duration));
-            case REST, THROW -> { }
+            case THROW -> target[3] = brain.age < brain.duration * 0.55f ? THROW_WIND_UP : THROW_RELEASE;
+            case REST -> {
+                if (!still) nextBob = breathing * 0.8f;
+            }
+        }
+        if (playing != null) {
+            playing.sample(brain.age, custom);
+            System.arraycopy(custom, 0, target, 0, target.length);
+            liftTarget[0] = custom[PetAnimation.LEFT_LIFT];
+            liftTarget[1] = custom[PetAnimation.LEFT_LIFT + 1];
+            nextLean = custom[PetAnimation.LEAN];
+            nextCrouch += custom[PetAnimation.CROUCH];
+            nextBob = custom[PetAnimation.BOB];
+            nextShift = custom[PetAnimation.SHIFT];
         }
         if (motion.travel != PetMotion.Travel.GROUNDED) {
+            nextBob = 0;
             nextFold = 0;
-            nextRecline = 0;
             nextSeat = 0;
             target[2] = step * 0.09f;
             target[3] = -step * 0.07f;
@@ -136,16 +180,52 @@ public final class PetPose {
         }
         float blend = 1 - (float) Math.exp(-dt * 12);
         for (int i = 0; i < angles.length; i++) angles[i] += (target[i] - angles[i]) * blend;
-        if (state == PetState.DRINK && brain.age / brain.duration >= 0.42f && brain.age / brain.duration <= 0.73f) {
+        float drinking = brain.drinkProgress();
+        if ((state == PetState.DRINK || state == PetState.SIT && brain.sitDrink) && drinking >= 0.42f && drinking <= 0.73f) {
             angles[0] = target[0];
             angles[3] = target[3];
         }
+        for (int i = 0; i < legLift.length; i++) legLift[i] += (liftTarget[i] - legLift[i]) * blend;
         fold += (nextFold - fold) * blend;
-        recline += (nextRecline - recline) * blend;
         seated += (nextSeat - seated) * blend;
         crouch += (nextCrouch - crouch) * blend;
-        wall += (motion.wallAngle() - wall) * blend;
+        bob += (nextBob - bob) * blend;
+        shift += (nextShift - shift) * blend;
+        lean += (nextLean - lean) * blend;
         turn = nextTurn;
+    }
+
+    private void drinkMotion(PetResources.Rig rig, float t) {
+        float head = smooth(Math.min(t / 0.22f, (1 - t) / 0.10f));
+        float arm = smooth(Math.min((t - 0.22f) / 0.18f, (0.88f - t) / 0.13f));
+        if (drink.available) {
+            target[0] = drink.headAngle * head;
+            target[3] = drink.armAngle * arm;
+        } else {
+            target[0] = -0.28f * head;
+            target[3] = towardMouth(rig, 3, 1, target[0]) * arm;
+        }
+    }
+
+    static float towardMouth(PetResources.Rig rig, int owner, int anchor, float headAngle) {
+        float x = rig.anchors()[4];
+        float y = rig.anchors()[5];
+        for (PetResources.Part part : rig.parts()) {
+            if (part.index() != 0) continue;
+            float dx = x - part.pivotX();
+            float dy = y - part.pivotY();
+            float sin = (float) Math.sin(headAngle);
+            float cos = (float) Math.cos(headAngle);
+            x = part.pivotX() + dx * cos - dy * sin;
+            y = part.pivotY() + dx * sin + dy * cos;
+            break;
+        }
+        for (PetResources.Part part : rig.parts()) {
+            if (part.index() != owner) continue;
+            return (float) (Math.atan2(y - part.pivotY(), x - part.pivotX())
+                - Math.atan2(rig.anchors()[anchor * 2 + 1] - part.pivotY(), rig.anchors()[anchor * 2] - part.pivotX()));
+        }
+        return 0;
     }
 
     private static float smooth(float value) {

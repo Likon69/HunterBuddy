@@ -1,0 +1,236 @@
+{
+  "step": [
+    {
+      "sound": "minecraft:block.chain.step",
+      "volume": 0.12,
+      "pitch": [
+        1.3,
+        1.6
+      ]
+    },
+    {
+      "sound": "minecraft:block.metal.step",
+      "volume": 0.1,
+      "pitch": [
+        1.4,
+        1.7
+      ]
+    }
+  ],
+  "jump": [
+    {
+      "sound": "minecraft:entity.iron_golem.step",
+      "volume": 0.18,
+      "pitch": [
+        1.6,
+        1.9
+      ]
+    }
+  ],
+  "land": [
+    {
+      "sound": "minecraft:block.anvil.land",
+      "volume": 0.06,
+      "pitch": [
+        1.7,
+        2.0
+      ]
+    },
+    {
+      "sound": "minecraft:entity.player.small_fall",
+      "volume": 0.25,
+      "pitch": [
+        1.2,
+        1.4
+      ]
+    }
+  ],
+  "climb": [
+    {
+      "sound": "minecraft:block.chain.step",
+      "volume": 0.1,
+      "pitch": [
+        1.6,
+        1.9
+      ]
+    }
+  ],
+  "fall": [
+    {
+      "sound": "minecraft:entity.player.big_fall",
+      "volume": 0.25,
+      "pitch": [
+        1.1,
+        1.3
+      ]
+    }
+  ],
+  "beer_open": [
+    {
+      "sound": "minecraft:block.fire.extinguish",
+      "volume": 0.12,
+      "pitch": [
+        1.8,
+        2.0
+      ]
+    }
+  ],
+  "drink": [
+    {
+      "sound": "minecraft:entity.generic.drink",
+      "volume": 0.25,
+      "pitch": [
+        0.85,
+        1.0
+      ]
+    }
+  ],
+  "burp": [
+    {
+      "sound": "minecraft:entity.player.burp",
+      "volume": 0.35,
+      "pitch": [
+        0.7,
+        0.9
+      ]
+    }
+  ],
+  "hic": [
+    {
+      "sound": "minecraft:entity.player.burp",
+      "volume": 0.2,
+      "pitch": [
+        1.7,
+        2.0
+      ]
+    }
+  ],
+  "smoke_puff": [
+    {
+      "sound": "minecraft:entity.generic.extinguish_fire",
+      "volume": 0.06,
+      "pitch": [
+        1.5,
+        1.8
+      ]
+    }
+  ],
+  "cough": [
+    {
+      "sound": "minecraft:entity.panda.sneeze",
+      "volume": 0.18,
+      "pitch": [
+        0.6,
+        0.75
+      ]
+    }
+  ],
+  "throw": [
+    {
+      "sound": "minecraft:entity.splash_potion.throw",
+      "volume": 0.25,
+      "pitch": [
+        0.9,
+        1.1
+      ]
+    },
+    {
+      "sound": "minecraft:entity.snowball.throw",
+      "volume": 0.25,
+      "pitch": [
+        0.8,
+        1.0
+      ]
+    }
+  ],
+  "bottle_bounce": [
+    {
+      "sound": "minecraft:block.glass.hit",
+      "volume": 0.3,
+      "pitch": [
+        1.3,
+        1.6
+      ]
+    }
+  ],
+  "bottle_shatter": [
+    {
+      "sound": "minecraft:block.glass.break",
+      "volume": 0.35,
+      "pitch": [
+        0.9,
+        1.1
+      ]
+    }
+  ],
+  "snore": [
+    {
+      "sound": "minecraft:entity.fox.sleep",
+      "volume": 0.25,
+      "pitch": [
+        0.55,
+        0.65
+      ]
+    }
+  ],
+  "sit": [
+    {
+      "sound": "minecraft:block.metal.step",
+      "volume": 0.18,
+      "pitch": [
+        0.8,
+        0.9
+      ]
+    }
+  ],
+  "lie_down": [
+    {
+      "sound": "minecraft:block.netherite_block.step",
+      "volume": 0.18,
+      "pitch": [
+        0.7,
+        0.8
+      ]
+    }
+  ],
+  "wake": [
+    {
+      "sound": "minecraft:block.iron_door.open",
+      "volume": 0.12,
+      "pitch": [
+        1.6,
+        1.8
+      ]
+    }
+  ],
+  "scared": [
+    {
+      "sound": "minecraft:entity.iron_golem.hurt",
+      "volume": 0.18,
+      "pitch": [
+        1.7,
+        2.0
+      ]
+    }
+  ],
+  "shine": [
+    {
+      "sound": "minecraft:block.copper_bulb.turn_on",
+      "volume": 0.2,
+      "pitch": [
+        1.6,
+        1.9
+      ]
+    }
+  ],
+  "turn": [
+    {
+      "sound": "minecraft:block.vault.close_shutter",
+      "volume": 0.1,
+      "pitch": [
+        1.8,
+        2.0
+      ]
+    }
+  ]
+}

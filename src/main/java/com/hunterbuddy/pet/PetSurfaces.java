@@ -15,7 +15,6 @@ public final class PetSurfaces {
     public boolean hotbar = true;
     public boolean bars = true;
     public boolean meteor = true;
-    public boolean climbing = true;
     public float petSize = 80;
 
     private PetSurfaces() {
@@ -57,8 +56,9 @@ public final class PetSurfaces {
         }
     }
 
-    public boolean wall(float x, float y) {
-        return climbing && (x == 0 || x == width) && y >= 0 && y <= height;
+    public int hotbarSurface() {
+        for (int i = 0; i < count; i++) if (kind[i] == 1 && right[i] > left[i]) return i;
+        return -1;
     }
 
     public int support(float x, float y) {

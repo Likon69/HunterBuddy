@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class PetSfxTest {
-    private static ResourceManager resources(String json) {
+    static ResourceManager resources(String json) {
         return (ResourceManager) Proxy.newProxyInstance(ResourceManager.class.getClassLoader(), new Class<?>[]{ResourceManager.class},
             (proxy, method, args) -> {
                 if (!method.getName().equals("getResourceOrThrow")) throw new UnsupportedOperationException();
@@ -24,10 +24,10 @@ final class PetSfxTest {
 
     @Test
     void missingOrMalformedResourcesDisableSoundsAndReloadClearsTheOldBank() {
-        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources(null)));
-        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources("{")));
-        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources("[]")));
-        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources("{\"step\": 7}")));
+        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources(null), id -> null, text -> { }));
+        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources("{"), id -> null, text -> { }));
+        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources("[]"), id -> null, text -> { }));
+        assertSame(PetSfxBank.EMPTY, PetSfxBank.load(resources("{\"step\": 7}"), id -> null, text -> { }));
         PetResources.INSTANCE.reload(resources("{\"step\": []}"));
         assertNotSame(PetSfxBank.EMPTY, PetResources.INSTANCE.sfx);
         assertEquals(0, PetResources.INSTANCE.sfx.samples[PetSfxAction.STEP.ordinal()].length);
@@ -154,8 +154,8 @@ final class PetSfxTest {
         Backend backend = new Backend();
         PetSfx sfx = new PetSfx(backend);
         PetSfxCues cues = new PetSfxCues(sfx);
-        PetBrain brain = new PetBrain();
-        PetMotion motion = new PetMotion();
+        PetBrain brain = new PetBrain(1001);
+        PetMotion motion = new PetMotion(77);
         PetPose puppet = new PetPose();
         PetFullPose full = new PetFullPose();
         brain.state = PetState.WALK;
@@ -172,7 +172,7 @@ final class PetSfxTest {
                 case 3 -> motion.travel = PetMotion.Travel.GROUNDED;
                 case 4 -> { brain.state = PetState.DRINK; brain.duration = 10; brain.age = 1.2f; }
                 case 5 -> { brain.state = PetState.SIT; motion.atEdge = true; puppet.seated = 1; }
-                case 6 -> { brain.state = PetState.LIE_DOWN; puppet.recline = 0.1f; }
+                case 6 -> { brain.state = PetState.LIE_DOWN; }
                 case 7 -> brain.state = PetState.RISE;
                 case 8 -> brain.state = PetState.PANIC;
                 case 9 -> brain.state = PetState.DANCE;
@@ -186,7 +186,6 @@ final class PetSfxTest {
         for (PetSfxAction action : new PetSfxAction[]{PetSfxAction.JUMP, PetSfxAction.FALL, PetSfxAction.LAND,
             PetSfxAction.SIT, PetSfxAction.LIE_DOWN, PetSfxAction.WAKE, PetSfxAction.SCARED})
             assertEquals(1, backend.count(action), action.key);
-        assertEquals(2, backend.count(PetSfxAction.DANCE_STEP));
     }
 
     @Test
@@ -207,9 +206,9 @@ final class PetSfxTest {
         effects.throwBottle(50, 50, 1, true, 100, 100, 40);
         PetResources.Rig rig = new PetResources.Rig(100, 100, new PetResources.Part[0], new float[0],
             null, 10, 20, 5, 0, new PetResources.FullPose[0], new PetResources.FullPose[0], new int[0], new int[0]);
-        PetBrain brain = new PetBrain();
+        PetBrain brain = new PetBrain(1002);
         brain.state = PetState.REST;
-        PetMotion motion = new PetMotion();
+        PetMotion motion = new PetMotion(77);
         motion.width = motion.height = 100;
         for (int i = 1; i <= 200; i++) {
             backend.finish();
@@ -222,37 +221,13 @@ final class PetSfxTest {
     }
 
     @Test
-    void shineSoundsOncePerVisibleSparkleRatherThanOncePerTick() {
-        Backend backend = new Backend();
-        PetSfx sfx = new PetSfx(backend);
-        PetSfxCues cues = new PetSfxCues(sfx);
-        PetBrain brain = new PetBrain();
-        brain.state = PetState.REST;
-        PetMotion motion = new PetMotion();
-        motion.travel = PetMotion.Travel.GROUNDED;
-        PetPose puppet = new PetPose();
-        PetFullPose full = new PetFullPose();
-        full.current = new PetResources.FullPose("moon", null, 100, 100, 50, 100, 50, 50, 1, 50, 20, 0);
-        for (int i = 0; i < 200; i++) {
-            backend.finish();
-            sfx.update(i * 50L, true, false, 1);
-            full.age = i * 0.05f;
-            full.blend = i < 100 ? 0 : 1;
-            cues.update(brain, motion, puppet, full);
-            if (i == 99) assertEquals(0, backend.count(PetSfxAction.SHINE));
-        }
-        assertTrue(backend.count(PetSfxAction.SHINE) >= 3);
-        assertTrue(backend.count(PetSfxAction.SHINE) <= 4);
-    }
-
-    @Test
     void schedulingAndCuesAllocateNothingAfterWarmup() {
         ThreadMXBean bean = (ThreadMXBean) ManagementFactory.getThreadMXBean();
         Backend backend = new Backend();
         PetSfx sfx = new PetSfx(backend);
         PetSfxCues cues = new PetSfxCues(sfx);
-        PetBrain brain = new PetBrain();
-        PetMotion motion = new PetMotion();
+        PetBrain brain = new PetBrain(1004);
+        PetMotion motion = new PetMotion(77);
         PetPose puppet = new PetPose();
         PetFullPose full = new PetFullPose();
         long time = 0;

@@ -22,25 +22,55 @@ public enum PetEvent {
     LAVA_CAST("lava_cast", 3, 30),
     EAT_GAPPLE("eat_gapple", 1, 30),
     TPS_DEAD("tps_dead", 3, 60),
-    DISCONNECT("disconnect", 3, 15),
+    DISCONNECT("disconnect", 1, 15),
     PLAYER_DEATH("player_death", 3, 15),
-    SLEEP("sleep", 1, 30),
+    SLEEP("sleep", 1, 600),
     WAKE_UP("wake_up", 1, 15),
     DRINK("drink", 0, 30),
     SMOKE("smoke", 0, 30),
     THROW_BOTTLE("throw_bottle", 0, 20),
     LAUGH("laugh", 0, 30),
+    DANCE("dance", 0, 60),
+    GREETING("greeting", 1, 60),
     IDLE("idle", 0, 30);
 
     public static final PetEvent[] ALL = values();
     public final String key;
     public final int priority;
-    public final long cooldownMs;
+    private final long baseCooldownMs;
 
     PetEvent(String key, int priority, int cooldownSeconds) {
         this.key = key;
         this.priority = priority;
-        this.cooldownMs = cooldownSeconds * 1000L;
+        this.baseCooldownMs = cooldownSeconds * 1000L;
+    }
+
+    public enum Kind { ALERT, FLAVOUR, REACTION }
+
+    public Kind kind() {
+        if (important()) return Kind.ALERT;
+        return switch (this) {
+            case IDLE, DRINK, SMOKE, THROW_BOTTLE, DANCE, FLYING -> Kind.FLAVOUR;
+            default -> Kind.REACTION;
+        };
+    }
+
+    public long cooldownMs() {
+        return switch (this) {
+            case SLEEP -> baseCooldownMs;
+            case WAKE_UP -> 600000;
+            case FLYING, ROCKET_BOOST, SPAWNER_FOUND, STASH_FOUND -> 300000;
+            case LAVA_CAST -> Math.max(baseCooldownMs, 120000);
+            default -> switch (kind()) {
+                case ALERT -> Math.max(baseCooldownMs, 60000);
+                case REACTION -> Math.max(baseCooldownMs, 120000);
+                case FLAVOUR -> baseCooldownMs;
+            };
+        };
+    }
+
+    public boolean gesture() {
+        return this == DRINK || this == SMOKE || this == THROW_BOTTLE || this == DANCE;
     }
 
     public boolean important() {

@@ -47,10 +47,10 @@ public final class PetMonitor {
         danger = false;
     }
 
-    public void update() {
+    public void update(double dangerRange) {
         var mc = MeteorClient.mc;
         if (mc.player == null || mc.world == null) return;
-        combatQuiet = combat != null && combat.isActive();
+        combatQuiet = combat != null && combat.hasActiveTarget();
         regearQuiet = regear != null && regear.isActive() && regear.isBusy();
         WaypointFollower.HudState route = follower != null && follower.isActive() ? follower.hudState() : null;
         landingQuiet = route == WaypointFollower.HudState.LANDING;
@@ -59,9 +59,9 @@ public final class PetMonitor {
         for (int i = 0; i < players.size(); i++) {
             PlayerEntity player = players.get(i);
             if (player == mc.player || Friends.get().get(player.getGameProfile().name()) != null) continue;
-            if (mc.player.squaredDistanceTo(player) <= 250 * 250) { close = true; break; }
+            if (closeEnough(mc.player.squaredDistanceTo(player), dangerRange)) { close = true; break; }
         }
-        danger = close || combatQuiet;
+        danger = close;
         int rockets = 0;
         int totems = 0;
         var inventory = mc.player.getInventory();
@@ -76,17 +76,30 @@ public final class PetMonitor {
         boolean trail = radar != null && radar.isActive() && radar.isAcquired();
         boolean wasTrail = (flags & (1L << PetEvent.TRAIL_ACQUIRED.ordinal())) != 0;
         if (initialized && wasTrail && !trail) PetEvents.publish(PetEvent.TRAIL_LOST);
+        boolean wasClose = (flags & (1L << PetEvent.PLAYER_CLOSE.ordinal())) != 0;
+        if (initialized && wasClose && !close) PetEvents.publish(PetEvent.LAUGH);
         edge(PetEvent.PLAYER_CLOSE, close);
         edge(PetEvent.TRAIL_ACQUIRED, trail);
         edge(PetEvent.TOTEM_LAST, totems == 1);
         edge(PetEvent.ELYTRA_LOW, low);
         edge(PetEvent.ROCKETS_EMPTY, mc.player.isGliding() && rockets == 0);
-        edge(PetEvent.REGEAR, regearQuiet);
+        finished(PetEvent.REGEAR, regearQuiet);
         edge(PetEvent.ROCKET_BOOST, boost != null && boost.isActive() && boost.isBoosting());
         edge(PetEvent.MANUAL_TAKEOVER, route == WaypointFollower.HudState.MANUAL);
         edge(PetEvent.TPS_DEAD, TpsSampler.get().timeSinceLastTick() > 5);
         edge(PetEvent.FLYING, mc.player.isGliding());
         initialized = true;
+    }
+
+    public static boolean closeEnough(double squaredDistance, double range) {
+        return squaredDistance <= range * range;
+    }
+
+    private void finished(PetEvent event, boolean value) {
+        long bit = 1L << event.ordinal();
+        if (!value && (flags & bit) != 0 && initialized) PetEvents.publish(event);
+        if (value) flags |= bit;
+        else flags &= ~bit;
     }
 
     private void edge(PetEvent event, boolean value) {

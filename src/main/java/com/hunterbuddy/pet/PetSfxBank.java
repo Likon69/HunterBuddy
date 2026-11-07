@@ -3,10 +3,11 @@ package com.hunterbuddy.pet;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.hunterbuddy.HunterBuddyAddon;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import net.minecraft.registry.Registries;
 import net.minecraft.resource.ResourceManager;
 import net.minecraft.sound.SoundEvent;
@@ -20,12 +21,18 @@ public final class PetSfxBank {
         this.samples = samples;
     }
 
-    public static PetSfxBank load(ResourceManager manager) {
+    public static PetSfxBank load(ResourceManager manager, Consumer<String> log) {
+        return load(manager, id -> Registries.SOUND_EVENT.containsId(id) ? Registries.SOUND_EVENT.get(id) : null, log);
+    }
+
+    static PetSfxBank load(ResourceManager manager, Function<Identifier, SoundEvent> sounds, Consumer<String> log) {
         Identifier id = Identifier.of("hunterbuddy", "pet/sfx.json");
         try (var reader = new InputStreamReader(manager.getResourceOrThrow(id).getInputStream(), StandardCharsets.UTF_8)) {
             JsonObject data = JsonParser.parseReader(reader).getAsJsonObject();
             Sample[][] samples = new Sample[PetSfxAction.ALL.length][];
             int unknown = 0;
+            int actions = 0;
+            int total = 0;
             for (PetSfxAction action : PetSfxAction.ALL) {
                 if (!data.has(action.key)) continue;
                 JsonArray entries = data.getAsJsonArray(action.key);
@@ -35,7 +42,8 @@ public final class PetSfxBank {
                 for (var entry : entries) {
                     JsonObject value = entry.getAsJsonObject();
                     Identifier sound = Identifier.tryParse(value.get("sound").getAsString());
-                    if (sound == null || !sound.getNamespace().equals("minecraft") || !Registries.SOUND_EVENT.containsId(sound)) {
+                    SoundEvent event = resolve(sound, sounds);
+                    if (event == null) {
                         unknown++;
                         continue;
                     }
@@ -46,15 +54,27 @@ public final class PetSfxBank {
                     float high = pitch.get(1).getAsFloat();
                     if (!Float.isFinite(volume) || volume < 0 || volume > 4 || !Float.isFinite(low)
                         || !Float.isFinite(high) || low <= 0 || high < low) throw new IllegalArgumentException();
-                    group[count++] = new Sample(Registries.SOUND_EVENT.get(sound), volume, low, high);
+                    group[count++] = new Sample(event, volume, low, high);
                 }
                 samples[action.ordinal()] = Arrays.copyOf(group, count);
+                if (count > 0) actions++;
+                total += count;
             }
-            if (unknown > 0) HunterBuddyAddon.LOG.warn("Pet SFX: ignored {} unknown or non-vanilla sound identifiers during reload.", unknown);
+            log.accept("[pet] sfx loaded " + actions + " actions, " + total + " sounds" + (unknown > 0 ? " (" + unknown + " unknown ids ignored)" : ""));
             return new PetSfxBank(samples);
-        } catch (Exception ignored) {
+        } catch (Exception failure) {
+            log.accept("[pet] sfx not loaded: " + failure);
             return EMPTY;
         }
+    }
+
+    private static SoundEvent resolve(Identifier sound, Function<Identifier, SoundEvent> sounds) {
+        if (sound == null) return null;
+        return switch (sound.getNamespace()) {
+            case "minecraft" -> sounds.apply(sound);
+            case "hunterbuddy" -> SoundEvent.of(sound);
+            default -> null;
+        };
     }
 
     static final class Sample {

@@ -28,7 +28,12 @@ public final class PetEffects {
     private final byte[] kind = new byte[PARTICLES];
     private final Random random = new Random();
     private float smokeTimer;
-    private float wordTimer;
+    private float coughAt;
+    private float snoreAt;
+    private float drunkAt;
+    private boolean smokeSounded;
+    private PetState lastState;
+    private boolean lastSitDrink;
     private float clock;
     private int nextParticle;
     private static final OrderedText[] WORDS = {
@@ -48,7 +53,10 @@ public final class PetEffects {
         Arrays.fill(life, 0);
         Arrays.fill(remaining, 0);
         smokeTimer = 0;
-        wordTimer = 0;
+        coughAt = snoreAt = drunkAt = 0;
+        smokeSounded = false;
+        lastState = null;
+        lastSitDrink = false;
         clock = 0;
     }
 
@@ -90,18 +98,41 @@ public final class PetEffects {
     public void update(float dt, PetBrain brain, PetMotion motion, PetResources.Rig rig, float size, float cigarX, float cigarY, float headX, float headY, boolean puppet) {
         clock += dt;
         smokeTimer += dt;
-        wordTimer += dt;
-        if (puppet && brain.state == PetState.SMOKE && smokeTimer > 0.13f) {
+        if (lastSitDrink && !brain.sitDrink && random.nextFloat() < 0.6f) word(0, headX, headY);
+        lastSitDrink = brain.sitDrink;
+        if (brain.state != lastState) {
+            if (lastState == PetState.DRINK && random.nextFloat() < 0.6f) word(0, headX, headY);
+            coughAt = brain.state == PetState.SMOKE && random.nextFloat() < 0.4f ? clock + 1.5f + random.nextFloat() * 3 : 0;
+            smokeSounded = false;
+            lastState = brain.state;
+        }
+        boolean smoking = brain.state == PetState.SMOKE || brain.state == PetState.CUSTOM && brain.animation != null && brain.animation.smoke();
+        if (puppet && smoking && smokeTimer > 0.13f) {
             smokeTimer = 0;
-            sfx.play(PetSfxAction.SMOKE_PUFF);
+            if (!smokeSounded) {
+                sfx.play(PetSfxAction.SMOKE_PUFF);
+                smokeSounded = true;
+            }
             emit((byte) 0, cigarX, cigarY, (random.nextFloat() - 0.5f) * 6, -size * 0.22f, 2.7f);
         }
-        if (wordTimer > (brain.state == PetState.SLEEP ? 1.8f : 7 / (1 + brain.drunkenness * 3))) {
-            wordTimer = 0;
-            if (brain.grounded && brain.state == PetState.SLEEP) word(4, headX, headY);
-            else if (brain.state == PetState.SMOKE) word(3, headX, headY);
-            else if (!brain.resting() && brain.drunkenness > 0.1f) word(random.nextBoolean() ? 0 : 1, headX, headY);
+        if (coughAt > 0 && clock >= coughAt) {
+            coughAt = 0;
+            word(3, headX, headY);
         }
+        if (brain.grounded && brain.state == PetState.SLEEP) {
+            if (snoreAt == 0) snoreAt = clock + 2;
+            if (clock >= snoreAt) {
+                snoreAt = clock + 5 + random.nextFloat() * 3;
+                word(4, headX, headY);
+            }
+        } else snoreAt = 0;
+        if (!brain.resting() && brain.drunkenness > 0.1f) {
+            if (drunkAt == 0) drunkAt = clock + 30 + random.nextFloat() * 30;
+            if (clock >= drunkAt) {
+                drunkAt = clock + 30 + random.nextFloat() * 30;
+                word(random.nextBoolean() ? 0 : 1, headX, headY);
+            }
+        } else drunkAt = 0;
         float radius = Math.max(2, size / rig.height() * (float) Math.hypot(
             Math.max(rig.neckX(), rig.bottleWidth() - rig.neckX()), Math.max(rig.neckY(), rig.bottleHeight() - rig.neckY())));
         for (int i = 0; i < BOTTLES; i++) {

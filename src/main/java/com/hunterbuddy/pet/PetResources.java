@@ -3,10 +3,12 @@ package com.hunterbuddy.pet;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.mojang.logging.LogUtils;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
@@ -17,13 +19,16 @@ import net.minecraft.sound.SoundEvent;
 import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import org.slf4j.Logger;
 
 public final class PetResources implements SynchronousResourceReloader {
+    private static final Logger LOG = LogUtils.getLogger();
     public static final String[] PART_NAMES = {"head", "torso", "left_arm", "right_arm", "left_leg", "right_leg"};
     public static final String[] ANCHOR_NAMES = {"cigar_tip", "bottle_mouth", "mouth", "eyes", "feet"};
     public static final PetResources INSTANCE = new PetResources();
     public volatile Rig rig;
     public volatile PetSfxBank sfx = PetSfxBank.EMPTY;
+    public volatile PetAnimation[] animations = new PetAnimation[0];
     public volatile Line[][] lines = new Line[PetEvent.ALL.length][];
     public volatile int revision;
     public volatile String status = "Resource pack not loaded";
@@ -64,7 +69,8 @@ public final class PetResources implements SynchronousResourceReloader {
             }
         } catch (Exception ignored) {
         }
-        sfx = PetSfxBank.load(manager);
+        sfx = PetSfxBank.load(manager, LOG::info);
+        animations = PetAnimationPack.load(manager, LOG::info);
         rig = loaded;
         lines = loadedLines;
         status = loadedStatus;
@@ -99,8 +105,9 @@ public final class PetResources implements SynchronousResourceReloader {
             }
             ordered[i] = new Part(i, texture, coordinate(value.getAsJsonArray("offset"), 0),
                 coordinate(value.getAsJsonArray("offset"), 1), coordinate(value.getAsJsonArray("pivot"), 0),
-                coordinate(value.getAsJsonArray("pivot"), 1), imageWidth, imageHeight, outline);
+                coordinate(value.getAsJsonArray("pivot"), 1), imageWidth, imageHeight, outline, value.get("z").getAsInt());
         }
+        Arrays.sort(ordered, Comparator.comparingInt(Part::z));
         float[] anchors = new float[ANCHOR_NAMES.length * 2];
         JsonObject points = data.getAsJsonObject("anchors");
         for (int i = 0; i < ANCHOR_NAMES.length; i++) {
@@ -136,8 +143,6 @@ public final class PetResources implements SynchronousResourceReloader {
                     if (pw < 1 || ph < 1 || pw > 4096 || ph > 4096 || fx < 0 || fx > pw || fy < 0 || fy > ph) continue;
                     long hangingSum = 0;
                     int hangingCount = 0;
-                    float shineX = fx;
-                    float shineY = ph * 0.55f;
                     try (InputStream stream = manager.getResourceOrThrow(texture).getInputStream(); NativeImage image = NativeImage.read(stream)) {
                         if (image.getWidth() != pw || image.getHeight() != ph) continue;
                         for (int py = Math.max(0, (int) Math.ceil(fy)); py < ph; py++) {
@@ -147,21 +152,8 @@ public final class PetResources implements SynchronousResourceReloader {
                                 hangingCount++;
                             }
                         }
-                        int best = -1;
-                        for (int py = ph / 3; py < ph * 3 / 4; py++) {
-                            for (int px = 0; px < pw; px++) {
-                                int color = image.getColorArgb(px, py);
-                                if ((color >>> 24) < 240) continue;
-                                int brightness = Math.min((color >> 16) & 255, Math.min((color >> 8) & 255, color & 255));
-                                if (brightness > best) {
-                                    best = brightness;
-                                    shineX = px;
-                                    shineY = py;
-                                }
-                            }
-                        }
                     }
-                    candidates[count++] = new FullPose(name, texture, pw, ph, fx, fy, shineX, shineY, poseScale, eyesX, eyesY, hangingCount == 0 ? 0 : (float) hangingSum / hangingCount - fx);
+                    candidates[count++] = new FullPose(name, texture, pw, ph, fx, fy, poseScale, eyesX, eyesY, hangingCount == 0 ? 0 : (float) hangingSum / hangingCount - fx);
                 } catch (Exception ignored) {
                 }
             }
@@ -206,7 +198,7 @@ public final class PetResources implements SynchronousResourceReloader {
         }
     }
 
-    public record Part(int index, Identifier texture, float x, float y, float pivotX, float pivotY, int width, int height, float[] outline) {
+    public record Part(int index, Identifier texture, float x, float y, float pivotX, float pivotY, int width, int height, float[] outline, int z) {
     }
 
     public record Rig(float width, float height, Part[] parts, float[] anchors, Identifier bottle, int bottleWidth,
@@ -214,7 +206,7 @@ public final class PetResources implements SynchronousResourceReloader {
     }
 
     public record FullPose(String name, Identifier texture, int width, int height, float feetX, float feetY,
-                           float shineX, float shineY, float scale, float eyesX, float eyesY, float hangingX) {
+                           float scale, float eyesX, float eyesY, float hangingX) {
     }
 
     public static final class Line {

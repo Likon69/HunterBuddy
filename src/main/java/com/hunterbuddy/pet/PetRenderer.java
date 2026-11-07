@@ -30,11 +30,11 @@ public final class PetRenderer {
         float mix = poses.previousMix + (poses.mix - poses.previousMix) * delta;
         float eyeX = anchorX * (1 - blend);
         float eyeY = anchorY * (1 - blend);
-        image.update(poses.current, rig.height(), size, poses.age, motion.direction, blend, x, y);
+        image.update(poses.current, rig.height(), size, poses.age(delta), motion.direction, blend, x, y);
         eyeX += image.eyesX * blend * (1 - mix);
         eyeY += image.eyesY * blend * (1 - mix);
         if (poses.alternate != null && mix > 0) {
-            image.update(poses.alternate, rig.height(), size, poses.age, motion.direction, blend, x, y);
+            image.update(poses.alternate, rig.height(), size, poses.age(delta), motion.direction, blend, x, y);
             eyeX += image.eyesX * blend * mix;
             eyeY += image.eyesY * blend * mix;
         }
@@ -49,10 +49,18 @@ public final class PetRenderer {
         float y = motion.previousY + (motion.y - motion.previousY) * delta;
         float blend = fullPose.previousBlend + (fullPose.blend - fullPose.previousBlend) * delta;
         prepare(rig, motion, pose, size, delta);
-        if (blend < 1) puppet(context, rig, motion.direction, 1 - blend);
+        float squash = fullPose.previousSquash + (fullPose.squash - fullPose.previousSquash) * delta;
+        boolean showImage = fullPose.current != null && blend >= squash && (blend > 0 || squash == 0);
+        if (!showImage && squash > 0) {
+            matrices.pushMatrix();
+            squash(matrices, x, squash);
+            puppet(context, rig, motion, 1);
+            matrices.popMatrix();
+        }
+        float age = fullPose.age(delta);
         float mix = fullPose.previousMix + (fullPose.mix - fullPose.previousMix) * delta;
-        if (fullPose.current != null && blend > 0) whole(context, rig, fullPose.current, fullPose.age, motion.direction, size, blend, blend * (1 - mix), x, y);
-        if (fullPose.alternate != null && mix > 0 && blend > 0) whole(context, rig, fullPose.alternate, fullPose.age, motion.direction, size, blend, blend * mix, x, y);
+        if (showImage) whole(context, rig, fullPose.current, age, motion.direction, size, blend, 1 - mix, x, y);
+        if (showImage && fullPose.alternate != null && mix > 0) whole(context, rig, fullPose.alternate, age, motion.direction, size, blend, mix, x, y);
         effects.render(context, rig, size);
         PetResources.Line line = dialogue.current;
         if (line == null) return;
@@ -75,27 +83,31 @@ public final class PetRenderer {
         Matrix3x2fStack matrices = context.getMatrices();
         image.update(pose, rig.height(), size, age, direction, breathing, x, y);
         matrices.pushMatrix();
+        squash(matrices, x, breathing);
         matrices.mul(image.matrix);
         if (direction < 0) matrices.scale(-1, 1);
         PetImages.draw(context, pose.texture(), 0, 0, pose.width(), pose.height(), direction, ((int) (alpha * 255) << 24) | 0xffffff);
-        float sparkle = Math.max(0, (float) Math.sin(age * 4));
-        if (pose.name().equals("moon") && sparkle > 0.65f) {
-            int sx = direction * Math.round(pose.shineX());
-            int sy = Math.round(pose.shineY());
-            int radius = Math.round(5 + sparkle * 9);
-            int color = ((int) (alpha * 255) << 24) | 0xffffdf;
-            context.fill(sx - radius, sy - 2, sx + radius, sy + 2, color);
-            context.fill(sx - 2, sy - radius, sx + 2, sy + radius, color);
-        }
         matrices.popMatrix();
     }
 
-    private void puppet(DrawContext context, PetResources.Rig rig, int direction, float alpha) {
-        for (int layer = 0; layer < 6; layer++) {
-            for (PetResources.Part part : rig.parts()) {
-                if (part.index() == PetSkeleton.layer(layer)) part(context, part, direction, alpha);
-            }
+    private static void squash(Matrix3x2fStack matrices, float x, float width) {
+        matrices.translate(x, 0);
+        matrices.scale(Math.max(0.02f, width), 1);
+        matrices.translate(-x, 0);
+    }
+
+    private void puppet(DrawContext context, PetResources.Rig rig, PetMotion motion, float alpha) {
+        if (!motion.hiding) {
+            parts(context, rig, motion.direction, alpha);
+            return;
         }
+        context.enableScissor(0, 0, motion.width, Math.max(0, Math.round(motion.hideTop)));
+        parts(context, rig, motion.direction, alpha);
+        context.disableScissor();
+    }
+
+    private void parts(DrawContext context, PetResources.Rig rig, int direction, float alpha) {
+        for (PetResources.Part part : rig.parts()) part(context, part, direction, alpha);
     }
 
     private void part(DrawContext context, PetResources.Part part, int direction, float alpha) {

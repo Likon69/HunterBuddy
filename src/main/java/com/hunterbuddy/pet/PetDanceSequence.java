@@ -41,21 +41,29 @@ public final class PetDanceSequence {
     public void update(float dt) {
         previousMix = mix;
         if (frames == null || frames.length < 2) return;
-        if (next != null) {
-            if (mix == 1 && previousMix == 1) {
-                current = next;
-                next = null;
-                mix = previousMix = 0;
-                clock = 0;
-                hold = 0.2f + random.nextFloat() * 0.08f;
-            } else mix = Math.min(1, mix + dt / 0.25f);
-        } else {
+        if (next != null) advance(dt);
+        else {
             clock += dt;
             if (clock >= hold) {
                 next = frames[pick()];
                 mix = previousMix = 0;
             }
         }
+    }
+
+    public void finish(float dt) {
+        previousMix = mix;
+        if (next != null) advance(dt);
+    }
+
+    private void advance(float dt) {
+        if (mix == 1 && previousMix == 1) {
+            current = next;
+            next = null;
+            mix = previousMix = 0;
+            clock = 0;
+            hold = 0.2f + random.nextFloat() * 0.08f;
+        } else mix = Math.min(1, mix + dt / 0.25f);
     }
 
     private int pick() {
