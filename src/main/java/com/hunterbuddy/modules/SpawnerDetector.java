@@ -523,6 +523,7 @@ public class SpawnerDetector extends Module {
     private final Set<BlockPos> autoSoundedSites = new java.util.HashSet<>();
     private final Map<String, Long> autoSoundLastPlayed = new HashMap<>();
 
+    private static final int FIRST_SCAN_TICKS = 400;
     private long totalTicks;
     private int scanCooldown;
     private ClientWorld lastWorld;
@@ -2130,8 +2131,8 @@ public class SpawnerDetector extends Module {
 
         recomputeScoreAndCategory(site);
 
-        sites.put(center, site);
-        if (site.hasSpawner) com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.SPAWNER_FOUND);
+        boolean known = sites.put(center, site) != null;
+        if (site.hasSpawner && !known && totalTicks > FIRST_SCAN_TICKS) com.hunterbuddy.pet.PetEvents.publish(com.hunterbuddy.pet.PetEvent.SPAWNER_FOUND);
 
         long evalMs = (System.nanoTime() - t0) / 1_000_000;
         logSite(site, evalMs);
@@ -8005,7 +8006,7 @@ public class SpawnerDetector extends Module {
 
         mc.player.closeHandledScreen();
 
-        int shulkers = isShulkerScreen ? 1 : fullShulkers;
+        int shulkers = isShulkerScreen ? (piles > 0 ? 1 : 0) : fullShulkers;
         statShulkersFound += shulkers;
 
         String kindLabel = isShulkerScreen ? "shulker_box" : Registries.BLOCK.getId(mc.world.getBlockState(target).getBlock()).getPath();
