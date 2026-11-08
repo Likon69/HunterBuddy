@@ -202,7 +202,7 @@ Several modules started as ports from other addons rather than being written fro
 
 - **Baritone** (and this project's own fork of it) — the pathfinding underneath `auto-portal`, the elytra flight processes, and the regear/travel helpers.
 - **[Jeff mod](https://github.com/miles352/meteor-stashhunting-addon)** (miles352) — the firework logic `Pitch40Classic` and `elytra-auto-fly` are ported from, and the reason `VanityESP` carries that name instead of its original one.
-- **riths** — Hunting Utilities ([Tim](https://github.com/rithsgit/Tim)).
+- **riths** — Hunting Utilities ([Tim](https://github.com/rithsgit/Tim)). The idea for `pet` comes from Timi in riths's Tim addon.
 - **tilley** — the polar-spiral area-loader mode, ported from `polar-spiral-efly`.
 - **0xTas** — [Stardust](https://github.com/0xTas/stardust): the firework hooks of `rocket-boost` (stronger push, rocket kept alive) are ported from its `RocketMan` (GPL-3.0); the speed control built on them is our own.
 
