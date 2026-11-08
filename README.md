@@ -43,14 +43,14 @@ Stash hunting, trail and waypoint travel, elytra flight, and world reconnaissanc
 | `heading-lock` | Holds your yaw on the nearest multiple of 45 degrees. `2b2t-bypass` adds a tiny random wobble so the yaw is never perfectly constant. |
 | `old-chunk-notifier` | Detects 1.12 and/or 1.19+ old chunks (`chunk-type`) in chosen dimensions and sends a Discord webhook, an Xaero marker, or both. Only groups of at least `min-cluster-size` adjacent chunks count, and it can ping you. |
 | `Pitch40` | Pitch40 helper: syncs bounds with Meteor's ElytraFly and turns Pitch40 back on after a reconnect. `chest-swap` glides with a chest piece worn and swaps the elytra in only when needed. |
-| `pitch40-classic` | Standalone elytra pitch oscillation between `lower-bound` and `upper-bound` (CLASSIC +40/-40 or EFFICIENT angles) with its own auto-firework. It does not use Meteor's ElytraFly. |
+| `pitch40-classic` | Standalone elytra pitch oscillation: it climbs until `upper-bound` (220 by default), then glides down until `lower-bound` (120 by default), using CLASSIC +40/-40 or EFFICIENT angles and its own auto-firework. It does not use Meteor's ElytraFly. |
 | `RocketFly` | Keeps level flight with fireworks used every `timed-delay` ms, at a fixed Y level. It can climb over terrain ahead (`obstacle-lookahead`) and take off from the ground. |
 | `stash-finder` | Finds player stashes by counting containers, signs, item frames, stasis pearls and more per chunk, with per-type minimums and filters for generated structures. Alerts by chat, tracer, Xaero waypoint or Discord, and can hide coordinates. |
 | `TrailFollower` | Follows detected trails in all dimensions. `heading-turn-limit` limits turning, `ignore-behind` drops chunks far behind you, and `lost-trail-scan` (weave, spin or hold) searches when the trail runs out. |
-| `visual-range-notifier` | Alerts when players enter or leave visual range, when chosen items lie on the ground, and on nearby end crystal or respawn anchor activity. Sends to chat, sound or Discord, which can also report your death and disconnects. |
-| `waypoint-follower` | Follows Xaero waypoints whose name starts with `waypoint-prefix` (`Hunt_` by default), in order or closest first, with a flight mode per dimension. At the end it stops, switches off or leaves the server. `seed-route` can lay the waypoints along a mapped trail for you. |
+| `visual-range-notifier` | Alerts when players enter or leave visual range, when chosen items lie on the ground, and on nearby end crystal or respawn anchor activity. Sends to chat, sound or Discord, which can also report your death and disconnects. Tracked items (`tracked-items`) also get a beam and a marker cube (`item-beam`, on by default; `beam-color`, `beam-height`, `through-walls`), and `beam-labels` names the five closest ones more than 16 blocks away with their count and distance. |
+| `waypoint-follower` | Follows Xaero waypoints whose name starts with `waypoint-prefix` (`Hunt_` by default), in order or closest first, with a flight mode per dimension: RocketFly, Pitch40, Baritone elytra or None (manual) in the Overworld (`overworld-flight-mode`) and the End (`end-flight-mode`), and Baritone or None in the Nether (`nether-flight-mode`). With `land-on-arrival` (on by default) it lands at the last waypoint with Baritone's safe landing instead of gliding on, and gives up after `landing-timeout` seconds. `manual-override` (on by default) hands control back while you move the mouse or hold a movement key and takes it again after `manual-override-delay` seconds without input. `waypoint-label` draws the distance and time left above the current waypoint, with the same for the last waypoint on a second line (`label-final-destination`). At the end it stops, switches off or leaves the server. `seed-route` can lay the waypoints along a mapped trail for you. |
 
-### Visuals (12)
+### Visuals (14)
 
 ESP, overlays, and render helpers.
 
@@ -61,12 +61,14 @@ ESP, overlays, and render helpers.
 | `entity-view` | Rescales mobs and players, shows their gear above them through walls, names dropped items on the ground, and outlines nether portals with a tracer to the nearest one. |
 | `FlightTrail` | A light two-trail wake behind the elytra while gliding, with speed-reactive flames at the wingtips, instead of dbrighthd's heavier particle trail. |
 | `flow-esp` | Marks chunks where lava (in the Nether) or water (in the Overworld) is still flowing, a hint that something was built or changed there. Colors can fade from fresh to mature flows; `render-distance` and the size limits tune it. |
+| `pet` | Animated companion drawn on the screen, loaded entirely from a resource pack you supply (see Files and network). It walks on the screen bottom, the hotbar, the status bars and the visible Meteor HUD boxes (`screen-bottom`, `hotbar`, `status-bars`, `meteor-hud`), sleeps after `sleep-after-minutes` without input, hides beside the hotbar when a non-friend player comes within `danger-range` (`hide-on-arrival`), and can throw bottles (`bottles`). It greets you when you join, and between events it drinks, smokes and dances. It reacts to what the addon sees, such as players in range, totem pops, low elytra, trails found or lost, stash and spawner finds, landings, long flights, valuables seen in a chest or shulker box you open, a golden apple eaten, and another player writing `bender` in public chat. Its lines and sounds come from the pack (`chatter`, `line-delay`, `sounds`, and the Sound Effects group); the Silence group mutes non-alert dialogue and animation sounds during combat, regear and landing. The module info shows the pack status. |
 | `rotation-detector` | Highlights logs, basalt, purpur pillars, hay bales and deepslate lying sideways, since in nature they only generate upright. Block types, `min-y`/`max-y` and `ignore-near-air` (skips surface builds) are configurable. |
-| `shader` | Draws a crisp outline, an optional glow and an optional fill around entities (players, mobs, items, pearls...), nether portals, storage blocks and spawners, each with its own color. `outline-width`, `glow` and `filled` set the look. |
+| `shader` | Draws a crisp outline, an optional glow and an optional fill around entities (players, mobs, items, pearls...), nether portals, storage blocks and spawners, each with its own color. `outline-width`, `glow` and `filled` set the look. The alpha of each color also sets how opaque its outline and glow are. |
 | `sign-reader` | Shows the text of nearby signs on screen, through walls, grouping the ones that overlap. |
 | `sign-history` | Remembers every sign you see, per server and dimension, and marks the ones destroyed (red) or changed (yellow) since, with their original text above. Place a sign where one was destroyed, or open a changed one, and it writes the original text back on that face, then its dye color and glow from your hotbar. Signs you break or edit yourself update the history. Multiplayer only. |
+| `skybox` | Replaces the Overworld sky with an animated shader sky. `style` picks Aurora, Nebula, Twilight, Storm Night or Deep Void; `end-sky` (on by default) does the same in the End with `end-style` (Nebula by default). `speed`, `intensity`, `star-density`, the per-style colors and the World group (`follow-world-time`, `rain-dims`, `horizon-fog-blend`) tune it. The vanilla sun, moon, stars and clouds are hidden unless `keep-celestial` or `keep-clouds` is on. |
 | `speed-blur` | A radial motion blur that grows with your flight speed and keeps you sharp in the middle. Never shows on the ground. |
-| `SpawnerDetector` | Finds classic monster-room dungeons (with or without spawner), activated trial spawners and shipwrecks, and scores the player traces around each room. With `auto-farm` it flies to a traced room (`auto-farm-all`: any room with a chest), digs down, mines the spawner, loots the chests and climbs out. Runs need at least `auto-min-health` and `auto-min-rockets`. |
+| `SpawnerDetector` | Finds classic monster-room dungeons (with or without spawner), activated trial spawners and shipwrecks, and scores the player traces around each room. With `auto-farm` it flies to a traced room (`auto-farm-all`: any room with a chest), digs down, mines the spawner, loots the chests and climbs out. Runs need at least `auto-min-health` and `auto-min-rockets`. On the approach it holds level when the line to the site is blocked and backs off a wall instead of sliding down it. The direct tunnel falls back to Baritone after 20 seconds without progress, or when a falling block has refilled the same spot 8 times. An empty shulker box is not counted as a find. |
 | `VanityESP` | Highlights map and shulker item frames, banners, ominous vaults, buried treasure, endermen holding blocks, XP orbs and stacked chest minecarts. Each type has its own colors and tracers; buried treasure can alert in chat and add temporary waypoints. |
 
 ### Logistics (6)
@@ -97,10 +99,10 @@ Restocking and inventory handling tools.
 | `h-mine` | Breaks blocks with packets, faster than holding the button. Click several blocks to queue them (`queue`, `queue-through` lines up a row), `instant` re-breaks a cleared spot, `double-break` works two blocks at once, `auto-mine` clears around enemies and `anti-crawl` stands you up. |
 | `inventory-cleaner` | Throws out every item not on its list (or only the listed ones in blacklist mode), one stack every `delay` ticks. The hotbar is optional; works in the inventory, a crafting table or a container. |
 | `kick-alarm` | Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed. |
-| `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. |
+| `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. While it swings, your walking direction is turned to the aim, also while Baritone walks. |
 | `messenger` | Private messages in movable windows with Classic, Bubbles, Slate or Compact chat styles and an unread badge. Replies go out through `reply-command` (`msg` by default), spaced by `send-interval`. `hide-from-main-chat`, `friends-only`, `ignored-names` and `stream-mode` keep the chat clean, and `keep-history` brings conversations back next session. |
 | `NoJumpDelay` | Removes the delay between jumps. |
-| `rocket-boost` | Extends each firework's boost window with a fixed or automatic `speed-multiplier`, and can brake near terrain. Can trace every boosted tick to a CSV for tuning. |
+| `rocket-boost` | Extends each firework's boost window. `auto-speed` (on by default) works out every tick the highest multiplier Grim still accepts for your look direction; with it off the fixed `speed-multiplier` is used. It can brake near terrain. Can trace every boosted tick to a CSV for tuning. |
 | `Villager Trading` | Buys experience bottles from clerics with emeralds, visiting each cleric in range with Baritone while the price stays under `experience-max-price`. Restocks emeralds from a chest, drops bottles in another, then switches off and walks home. |
 
 ## Commands (4)
@@ -145,6 +147,17 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `TpsCardiogram` | Server TPS as a scrolling cardiogram, flatlining on lag. |
 | `Travel` | Distance, ETA and speed toward a named waypoint, checked against elytra range. |
 
+## GUI themes
+
+HunterBuddy also registers four Meteor GUI themes: `HunterBuddy Lanterne`, `HunterBuddy Echo`, `HunterBuddy Encre` and `HunterBuddy Phosphore`. They are not modules; they appear in Meteor's list of GUI themes.
+
+- Each theme has its own default font (JetBrains Mono, Share Tech Mono, IBM Plex Mono and VT323). The `font-family` setting in the theme's HunterBuddy Design group changes it. It uses an installed font family and falls back to Meteor's bundled JetBrains Mono; no font is downloaded.
+- The same group has `input-background-color`, `risk-color`, `accent-text-color`, `accent-preset`, `risk-modules` (modules marked as risky) and `separator-before-modules` (draw an Encre group separator before these modules).
+- Sizes follow the text height of Meteor's own font setting and update without a restart.
+- In the ClickGUI, left click toggles a module and right click unfolds its settings in place under it.
+- While you drag a ClickGUI window, an alignment grid appears and the window snaps to the screen edges, to other windows and to the grid. Hold Alt to drag without snapping.
+- The HUD editor is drawn in the theme's colors, and shows guide lines while the selected elements line up with the screen edges, the screen center or other elements.
+
 ## Dependencies
 
 You need **Minecraft 1.21.11**, **Java 21**, **Fabric Loader** and a **Meteor Client build for 1.21.11**.
@@ -152,7 +165,7 @@ You need **Minecraft 1.21.11**, **Java 21**, **Fabric Loader** and a **Meteor Cl
 - **Baritone** is required for automatic dungeon farming, pathfinding and travel. We recommend [HunterBuddy Baritone](https://github.com/Likon69/hunterbuddy-baritone), our fork for Minecraft 1.21.11. The elytra flight and regear helpers use fixes and APIs from this fork.
 - **Xaero's Minimap, Xaero's World Map and XaeroPlus** are required for map and waypoint features, including `waypoint-follower`, chunk-radar's waypoint marks and the `Travel` HUD. Install the Fabric versions for Minecraft 1.21.11.
 
-These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.5.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
+These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.6.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
 
 ## Files and network
 
@@ -160,6 +173,8 @@ These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.
 - AreaLoader routes and the lifetime odometer stats are also stored as JSON.
 - `sign-history` keeps the signs it has seen in `sign-history/<server>/signs.json` under the Meteor folder; a file that fails to load is set aside as `signs.json.corrupt-<time>`.
 - `old-chunk-notifier` and `visual-range-notifier` post to a Discord webhook if one is configured.
+- `pet` needs a resource pack that you supply; HunterBuddy does not include one. The pack provides files in the `hunterbuddy` namespace: `assets/hunterbuddy/pet/rig.json` is required, together with the six part textures it names (`head`, `torso`, `left_arm`, `right_arm`, `left_leg`, `right_leg`) and the bottle texture. `pet/lines.json` (dialogue, each line with `text`, `sound` and an optional `pose`), `pet/animations.json` and `pet/sfx.json` are optional. Without a valid `rig.json` nothing is drawn and the module info reads `Resource pack missing or incomplete`; with a `rig.json` but no readable `lines.json` it reads `Ready, dialogue missing`; otherwise `Ready`. The pack is read again whenever the game reloads resources.
+- `pet` keeps a few counters (`beers`, `players_fled`, `stashes_found`, `totems_lost`) in `hunterbuddy/pet-memory.json` in the Fabric config folder of your instance.
 
 ## Build
 
@@ -169,7 +184,7 @@ Java 21 is required. Use the included Gradle wrapper:
 .\gradlew.bat build
 ```
 
-The built addon JAR is written to `build/libs/hunterbuddy-1.0.5.jar`.
+The built addon JAR is written to `build/libs/hunterbuddy-1.0.6.jar`.
 
 ## Credits and provenance
 
