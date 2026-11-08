@@ -43,8 +43,12 @@ public final class PetDialogue {
         return speaking;
     }
 
+    private static boolean sharesNoBudget(PetEvent event) {
+        return event == PetEvent.GREETING || event == PetEvent.SLEEP || event == PetEvent.CHAT_MENTION;
+    }
+
     private static boolean silenced(PetEvent event, boolean asleep) {
-        return asleep && event != PetEvent.SLEEP && event != PetEvent.WAKE_UP && !event.important();
+        return asleep && event != PetEvent.SLEEP && event != PetEvent.WAKE_UP && event != PetEvent.CHAT_MENTION && !event.important();
     }
 
     public void dropSleep() {
@@ -144,7 +148,7 @@ public final class PetDialogue {
             if (speaking.gesture()) lastGesture = now;
             else lastFlavour = now;
         } else if (kind == PetEvent.Kind.ALERT) lastAlert = now;
-        else if (kind == PetEvent.Kind.REACTION && speaking != PetEvent.GREETING && speaking != PetEvent.SLEEP) lastReaction = now;
+        else if (kind == PetEvent.Kind.REACTION && !sharesNoBudget(speaking)) lastReaction = now;
         if (sounds && MeteorClient.mc.getSoundManager().get(chosen.sound) != null) {
             voice = chosen.voice;
             MeteorClient.mc.getSoundManager().play(voice);
@@ -162,7 +166,7 @@ public final class PetDialogue {
             case ALERT -> true;
             case FLAVOUR -> flavourOk && now - lastAlert >= 60000 && (event == PetEvent.FLYING || active && !gliding)
                 && now - (event.gesture() ? lastGesture : lastFlavour) >= (event.gesture() ? 180000 : flavourSeconds * 1000);
-            case REACTION -> event == PetEvent.GREETING || event == PetEvent.SLEEP || now - lastReaction >= 90000;
+            case REACTION -> sharesNoBudget(event) || now - lastReaction >= 90000;
         };
     }
 

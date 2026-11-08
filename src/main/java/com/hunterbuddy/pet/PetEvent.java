@@ -32,6 +32,10 @@ public enum PetEvent {
     LAUGH("laugh", 0, 30),
     DANCE("dance", 0, 60),
     GREETING("greeting", 1, 60),
+    CHAT_MENTION("chat_mention", 1, 30),
+    LOOT("loot", 1, 180),
+    DISTANCE("distance", 1, 120),
+    THIRSTY("thirsty", 0, 600),
     IDLE("idle", 0, 30);
 
     public static final PetEvent[] ALL = values();
@@ -59,6 +63,7 @@ public enum PetEvent {
         return switch (this) {
             case SLEEP -> baseCooldownMs;
             case WAKE_UP -> 600000;
+            case CHAT_MENTION -> baseCooldownMs;
             case FLYING, ROCKET_BOOST, SPAWNER_FOUND, STASH_FOUND -> 300000;
             case LAVA_CAST -> Math.max(baseCooldownMs, 120000);
             default -> switch (kind()) {

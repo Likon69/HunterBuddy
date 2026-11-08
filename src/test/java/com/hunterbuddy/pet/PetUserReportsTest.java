@@ -401,4 +401,238 @@ final class PetUserReportsTest {
         enter(brain, PetState.DANCE);
         assertTrue(brain.imageDance);
     }
+
+    @Test
+    void aChatMentionNeedsAnotherPlayerAndTheWholeWord() {
+        assertTrue(PetChatMention.mentions("<Steve> hey Bender, nice base", "Me"));
+        assertTrue(PetChatMention.mentions("[12:30:01] <Steve> BENDER!", "Me"));
+        assertTrue(PetChatMention.mentions("<Steve> is it a bender?", "Me"));
+        assertFalse(PetChatMention.mentions("<Me> bender", "me"));
+        assertFalse(PetChatMention.mentions("<Bender> hello there", "Me"));
+        assertFalse(PetChatMention.mentions("<Steve> benders and blenders", "Me"));
+        assertFalse(PetChatMention.mentions("<Steve> bender_2 is back", "Me"));
+        assertFalse(PetChatMention.mentions("[Meteor] bender", "Me"));
+        assertFalse(PetChatMention.mentions("Steve whispers: bender", "Me"));
+        assertFalse(PetChatMention.mentions("Server restarting, bender", "Me"));
+        assertFalse(PetChatMention.mentions(null, "Me"));
+    }
+
+    @Test
+    void aChatMentionWakesTheSleeperAndSharesNoReactionBudget() throws Exception {
+        assertTrue(new PetDialogue().offer(PetEvent.CHAT_MENTION, 0, true));
+        PetDialogue dialogue = new PetDialogue();
+        java.lang.reflect.Method budget = PetDialogue.class.getDeclaredMethod("budgetAllows", PetEvent.class, long.class, double.class, boolean.class, boolean.class, boolean.class);
+        budget.setAccessible(true);
+        assertTrue((boolean) budget.invoke(dialogue, PetEvent.CHAT_MENTION, 0L, 0.0, false, false, false));
+        assertFalse((boolean) budget.invoke(dialogue, PetEvent.LOOT, 0L, 0.0, false, false, false));
+    }
+
+    @Test
+    void theNewReactionsRespectTheirMinimumCooldowns() {
+        assertEquals(30000, PetEvent.CHAT_MENTION.cooldownMs());
+        assertTrue(PetEvent.LOOT.cooldownMs() >= 180000);
+        assertTrue(PetEvent.DISTANCE.cooldownMs() >= 120000);
+        assertTrue(PetEvent.THIRSTY.cooldownMs() >= 600000);
+        for (PetEvent event : new PetEvent[]{PetEvent.CHAT_MENTION, PetEvent.LOOT, PetEvent.DISTANCE, PetEvent.THIRSTY}) {
+            assertEquals(PetEvent.Kind.REACTION, event.kind());
+            assertFalse(event.important());
+        }
+    }
+
+    @Test
+    void flightDistanceFiresEveryTenKilometresOfGlidingOnly() {
+        PetFlightDistance flight = new PetFlightDistance();
+        Object world = new Object();
+        assertFalse(flight.update(world, true, 0, 0));
+        int fired = 0;
+        double x = 0;
+        for (int i = 0; i < 2999; i++) {
+            x += 3.3333;
+            if (flight.update(world, true, x, 0)) fired++;
+        }
+        assertEquals(0, fired);
+        assertTrue(flight.total() < PetFlightDistance.MARK);
+        assertTrue(flight.update(world, true, x + 5, 0));
+        assertFalse(flight.update(world, true, x + 10, 0));
+        double z = 0;
+        for (int i = 0; i < 3000; i++) {
+            z += 3.3334;
+            if (flight.update(world, true, 0, z)) fired++;
+        }
+        assertEquals(1, fired);
+    }
+
+    @Test
+    void flightDistanceIgnoresWalkingTeleportsAndResetsWithTheWorld() {
+        PetFlightDistance flight = new PetFlightDistance();
+        Object world = new Object();
+        for (int i = 0; i < 5000; i++) assertFalse(flight.update(world, false, i * 10.0, 0));
+        assertEquals(0, flight.total(), 0);
+        flight.update(world, true, 0, 0);
+        assertFalse(flight.update(world, true, 50000, 0));
+        assertEquals(0, flight.total(), 0);
+        flight.update(world, true, 50090, 0);
+        flight.update(world, true, 50190, 0);
+        assertEquals(190, flight.total(), 0);
+        flight.update(world, false, 50190, 0);
+        flight.update(world, true, 90000, 0);
+        flight.update(world, true, 90050, 0);
+        assertEquals(240, flight.total(), 0);
+        flight.update(new Object(), true, 0, 0);
+        assertEquals(0, flight.total(), 0);
+        flight.update(world, true, 0, 0);
+        flight.reset();
+        assertEquals(0, flight.total(), 0);
+    }
+
+    @Test
+    void lootNeedsAValuableAndIsAnnouncedOncePerScreenWhenItCloses() {
+        PetLoot loot = new PetLoot();
+        Object chest = new Object();
+        assertFalse(loot.update(null, () -> true));
+        assertFalse(loot.update(chest, () -> false));
+        assertFalse(loot.update(chest, () -> true));
+        assertFalse(loot.update(chest, () -> true));
+        assertTrue(loot.update(null, () -> true));
+        assertFalse(loot.update(null, () -> true));
+        assertFalse(loot.update(chest, () -> false));
+        assertFalse(loot.update(null, () -> false));
+    }
+
+    @Test
+    void lootWaitsForTheContentsToSyncAndStopsLookingAfterTheWindow() {
+        PetLoot loot = new PetLoot();
+        Object chest = new Object();
+        for (int i = 0; i < 40; i++) assertFalse(loot.update(chest, () -> false));
+        assertFalse(loot.update(chest, () -> true));
+        assertTrue(loot.update(null, () -> false));
+        Object late = new Object();
+        for (int i = 0; i < 100; i++) assertFalse(loot.update(late, () -> false));
+        assertFalse(loot.update(late, () -> true));
+        assertFalse(loot.update(null, () -> false));
+    }
+
+    @Test
+    void lootScreensChangingDirectlyAnnounceThePreviousOneAndResetClearsIt() {
+        PetLoot loot = new PetLoot();
+        Object first = new Object();
+        Object second = new Object();
+        loot.update(first, () -> true);
+        assertTrue(loot.update(second, () -> false));
+        assertFalse(loot.update(null, () -> false));
+        loot.update(second, () -> true);
+        loot.reset();
+        assertFalse(loot.update(null, () -> false));
+    }
+
+    @Test
+    void onlyValuablesCountAsLoot() {
+        for (String path : new String[]{"shulker_box", "red_shulker_box", "netherite_ingot", "netherite_scrap", "netherite_sword",
+            "netherite_chestplate", "elytra", "enchanted_golden_apple", "totem_of_undying"}) assertTrue(PetLoot.valuable(path), path);
+        for (String path : new String[]{"cobblestone", "diamond", "golden_apple", "shulker_shell", "iron_ingot", "firework_rocket",
+            "ancient_debris", "diamond_chestplate"}) assertFalse(PetLoot.valuable(path), path);
+    }
+
+    @Test
+    void thirstNeedsTenActiveMinutesWithoutADrink() {
+        PetThirst thirst = new PetThirst();
+        thirst.tick(PetThirst.LIMIT * 3, false);
+        assertFalse(thirst.ask(true));
+        thirst.tick(PetThirst.LIMIT - 1, true);
+        assertFalse(thirst.ask(true));
+        thirst.tick(1, true);
+        assertFalse(thirst.ask(false));
+        assertTrue(thirst.ask(true));
+        assertFalse(thirst.ask(true));
+        assertFalse(thirst.drink(true));
+        thirst.tick(PetThirst.WAIT, false);
+        assertFalse(thirst.drink(false));
+        assertTrue(thirst.drink(true));
+        thirst.drank();
+        assertFalse(thirst.drink(true));
+        thirst.tick(PetThirst.LIMIT * 2, true);
+        assertTrue(thirst.ask(true));
+    }
+
+    @Test
+    void aThirstyPetSaysSoOnceAndThenTakesARealDrink() {
+        PetEvents.listen(true);
+        try {
+            for (long seed = 0; seed < 12; seed++) {
+                PetBrain brain = new PetBrain(seed);
+                brain.reset();
+                brain.grounded = true;
+                brain.worldStable = true;
+                for (int i = 0; i < 20 * 120; i++) {
+                    brain.update(0.05f, false, 1, 0, true);
+                    if ((PetEvents.drain() & (1L << PetEvent.GREETING.ordinal())) != 0) brain.greeted();
+                }
+                brain.thirst.dry = PetThirst.LIMIT;
+                int asks = 0;
+                boolean drank = false;
+                for (int i = 0; i < 20 * 2500 && !drank; i++) {
+                    brain.update(0.05f, false, 1, 0, true);
+                    long mask = PetEvents.drain();
+                    if ((mask & (1L << PetEvent.THIRSTY.ordinal())) != 0) asks++;
+                    if (asks > 0 && (mask & (1L << PetEvent.DRINK.ordinal())) != 0) drank = true;
+                }
+                assertEquals(1, asks, "seed " + seed);
+                assertTrue(drank, "seed " + seed);
+                for (int i = 0; i < 20 * 500; i++) {
+                    brain.update(0.05f, false, 1, 0, true);
+                    assertEquals(0, PetEvents.drain() & (1L << PetEvent.THIRSTY.ordinal()), "seed " + seed);
+                }
+            }
+        } finally {
+            PetEvents.listen(false);
+        }
+    }
+
+    @Test
+    void aPetWhoseOwnerIsAwayNeverGetsThirsty() {
+        PetEvents.listen(true);
+        try {
+            PetBrain brain = new PetBrain(4);
+            brain.reset();
+            brain.grounded = true;
+            brain.worldStable = true;
+            for (int i = 0; i < 20 * 3600 * 2; i++) {
+                brain.update(0.05f, true, 1, 0, true);
+                assertEquals(0, PetEvents.drain() & (1L << PetEvent.THIRSTY.ordinal()));
+            }
+        } finally {
+            PetEvents.listen(false);
+        }
+    }
+
+    @Test
+    void theDrinkFollowsTheThirstyLineWithinSecondsNotAfterTheSpeechPause() throws ReflectiveOperationException {
+        PetEvents.listen(true);
+        try {
+            for (long seed = 0; seed < 12; seed++) {
+                PetBrain brain = new PetBrain(seed);
+                brain.reset();
+                brain.grounded = true;
+                brain.worldStable = true;
+                var field = PetBrain.class.getDeclaredField("greetingPending");
+                field.setAccessible(true);
+                field.setBoolean(brain, false);
+                enter(brain, PetState.WALK);
+                brain.thirst.dry = PetThirst.LIMIT;
+                PetEvents.drain();
+                brain.update(0.05f, false, 1, 0, true);
+                assertNotEquals(0, PetEvents.drain() & (1L << PetEvent.THIRSTY.ordinal()), "seed " + seed);
+                brain.spoke();
+                int ticks = 0;
+                while (brain.state != PetState.DRINK && ticks < 20 * 30) {
+                    brain.update(0.05f, false, 1, 0, true);
+                    ticks++;
+                }
+                assertEquals(PetState.DRINK, brain.state, "seed " + seed);
+                assertTrue(ticks <= 20 * (PetThirst.WAIT + 1), "seed " + seed + " ticks " + ticks);
+            }
+        } finally {
+            PetEvents.listen(false);
+        }
+    }
 }

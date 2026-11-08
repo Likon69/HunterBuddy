@@ -13,6 +13,7 @@ public final class PetBrain {
         PetState.CUSTOM};
     private final Random random;
     private final PetState[] recent = new PetState[4];
+    final PetThirst thirst = new PetThirst();
     private final float[] nextFamily = new float[7];
     public PetState state = PetState.WALK;
     public float age;
@@ -113,10 +114,12 @@ public final class PetBrain {
         wakeTarget = null;
         Arrays.fill(recent, null);
         Arrays.fill(nextFamily, 0);
+        thirst.reset();
     }
 
     public void spoke() {
         speechUntil = clock + 12 + random.nextFloat() * 12;
+        thirst.spoke();
     }
 
     public void greeted() {
@@ -145,7 +148,7 @@ public final class PetBrain {
             case STASH_FOUND, SPAWNER_FOUND, LANDING_OK -> response = PetState.CELEBRATE;
             default -> response = null;
         }
-        boolean wake = event == PetEvent.WAKE_UP || accepted && event.important();
+        boolean wake = event == PetEvent.WAKE_UP || accepted && (event.important() || event == PetEvent.CHAT_MENTION);
         if (wake && asleep() && !danger() && wakeTarget == null) wakeTarget = response == PetState.CELEBRATE ? response : PetState.REST;
         if (response == null) return;
         if (response != PetState.CELEBRATE) {
@@ -165,6 +168,7 @@ public final class PetBrain {
             if (sitDrink) sitDrinkAge += dt;
         }
         drunkenness = Math.max(0, Math.min((float) maxDrunk, drunkenness - dt * 0.007f));
+        thirst.tick(dt, !idle);
         if (preparingPose || holdingOverlay) return;
         seatedDrink();
         if (state == PetState.SIT && !atEdge) {
@@ -211,6 +215,7 @@ public final class PetBrain {
             actionDone = true;
             if (state == PetState.DRINK) {
                 lastDrinkAt = clock;
+                thirst.drank();
                 drunkenness = Math.min((float) maxDrunk, drunkenness + 0.18f);
                 PetEvents.publish(PetEvent.DRINK);
             } else if (state == PetState.SMOKE) PetEvents.publish(PetEvent.SMOKE);
@@ -222,6 +227,7 @@ public final class PetBrain {
             PetEvents.publish(PetEvent.GREETING);
         }
         if (greetingPending && greetingPublishedAt >= 0 && clock - greetingPublishedAt >= GREETING_TIMEOUT) greetingPending = false;
+        if (thirsty()) return;
         if (idle && (state == PetState.DANCE || state == PetState.SIT)) age = duration;
         if (age < duration) return;
         int family = family(state);
@@ -245,6 +251,18 @@ public final class PetBrain {
         else if (choice == PetState.DANCE) enter(choice, 15, 120);
         else if (choice == PetState.WALK) enter(choice, 10, 20);
         else enter(choice, 4, 10);
+    }
+
+    private boolean thirsty() {
+        boolean fit = (state == PetState.WALK || state == PetState.REST) && grounded && worldStable && !greetingPending
+            && !idle && !danger();
+        if (thirst.ask(fit && clock >= speechUntil)) {
+            PetEvents.publish(PetEvent.THIRSTY);
+            return false;
+        }
+        if (!thirst.drink(fit && clock >= nextFamily[1])) return false;
+        enter(PetState.DRINK, 4, 10);
+        return true;
     }
 
     private void startAnimation() {
@@ -293,6 +311,7 @@ public final class PetBrain {
         if (sitDrink) {
             if (!sitDrinkDone && sitDrinkAge >= sitDrinkLength * 0.6f) {
                 sitDrinkDone = true;
+                thirst.drank();
                 drunkenness = Math.min(1, drunkenness + 0.18f);
                 PetEvents.publish(PetEvent.DRINK);
             }

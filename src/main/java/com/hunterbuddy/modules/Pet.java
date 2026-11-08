@@ -2,6 +2,10 @@ package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.pet.PetBrain;
+import com.hunterbuddy.pet.PetChatMention;
+import com.hunterbuddy.pet.PetFlightDistance;
+import com.hunterbuddy.pet.PetLoot;
+import com.hunterbuddy.pet.PetLootScan;
 import com.mojang.logging.LogUtils;
 import com.hunterbuddy.pet.PetSfx;
 import com.hunterbuddy.pet.PetSfxLog;
@@ -28,6 +32,7 @@ import com.hunterbuddy.pet.PetStability;
 import meteordevelopment.meteorclient.events.entity.player.FinishUsingItemEvent;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.meteor.KeyEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseScrollEvent;
@@ -43,6 +48,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.resource.ReloadableResourceManagerImpl;
@@ -108,6 +114,8 @@ public final class Pet extends Module {
     private final PetMemory memory = new PetMemory();
     private final PetInput input = new PetInput();
     private final PetStability stability = new PetStability();
+    private final PetFlightDistance flight = new PetFlightDistance();
+    private final PetLoot loot = new PetLoot();
     private long lastInput;
     private int revision;
     private PetResources.Line lastLine;
@@ -166,6 +174,8 @@ public final class Pet extends Module {
         effects.reset();
         dialogue.reset(System.currentTimeMillis());
         monitor.reset();
+        flight.reset();
+        loot.reset();
         lastInput = System.currentTimeMillis();
         input.reset();
         revision = PetResources.INSTANCE.revision;
@@ -186,6 +196,8 @@ public final class Pet extends Module {
         memory.save();
         monitor.reset();
         input.reset();
+        flight.reset();
+        loot.reset();
     }
 
     @EventHandler
@@ -201,6 +213,12 @@ public final class Pet extends Module {
     @EventHandler
     private void onScroll(MouseScrollEvent event) {
         input(System.currentTimeMillis());
+    }
+
+    @EventHandler
+    private void onMessage(ReceiveMessageEvent event) {
+        if (mc.player == null) return;
+        if (PetChatMention.mentions(event.getMessage().getString(), mc.player.getGameProfile().name())) PetEvents.publish(PetEvent.CHAT_MENTION);
     }
 
     @EventHandler
@@ -228,7 +246,9 @@ public final class Pet extends Module {
             if (input.active(mc)) input(now);
             monitor.update(dangerRange.get());
             stability.update(mc.world, now);
-        }
+            if (flight.update(mc.world, mc.player.isGliding(), mc.player.getX(), mc.player.getZ())) PetEvents.publish(PetEvent.DISTANCE);
+            if (loot.update(storageScreen(), this::storageHoldsValuables)) PetEvents.publish(PetEvent.LOOT);
+        } else loot.reset();
         boolean quiet = combatSilence.get() && monitor.combatQuiet || regearSilence.get() && monitor.regearQuiet
             || landingSilence.get() && monitor.landingQuiet;
         boolean visible = inWorld && rig != null && mc.isWindowFocused()
@@ -298,6 +318,14 @@ public final class Pet extends Module {
             if (dialogue.speaking() == PetEvent.GREETING) brain.greeted();
         }
         lastLine = dialogue.current;
+    }
+
+    private HandledScreen<?> storageScreen() {
+        return mc.currentScreen instanceof HandledScreen<?> screen && PetLootScan.storage(screen.getScreenHandler()) ? screen : null;
+    }
+
+    private boolean storageHoldsValuables() {
+        return mc.currentScreen instanceof HandledScreen<?> screen && PetLootScan.holdsValuables(screen.getScreenHandler(), mc.player.getInventory());
     }
 
     private void input(long now) {
