@@ -151,6 +151,16 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 
 HunterBuddy also registers four Meteor GUI themes: `HunterBuddy Lanterne`, `HunterBuddy Echo`, `HunterBuddy Encre` and `HunterBuddy Phosphore`. They are not modules; they appear in Meteor's list of GUI themes.
 
+<p align="center">
+  <img src=".github/theme-lanterne.png" alt="HunterBuddy Lanterne theme" width="49%">
+  <img src=".github/theme-echo.png" alt="HunterBuddy Echo theme" width="49%">
+</p>
+
+<p align="center">
+  <img src=".github/theme-encre.png" alt="HunterBuddy Encre theme" width="49%">
+  <img src=".github/theme-phosphore.png" alt="HunterBuddy Phosphore theme" width="49%">
+</p>
+
 - Each theme has its own default font (JetBrains Mono, Share Tech Mono, IBM Plex Mono and VT323). The `font-family` setting in the theme's HunterBuddy Design group changes it. It uses an installed font family and falls back to Meteor's bundled JetBrains Mono; no font is downloaded.
 - The same group has `input-background-color`, `risk-color`, `accent-text-color`, `accent-preset`, `risk-modules` (modules marked as risky) and `separator-before-modules` (draw an Encre group separator before these modules).
 - Sizes follow the text height of Meteor's own font setting and update without a restart.
