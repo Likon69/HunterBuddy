@@ -639,6 +639,8 @@ public class SpawnerDetector extends Module {
     private static final double SOLO_ESCAPE_CLIMB = 40.0;
     private static final double SOLO_MAX_ALTITUDE = 300.0;
     private static final int TUNNEL_BARITONE_RETRIES = 1;
+    private static final int TUNNEL_REFILL_LIMIT = 8;
+    private static final int TUNNEL_NO_PROGRESS_TICKS = 20 * 20;
     private int autoSoloNearUnloadedTicks;
     private int autoSoloLastRocketTick;
     private double autoSoloCruiseAltitude;
@@ -864,6 +866,10 @@ public class SpawnerDetector extends Module {
     private List<Block> autoTunnelDisallowedBreaking;
     private double autoTunnelBestDist;
     private int autoTunnelBestElapsed;
+    private double autoTunnelGoalBestDist;
+    private int autoTunnelGoalBestElapsed;
+    private BlockPos autoTunnelRefillPos;
+    private int autoTunnelRefillCount;
     private final List<BlockPos> autoTunnelTrail = new ArrayList<>();
 
     private double autoBreachBestDist;
@@ -9062,6 +9068,10 @@ public class SpawnerDetector extends Module {
             }
             autoTunnelBestDist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(autoTunnelGoal));
             autoTunnelBestElapsed = 0;
+            autoTunnelGoalBestDist = autoTunnelBestDist;
+            autoTunnelGoalBestElapsed = 0;
+            autoTunnelRefillPos = null;
+            autoTunnelRefillCount = 0;
             autoLog("TUNNEL", autoSite.center, "direct goal=" + autoTunnelGoal.toShortString());
         }
 
@@ -9072,6 +9082,7 @@ public class SpawnerDetector extends Module {
         if (eat != null && eat.isEating()) {
             releaseAllAutoKeys();
             autoTunnelBestElapsed = stateTicks - autoPausedTicks;
+            autoTunnelGoalBestElapsed = autoTunnelBestElapsed;
             return;
         }
         recordTunnelTrail();
@@ -9094,7 +9105,15 @@ public class SpawnerDetector extends Module {
             autoTunnelBestDist = dist;
             autoTunnelBestElapsed = elapsed;
         }
+        if (dist < autoTunnelGoalBestDist - 1.0) {
+            autoTunnelGoalBestDist = dist;
+            autoTunnelGoalBestElapsed = elapsed;
+        }
         if (!autoTunnelBaritone) {
+            if (elapsed - autoTunnelGoalBestElapsed > TUNNEL_NO_PROGRESS_TICKS) {
+                startTunnelBaritone(autoTunnelStep, "no progress toward the goal");
+                return;
+            }
             tickTunnelDirect();
             logNavTelemetry("TUNNEL", autoTunnelGoal, 0);
             return;
@@ -9118,6 +9137,7 @@ public class SpawnerDetector extends Module {
                 autoTunnelBaritone = false;
                 autoTunnelStep = feet;
                 autoTunnelBestElapsed = elapsed;
+                autoTunnelGoalBestElapsed = elapsed;
                 autoLog("TUNNEL", autoSite.center, "baritone failed, direct rescue from " + feet.toShortString());
                 return;
             }
@@ -9132,10 +9152,17 @@ public class SpawnerDetector extends Module {
         mc.player.setSprinting(false);
         int elapsed = stateTicks - autoPausedTicks;
         if (autoBreachPos != null && isTunnelOpen(autoBreachPos)) {
-            autoLog("TUNNEL", autoSite.center, "direct broken=" + autoBreachPos.toShortString() + " block=" + autoBreachLabel);
+            BlockPos broken = autoBreachPos;
+            autoLog("TUNNEL", autoSite.center, "direct broken=" + broken.toShortString() + " block=" + autoBreachLabel);
             autoBreachPos = null;
             autoTunnelBestElapsed = elapsed;
             mc.interactionManager.cancelBlockBreaking();
+            autoTunnelRefillCount = broken.equals(autoTunnelRefillPos) ? autoTunnelRefillCount + 1 : 1;
+            autoTunnelRefillPos = broken;
+            if (autoTunnelRefillCount >= TUNNEL_REFILL_LIMIT) {
+                startTunnelBaritone(broken, "falling block refilled the passage");
+                return;
+            }
         }
         int stallLimit = 10 * 20;
         if (autoBreachPos != null && mc.player.isSubmergedInWater() && mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED) < 0.99) stallLimit *= 5;
@@ -9251,6 +9278,7 @@ public class SpawnerDetector extends Module {
 
     private void startTunnelBaritone(BlockPos blocked, String reason) {
         if (autoTunnelDirectRetried) {
+            autoLog("TUNNEL", autoSite.center, "direct passage abandoned reason=" + reason);
             abandonTunnel();
             return;
         }
@@ -9259,6 +9287,7 @@ public class SpawnerDetector extends Module {
         autoBreachPos = null;
         autoTunnelBaritone = true;
         autoTunnelBestElapsed = stateTicks - autoPausedTicks;
+        autoTunnelGoalBestElapsed = autoTunnelBestElapsed;
         autoLog("TUNNEL", autoSite.center, "direct blocked=" + blocked.toShortString()
             + " block=" + Registries.BLOCK.getId(mc.world.getBlockState(blocked).getBlock()).getPath()
             + " reason=" + reason + ", baritone fallback");
