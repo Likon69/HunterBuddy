@@ -7,8 +7,8 @@ import com.hunterbuddy.modules.mine.EnemyBlocks;
 import com.hunterbuddy.modules.mine.MineRender;
 import com.hunterbuddy.modules.mine.ToolHold;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
+import com.hunterbuddy.util.ActionSwap;
 import com.hunterbuddy.util.GrimBreakBalance;
-import com.hunterbuddy.util.ServerSlot;
 import com.hunterbuddy.util.SessionStats;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -20,6 +20,7 @@ import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.mixininterface.IClientPlayerInteractionManager;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BlockListSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -202,9 +203,16 @@ public class HMine extends Module {
 
     private final Setting<Swap> autoSwap = this.sgGeneral.add(new EnumSetting.Builder<Swap>()
         .name("auto-swap")
-        .description("Hold the best hotbar tool from the first packet until the block is gone. Only hotbar slots can be selected.")
+        .description("NORMAL holds the best hotbar tool; SILENT equips it only while sending each digging packet.")
         .defaultValue(Swap.SILENT)
         .visible(this::packetMode)
+        .build());
+
+    private final Setting<Boolean> alternative = this.sgGeneral.add(new BoolSetting.Builder()
+        .name("alternative")
+        .description("Temporarily exchange the tool with the held slot using inventory SWAP clicks instead of selecting a slot.")
+        .defaultValue(false)
+        .visible(() -> this.packetMode() && this.autoSwap.get() == Swap.SILENT)
         .build());
 
     private final Setting<Boolean> rotate = this.sgGeneral.add(new BoolSetting.Builder()
@@ -382,7 +390,7 @@ public class HMine extends Module {
         .visible(() -> this.render.get() && this.queue.get())
         .build());
 
-    private final ToolHold tool = new ToolHold(() -> this.autoSwap.get());
+    private final ToolHold tool = new ToolHold(() -> this.autoSwap.get(), () -> this.alternative.get());
     private final MineRender renderer = new MineRender();
     private final GrimBreakBalance balance = new GrimBreakBalance(this::costAt);
     private final Map<BlockPos, Long> stopSentAt = new LinkedHashMap<>() {
@@ -528,7 +536,13 @@ public class HMine extends Module {
     }
 
     private void sendAction(PlayerActionC2SPacket.Action action, BlockPos pos, Direction face) {
-        this.send(new PlayerActionC2SPacket(action, pos, face));
+        Runnable send = () -> this.send(new PlayerActionC2SPacket(action, pos, face));
+        if (this.packetMode() && this.mc.world != null
+            && (action == PlayerActionC2SPacket.Action.START_DESTROY_BLOCK || action == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK)) {
+            this.tool.withTool(this.mc.world.getBlockState(pos), send);
+        } else {
+            send.run();
+        }
     }
 
     private void swingOnce() {
@@ -658,7 +672,6 @@ public class HMine extends Module {
         this.active.clear();
         this.capacity = this.doubleBreak.get() ? 2 : 1;
         this.tool.forget();
-        this.tool.prepare();
         this.resetAutoBlocks();
     }
 
@@ -1195,7 +1208,7 @@ public class HMine extends Module {
             this.sendAction(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, action.getPos(), action.getDirection());
         }
 
-        if (packet instanceof UpdateSelectedSlotC2SPacket && this.switchReset.get() && this.packetMode() && !this.tool.ownChange() && !this.doubleQueue.ownChange) {
+        if (packet instanceof UpdateSelectedSlotC2SPacket && this.switchReset.get() && this.packetMode() && !this.tool.ownChange() && !this.doubleQueue.ownChange && !ActionSwap.active()) {
             if (this.doubleQueue.running) {
                 List<MiningData> restarting = new ArrayList<>(this.active);
                 this.doubleQueue.stop(true);
@@ -1341,7 +1354,6 @@ public class HMine extends Module {
             if (abort && HMine.this.mc.player != null && HMine.this.mc.world != null) {
                 if (this.primary != null && !this.primary.finished) this.action(this.primary, PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, this.primary.pos, this.primary.side);
                 if (this.secondary != null && !this.secondary.finished) this.action(this.secondary, PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, this.secondary.pos, this.secondary.side);
-                this.revertSlot();
             }
             if (this.running) HMine.this.active.clear();
             this.primary = null;
@@ -1424,7 +1436,6 @@ public class HMine extends Module {
                 this.secondary = null;
                 this.ready = System.currentTimeMillis() + (confirmed ? 50L : BURST_PAUSE);
             }
-            if (target.arming && this.swapped) this.revertSlot();
         }
 
         private void fail(Target target) {
@@ -1456,8 +1467,7 @@ public class HMine extends Module {
             Direction side = this.face(this.last.position, this.last.face);
             int slot = this.best(state, this.last.position);
             this.select(slot);
-            this.packet(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.last.position, side);
-            this.revertSlot();
+            this.packet(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.last.position, side, slot);
             this.stopped = System.currentTimeMillis();
             return true;
         }
@@ -1519,38 +1529,31 @@ public class HMine extends Module {
         }
 
         private void select(int slot) {
-            if (this.selected() == slot || HMine.this.autoSwap.get() == Swap.OFF) {
-                this.swapped = false;
-                return;
-            }
-            this.swapped = true;
+            this.swapped = HMine.this.autoSwap.get() == Swap.NORMAL && this.selected() != slot;
+            if (!this.swapped) return;
             this.ownChange = true;
             try {
-                if (HMine.this.autoSwap.get() == Swap.NORMAL) this.setSelected(slot);
-                ServerSlot.get().select(slot);
+                this.setSelected(slot);
+                ((IClientPlayerInteractionManager) HMine.this.mc.interactionManager).meteor$syncSelected();
             } finally {
                 this.ownChange = false;
             }
         }
 
-        private void revertSlot() {
-            if (!this.swapped || HMine.this.autoSwap.get() != Swap.SILENT) return;
-            this.ownChange = true;
-            try {
-                ServerSlot.get().resync();
-            } finally {
-                this.ownChange = false;
-                this.swapped = false;
-            }
-        }
-
-        private void packet(PlayerActionC2SPacket.Action action, BlockPos pos, Direction side) {
+        private void packet(PlayerActionC2SPacket.Action action, BlockPos pos, Direction side, int slot) {
             if (HMine.this.mc.world == null || HMine.this.mc.interactionManager == null) return;
-            this.sendingCustomPacket = true;
-            try {
+            Runnable send = () -> {
                 HMine.this.mc.interactionManager.sendSequencedPacket(HMine.this.mc.world,
                     sequence -> new PlayerActionC2SPacket(action, pos, side, sequence));
                 if (action == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK) HMine.this.stopSentAt.put(pos.toImmutable(), System.currentTimeMillis());
+            };
+            this.sendingCustomPacket = true;
+            try {
+                if (HMine.this.autoSwap.get() == Swap.SILENT && action != PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK) {
+                    ActionSwap.run(slot, HMine.this.alternative.get(), send);
+                } else {
+                    send.run();
+                }
             } finally {
                 this.sendingCustomPacket = false;
             }
@@ -1597,10 +1600,10 @@ public class HMine extends Module {
 
             target.instant = target.delta >= 1.0F;
 
-            this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, target.pos, target.side);
+            this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, target.pos, target.side, target.slot);
 
             if (HMine.this.packetMode() && !target.instant) {
-                this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, this.fake(target.pos), target.side);
+                this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, this.fake(target.pos), target.side, target.slot);
             }
 
             if (HMine.this.swing.get() == Swing.NONE) {
@@ -1610,7 +1613,6 @@ public class HMine extends Module {
             }
 
             if (target.instant) this.finish(target);
-            this.revertSlot();
         }
 
         private void update(Target target) {
@@ -1697,11 +1699,10 @@ public class HMine extends Module {
             BlockPos pos = this.fake(target.pos);
 
             for (int idx = 0; idx < BURST_COUNT; idx++) {
-                this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, target.side);
+                this.packet(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, target.side, target.slot);
             }
 
             target.burst = true;
-            this.revertSlot();
         }
 
         private void finish(Target target) {
@@ -1770,8 +1771,7 @@ public class HMine extends Module {
             target.slot = this.best(target.state, target.pos);
 
             this.select(target.slot);
-            this.packet(action, pos, target.side);
-            this.revertSlot();
+            this.packet(action, pos, target.side, target.slot);
         }
 
         private BlockPos fake(BlockPos pos) {

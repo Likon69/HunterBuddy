@@ -2,44 +2,37 @@ package com.hunterbuddy.modules.mine;
 
 import com.hunterbuddy.modules.HMine;
 import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
-import com.hunterbuddy.util.ServerSlot;
+import com.hunterbuddy.util.ActionSwap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.mixininterface.IClientPlayerInteractionManager;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.math.BlockPos;
 
 public class ToolHold {
     private final MinecraftClient mc = MeteorClient.mc;
     private final Supplier<HMine.Swap> mode;
+    private final BooleanSupplier alternative;
     private int taken = -1;
     private int origin = -1;
     private BlockPos heldPos;
     private long heldSince;
     private boolean own;
-    private boolean silentUsed;
 
-    public ToolHold(Supplier<HMine.Swap> mode) {
+    public ToolHold(Supplier<HMine.Swap> mode, BooleanSupplier alternative) {
         this.mode = mode;
+        this.alternative = alternative;
     }
 
     public boolean ownChange() {
         return this.own;
     }
 
-    public void prepare() {
-        if (this.mode.get() == HMine.Swap.SILENT) {
-            ServerSlot.get();
-            this.silentUsed = true;
-        }
-    }
-
     public void holdFor(BlockState s, BlockPos pos) {
-        if (this.mode.get() == HMine.Swap.OFF || this.mc.player == null) {
-            return;
-        }
+        if (this.mode.get() != HMine.Swap.NORMAL || this.mc.player == null) return;
 
         int best = BreakMath.fasterThanHeld(this.mc.player, s);
         if (best == -1) {
@@ -47,51 +40,37 @@ public class ToolHold {
                 this.heldPos = pos;
                 this.heldSince = System.currentTimeMillis();
             }
-
             return;
         }
 
         if (best != this.taken) {
-            if (this.taken == -1) {
-                this.origin = this.selected();
-            }
-
-            this.swapTo(best);
+            if (this.taken == -1) this.origin = this.selected();
+            this.select(best);
             this.taken = best;
         }
-
         this.heldPos = pos;
         this.heldSince = System.currentTimeMillis();
     }
 
+    public void withTool(BlockState state, Runnable action) {
+        if (this.mode.get() != HMine.Swap.SILENT) {
+            action.run();
+            return;
+        }
+        if (this.mc.player == null) return;
+        int best = BreakMath.fasterThanHeld(this.mc.player, state);
+        ActionSwap.run(best == -1 ? this.selected() : best, this.alternative.getAsBoolean(), action);
+    }
+
     public void release(boolean solidLeft, Predicate<BlockPos> cleared) {
-        if (this.taken == -1 || this.origin == -1) {
-            return;
-        }
-
-        if (solidLeft) {
-            return;
-        }
-
-        if (this.heldPos != null && !cleared.test(this.heldPos) && System.currentTimeMillis() - this.heldSince < 5000L) {
-            return;
-        }
-
-        boolean playerLeft = this.mode.get() == HMine.Swap.NORMAL && this.selected() != this.taken;
-        if (!playerLeft) {
-            this.returnTo(this.origin);
-        }
-
+        if (this.taken == -1 || this.origin == -1 || solidLeft) return;
+        if (this.heldPos != null && !cleared.test(this.heldPos) && System.currentTimeMillis() - this.heldSince < 5000L) return;
+        if (this.mode.get() == HMine.Swap.NORMAL && this.selected() == this.taken) this.select(this.origin);
         this.reset();
     }
 
     public void shutDown() {
-        if (this.taken != -1 && this.origin != -1) {
-            this.returnTo(this.origin);
-        } else if (this.mode.get() == HMine.Swap.SILENT && this.silentUsed) {
-            ServerSlot.get().resync();
-        }
-
+        if (this.mode.get() == HMine.Swap.NORMAL && this.mc.player != null && this.taken != -1 && this.origin != -1) this.select(this.origin);
         this.reset();
     }
 
@@ -111,48 +90,14 @@ public class ToolHold {
         return ((PlayerInventoryAccessor) this.mc.player.getInventory()).getSelectedSlot();
     }
 
-    private void swapTo(int n) {
+    private void select(int slot) {
+        if (this.mc.player == null || this.mc.interactionManager == null || this.mc.getNetworkHandler() == null) return;
         this.own = true;
-
         try {
-            switch (this.mode.get()) {
-                case NORMAL -> this.normalSelect(n);
-                case SILENT -> {
-                    this.silentUsed = true;
-                    ServerSlot.get().select(n);
-                }
-                case OFF -> {
-                }
-            }
+            this.mc.player.getInventory().setSelectedSlot(slot);
+            ((IClientPlayerInteractionManager) this.mc.interactionManager).meteor$syncSelected();
         } finally {
             this.own = false;
         }
-    }
-
-    private void returnTo(int o) {
-        this.own = true;
-
-        try {
-            switch (this.mode.get()) {
-                case NORMAL -> this.normalSelect(o);
-                case SILENT -> {
-                    this.silentUsed = true;
-                    ServerSlot.get().resync();
-                }
-                case OFF -> {
-                }
-            }
-        } finally {
-            this.own = false;
-        }
-    }
-
-    private void normalSelect(int n) {
-        if (this.mc.player == null || this.mc.getNetworkHandler() == null) {
-            return;
-        }
-
-        ((PlayerInventoryAccessor) this.mc.player.getInventory()).setSelectedSlot(n);
-        this.mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(n));
     }
 }
