@@ -1,7 +1,10 @@
 package com.hunterbuddy.modules;
 
-import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.mixin.accessors.LivingEntityAttackAccessor;
+import com.hunterbuddy.util.ActionSwap;
+import com.hunterbuddy.util.AttackCooldown;
+import com.hunterbuddy.util.QuietClicks;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -27,6 +30,7 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.TickRate;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
@@ -36,6 +40,7 @@ import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.PiglinEntity;
 import net.minecraft.entity.mob.ZombifiedPiglinEntity;
 import net.minecraft.entity.passive.WolfEntity;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.ItemStack;
@@ -129,6 +134,13 @@ public class KillAuraPlus extends Module {
         .build()
     );
 
+    private final Setting<SwitchMode> switchMode = sgGeneral.add(new EnumSetting.Builder<SwitchMode>()
+        .name("switch-mode")
+        .description("Normal keeps the weapon selected; Silent equips it only for the attack.")
+        .defaultValue(SwitchMode.Normal)
+        .visible(autoSwitch::get)
+        .build());
+
     private final Setting<Boolean> fetchFromInventory = sgGeneral.add(new BoolSetting.Builder()
         .name("fetch-from-inventory")
         .description("When no hotbar slot holds a weapon but the inventory does (a regear moved it, say), bring the best one back: into an empty hotbar slot, else the slot you are holding, whose item takes the weapon's old place.")
@@ -141,7 +153,7 @@ public class KillAuraPlus extends Module {
         .name("swap-back")
         .description("Return to the slot you were holding once there is nothing left to attack.")
         .defaultValue(true)
-        .visible(autoSwitch::get)
+        .visible(() -> autoSwitch.get() && switchMode.get() == SwitchMode.Normal)
         .build()
     );
 
@@ -388,7 +400,8 @@ public class KillAuraPlus extends Module {
 
     private final Setting<Integer> switchDelay = sgTiming.add(new IntSetting.Builder()
         .name("switch-delay")
-        .description("Ticks to wait after changing hotbar slot before swinging. A swing in the same tick as the switch is a swing the server may still credit to the old item.")
+        .description("Ticks to wait after a normal hotbar switch before swinging.")
+        .visible(() -> autoSwitch.get() && switchMode.get() == SwitchMode.Normal)
         .defaultValue(2)
         .min(0)
         .sliderRange(0, 10)
@@ -539,6 +552,7 @@ public class KillAuraPlus extends Module {
     private net.minecraft.item.Item lastHeld;
     private int previousSlot = -1;
     private int ourSlot = -1;
+    private int silentSlot = -1;
     private long handsOffUntil;
     private boolean swapped;
     private long nextFetchMs;
@@ -572,6 +586,7 @@ public class KillAuraPlus extends Module {
         lastHeld = null;
         previousSlot = -1;
         ourSlot = -1;
+        silentSlot = -1;
         handsOffUntil = 0;
         swapped = false;
         nextHitMs = 0;
@@ -638,6 +653,7 @@ public class KillAuraPlus extends Module {
 
         long now = System.currentTimeMillis();
         int selected = mc.player.getInventory().getSelectedSlot();
+        silentSlot = -1;
 
         // Two ways of saying "leave my hands alone": moving the slot off the one
         // this module put you on, and holding right click. Without this the switch
@@ -664,14 +680,18 @@ public class KillAuraPlus extends Module {
         // and changing item resets the cooldown, which keeps the charge low. Weighed
         // every tick the two answers chase each other and the module switches for
         // ever without ever landing a charged hit.
-        if (autoSwitch.get() && now >= handsOffUntil && charged()) {
+        if (autoSwitch.get() && now >= handsOffUntil && (switchMode.get() == SwitchMode.Silent || charged())) {
             int slot = bestSlot(target);
 
             if (slot == -1 && fetchFromInventory.get()) {
                 fetchWeapon(target, selected, now);
+                if (switchMode.get() == SwitchMode.Silent) slot = bestSlot(target);
             }
 
-            if (slot != -1 && slot != selected) {
+            if (switchMode.get() == SwitchMode.Silent) {
+                silentSlot = slot;
+            }
+            else if (slot != -1 && slot != selected) {
                 if (!swapped) {
                     previousSlot = selected;
                     swapped = true;
@@ -686,7 +706,8 @@ public class KillAuraPlus extends Module {
             }
         }
 
-        if (requireWeapon.get() && !isWeapon(mc.player.getMainHandStack())) return;
+        ItemStack weapon = silentSlot == -1 ? mc.player.getMainHandStack() : mc.player.getInventory().getStack(silentSlot);
+        if (requireWeapon.get() && !isWeapon(weapon)) return;
 
         Vec3d point = aimPoint(target);
         double goalYaw = Rotations.getYaw(point);
@@ -722,7 +743,7 @@ public class KillAuraPlus extends Module {
 
         if (rotate.get() == RotationMode.Off) {
             if (hit) {
-                attack(target);
+                attack(target, silentSlot);
                 logAttack(target, yaw, pitch);
             }
             return;
@@ -746,7 +767,7 @@ public class KillAuraPlus extends Module {
         ticksSinceAim = 0;
 
         if (hit) {
-            attack(target);
+            attack(target, silentSlot);
             logAttack(target, yaw, pitch);
         }
     }
@@ -756,7 +777,7 @@ public class KillAuraPlus extends Module {
     private String runningReason() {
         if (!mc.player.isAlive() || mc.player.isSpectator()) return "dead";
         if (minHealth.get() > 0 && mc.player.getHealth() <= minHealth.get()) return "health";
-        if (mc.currentScreen != null) return "screen";
+        if (mc.player.currentScreenHandler != mc.player.playerScreenHandler || mc.currentScreen instanceof InventoryScreen) return "screen";
         if (pauseGliding.get() && mc.player.isGliding()) return "gliding";
         if (onlyOnClick.get() && !mc.options.attackKey.isPressed()) return "onlyOnClick";
         if (pauseMining.get() && mc.interactionManager != null && mc.interactionManager.isBreakingBlock()) return "mining";
@@ -982,6 +1003,7 @@ public class KillAuraPlus extends Module {
      * the cursor, or with an empty weapon list, where anything at all would count as a weapon.
      */
     private void fetchWeapon(Entity target, int selected, long now) {
+        if (mc.currentScreen != null) return;
         if (now < nextFetchMs || weapons.get().isEmpty()) return;
         if (!mc.player.currentScreenHandler.getCursorStack().isEmpty()) return;
 
@@ -1073,11 +1095,27 @@ public class KillAuraPlus extends Module {
         // charge where the client shows a full one -- under the 0.9 a critical
         // needs, so every crit is silently lost. Meteor divides the base time
         // instead, which makes it swing sooner when the server is slower.
-        return ticksSinceHit * (tps / 20.0f) + 0.5f >= mc.player.getAttackCooldownProgressPerTick();
+        int ticks = hasSilentWeapon() ? ((LivingEntityAttackAccessor) mc.player).getTicksSinceLastAttack() : ticksSinceHit;
+        return ticks * (tps / 20.0f) + 0.5f >= cooldownTicks();
     }
 
     private boolean charged() {
-        return mc.player.getAttackCooldownProgress(0.5f) >= 1.0f;
+        return attackCharge() >= 1.0f;
+    }
+
+    private boolean hasSilentWeapon() {
+        return autoSwitch.get() && switchMode.get() == SwitchMode.Silent && silentSlot != -1;
+    }
+
+    private float cooldownTicks() {
+        if (!hasSilentWeapon()) return mc.player.getAttackCooldownProgressPerTick();
+        return AttackCooldown.ticks(mc.player.getAttributeInstance(EntityAttributes.ATTACK_SPEED),
+            mc.player.getMainHandStack(), mc.player.getInventory().getStack(silentSlot));
+    }
+
+    private float attackCharge() {
+        if (!hasSilentWeapon()) return mc.player.getAttackCooldownProgress(0.5f);
+        return AttackCooldown.progress(((LivingEntityAttackAccessor) mc.player).getTicksSinceLastAttack(), 0.5f, cooldownTicks());
     }
 
     /**
@@ -1097,7 +1135,13 @@ public class KillAuraPlus extends Module {
         return sprintReset.get() || !mc.player.isSprinting();
     }
 
-    private void attack(Entity target) {
+    private void attack(Entity target, int slot) {
+        float charge = attackCharge();
+        if (slot == -1) strike(target, charge);
+        else ActionSwap.run(slot, false, () -> strike(target, charge));
+    }
+
+    private void strike(Entity target, float charge) {
         if (mc.interactionManager == null || mc.getNetworkHandler() == null) return;
 
         boolean sprinting = mc.player.isSprinting();
@@ -1107,7 +1151,7 @@ public class KillAuraPlus extends Module {
         // timing the gate is already full charge, so this changes only the clicks
         // timing, where it was pure noise.
         boolean reset = sprintReset.get() && sprinting
-            && mc.player.getAttackCooldownProgress(0.5f) > 0.9f;
+            && charge > 0.9f;
 
         // Stop first, so the server works out the swing on a player who is not
         // sprinting and therefore may crit. Start again after, on both sides, so
@@ -1174,6 +1218,7 @@ public class KillAuraPlus extends Module {
         swapped = false;
         previousSlot = -1;
         ourSlot = -1;
+        silentSlot = -1;
     }
 
     private Vec3d aimPoint(Entity target) {
@@ -1545,6 +1590,11 @@ public class KillAuraPlus extends Module {
         if (aura.ticksSinceAim > Config.get().rotationHoldTicks.get()) return Float.NaN;
 
         return aura.lastAimYaw;
+    }
+
+    public enum SwitchMode {
+        Normal,
+        Silent
     }
 
     public enum Priority {

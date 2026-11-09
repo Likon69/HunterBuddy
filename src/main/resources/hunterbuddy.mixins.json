@@ -28,6 +28,7 @@
     "accessors.ElytraEntityModelAccessor",
     "accessors.FireworkRocketEntityAccessor",
     "accessors.PlayerInventoryAccessor",
+    "accessors.LivingEntityAttackAccessor",
     "accessors.EntityVelocityUpdateS2CPacketAccessor",
     "accessors.UpdateSelectedSlotS2CPacketAccessor",
     "fireworkboost.FireworkRocketEntityMixin",
