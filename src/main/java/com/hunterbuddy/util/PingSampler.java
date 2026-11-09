@@ -24,9 +24,10 @@ public final class PingSampler {
     private static final PingSampler INSTANCE = new PingSampler();
 
     private static final long SAMPLE_EVERY_MS = 1000L;
-    private static final int CAPACITY = 30;
+    public static final int CAPACITY = 30;
 
     private final ArrayDeque<Integer> samples = new ArrayDeque<>();
+    private final Integer[] snapshot = new Integer[CAPACITY];
     private long lastSampleAt;
 
     /**
@@ -109,9 +110,16 @@ public final class PingSampler {
     /** Oldest to newest. A copy. */
     public synchronized int[] history() {
         int[] out = new int[samples.size()];
-        int i = 0;
-        for (int sample : samples) out[i++] = sample;
+        copyHistory(out);
         return out;
+    }
+
+    public synchronized int copyHistory(int[] target) {
+        int size = samples.size();
+        int count = Math.min(size, target.length);
+        samples.toArray(snapshot);
+        for (int i = 0; i < count; i++) target[i] = snapshot[size - count + i];
+        return count;
     }
 
     /** Half the spread over the window — a plain figure for how unsteady the line is. */

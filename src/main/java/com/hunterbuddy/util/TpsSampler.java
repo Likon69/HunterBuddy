@@ -17,7 +17,7 @@ public final class TpsSampler {
     private static final TpsSampler INSTANCE = new TpsSampler();
 
     private static final long SAMPLE_EVERY_MS = 500L;
-    private static final int CAPACITY = 120;
+    public static final int CAPACITY = 120;
 
     private final float[] samples = new float[CAPACITY];
     private int head;
@@ -47,11 +47,14 @@ public final class TpsSampler {
     /** Oldest to newest. The array is full of zeros until the first minute has passed. */
     public synchronized float[] history() {
         float[] out = new float[filled];
-        for (int i = 0; i < filled; i++) {
-            out[i] = samples[(head - filled + i + CAPACITY * 2) % CAPACITY];
-        }
-
+        copyHistory(out);
         return out;
+    }
+
+    public synchronized int copyHistory(float[] target) {
+        int count = Math.min(filled, target.length);
+        for (int i = 0; i < count; i++) target[i] = samples[(head - count + i + CAPACITY) % CAPACITY];
+        return count;
     }
 
     public synchronized float worst() {

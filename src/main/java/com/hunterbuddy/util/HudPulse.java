@@ -88,13 +88,15 @@ public final class HudPulse {
     public static Color tint(Style style, SettingColor normal, SettingColor accent, float freshness) {
         if (freshness <= 0.0f) return normal;
 
-        float weight = style == Style.Lively ? freshness : freshness * 0.6f;
+        return tint(style, normal, accent, freshness, new Color());
+    }
 
-        return new Color(
-            (int) (normal.r + (accent.r - normal.r) * weight),
+    public static Color tint(Style style, SettingColor normal, SettingColor accent, float freshness, Color target) {
+        float weight = freshness <= 0 ? 0 : style == Style.Lively ? freshness : freshness * 0.6f;
+        target.set((int) (normal.r + (accent.r - normal.r) * weight),
             (int) (normal.g + (accent.g - normal.g) * weight),
-            (int) (normal.b + (accent.b - normal.b) * weight),
-            normal.a);
+            (int) (normal.b + (accent.b - normal.b) * weight), normal.a);
+        return target;
     }
 
     /**

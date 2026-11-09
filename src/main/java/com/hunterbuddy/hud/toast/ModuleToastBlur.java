@@ -100,11 +100,12 @@ public final class ModuleToastBlur implements AutoCloseable {
             int top = Math.max(0, (int) Math.floor(mask.y - 1));
             int right = Math.min(main.textureWidth, (int) Math.ceil(mask.x + mask.width + 1));
             int bottom = Math.min(main.textureHeight, (int) Math.ceil(mask.y + mask.height + 1));
+            GpuBufferSlice maskSlice = maskUniforms.write(mask);
             try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder()
                 .createRenderPass(() -> "HunterBuddy Journal Blur", main.getColorAttachmentView(), OptionalInt.empty())) {
                 pass.setPipeline(MASK);
                 pass.enableScissor(left, main.textureHeight - bottom, Math.max(0, right - left), Math.max(0, bottom - top));
-                pass.setUniform("MaskData", maskUniforms.write(mask));
+                pass.setUniform("MaskData", maskSlice);
                 pass.bindTexture("u_Texture", targets[0].getColorAttachmentView(), RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
                 pass.setVertexBuffer(0, FullScreenRenderer.vbo);
                 pass.setIndexBuffer(FullScreenRenderer.ibo, VertexFormat.IndexType.INT);

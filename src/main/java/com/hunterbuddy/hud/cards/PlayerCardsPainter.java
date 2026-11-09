@@ -2,6 +2,7 @@ package com.hunterbuddy.hud.cards;
 
 import com.hunterbuddy.hud.glass.GlassPainter;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.item.ItemStack;
@@ -17,9 +18,9 @@ public final class PlayerCardsPainter {
     public CardMetrics measure(HudRenderer renderer, CardStyle style) {
         double s = style.scale();
         double t = style.textScale();
-        double nameHeight = renderer.textHeight(false, NAME * t);
-        double pillHeight = renderer.textHeight(false, PILL * t) + 6 * s;
-        double nameWidth = renderer.textWidth(NAME_SAMPLE, false, NAME * t);
+        double nameHeight = HudText.textHeight(renderer, false, NAME * t);
+        double pillHeight = HudText.textHeight(renderer, false, PILL * t) + 6 * s;
+        double nameWidth = HudText.textWidth(renderer, NAME_SAMPLE, false, NAME * t);
         double padding = (style.compact() ? 7 : 9) * s;
         double firstRow;
         double secondRow;
@@ -33,13 +34,13 @@ public final class PlayerCardsPainter {
             rightWidth = pillWidth;
             leftWidth = nameWidth;
         } else {
-            firstRow = Math.max(nameHeight, renderer.textHeight(false, VALUE * t));
+            firstRow = Math.max(nameHeight, HudText.textHeight(renderer, false, VALUE * t));
             secondRow = Math.max(16 * s, pillHeight);
             pillWidth = Math.max(Math.max(pillWidth(renderer, PlayerMovement.APPROACH.label(), s, t),
                 pillWidth(renderer, PlayerMovement.RECEDE.label(), s, t)),
                 Math.max(pillWidth(renderer, PlayerMovement.HOLD.label(), s, t),
                     pillWidth(renderer, PlayerMovement.GONE.label(), s, t)));
-            rightWidth = Math.max(pillWidth, renderer.textWidth(DISTANCE_SAMPLE, false, VALUE * t));
+            rightWidth = Math.max(pillWidth, HudText.textWidth(renderer, DISTANCE_SAMPLE, false, VALUE * t));
             leftWidth = Math.max(nameWidth, PlayerTrack.GEAR_SLOTS.length * 16 * s + (PlayerTrack.GEAR_SLOTS.length - 1) * 2 * s);
         }
         double content = firstRow + (style.compact() ? 0 : 4 * s + secondRow);
@@ -65,14 +66,14 @@ public final class PlayerCardsPainter {
         String distance = Math.round(track.distance()) + " b";
         CardIcons.head(renderer, track.skin(), left, top, metrics.headSize(), alpha);
         String name = GlassPainter.fit(renderer, track.name(), right - metrics.rightWidth() - 8 * s - textX, NAME * t);
-        renderer.text(name, textX, GlassPainter.centered(renderer, firstCenter, NAME * t),
+        HudText.text(renderer, name, textX, GlassPainter.centered(renderer, firstCenter, NAME * t),
             glass.tint(style.text(), alpha), false, NAME * t);
         if (style.compact()) {
             pill(renderer, distance, right, firstCenter, metrics, card.pill(), alpha, s, t);
             return;
         }
-        double valueWidth = renderer.textWidth(distance, false, VALUE * t);
-        renderer.text(distance, right - valueWidth, GlassPainter.centered(renderer, firstCenter, VALUE * t),
+        double valueWidth = HudText.textWidth(renderer, distance, false, VALUE * t);
+        HudText.text(renderer, distance, right - valueWidth, GlassPainter.centered(renderer, firstCenter, VALUE * t),
             glass.tint(style.text(), alpha * 0.85), false, VALUE * t);
         double secondCenter = top + metrics.firstRow() + 4 * s + metrics.secondRow() / 2;
         pill(renderer, card.movement().label(), right, secondCenter, metrics, card.pill(), alpha, s, t);
@@ -90,12 +91,12 @@ public final class PlayerCardsPainter {
         double left = right - metrics.pillWidth();
         glass.pill(renderer, left, center - metrics.pillHeight() / 2, metrics.pillWidth(), metrics.pillHeight(),
             scale, glass.tint(color, alpha * 0.16));
-        double labelWidth = renderer.textWidth(label, false, PILL * textScale);
-        renderer.text(label, left + (metrics.pillWidth() - labelWidth) / 2,
+        double labelWidth = HudText.textWidth(renderer, label, false, PILL * textScale);
+        HudText.text(renderer, label, left + (metrics.pillWidth() - labelWidth) / 2,
             GlassPainter.centered(renderer, center, PILL * textScale), glass.tint(color, alpha), false, PILL * textScale);
     }
 
     private static double pillWidth(HudRenderer renderer, String label, double scale, double textScale) {
-        return Math.max(43 * scale, renderer.textWidth(label, false, PILL * textScale) + 14 * scale);
+        return Math.max(43 * scale, HudText.textWidth(renderer, label, false, PILL * textScale) + 14 * scale);
     }
 }

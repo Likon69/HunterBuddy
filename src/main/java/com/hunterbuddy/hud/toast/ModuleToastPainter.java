@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud.toast;
 
 import com.hunterbuddy.hud.glass.GlassPainter;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 
@@ -38,11 +39,11 @@ public final class ModuleToastPainter {
     }
 
     private static double topHeight(HudRenderer renderer, double scale, double textScale) {
-        return Math.max(renderer.textHeight(false, TITLE * textScale), pillHeight(renderer, scale, textScale));
+        return Math.max(HudText.textHeight(renderer, false, TITLE * textScale), pillHeight(renderer, scale, textScale));
     }
 
     private static double pillHeight(HudRenderer renderer, double scale, double textScale) {
-        return renderer.textHeight(false, STATE * textScale) + 6 * scale;
+        return HudText.textHeight(renderer, false, STATE * textScale) + 6 * scale;
     }
 
     public void draw(HudRenderer renderer, int index, ModuleToastTimeline.Notice notice, double x, double y,
@@ -59,8 +60,8 @@ public final class ModuleToastPainter {
             label.textScale = textScale;
             label.compact = compact;
             label.bind = GlassPainter.fit(renderer, notice.bind(), width * 0.48 - 18 * scale, SMALL * textScale);
-            label.bindWidth = renderer.textWidth(label.bind, false, SMALL * textScale) + 16 * scale;
-            label.stateWidth = renderer.textWidth(notice.enabled() ? "ON" : "OFF", false, STATE * textScale);
+            label.bindWidth = HudText.textWidth(renderer, label.bind, false, SMALL * textScale) + 16 * scale;
+            label.stateWidth = HudText.textWidth(renderer, notice.enabled() ? "ON" : "OFF", false, STATE * textScale);
             label.statePill = Math.max(43 * scale, label.stateWidth + 14 * scale);
             double reserved = compact ? 43 * scale + label.statePill + label.bindWidth : 51 * scale + label.statePill;
             label.title = GlassPainter.fit(renderer, notice.name(), width - reserved, TITLE * textScale);
@@ -73,19 +74,19 @@ public final class ModuleToastPainter {
         double stateX = x + width - 13 * scale - label.statePill;
         glass.pill(renderer, stateX, topCenter - pillHeight / 2, label.statePill, pillHeight, scale,
             glass.tint(accent, alpha * 0.16));
-        renderer.text(notice.enabled() ? "ON" : "OFF", stateX + (label.statePill - label.stateWidth) / 2,
+        HudText.text(renderer, notice.enabled() ? "ON" : "OFF", stateX + (label.statePill - label.stateWidth) / 2,
             GlassPainter.centered(renderer, topCenter, STATE * textScale), glass.tint(accent, alpha), false, STATE * textScale);
-        renderer.text(label.title, x + 16 * scale, GlassPainter.centered(renderer, topCenter, TITLE * textScale),
+        HudText.text(renderer, label.title, x + 16 * scale, GlassPainter.centered(renderer, topCenter, TITLE * textScale),
             glass.tint(text, alpha), false, TITLE * textScale);
         double bindCenter = compact ? topCenter : y + 11 * scale + topHeight + 5 * scale + pillHeight / 2;
         if (!compact) {
-            renderer.text(notice.enabled() ? "Activated" : "Deactivated", x + 16 * scale,
+            HudText.text(renderer, notice.enabled() ? "Activated" : "Deactivated", x + 16 * scale,
                 GlassPainter.centered(renderer, bindCenter, SMALL * textScale), glass.tint(text, alpha * 0.58), false, SMALL * textScale);
         }
         double bindX = compact ? stateX - 6 * scale - label.bindWidth : x + width - label.bindWidth - 13 * scale;
         glass.pill(renderer, bindX, bindCenter - pillHeight / 2, label.bindWidth, pillHeight, scale,
             glass.white(alpha * 0.07));
-        renderer.text(label.bind, bindX + 8 * scale, GlassPainter.centered(renderer, bindCenter, SMALL * textScale),
+        HudText.text(renderer, label.bind, bindX + 8 * scale, GlassPainter.centered(renderer, bindCenter, SMALL * textScale),
             glass.tint(text, alpha * 0.85), false, SMALL * textScale);
         renderer.quad(x + 13 * scale, y + height - 3 * scale, width - 26 * scale, scale, glass.tint(accent, alpha * 0.09));
         renderer.quad(x + 13 * scale, y + height - 3 * scale, (width - 26 * scale) * remaining,
