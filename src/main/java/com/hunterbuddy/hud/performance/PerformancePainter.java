@@ -70,11 +70,6 @@ public final class PerformancePainter {
         double wave = 0.5 + 0.5 * Math.sin(now * 0.0026);
         double pulse = 0.65 + 0.35 * wave * wave;
         double alert = Math.max(level * 0.5, flash);
-        if (alert > 0) {
-            double halo = 2 * scale;
-            glass.pill(renderer, x - halo, y - halo, layout.width + halo * 2, layout.height + halo * 2,
-                (GlassPainter.radius(scale) + halo) / 5, glass.tint(critical, alert * pulse * 0.22));
-        }
         glass.card(renderer, x, y, layout.width, layout.height, scale, 1, reflection, background);
         if (alert > 0) glass.outline(renderer, x, y, layout.width, layout.height, GlassPainter.radius(scale), 0.8 * scale,
             glass.tint(critical, 0.38 + alert * pulse * 0.36));
@@ -95,7 +90,7 @@ public final class PerformancePainter {
                         double pulse, boolean reflection, Color background, Color titleColor) {
         double alert = Math.max(metric.level * 0.5, metric.flash) * pulse;
         double width = layout.widths[index];
-        double radius = 5 * scale;
+        double radius = GlassPainter.pillRadius(scale);
         glass.pill(renderer, x, y, width, layout.rowHeight, scale, glass.tint(background, 0.46));
         glass.pill(renderer, x, y, width, layout.rowHeight, scale, glass.tint(metric.color, 0.055 + alert * 0.09));
         glass.outline(renderer, x, y, width, layout.rowHeight, radius, 0.8 * scale,
