@@ -5,7 +5,10 @@ public enum SkyboxStyle {
     NEBULA(1, "Nebula"),
     TWILIGHT(2, "Twilight"),
     STORM_NIGHT(3, "Storm Night"),
-    DEEP_VOID(4, "Deep Void");
+    DEEP_VOID(4, "Deep Void"),
+    RINGED_PLANET(5, "Ringed Planet"),
+    BLACK_HOLE(6, "Ember Lens"),
+    MILKY_WAY(7, "Milky Way");
 
     private final int shaderId;
     private final String displayName;

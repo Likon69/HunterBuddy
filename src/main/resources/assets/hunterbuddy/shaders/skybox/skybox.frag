@@ -231,6 +231,169 @@ vec3 deepVoid(vec3 dir, float t) {
     return col;
 }
 
+vec3 spaceBackground(vec3 dir, float t) {
+    vec3 col = mix(vec3(0.018, 0.024, 0.039), vec3(0.003, 0.006, 0.014), smoothstep(0.0, 0.75, dir.y));
+    return col + stars(dir, Misc.z, t * 0.035);
+}
+
+float sphereHit(vec3 origin, vec3 ray, vec3 centre, float radius) {
+    vec3 offset = origin - centre;
+    float b = dot(offset, ray);
+    float c = dot(offset, offset) - radius * radius;
+    float discriminant = b * b - c;
+    if (discriminant < 0.0) return -1.0;
+    float distance = -b - sqrt(discriminant);
+    return distance > 0.0 ? distance : -1.0;
+}
+
+vec3 ringedPlanet(vec3 dir, float t) {
+    float night = nightFactor();
+    if (night <= 0.0) return daySky(dir);
+    vec3 col = spaceBackground(dir, t);
+
+    vec3 centre = normalize(vec3(0.65, 0.29, -0.70)) * 7.0;
+    float alignment = dot(dir, normalize(centre));
+    if (alignment < 0.91) return mix(daySky(dir), col, night);
+
+    vec3 light = sunDirection();
+    vec3 normal = normalize(vec3(-0.22, 0.86, -0.46));
+    float surface = sphereHit(vec3(0.0), dir, centre, 1.45);
+    float miss = length(cross(centre, dir));
+    float rim = exp(-abs(miss - 1.45) * 35.0);
+    col += Color1.rgb * rim * 0.24;
+
+    if (surface > 0.0) {
+        vec3 point = dir * surface - centre;
+        vec3 outward = point / 1.45;
+        float latitude = dot(outward, normal);
+        float bands = sin(latitude * 42.0 + valueNoise3(outward * 5.0 + vec3(t * 0.003)) * 2.5);
+        float diffuse = max(dot(outward, light), 0.0);
+        col = Color0.rgb * (0.74 + 0.16 * bands) * (0.055 + 0.78 * diffuse);
+        float limb = pow(1.0 - max(dot(outward, -dir), 0.0), 3.0);
+        col += Color1.rgb * limb * (0.04 + 0.22 * diffuse);
+    }
+
+    float denominator = dot(dir, normal);
+    if (abs(denominator) > 0.0001) {
+        float distance = dot(centre, normal) / denominator;
+        if (distance > 0.0 && (surface < 0.0 || distance < surface)) {
+            vec3 point = dir * distance - centre;
+            float radius = length(point);
+            float edge = max(fwidth(radius), 0.006);
+            float ring = smoothstep(1.72, 1.72 + edge, radius) * (1.0 - smoothstep(2.74 - edge, 2.74, radius));
+            float gap = smoothstep(0.025, 0.025 + edge, abs(radius - 2.27));
+            float bands = 0.66 + 0.17 * sin(radius * 105.0) + 0.09 * sin(radius * 43.0);
+            float shadow = sphereHit(point + light * 0.002, light, vec3(0.0), 1.45) > 0.0 ? 0.075 : 1.0;
+            vec3 rings = Color2.rgb * bands * shadow * (0.34 + 0.4 * abs(dot(normal, light)));
+            col = mix(col, rings, ring * gap * 0.9);
+        }
+    }
+
+    return mix(daySky(dir), col, night);
+}
+
+vec3 accretionDisk(vec3 point, float t) {
+    float radius = length(point);
+    float heat = 1.0 - smoothstep(2.6, 4.6, radius);
+    float angle = atan(point.z, point.x);
+    float lanes = 0.82 + 0.12 * sin(radius * 31.0 + sin(angle * 3.0 - t * 0.018));
+    float beaming = clamp(1.0 + point.x / max(radius, 0.001) * 0.35, 0.65, 1.35);
+    return mix(Color0.rgb, Color1.rgb, heat) * (0.22 + heat * 0.72) * lanes * beaming;
+}
+
+vec3 blackHole(vec3 dir, float t) {
+    float night = nightFactor();
+    if (night <= 0.0) return daySky(dir);
+    vec3 col = spaceBackground(dir, t);
+
+    vec3 axis = normalize(vec3(0.35, 0.46, -0.82));
+    float alignment = dot(dir, axis);
+    if (alignment < 0.866) return mix(daySky(dir), col, night);
+
+    vec3 right = normalize(cross(axis, vec3(0.0, 1.0, 0.0)));
+    vec3 up = cross(right, axis);
+    vec3 ray = vec3(dot(dir, right), dot(dir, up), -alignment);
+    vec3 position = vec3(0.0, 0.0, 12.0);
+    float entry = sphereHit(position, ray, vec3(0.0), 6.0);
+    if (entry < 0.0) return mix(daySky(dir), col, night);
+
+    vec3 momentum = cross(position, ray);
+    float impactSquared = dot(momentum, momentum);
+    float impact = sqrt(impactSquared);
+    float photonWidth = max(fwidth(impact) * 1.25, 0.012);
+    float photons = exp(-pow((impact - 2.598) / photonWidth, 2.0));
+    position += ray * entry;
+    vec3 diskNormal = normalize(vec3(0.12, 0.95, 0.29));
+    vec3 emission = vec3(0.0);
+    float transmission = 1.0;
+    int steps = clamp(int(Misc.w + 0.5), 16, 64);
+
+    for (int i = 0; i < 64; i++) {
+        if (i >= steps) break;
+        float radius = length(position);
+        if (radius < 1.0) {
+            transmission = 0.0;
+            break;
+        }
+        if (radius > 6.01 && dot(position, ray) > 0.0) break;
+
+        float stride = clamp(radius * 0.3, 0.18, 1.35) * 32.0 / float(steps);
+        vec3 acceleration = -1.5 * impactSquared * position / pow(radius, 5.0);
+        vec3 nextPosition = position + ray * stride + acceleration * (0.5 * stride * stride);
+        float nextRadius = length(nextPosition);
+        if (nextRadius < 1.0) {
+            transmission = 0.0;
+            break;
+        }
+        vec3 nextAcceleration = -1.5 * impactSquared * nextPosition / pow(nextRadius, 5.0);
+        ray += (acceleration + nextAcceleration) * (0.5 * stride);
+
+        float height = dot(position, diskNormal);
+        float nextHeight = dot(nextPosition, diskNormal);
+        if (height * nextHeight < 0.0) {
+            vec3 crossing = mix(position, nextPosition, height / (height - nextHeight));
+            float diskRadius = length(crossing);
+            float opacity = smoothstep(2.55, 2.75, diskRadius) * (1.0 - smoothstep(4.2, 4.6, diskRadius)) * 0.92;
+            emission += transmission * opacity * accretionDisk(crossing, t);
+            transmission *= 1.0 - opacity;
+        }
+        position = nextPosition;
+    }
+
+    vec3 escaped = normalize(right * ray.x + up * ray.y - axis * ray.z);
+    col = emission + transmission * spaceBackground(escaped, t);
+    col += Color2.rgb * photons * 0.28;
+    return mix(daySky(dir), col, night);
+}
+
+vec3 milkyWay(vec3 dir, float t) {
+    float night = nightFactor();
+    if (night <= 0.0) return daySky(dir);
+    vec3 col = spaceBackground(dir, t);
+
+    vec3 normal = normalize(vec3(-0.38, 0.64, 0.67));
+    vec3 core = normalize(vec3(0.78, 0.57, -0.10));
+    float latitude = dot(dir, normal);
+    float band = exp(-latitude * latitude * 95.0);
+    float bulge = pow(max(dot(dir, core), 0.0), 9.0);
+    if (abs(latitude) > 0.45) return mix(daySky(dir), col, night);
+    vec2 plane = vec2(dot(dir, normalize(cross(normal, core))), dot(dir, core));
+    float clouds = valueNoise2(plane * 14.0) * 0.65 + valueNoise2(plane * 33.0 + 7.0) * 0.35;
+    float detail = valueNoise2(plane * 79.0);
+    float dust = smoothstep(0.40, 0.67, clouds + detail * 0.12);
+    float lane = exp(-pow((latitude + (clouds - 0.5) * 0.11) * 42.0, 2.0));
+    float extinction = clamp(lane * (0.3 + dust * 0.65), 0.0, 0.93);
+    vec3 starlight = mix(Color0.rgb, Color1.rgb, bulge);
+    float glow = band * (0.055 + clouds * 0.1) + bulge * exp(-latitude * latitude * 26.0) * 0.075;
+    col += starlight * glow * (1.0 - extinction);
+    col += Color2.rgb * band * extinction * 0.035;
+    float density = Misc.z * band * (1.0 - extinction) * 3.5;
+    col += stars(dir * 1.73, density, t * 0.025) * starlight * 0.55;
+    float unresolved = smoothstep(0.965, 1.0, hash31(floor(dir * 850.0)));
+    col += starlight * unresolved * band * (1.0 - extinction) * Misc.z * 0.11;
+    return mix(daySky(dir), col, night);
+}
+
 void main() {
     vec4 farPoint = InvViewProj * vec4(v_Ndc, 0.5, 1.0);
     vec3 dir = normalize(farPoint.xyz / farPoint.w);
@@ -242,7 +405,10 @@ void main() {
     else if (style == 1) col = nebula(dir, t);
     else if (style == 2) col = twilight(dir, t);
     else if (style == 3) col = stormNight(dir, t);
-    else col = deepVoid(dir, t);
+    else if (style == 4) col = deepVoid(dir, t);
+    else if (style == 5) col = ringedPlanet(dir, t);
+    else if (style == 6) col = blackHole(dir, t);
+    else col = milkyWay(dir, t);
 
     col *= Params.z;
     col *= 1.0 - 0.55 * Misc.y;

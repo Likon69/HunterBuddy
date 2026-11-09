@@ -1,11 +1,13 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.render.SkyboxRenderer;
 import com.hunterbuddy.render.SkyboxStyle;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -38,6 +40,13 @@ public class Skybox extends Module {
         .name("star-density")
         .description("How many stars the styles that show stars draw.")
         .defaultValue(0.5).min(0.0).max(1.0).sliderRange(0.0, 1.0)
+        .build());
+
+    private final Setting<Integer> quality = sgGeneral.add(new IntSetting.Builder()
+        .name("quality")
+        .description("Maximum ray integration steps for Ember Lens.")
+        .defaultValue(32).min(16).max(64).sliderRange(16, 64)
+        .visible(() -> uses(SkyboxStyle.BLACK_HOLE))
         .build());
 
     private final Setting<Boolean> keepCelestial = sgGeneral.add(new BoolSetting.Builder()
@@ -94,9 +103,30 @@ public class Skybox extends Module {
     private final Setting<SettingColor> voidBottom = color("void-bottom", "Colour of the sky at the horizon.",
         new SettingColor(60, 20, 90), SkyboxStyle.DEEP_VOID);
 
+    private final Setting<SettingColor> planetSurface = color("planet-surface", "Cloud bands of the ringed planet.",
+        new SettingColor(168, 143, 112), SkyboxStyle.RINGED_PLANET);
+    private final Setting<SettingColor> planetAtmosphere = color("planet-atmosphere", "Atmospheric halo of the ringed planet.",
+        new SettingColor(107, 166, 196), SkyboxStyle.RINGED_PLANET);
+    private final Setting<SettingColor> planetRings = color("planet-rings", "Dust and ice in the tilted rings.",
+        new SettingColor(194, 181, 155), SkyboxStyle.RINGED_PLANET);
+
+    private final Setting<SettingColor> blackHoleOuter = color("black-hole-outer", "Cooler outer edge of the accretion disk.",
+        new SettingColor(191, 83, 48), SkyboxStyle.BLACK_HOLE);
+    private final Setting<SettingColor> blackHoleInner = color("black-hole-inner", "Hot inner edge of the accretion disk.",
+        new SettingColor(255, 213, 151), SkyboxStyle.BLACK_HOLE);
+    private final Setting<SettingColor> blackHolePhoton = color("black-hole-photon", "Thin photon ring around the shadow.",
+        new SettingColor(163, 204, 222), SkyboxStyle.BLACK_HOLE);
+
+    private final Setting<SettingColor> milkyWayStars = color("milky-way-stars", "Neutral starlight along the galactic band.",
+        new SettingColor(177, 186, 201), SkyboxStyle.MILKY_WAY);
+    private final Setting<SettingColor> milkyWayCore = color("milky-way-core", "Warm starlight in the galactic bulge.",
+        new SettingColor(211, 186, 151), SkyboxStyle.MILKY_WAY);
+    private final Setting<SettingColor> milkyWayDust = color("milky-way-dust", "Dark dust lanes across the galactic band.",
+        new SettingColor(20, 18, 23), SkyboxStyle.MILKY_WAY);
+
     private final Setting<Boolean> followWorldTime = sgWorld.add(new BoolSetting.Builder()
         .name("follow-world-time")
-        .description("Twilight follows the real sun, and Aurora and Storm Night only show at night.")
+        .description("Follows the sun cycle; Aurora, Storm Night and the space styles fade in at night.")
         .defaultValue(false)
         .build());
 
@@ -114,6 +144,11 @@ public class Skybox extends Module {
 
     public Skybox() {
         super(HunterBuddyAddon.VISUALS_CATEGORY, "skybox", "Replaces the sky with an animated shader sky.");
+    }
+
+    @Override
+    public void onDeactivate() {
+        SkyboxRenderer.release();
     }
 
     private Setting<SettingColor> color(String name, String description, SettingColor defaultValue, SkyboxStyle owner) {
@@ -140,6 +175,9 @@ public class Skybox extends Module {
             case TWILIGHT -> new SettingColor[] {twilightHorizon.get(), twilightZenith.get(), twilightClouds.get()};
             case STORM_NIGHT -> new SettingColor[] {stormCloud.get(), stormFlash.get(), stormFlash.get()};
             case DEEP_VOID -> new SettingColor[] {voidTop.get(), voidBottom.get(), voidBottom.get()};
+            case RINGED_PLANET -> new SettingColor[] {planetSurface.get(), planetAtmosphere.get(), planetRings.get()};
+            case BLACK_HOLE -> new SettingColor[] {blackHoleOuter.get(), blackHoleInner.get(), blackHolePhoton.get()};
+            case MILKY_WAY -> new SettingColor[] {milkyWayStars.get(), milkyWayCore.get(), milkyWayDust.get()};
         };
     }
 
@@ -153,6 +191,10 @@ public class Skybox extends Module {
 
     public double starDensity() {
         return starDensity.get();
+    }
+
+    public int quality() {
+        return quality.get();
     }
 
     public boolean keepCelestial() {

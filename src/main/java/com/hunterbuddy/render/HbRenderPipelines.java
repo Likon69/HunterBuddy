@@ -86,6 +86,17 @@ public final class HbRenderPipelines {
         .withCull(false)
         .build();
 
+    public static final RenderPipeline SKYBOX_UPSCALE = add(RenderPipeline.builder()
+        .withLocation(id("pipeline/skybox/upscale"))
+        .withVertexFormat(MeteorVertexFormats.POS2, VertexFormat.DrawMode.TRIANGLES)
+        .withVertexShader(id("shaders/skybox/skybox.vert"))
+        .withFragmentShader(id("shaders/skybox/upscale.frag"))
+        .withSampler("SkyTexture")
+        .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+        .withDepthWrite(false)
+        .withCull(false)
+        .build());
+
     private HbRenderPipelines() {}
 
     public static Identifier id(String path) {
