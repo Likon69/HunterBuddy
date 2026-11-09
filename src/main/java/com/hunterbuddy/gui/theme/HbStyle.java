@@ -68,6 +68,12 @@ public interface HbStyle {
             theme.hbScale(3), theme.hbScale(2), expanded, theme.accent());
     }
 
+    default void drawSectionHeader(GuiRenderer renderer, HbGuiTheme theme, WWidget header, boolean hover) {
+        renderer.quad(header, hover ? theme.colors().hover() : theme.colors().input());
+        renderer.quad(header.x, header.y, theme.hbScale(2), header.height, theme.accent());
+        renderer.quad(header.x, header.y + header.height - theme.hbScale(1), header.width, theme.hbScale(1), theme.colors().border());
+    }
+
     default void drawModuleSettings(GuiRenderer renderer, HbGuiTheme theme, WWidget panel) {
         renderer.quad(panel.x - theme.hbScale(6), panel.y + theme.hbScale(2), panel.width + theme.hbScale(6),
             Math.max(0, panel.height - theme.hbScale(2)), theme.colors().row());

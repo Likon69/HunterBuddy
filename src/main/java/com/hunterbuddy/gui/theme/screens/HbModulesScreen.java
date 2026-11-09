@@ -57,6 +57,10 @@ public class HbModulesScreen extends ModulesScreen {
         favoritesDirty = true;
     }
 
+    public List<WWindow> windows() {
+        return categoryController == null ? List.of() : categoryController.windows;
+    }
+
     public void cancelBindings() {
         for (HbModuleEntry entry : expanded) entry.settings().cancelBinding();
     }

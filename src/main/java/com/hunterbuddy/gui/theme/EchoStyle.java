@@ -40,6 +40,12 @@ public final class EchoStyle implements HbStyle {
     }
 
     @Override
+    public void drawSectionHeader(GuiRenderer renderer, HbGuiTheme theme, WWidget header, boolean hover) {
+        renderer.quad(header, hover ? theme.colors().hover() : theme.colors().input());
+        HbDraw.bracket(renderer, header.x, header.y, header.width, header.height, theme.hbScale(1), theme.hbScale(5), theme.accent());
+    }
+
+    @Override
     public void drawWindowHeader(GuiRenderer renderer, HbGuiTheme theme, WWidget header, boolean active, double phase) {
         renderer.quad(header, theme.colors().window());
         double inset = theme.hbScale(6);

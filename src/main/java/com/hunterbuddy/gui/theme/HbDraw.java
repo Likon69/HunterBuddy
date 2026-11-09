@@ -51,6 +51,33 @@ public final class HbDraw {
         renderer.quad(x, y + chamfer, width, height - chamfer, color);
     }
 
+    public static void chevron(GuiRenderer renderer, double cx, double cy, double radius, double thickness, double progress, Color color) {
+        double angle = Math.clamp(progress, 0, 1) * Math.PI / 2;
+        double cos = Math.cos(angle);
+        double sin = Math.sin(angle);
+        double ax = -radius / 2;
+        double bx = radius / 2;
+        double by = 0;
+        for (int side = -1; side <= 1; side += 2) {
+            double ay = side * radius;
+            double dx = bx - ax;
+            double dy = by - ay;
+            double length = Math.hypot(dx, dy);
+            double nx = -dy / length * thickness / 2;
+            double ny = dx / length * thickness / 2;
+            double x1 = cx + (ax + nx) * cos - (ay + ny) * sin;
+            double y1 = cy + (ax + nx) * sin + (ay + ny) * cos;
+            double x2 = cx + (bx + nx) * cos - (by + ny) * sin;
+            double y2 = cy + (bx + nx) * sin + (by + ny) * cos;
+            double x3 = cx + (bx - nx) * cos - (by - ny) * sin;
+            double y3 = cy + (bx - nx) * sin + (by - ny) * cos;
+            double x4 = cx + (ax - nx) * cos - (ay - ny) * sin;
+            double y4 = cy + (ax - nx) * sin + (ay - ny) * cos;
+            renderer.triangle(x1, y1, x2, y2, x3, y3, color);
+            renderer.triangle(x1, y1, x3, y3, x4, y4, color);
+        }
+    }
+
     public static void arrow(GuiRenderer renderer, double cx, double cy, double halfWidth, double halfHeight, boolean up, Color color) {
         if (up) {
             renderer.triangle(cx - halfWidth, cy + halfHeight, cx + halfWidth, cy + halfHeight, cx, cy - halfHeight, color);

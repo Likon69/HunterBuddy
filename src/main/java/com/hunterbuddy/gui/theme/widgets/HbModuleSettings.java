@@ -30,6 +30,9 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
     private WFavorite favorite;
     private HbMultiLabel description;
     private WKeybind keybind;
+    private HbLabeledRow bindRow;
+    private HbLabeledRow releaseRow;
+    private HbLabeledRow feedbackRow;
     private WCheckbox active;
     private boolean binding;
 
@@ -66,8 +69,8 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
         }
 
         WSection section = add(theme.section("Bind", true)).expandX().widget();
-        WHorizontalList bind = section.add(theme.horizontalList()).expandX().widget();
-        bind.add(theme.label("Bind: "));
+        bindRow = section.add(new HbLabeledRow("Bind")).expandX().widget();
+        WHorizontalList bind = bindRow.controls();
         keybind = bind.add(theme.keybind(module.keybind)).expandX().widget();
         keybind.actionOnSet = () -> {
             if (mc.currentScreen instanceof HbModulesScreen screen) screen.cancelBindings();
@@ -78,13 +81,13 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
         reset.action = this::resetModuleBind;
         reset.tooltip = "Reset";
 
-        WHorizontalList release = section.add(theme.horizontalList()).widget();
-        release.add(theme.label("Toggle on bind release: "));
+        releaseRow = section.add(new HbLabeledRow("Toggle on bind release")).expandX().widget();
+        WHorizontalList release = releaseRow.controls();
         WCheckbox releaseCheckbox = release.add(theme.checkbox(module.toggleOnBindRelease)).widget();
         releaseCheckbox.action = () -> module.toggleOnBindRelease = releaseCheckbox.checked;
 
-        WHorizontalList feedback = section.add(theme.horizontalList()).widget();
-        feedback.add(theme.label("Chat Feedback: "));
+        feedbackRow = section.add(new HbLabeledRow("Chat Feedback")).expandX().widget();
+        WHorizontalList feedback = feedbackRow.controls();
         WCheckbox feedbackCheckbox = feedback.add(theme.checkbox(module.chatFeedback)).widget();
         feedbackCheckbox.action = () -> module.chatFeedback = feedbackCheckbox.checked;
 
@@ -119,7 +122,15 @@ public class HbModuleSettings extends WVerticalList implements HbWidget {
     public void calculateSize() {
         super.calculateSize();
         if (!(parent instanceof HbModuleEntry entry) || !theme().clickGui()) return;
-        for (int pass = 0; pass < MAX_WRAP_PASSES && description.rewrap(wrapTarget(entry)); pass++) super.calculateSize();
+        for (int pass = 0; pass < MAX_WRAP_PASSES; pass++) {
+            double available = Math.max(1, entry.settle(width) - theme().hbScale(12) - theme.scale(12));
+            boolean changed = description.rewrap(wrapTarget(entry));
+            changed |= bindRow.rewrap(available);
+            changed |= releaseRow.rewrap(available);
+            changed |= feedbackRow.rewrap(available);
+            if (!changed) break;
+            super.calculateSize();
+        }
     }
 
     private double wrapTarget(HbModuleEntry entry) {

@@ -45,6 +45,12 @@ public final class EncreStyle implements HbStyle {
     }
 
     @Override
+    public void drawSectionHeader(GuiRenderer renderer, HbGuiTheme theme, WWidget header, boolean hover) {
+        renderer.quad(header, hover ? theme.colors().hover() : theme.colors().input());
+        renderer.quad(header.x, header.y + header.height - theme.hbScale(2), header.width, theme.hbScale(2), theme.accent());
+    }
+
+    @Override
     public void drawWindowHeader(GuiRenderer renderer, HbGuiTheme theme, WWidget header, boolean active, double phase) {
         renderer.quad(header, theme.colors().row());
         renderer.quad(header.x, header.y + header.height - theme.hbScale(2), header.width, theme.hbScale(2), theme.accent());

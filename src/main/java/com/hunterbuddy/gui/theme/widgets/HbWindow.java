@@ -39,7 +39,7 @@ public class HbWindow extends WWindow implements HbWidget {
         return guides;
     }
 
-    private double visibleHeight() {
+    public double visibleHeight() {
         return header.height + (height - header.height) * animProgress;
     }
 
