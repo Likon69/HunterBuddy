@@ -2,6 +2,7 @@ package com.hunterbuddy.modules.regear.util;
 
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ShapeContext;
@@ -53,6 +54,24 @@ public class PlacementUtils {
         player.networkHandler.sendPacket(swap);
         player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.OFF_HAND, hit, grimSequenceId()));
         player.networkHandler.sendPacket(swap);
+    }
+
+    public static int grimPlacePredicted(BlockHitResult hit, BlockState state) {
+        MinecraftClient mc = client();
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) return -1;
+        int[] prediction = {-1};
+        PlayerActionC2SPacket swap = new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND, BlockPos.ORIGIN, Direction.DOWN);
+        mc.player.networkHandler.sendPacket(swap);
+        try {
+            mc.interactionManager.sendSequencedPacket(mc.world, sequence -> {
+                prediction[0] = sequence;
+                mc.world.setBlockState(hit.getBlockPos(), state, Block.NOTIFY_ALL);
+                return new PlayerInteractBlockC2SPacket(Hand.OFF_HAND, hit, sequence);
+            });
+        } finally {
+            mc.player.networkHandler.sendPacket(swap);
+        }
+        return prediction[0];
     }
 
     public static boolean placeHit(BlockHitResult hit, Hand hand, boolean swing) {

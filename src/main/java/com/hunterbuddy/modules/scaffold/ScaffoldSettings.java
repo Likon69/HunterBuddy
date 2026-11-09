@@ -17,6 +17,8 @@ public final class ScaffoldSettings {
     public final Setting<List<Block>> blocks;
     public final Setting<ListMode> blocksFilter;
     public final Setting<Boolean> airPlace;
+    public final Setting<Integer> lookahead;
+    public final Setting<Boolean> postRotate;
     public final Setting<Double> closestBlockRange;
     public final Setting<Boolean> tower;
     public final Setting<Double> towerSpeed;
@@ -45,6 +47,8 @@ public final class ScaffoldSettings {
         placeDelay = placeDelay();
         autoSwitch = autoSwitch();
         rotate = rotate();
+        postRotate = postRotate();
+        lookahead = lookahead();
         extendDistance = extendDistance();
         velocityPredict = velocityPredict();
         safewalk = safewalk();
@@ -69,7 +73,7 @@ public final class ScaffoldSettings {
     private Setting<Boolean> airPlace() {
         return general.add(new BoolSetting.Builder()
             .name("air-place")
-            .description("Places blocks in mid-air, without a neighbouring block.")
+            .description("Place directly under your feet in air with Grim raw packets and client prediction. Off uses visible support faces.")
             .defaultValue(true)
             .build());
     }
@@ -77,11 +81,10 @@ public final class ScaffoldSettings {
     private Setting<Double> closestBlockRange() {
         return general.add(new DoubleSetting.Builder()
             .name("closest-block-range")
-            .description("How far to look for a block to build on.")
+            .description("Maximum distance to the clicked face, limited by the player interaction reach.")
             .defaultValue(4.0)
             .min(0.0)
             .sliderMax(8.0)
-            .visible(() -> !airPlace.get())
             .build());
     }
 
@@ -134,8 +137,28 @@ public final class ScaffoldSettings {
     private Setting<Boolean> rotate() {
         return general.add(new BoolSetting.Builder()
             .name("rotate")
-            .description("Faces the block before placing it.")
+            .description("Rotate toward support faces using normal movement packets. Raw air placement does not add rotation packets.")
             .defaultValue(true)
+            .build());
+    }
+
+    private Setting<Boolean> postRotate() {
+        return general.add(new BoolSetting.Builder()
+            .name("post-rotate")
+            .description("Restore the local view after face placement; the next normal movement restores the server view.")
+            .defaultValue(true)
+            .visible(rotate::get)
+            .build());
+    }
+
+    private Setting<Integer> lookahead() {
+        return general.add(new IntSetting.Builder()
+            .name("lookahead")
+            .description("How many blocks ahead of the predicted feet to search along horizontal movement.")
+            .defaultValue(1)
+            .min(0)
+            .max(3)
+            .sliderRange(0, 3)
             .build());
     }
 

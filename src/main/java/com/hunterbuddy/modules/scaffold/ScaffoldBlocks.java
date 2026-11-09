@@ -17,15 +17,16 @@ final class ScaffoldBlocks {
     private ScaffoldBlocks() {
     }
 
-    static FindItemResult forRegear(RegearMode mode) {
-        if (!mode.hasFixedSlot()) return InvUtils.findInHotbar(ScaffoldBlocks::isRegearBlock);
+    static FindItemResult forRegear(RegearMode mode, boolean air) {
+        if (!mode.hasFixedSlot()) return air ? InvUtils.find(ScaffoldBlocks::isRegearBlock, 0, 8) : InvUtils.findInHotbar(ScaffoldBlocks::isRegearBlock);
         ItemStack stack = MinecraftClient.getInstance().player.getInventory().getStack(mode.hotbarSlot());
         if (!isRegearBlock(stack)) return NOTHING;
         return new FindItemResult(mode.hotbarSlot(), stack.getCount());
     }
 
-    static FindItemResult forTarget(BlockPos target, ScaffoldSettings settings) {
-        return InvUtils.findInHotbar(stack -> isPlaceableAt(stack, target, settings));
+    static FindItemResult forTarget(BlockPos target, ScaffoldSettings settings, boolean air) {
+        return air ? InvUtils.find(stack -> isPlaceableAt(stack, target, settings), 0, 8)
+            : InvUtils.findInHotbar(stack -> isPlaceableAt(stack, target, settings));
     }
 
     private static boolean isRegearBlock(ItemStack stack) {

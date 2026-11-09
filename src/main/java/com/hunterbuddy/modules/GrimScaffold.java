@@ -1,12 +1,14 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.scaffold.ScaffoldEngine;
 import com.hunterbuddy.modules.scaffold.RegearMode;
 import com.hunterbuddy.modules.scaffold.ScaffoldSettings;
 import meteordevelopment.meteorclient.events.entity.player.ClipAtLedgeEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
+import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
@@ -17,7 +19,7 @@ public class GrimScaffold extends Module {
     private final ScaffoldEngine scaffold = new ScaffoldEngine(config, regear);
 
     public GrimScaffold() {
-        super(HunterBuddyAddon.UTILITY_CATEGORY, "grim-scaffold", "Places blocks under you using GrimAC bypass.");
+        super(HunterBuddyAddon.UTILITY_CATEGORY, "grim-scaffold", "Places predicted blocks directly under your feet in air, or clicks visible support faces.");
     }
 
     public void setRegearMode(boolean enabled) {
@@ -41,14 +43,30 @@ public class GrimScaffold extends Module {
     @Override
     public void onDeactivate() {
         regear.reset();
-        RotationUtils.getInstance().clearRotations();
+        scaffold.reset();
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.getNetworkHandler() == null) return;
+        scaffold.reconcile();
         if (config.onlyOnClick.get() && !mc.options.useKey.isPressed()) return;
         scaffold.tick();
+    }
+
+    @EventHandler(priority = -10000)
+    private void onMovementPre(SendMovementPacketsEvent.Pre event) {
+        scaffold.movementPre();
+    }
+
+    @EventHandler(priority = 10000)
+    private void onMovementPost(SendMovementPacketsEvent.Post event) {
+        scaffold.movementPost();
+    }
+
+    @EventHandler
+    private void onPacketSent(PacketEvent.Sent event) {
+        if (event.packet instanceof PlayerMoveC2SPacket packet) scaffold.movementSent(packet);
     }
 
     @EventHandler
