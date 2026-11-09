@@ -135,6 +135,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `Performance` | FPS, ping and server TPS in one line, colored by level and flashing on spikes and drops. |
 | `PingMeter` | Ping with sparkline, jitter and keepalive freshness. |
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
+| `PlayerCards` | Glass cards for players in range, nearest first: head, name, gear, distance and whether they are closing in, holding or moving away. |
 | `RegearStatus` | Regear progress: station on its line, stocks and gains, counters, next-regear estimate and last event. |
 | `SorterStatus` | Shulker sorter state, target, input progress, deliveries, shulkers made and alerts. |
 | `SpawnerFarm` | SpawnerDetector auto-farm tally with item icons: spawners, chests, shulkers, rooms and the bot's state. |
@@ -142,7 +143,6 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
 | `SpiralCoverage` | AreaLoader coverage in any mode: flown legs, current leg, planned turns. |
 | `SystemStats` | RAM and CPU usage with line graphs. |
-| `ThreatBoard` | Players in range: distance, approach vector, gear summary. |
 | `TimerGauge` | Meteor Timer's current speed multiplier, including speeds forced by other modules. |
 | `TpsCardiogram` | Server TPS as a scrolling cardiogram, flatlining on lag. |
 | `Travel` | Distance, ETA and speed toward a named waypoint, checked against elytra range. |

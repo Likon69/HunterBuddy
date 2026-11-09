@@ -2,6 +2,8 @@ package com.hunterbuddy;
 
 
 import com.hunterbuddy.hud.ElytraHelperHud;
+import com.hunterbuddy.hud.ModuleToastHud;
+import com.hunterbuddy.hud.toast.ModuleToastFeed;
 import com.hunterbuddy.hud.ElytraStatusHud;
 import com.hunterbuddy.hud.HuntTallyHud;
 import com.hunterbuddy.hud.MovementStatusHud;
@@ -103,8 +105,9 @@ public class HunterBuddyAddon extends MeteorAddon {
         Hud.get().register(HuntTallyHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.Pitch40CycleHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.FindsTickerHud.INFO);
+        Hud.get().register(ModuleToastHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.SpiralCoverageHud.INFO);
-        Hud.get().register(com.hunterbuddy.hud.ThreatBoardHud.INFO);
+        Hud.get().register(com.hunterbuddy.hud.PlayerCardsHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.TpsCardiogramHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.PingMeterHud.INFO);
         Hud.get().register(com.hunterbuddy.hud.OdometerHud.INFO);
@@ -181,6 +184,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         ExperienceTraderModule module = new ExperienceTraderModule(UTILITY_CATEGORY);
         Modules.get().add(module);
         Modules.get().add(new ExperienceTraderStarterModule(UTILITY_CATEGORY, module));
+        ModuleToastFeed.INSTANCE.init();
     }
 
     @Override

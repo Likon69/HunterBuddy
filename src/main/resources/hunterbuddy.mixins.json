@@ -54,7 +54,12 @@
     "accessors.GuiRendererScissorAccessor",
     "accessors.PetHudAccess",
     "render.PetHudFrameMixin",
-    "render.PetHudTextureMixin"
+    "render.PetHudTextureMixin",
+    "toast.ModuleToastToggleMixin",
+    "toast.ModuleToastBindMixin",
+    "toast.ModuleToastGuiMixin",
+    "toast.ModuleToastCommandMixin",
+    "toast.ModuleToastShaderMixin"
   ],
   "injectors": {
     "defaultRequire": 1
