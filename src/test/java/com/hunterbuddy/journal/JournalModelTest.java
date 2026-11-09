@@ -3,6 +3,7 @@ package com.hunterbuddy.journal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import com.hunterbuddy.chatdock.DockPlacement;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -102,11 +103,13 @@ final class JournalModelTest {
         JournalStore store = new JournalStore(2);
         store.add(0, JournalSource.METEOR, JournalEntry.Level.INFO, "Position at 123.4 56.0 -789.1 with more words");
         JournalRows rows = new JournalRows();
-        assertTrue(rows.update(store.snapshot(), false, 12, 1, 0, String::length));
+        JournalBuffer buffer = new JournalBuffer();
+        store.read(buffer);
+        assertTrue(rows.update(buffer, false, 12, 1, 0, 100, String::length, text -> text));
         int visibleParts = rows.size();
         assertTrue(visibleParts > 1);
-        assertFalse(rows.update(store.snapshot(), false, 12, 1, 0, text -> { fail("Unchanged text measured again"); return 0; }));
-        assertTrue(rows.update(store.snapshot(), true, 12, 1, 0, String::length));
+        assertFalse(rows.update(buffer, false, 12, 1, 0, 100, text -> { fail("Unchanged text measured again"); return 0; }, text -> text));
+        assertTrue(rows.update(buffer, true, 12, 1, 0, 100, String::length, text -> text));
         for (int i = 0; i < rows.size(); i++) assertFalse(rows.get(i).message().contains("123.4"));
         assertTrue(rows.size() <= visibleParts);
         rows.clear();
@@ -125,14 +128,14 @@ final class JournalModelTest {
     @Test
     void chatButtonAvoidsTheCrosshairAndTheChatArea() {
         for (double scale : new double[]{0.6, 1, 1.8}) {
-            var button = JournalLayout.icon(1920, 1080, scale, 984, 420);
+            var button = DockPlacement.initial(1920, 1080, 90 * scale, 34 * scale, 984, 420, 54);
             assertFalse(button.contains(960, 540));
             assertTrue(button.x() >= 984 || button.y() + button.h() < 420);
         }
-        var beside = JournalLayout.icon(1920, 1080, 1, 1000, 0);
+        var beside = DockPlacement.initial(1920, 1080, 90, 34, 1000, 0, 54);
         assertTrue(beside.x() >= 1000);
         assertFalse(beside.contains(960, 540));
-        var largeText = JournalLayout.icon(1920, 1080, 0.6, 0, 1080, 110, 42, 54);
+        var largeText = DockPlacement.initial(1920, 1080, 110, 42, 0, 1080, 54);
         assertTrue(largeText.w() >= 110 && largeText.h() >= 42);
         assertTrue(largeText.y() + largeText.h() <= 540 - 54);
     }

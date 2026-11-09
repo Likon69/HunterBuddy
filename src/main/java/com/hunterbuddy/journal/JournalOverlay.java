@@ -1,6 +1,12 @@
 package com.hunterbuddy.journal;
 
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
+import com.hunterbuddy.hud.glass.GlassPainter;
+import com.hunterbuddy.chatdock.ChatDock;
+import java.util.function.UnaryOperator;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import java.nio.charset.StandardCharsets;
 import com.hunterbuddy.modules.ClientLog;
 import com.hunterbuddy.modules.messenger.ui.Pointer;
 import java.io.IOException;
@@ -11,7 +17,6 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.Utils;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.hud.ChatHud;
 import org.lwjgl.glfw.GLFW;
 
 public final class JournalOverlay {
@@ -22,22 +27,26 @@ public final class JournalOverlay {
     private final JournalSelection selection = new JournalSelection();
     private final JournalPainter painter = new JournalPainter();
     private final ToDoubleFunction<String> measure;
+    private final UnaryOperator<String> prefix;
+    private final JournalBuffer buffer = new JournalBuffer();
+    private final ModuleToastBlur blur = ModuleToastBlur.cached(125_000_000L);
+    private final JournalProfile profile = new JournalProfile();
+    private boolean profiling;
+    private boolean chatSeen;
+    private long refreshAt;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "HunterBuddy Journal Export");
         thread.setDaemon(true);
         return thread;
     });
-    private JournalStore.Snapshot snapshot;
     private boolean open;
     private boolean hidden = true;
     private boolean expanded;
     private boolean focused;
     private boolean selecting;
     private boolean dragging;
-    private boolean following = true;
     private double dragX;
     private double dragY;
-    private int first;
     private int font;
     private long lastScroll;
     private volatile String status = "";
@@ -47,6 +56,8 @@ public final class JournalOverlay {
     public JournalOverlay(ClientLog config) {
         this.config = config;
         measure = text -> HudRenderer.INSTANCE.textWidth(text, false, config.textScale.get());
+        prefix = text -> GlassPainter.fit(HudRenderer.INSTANCE, text, Math.max(1, layout.prefixWidth - 8 * config.scale.get()),
+            0.65 * config.textScale.get());
     }
 
     public static JournalOverlay active() {
@@ -55,12 +66,34 @@ public final class JournalOverlay {
 
     public static void activate(JournalOverlay overlay) {
         overlay.hidden = true;
+        overlay.chatSeen = false;
         active = overlay;
     }
 
     public static void deactivate(JournalOverlay overlay) {
-        overlay.close();
+        overlay.chatClosed();
         if (active == overlay) active = null;
+    }
+
+    public boolean isOpen() {
+        return open;
+    }
+
+    public void toggle() {
+        if (open) close();
+        else {
+            open = focused = true;
+            rows.end();
+            refreshAt = 0;
+            status = "";
+        }
+    }
+
+    public void chatClosed() {
+        close();
+        chatSeen = false;
+        profile.pause();
+        ChatDock.INSTANCE.cancel();
     }
 
     public boolean inputFocused() {
@@ -71,11 +104,14 @@ public final class JournalOverlay {
         open = focused = selecting = dragging = false;
         selection.clear();
         rows.clear();
-        snapshot = null;
+        buffer.clear();
+        refreshAt = 0;
+        blur.invalidateCache();
     }
 
     public void shutdown() {
         writer.shutdown();
+        blur.close();
     }
 
     public void fontChanged() {
@@ -83,51 +119,52 @@ public final class JournalOverlay {
     }
 
     public void render(DrawContext context) {
+        if (!chatSeen) {
+            chatSeen = true;
+            if (config.autoOpen.get()) { open = true; focused = false; rows.end(); refreshAt = 0; }
+        }
+        boolean measuring = config.profilePerformance.get();
+        if (measuring && !profiling) profile.clear();
+        if (!measuring && profiling) profile.pause();
+        profiling = measuring;
+        long now = System.nanoTime();
+        if (measuring) profile.frame(now, open);
+        if (!open) return;
         var screen = MeteorClient.mc.getWindow();
         Utils.unscaledProjection();
         HudRenderer renderer = HudRenderer.INSTANCE;
         renderer.begin(context);
+        long stamp = measuring ? System.nanoTime() : 0;
         try {
-            double gui = screen.getScaleFactor();
-            double chatScale = MeteorClient.mc.options.getChatScale().getValue();
-            double lineHeight = (int) (9 * (MeteorClient.mc.options.getChatLineSpacing().getValue() + 1));
-            double chatRight = (ChatHud.getWidth(MeteorClient.mc.options.getChatWidth().getValue()) + 8 * chatScale) * gui;
-            double chatTop = (screen.getScaledHeight() - 40) * gui
-                - MeteorClient.mc.inGameHud.getChatHud().getVisibleLineCount() * lineHeight * chatScale * gui;
             layout.update(renderer, config, screen.getFramebufferWidth(), screen.getFramebufferHeight(),
-                Math.max(24, gui * 18), chatRight, chatTop, expanded, font);
+                Math.max(24, screen.getScaleFactor() * 18), expanded, font);
+            if (measuring) { profile.add(JournalProfile.Stage.LAYOUT, System.nanoTime() - stamp); stamp = System.nanoTime(); }
+            if (now >= refreshAt) {
+                if (config.store.read(buffer)) count = buffer.size() + " messages";
+                refreshAt = now + 250_000_000L;
+            }
+            if (measuring) { profile.add(JournalProfile.Stage.BUFFER, System.nanoTime() - stamp); stamp = System.nanoTime(); }
+            rows.update(buffer, hidden, Math.max(1, layout.content.w() - layout.prefixWidth - 5 * config.scale.get()),
+                config.textScale.get(), font, layout.visible, measure, prefix);
             double mx = Pointer.x();
             double my = Pointer.y();
-            if (!open) {
-                painter.icon(renderer, layout.closedButton, config, layout.closedButton.contains(mx, my));
-                return;
-            }
-            ModuleToastBlur.INSTANCE.begin(2);
             if (dragging || selecting) hold(mx, my);
-            refresh();
-            painter.window(renderer, layout, config, rows, selection, first, hidden, expanded, count, status, mx, my);
+            if (measuring) { profile.add(JournalProfile.Stage.ROWS, System.nanoTime() - stamp); stamp = System.nanoTime(); }
+            blur.begin(2);
+            blur.draw(layout.window.x(), layout.window.y(), layout.window.w(), layout.window.h(), GlassPainter.radius(config.scale.get()), 1);
+            if (measuring) { profile.add(JournalProfile.Stage.BLUR_SUBMIT, System.nanoTime() - stamp); stamp = System.nanoTime(); }
+            painter.window(renderer, layout, config, rows, selection, hidden, expanded, count, status, mx, my);
+            if (measuring) profile.add(JournalProfile.Stage.DRAW_SUBMIT, System.nanoTime() - stamp);
         } finally {
+            stamp = measuring ? System.nanoTime() : 0;
             renderer.end();
             Utils.scaledProjection();
+            if (measuring) profile.add(JournalProfile.Stage.TEXT_FLUSH, System.nanoTime() - stamp);
         }
-    }
-
-    private void refresh() {
-        long id = rows.size() > first ? rows.get(first).entry().id() : 0;
-        int part = rows.size() > first ? rows.get(first).part() : 0;
-        if (snapshot == null || snapshot.revision() != config.store.revision()) {
-            snapshot = config.store.snapshot();
-            count = snapshot.entries().length + " messages";
-        }
-        boolean changed = rows.update(snapshot, hidden, Math.max(1, layout.content.w() - layout.prefixWidth - 5 * config.scale.get()),
-            config.textScale.get(), font, measure);
-        if (following) first = Math.max(0, rows.size() - layout.visible);
-        else if (changed && id > 0) first = rows.index(id, part);
-        clamp();
     }
 
     public boolean click(double x, double y, int button) {
-        JournalLayout.Action action = layout.hit(x, y, open);
+        JournalLayout.Action action = open && layout.window != null ? layout.hit(x, y) : null;
         if (action != null) {
             if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) act(action);
             return true;
@@ -143,7 +180,7 @@ public final class JournalOverlay {
             if (index >= 0) {
                 selection.start(rows.get(index).entry().id(), shift());
                 selecting = true;
-                following = false;
+                rows.pause();
             }
         } else if (y < layout.window.y() + layout.headerHeight && !expanded) {
             dragging = true;
@@ -155,9 +192,7 @@ public final class JournalOverlay {
 
     public boolean scroll(double x, double y, double amount) {
         if (!open || layout.window == null || !layout.window.contains(x, y)) return false;
-        first -= (int) Math.signum(amount) * Math.max(1, (int) Math.ceil(Math.abs(amount) * 3));
-        clamp();
-        following = first >= Math.max(0, rows.size() - layout.visible);
+        rows.scroll(-(int) Math.signum(amount) * Math.max(1, (int) Math.ceil(Math.abs(amount) * 3)));
         return true;
     }
 
@@ -166,7 +201,6 @@ public final class JournalOverlay {
         if (key == GLFW.GLFW_KEY_ESCAPE) { close(); return true; }
         if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) return true;
         if ((modifiers & GLFW.GLFW_MOD_CONTROL) != 0 && key == GLFW.GLFW_KEY_C) {
-            if (snapshot == null) return false;
             String copied = selection.copy(config.store.snapshot().entries(), hidden);
             if (copied.isEmpty()) return false;
             MeteorClient.mc.keyboard.setClipboard(copied);
@@ -174,18 +208,16 @@ public final class JournalOverlay {
             return true;
         }
         if ((modifiers & GLFW.GLFW_MOD_CONTROL) != 0 && key == GLFW.GLFW_KEY_A) {
-            if (snapshot != null && snapshot.entries().length > 0) {
-                selection.start(snapshot.entries()[0].id(), false);
-                selection.extend(snapshot.entries()[snapshot.entries().length - 1].id());
+            if (buffer.size() > 0) {
+                selection.start(buffer.get(0).id(), false);
+                selection.extend(buffer.get(buffer.size() - 1).id());
             }
             return true;
         }
-        if (key == GLFW.GLFW_KEY_END) { following = true; first = Math.max(0, rows.size() - layout.visible); return true; }
-        if (key == GLFW.GLFW_KEY_HOME) { following = false; first = 0; return true; }
+        if (key == GLFW.GLFW_KEY_END) { rows.end(); return true; }
+        if (key == GLFW.GLFW_KEY_HOME) { rows.home(); return true; }
         if (key == GLFW.GLFW_KEY_PAGE_UP || key == GLFW.GLFW_KEY_PAGE_DOWN) {
-            first += (key == GLFW.GLFW_KEY_PAGE_UP ? -1 : 1) * Math.max(1, layout.visible - 1);
-            clamp();
-            following = first == Math.max(0, rows.size() - layout.visible);
+            rows.scroll((key == GLFW.GLFW_KEY_PAGE_UP ? -1 : 1) * Math.max(1, layout.visible - 1));
             return true;
         }
         return false;
@@ -194,8 +226,8 @@ public final class JournalOverlay {
     private void act(JournalLayout.Action action) {
         focused = true;
         switch (action) {
-            case LOG -> { if (open) close(); else { open = true; following = true; status = ""; } }
-            case CLEAR -> { config.store.clear(); selection.clear(); following = true; status = "Journal cleared"; }
+            case LOG -> toggle();
+            case CLEAR -> { config.store.clear(); selection.clear(); rows.end(); refreshAt = 0; status = "Journal cleared"; }
             case SAVE -> save();
             case SIZE -> expanded = !expanded;
             case COORDS -> { hidden = !hidden; status = hidden ? "Coordinates are hidden" : "Coordinates are visible"; }
@@ -204,6 +236,21 @@ public final class JournalOverlay {
             case SCALE_DOWN -> config.scale.set(Math.max(0.6, config.scale.get() - 0.1));
             case SCALE_UP -> config.scale.set(Math.min(1.8, config.scale.get() + 0.1));
         }
+    }
+
+    public void savePerformance() {
+        String report = profile.report();
+        var directory = MeteorClient.mc.runDirectory.toPath().resolve("hunterbuddy/logs");
+        writer.execute(() -> {
+            try {
+                Files.createDirectories(directory);
+                var target = directory.resolve("log-performance-" + System.currentTimeMillis() + ".txt");
+                Files.writeString(target, report, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+                status = "Performance report saved";
+            } catch (IOException exception) {
+                status = "Could not save performance report";
+            }
+        });
     }
 
     private void save() {
@@ -235,9 +282,7 @@ public final class JournalOverlay {
         }
         long now = System.nanoTime();
         if (now - lastScroll > 70_000_000L && (y < layout.content.y() || y > layout.content.y() + layout.content.h())) {
-            first += y < layout.content.y() ? -1 : 1;
-            clamp();
-            following = false;
+            rows.scroll(y < layout.content.y() ? -1 : 1);
             lastScroll = now;
         }
         int index = rowAt(y);
@@ -247,11 +292,7 @@ public final class JournalOverlay {
     private int rowAt(double y) {
         if (rows.size() == 0 || layout.visible == 0) return -1;
         int offset = Math.max(0, Math.min(layout.visible - 1, (int) ((y - layout.content.y()) / layout.rowHeight)));
-        return Math.min(rows.size() - 1, first + offset);
-    }
-
-    private void clamp() {
-        first = Math.max(0, Math.min(Math.max(0, rows.size() - layout.visible), first));
+        return Math.min(rows.size() - 1, offset);
     }
 
     private static boolean shift() {

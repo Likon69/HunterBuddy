@@ -31,8 +31,15 @@ public final class JournalStore {
         revision++;
     }
 
-    public synchronized long revision() {
-        return revision;
+    public synchronized boolean read(JournalBuffer target) {
+        target.capacity(entries.length);
+        if (target.revision() == revision) return false;
+        long oldest = size == 0 ? sequence + 1 : entries[head].id();
+        long newest = size == 0 ? sequence : entries[(head + size - 1) % entries.length].id();
+        long from = Math.max(oldest, target.last() + 1);
+        for (long id = from; id <= newest; id++) target.put(entries[(int) ((head + id - oldest) % entries.length)]);
+        target.range(revision, oldest, newest, size);
+        return true;
     }
 
     public synchronized Snapshot snapshot() {

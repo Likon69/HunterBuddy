@@ -20,16 +20,14 @@ public final class JournalLayout {
     public final Rect[] buttons = new Rect[Action.ALL.length];
     public Rect window;
     public Rect content;
-    public Rect closedButton;
     public double rowHeight;
     public double headerHeight;
     public double prefixWidth;
     public int visible;
+    public int revision;
     private double screenWidth;
     private double screenHeight;
     private double bottom;
-    private double chatRight;
-    private double chatTop;
     private double scale;
     private double textScale;
     private boolean expanded;
@@ -37,16 +35,15 @@ public final class JournalLayout {
     private double x = Double.NaN;
     private double y;
 
-    public void update(HudRenderer renderer, ClientLog config, double sw, double sh, double bottom, double chatRight, double chatTop, boolean expanded, int font) {
+    public void update(HudRenderer renderer, ClientLog config, double sw, double sh, double bottom, boolean expanded, int font) {
         double s = config.scale.get();
         double t = config.textScale.get();
         if (window != null && sw == screenWidth && sh == screenHeight && s == scale && t == textScale
-            && this.bottom == bottom && this.chatRight == chatRight && this.chatTop == chatTop && this.expanded == expanded && this.font == font) return;
+            && this.bottom == bottom && this.expanded == expanded && this.font == font) return;
+        revision++;
         screenWidth = sw;
         screenHeight = sh;
         this.bottom = bottom;
-        this.chatRight = chatRight;
-        this.chatTop = chatTop;
         scale = s;
         textScale = t;
         this.expanded = expanded;
@@ -59,7 +56,6 @@ public final class JournalLayout {
         window = new Rect(wx, wy, w, h);
         double labelWidth = renderer.textWidth("Log", false, 0.82 * t) + 45 * s;
         double labelHeight = renderer.textHeight(false, 0.82 * t) + 10 * s;
-        closedButton = icon(sw, sh, s, chatRight, chatTop, labelWidth, labelHeight, Math.max(24, bottom / 2));
         double logHeight = Math.max(29 * s, labelHeight);
         headerHeight = Math.max(44 * s, logHeight + 18 * s);
         buttons[Action.LOG.ordinal()] = new Rect(wx + 12 * s, wy + 9 * s, Math.max(72 * s, labelWidth), logHeight);
@@ -80,32 +76,13 @@ public final class JournalLayout {
         visible = Math.max(0, (int) (content.h() / rowHeight));
     }
 
-    public static Rect icon(double sw, double sh, double scale, double chatRight, double chatTop) {
-        return icon(sw, sh, scale, chatRight, chatTop, 0, 0, 32);
-    }
-
-    public static Rect icon(double sw, double sh, double scale, double chatRight, double chatTop,
-                            double minimumWidth, double minimumHeight, double crosshairGap) {
-        double w = Math.max(86 * scale, minimumWidth);
-        double h = Math.max(34 * scale, minimumHeight);
-        double x = sw / 2 - w / 2;
-        double y = Math.max(8, sh / 2 - Math.max(76 * scale, h + crosshairGap));
-        if (x < chatRight && y + h > chatTop) {
-            if (chatTop - h - 12 * scale >= 8) y = chatTop - h - 12 * scale;
-            else if (chatRight + w + 12 * scale <= sw) x = chatRight + 8 * scale;
-            else y = 8;
-        }
-        return new Rect(x, y, w, h);
-    }
-
     public void move(double px, double py) {
         x = px;
         y = py;
         font = -1;
     }
 
-    public Action hit(double px, double py, boolean open) {
-        if (!open) return closedButton != null && closedButton.contains(px, py) ? Action.LOG : null;
+    public Action hit(double px, double py) {
         for (Action action : Action.ALL) if (buttons[action.ordinal()].contains(px, py)) return action;
         return null;
     }

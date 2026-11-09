@@ -1,12 +1,16 @@
 package com.hunterbuddy.hud.toast;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.hud.glass.BlurCadence;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.DepthTestFunction;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.systems.RenderPass;
+import java.util.OptionalInt;
+import meteordevelopment.meteorclient.renderer.FullScreenRenderer;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import java.io.IOException;
@@ -38,20 +42,32 @@ public final class ModuleToastBlur implements AutoCloseable {
         .withCull(false)
         .withBlend(BlendFunction.TRANSLUCENT)
         .build();
-    public static final ModuleToastBlur INSTANCE = new ModuleToastBlur();
+    public static final ModuleToastBlur INSTANCE = new ModuleToastBlur(0);
     private final Framebuffer[] targets = new Framebuffer[3];
     private final GpuBufferSlice[] blurData = new GpuBufferSlice[3];
     private final MaskData mask = new MaskData();
     private FixedUniformStorage<DownData> downUniforms;
     private FixedUniformStorage<MaskData> maskUniforms;
-    private int revision;
+    private static int revision;
+    private final BlurCadence cadence;
+    private final boolean bounded;
     private int compiled = -1;
     private int strength;
     private int loadedStrength;
     private boolean available;
     private boolean prepared;
 
-    private ModuleToastBlur() {
+    private ModuleToastBlur(long interval) {
+        cadence = new BlurCadence(interval);
+        bounded = interval > 0;
+    }
+
+    public static ModuleToastBlur cached(long interval) {
+        return new ModuleToastBlur(interval);
+    }
+
+    public void invalidateCache() {
+        cadence.invalidate();
     }
 
     public void invalidate() {
@@ -79,6 +95,23 @@ public final class ModuleToastBlur implements AutoCloseable {
         mask.screenHeight = main.textureHeight;
         mask.radius = (float) radius * Math.min(sx, sy);
         mask.alpha = (float) alpha;
+        if (bounded) {
+            int left = Math.max(0, (int) Math.floor(mask.x - 1));
+            int top = Math.max(0, (int) Math.floor(mask.y - 1));
+            int right = Math.min(main.textureWidth, (int) Math.ceil(mask.x + mask.width + 1));
+            int bottom = Math.min(main.textureHeight, (int) Math.ceil(mask.y + mask.height + 1));
+            try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder()
+                .createRenderPass(() -> "HunterBuddy Journal Blur", main.getColorAttachmentView(), OptionalInt.empty())) {
+                pass.setPipeline(MASK);
+                pass.enableScissor(left, main.textureHeight - bottom, Math.max(0, right - left), Math.max(0, bottom - top));
+                pass.setUniform("MaskData", maskUniforms.write(mask));
+                pass.bindTexture("u_Texture", targets[0].getColorAttachmentView(), RenderSystem.getSamplerCache().get(FilterMode.LINEAR));
+                pass.setVertexBuffer(0, FullScreenRenderer.vbo);
+                pass.setIndexBuffer(FullScreenRenderer.ibo, VertexFormat.IndexType.INT);
+                pass.drawIndexed(0, 0, 6, 1);
+            }
+            return;
+        }
         MeshRenderer.begin().attachments(main).pipeline(MASK).fullscreen()
             .uniform("MaskData", maskUniforms.write(mask))
             .sampler("u_Texture", targets[0].getColorAttachmentView(), RenderSystem.getSamplerCache().get(FilterMode.LINEAR))
@@ -112,6 +145,7 @@ public final class ModuleToastBlur implements AutoCloseable {
             loadedStrength = strength;
         }
         maskUniforms.clear();
+        if (!cadence.refresh(System.nanoTime(), revision, main.textureWidth, main.textureHeight, strength)) return;
         flush();
         pass(main, 1, MeteorRenderPipelines.BLUR_DOWN);
         pass(targets[1], 2, MeteorRenderPipelines.BLUR_DOWN);
@@ -151,6 +185,7 @@ public final class ModuleToastBlur implements AutoCloseable {
 
     @Override
     public void close() {
+        cadence.invalidate();
         for (int i = 0; i < targets.length; i++) {
             if (targets[i] != null) targets[i].delete();
             targets[i] = null;

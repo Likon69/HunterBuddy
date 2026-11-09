@@ -1,6 +1,14 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.chatdock.ChatDock;
+import com.hunterbuddy.chatdock.DockEntry;
+import com.hunterbuddy.chatdock.DockPreferences;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WWidget;
+import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
+import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
+import meteordevelopment.meteorclient.settings.BoolSetting;
 import com.hunterbuddy.journal.JournalCapture;
 import com.hunterbuddy.journal.JournalEntry;
 import com.hunterbuddy.journal.JournalOverlay;
@@ -16,10 +24,18 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 
-public final class ClientLog extends Module {
+public final class ClientLog extends Module implements DockPreferences {
     public final JournalStore store = new JournalStore(2048);
     private final SettingGroup general = settings.getDefaultGroup();
     private final SettingGroup colors = settings.createGroup("Colors");
+    public final Setting<Boolean> profilePerformance = general.add(new BoolSetting.Builder().name("profile-performance")
+        .description("Record chat frame intervals and journal CPU submission stages for a performance report.").defaultValue(false).build());
+    public final Setting<Boolean> autoOpen = general.add(new BoolSetting.Builder().name("auto-open")
+        .description("Open the journal when a new chat screen opens.").defaultValue(false).build());
+    private final Setting<Double> dockX = general.add(new DoubleSetting.Builder().name("dock-x")
+        .description("Relative dock position; negative uses automatic placement.").defaultValue(-1).min(-1).max(1).visible(() -> false).build());
+    private final Setting<Double> dockY = general.add(new DoubleSetting.Builder().name("dock-y")
+        .description("Relative dock position; negative uses automatic placement.").defaultValue(-1).min(-1).max(1).visible(() -> false).build());
     public final Setting<Double> scale = general.add(new DoubleSetting.Builder().name("scale")
         .description("Window dimensions and spacing; text has its own scale.").defaultValue(1).min(0.6).max(1.8).sliderRange(0.7, 1.5).build());
     public final Setting<Double> textScale = general.add(new DoubleSetting.Builder().name("text-scale")
@@ -41,6 +57,8 @@ public final class ClientLog extends Module {
     public ClientLog() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "log", "Glass journal of local mod messages, opened from the chat. Server chat is excluded.");
         runInMainMenu = true;
+        ChatDock.INSTANCE.configure(this);
+        ChatDock.INSTANCE.register(new DockEntry("log", "Log", this::isActive, overlay::isOpen, overlay::toggle));
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             JournalCapture.stop();
             overlay.shutdown();
@@ -63,6 +81,7 @@ public final class ClientLog extends Module {
     @EventHandler
     private void onFontChanged(CustomFontChangedEvent event) {
         overlay.fontChanged();
+        ChatDock.INSTANCE.fontChanged();
     }
 
     public SettingColor color(JournalEntry entry) {
@@ -75,6 +94,40 @@ public final class ClientLog extends Module {
             case OTHER -> other.get();
         };
     }
+
+    @Override
+    public WWidget getWidget(GuiTheme theme) {
+        WVerticalList controls = theme.verticalList();
+        WButton reset = controls.add(theme.button("Reset position")).expandX().widget();
+        reset.action = ChatDock.INSTANCE::resetPosition;
+        WButton performance = controls.add(theme.button("Save performance report")).expandX().widget();
+        performance.action = overlay::savePerformance;
+        return controls;
+    }
+
+    @Override
+    public double dockX() { return dockX.get(); }
+
+    @Override
+    public double dockY() { return dockY.get(); }
+
+    @Override
+    public void dockPosition(double x, double y) {
+        dockX.set(x);
+        dockY.set(y);
+    }
+
+    @Override
+    public double dockScale() { return scale.get(); }
+
+    @Override
+    public double dockTextScale() { return textScale.get(); }
+
+    @Override
+    public SettingColor dockAccent() { return accent.get(); }
+
+    @Override
+    public SettingColor dockBackground() { return background.get(); }
 
     private Setting<SettingColor> color(String name, int r, int g, int b) {
         return colors.add(new ColorSetting.Builder().name(name).description("Journal color and opacity.")
