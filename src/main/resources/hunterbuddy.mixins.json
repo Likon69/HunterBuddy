@@ -59,7 +59,8 @@
     "toast.ModuleToastBindMixin",
     "toast.ModuleToastGuiMixin",
     "toast.ModuleToastCommandMixin",
-    "toast.ModuleToastShaderMixin"
+    "toast.ModuleToastShaderMixin",
+    "TitleScreenCreditsMixin"
   ],
   "injectors": {
     "defaultRequire": 1
