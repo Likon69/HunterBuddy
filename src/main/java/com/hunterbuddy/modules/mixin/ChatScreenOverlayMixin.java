@@ -1,6 +1,7 @@
 package com.hunterbuddy.modules.mixin;
 
 import com.hunterbuddy.modules.messenger.Messenger;
+import com.hunterbuddy.journal.JournalOverlay;
 import com.hunterbuddy.modules.messenger.ui.MessengerOverlay;
 import com.hunterbuddy.modules.messenger.ui.Pointer;
 import net.minecraft.client.gui.Click;
@@ -33,11 +34,10 @@ public abstract class ChatScreenOverlayMixin {
     @Inject(method = "render", at = @At("TAIL"))
     private void hunterBuddy$renderOverlay(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         MessengerOverlay overlay = hunterBuddy$overlay();
-        if (overlay == null) return;
-
-        overlay.render(context);
-
-        boolean owns = overlay.inputFocused();
+        if (overlay != null) overlay.render(context);
+        JournalOverlay journal = JournalOverlay.active();
+        if (journal != null) journal.render(context);
+        boolean owns = overlay != null && overlay.inputFocused() || journal != null && journal.inputFocused();
         if (owns != hunterBuddy$ownsInput) {
             hunterBuddy$ownsInput = owns;
             chatField.setFocused(!owns);
@@ -46,6 +46,11 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void hunterBuddy$click(Click click, boolean doubled, CallbackInfoReturnable<Boolean> cir) {
+        JournalOverlay journal = JournalOverlay.active();
+        if (journal != null && journal.click(Pointer.fromGui(click.x()), Pointer.fromGui(click.y()), click.button())) {
+            cir.setReturnValue(true);
+            return;
+        }
         MessengerOverlay overlay = hunterBuddy$overlay();
         if (overlay == null) return;
 
@@ -56,6 +61,11 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
     private void hunterBuddy$scroll(double mouseX, double mouseY, double horizontal, double vertical, CallbackInfoReturnable<Boolean> cir) {
+        JournalOverlay journal = JournalOverlay.active();
+        if (journal != null && journal.scroll(Pointer.fromGui(mouseX), Pointer.fromGui(mouseY), vertical)) {
+            cir.setReturnValue(true);
+            return;
+        }
         MessengerOverlay overlay = hunterBuddy$overlay();
         if (overlay == null) return;
 
@@ -66,6 +76,11 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
     private void hunterBuddy$key(KeyInput input, CallbackInfoReturnable<Boolean> cir) {
+        JournalOverlay journal = JournalOverlay.active();
+        if (journal != null && journal.key(input.key(), input.modifiers())) {
+            cir.setReturnValue(true);
+            return;
+        }
         MessengerOverlay overlay = hunterBuddy$overlay();
         if (overlay == null) return;
 
@@ -76,6 +91,8 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "removed", at = @At("HEAD"))
     private void hunterBuddy$closed(CallbackInfo ci) {
+        JournalOverlay journal = JournalOverlay.active();
+        if (journal != null) journal.close();
         MessengerOverlay overlay = hunterBuddy$overlay();
         if (overlay != null) overlay.reset();
     }

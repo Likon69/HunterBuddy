@@ -60,7 +60,10 @@
     "toast.ModuleToastGuiMixin",
     "toast.ModuleToastCommandMixin",
     "toast.ModuleToastShaderMixin",
-    "TitleScreenCreditsMixin"
+    "TitleScreenCreditsMixin",
+    "journal.JournalChatMixin",
+    "journal.JournalServerMixin",
+    "journal.JournalMeteorMixin"
   ],
   "injectors": {
     "defaultRequire": 1
