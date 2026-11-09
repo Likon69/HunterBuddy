@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -133,15 +134,15 @@ public class PingMeterHud extends HudElement {
         boolean shadow = textShadow.get();
         double scale = textScale.get();
         double pad = panel.padding();
-        double lineH = renderer.textHeight(shadow, scale);
+        double lineH = HudText.textHeight(renderer, shadow, scale);
 
         double bigScale = scale * 1.6;
-        double bigH = renderer.textHeight(shadow, bigScale);
+        double bigH = HudText.textHeight(renderer, shadow, bigScale);
         double sparkW = sparkWidth.get();
         double sparkH = Math.max(14.0, bigH - 2.0);
 
-        double pingSlot = renderer.textWidth("8888", shadow, bigScale);
-        double msW = renderer.textWidth(" ms", shadow, scale);
+        double pingSlot = HudText.textWidth(renderer, "8888", shadow, bigScale);
+        double msW = HudText.textWidth(renderer, " ms", shadow, scale);
         double w = pingSlot + msW + 6.0 * scale + sparkW;
         double h = bigH + 2.0 + lineH;
 
@@ -180,11 +181,11 @@ public class PingMeterHud extends HudElement {
                 : keepAliveAge > 10.0 ? warnColor.get() : valueColor.get();
 
             drawBig(renderer, age, left, top, ageColor, bandFlash, breathe, shadow, bigScale, scale);
-            renderer.text(" s idle", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
+            HudText.text(renderer, " s idle", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
         } else {
             drawBig(renderer, ping < 0 ? "-" : String.valueOf(ping), left, top, pingColor,
                 bandFlash, breathe, shadow, bigScale, scale);
-            renderer.text(" ms", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
+            HudText.text(renderer, " ms", left + pingSlot, top + (bigH - lineH), labelColor.get(), shadow, scale);
         }
 
         // Keyed on the newest sample: no new reading, no beat, which is exactly what a stalled
@@ -228,7 +229,7 @@ public class PingMeterHud extends HudElement {
             colour = new Color(colour.r, colour.g, colour.b, (int) (colour.a * breathe));
         }
 
-        renderer.text(text, left, top + HudPulse.bounce(animationStyle.get(), flash, scale),
+        HudText.text(renderer, text, left, top + HudPulse.bounce(animationStyle.get(), flash, scale),
             colour, shadow, bigScale);
     }
 
@@ -283,13 +284,13 @@ public class PingMeterHud extends HudElement {
     }
 
     private double label(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale) {
-        renderer.text(s, tx, ty, labelColor.get(), shadow, scale);
-        return tx + renderer.textWidth(s, shadow, scale);
+        HudText.text(renderer, s, tx, ty, labelColor.get(), shadow, scale);
+        return tx + HudText.textWidth(renderer, s, shadow, scale);
     }
 
     private double fixed(HudRenderer renderer, String s, String template, double tx, double ty,
                          Color color, boolean shadow, double scale) {
-        renderer.text(s, tx, ty, color, shadow, scale);
-        return tx + Math.max(renderer.textWidth(template, shadow, scale), renderer.textWidth(s, shadow, scale));
+        HudText.text(renderer, s, tx, ty, color, shadow, scale);
+        return tx + Math.max(HudText.textWidth(renderer, template, shadow, scale), HudText.textWidth(renderer, s, shadow, scale));
     }
 }

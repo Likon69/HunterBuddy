@@ -18,6 +18,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -217,7 +218,7 @@ public class TravelHud extends HudElement {
     public void render(HudRenderer renderer) {
         boolean shadow = textShadow.get();
         double scale = textScale.get();
-        double lineHeight = renderer.textHeight(shadow, scale);
+        double lineHeight = HudText.textHeight(renderer, shadow, scale);
 
         boolean live = MeteorClient.mc.player != null && MeteorClient.mc.world != null;
 
@@ -239,8 +240,8 @@ public class TravelHud extends HudElement {
                 return;
             }
 
-            renderer.text("no destination", this.x, this.y, labelColor.get(), shadow, scale);
-            setSize(renderer.textWidth("no destination", shadow, scale), lineHeight);
+            HudText.text(renderer, "no destination", this.x, this.y, labelColor.get(), shadow, scale);
+            setSize(HudText.textWidth(renderer, "no destination", shadow, scale), lineHeight);
             return;
         }
 
@@ -586,14 +587,14 @@ public class TravelHud extends HudElement {
     private double measureCompact(HudRenderer renderer, Target target, double distance, int eta,
                                   int rangeSeconds, boolean short_, double dx, double dz,
                                   boolean shadow, double scale, double pad) {
-        double sep = pad * 2 + renderer.textWidth("·", shadow, scale);
+        double sep = pad * 2 + HudText.textWidth(renderer, "\u00b7", shadow, scale);
         double w = 0.0;
 
         // The glyph actually drawn, not a stand-in: "^" and "<" need not be the same width, and
         // measuring one while drawing the other slides the panel by a pixel or two on this field.
-        if (showHeading.get()) w += renderer.textWidth(headingArrow(dx, dz), shadow, scale) + pad;
+        if (showHeading.get()) w += HudText.textWidth(renderer, headingArrow(dx, dz), shadow, scale) + pad;
 
-        w += renderer.textWidth(target.name, shadow, scale);
+        w += HudText.textWidth(renderer, target.name, shadow, scale);
         w += sep + slot(renderer, formatDistance(distance), "00000.0 km", shadow, scale);
         w += sep + slot(renderer, eta < 0 ? "--" : formatTime(eta), "000h 00m", shadow, scale);
 
@@ -603,10 +604,10 @@ public class TravelHud extends HudElement {
         }
 
         w += sep + slot(renderer, String.format("%.0f", speed), "000", shadow, scale);
-        w += renderer.textWidth(" b/s", shadow, scale);
+        w += HudText.textWidth(renderer, " b/s", shadow, scale);
 
         if (showArrivalClock.get() && eta >= 0) {
-            w += sep + renderer.textWidth(arrivalClock(eta), shadow, scale);
+            w += sep + HudText.textWidth(renderer, arrivalClock(eta), shadow, scale);
         }
 
         if (showSessionDistance.get()) {
@@ -618,18 +619,18 @@ public class TravelHud extends HudElement {
 
     /** Widest row of the detailed layout, from the templates rather than the live values. */
     private double measureDetailed(HudRenderer renderer, Target target, boolean shadow, double scale) {
-        double labelWidth = renderer.textWidth("Travelled ", shadow, scale);
-        double widest = renderer.textWidth(target.name, shadow, scale);
+        double labelWidth = HudText.textWidth(renderer, "Travelled ", shadow, scale);
+        double widest = HudText.textWidth(renderer, target.name, shadow, scale);
 
         for (String template : new String[]{"00000.0 km", "000h 00m  (elytra -000h 00m)", "000 b/s"}) {
-            widest = Math.max(widest, renderer.textWidth(template, shadow, scale));
+            widest = Math.max(widest, HudText.textWidth(renderer, template, shadow, scale));
         }
 
         return Math.max(labelWidth + widest, 90.0);
     }
 
     private double slot(HudRenderer renderer, String text, String template, boolean shadow, double scale) {
-        return Math.max(renderer.textWidth(text, shadow, scale), renderer.textWidth(template, shadow, scale));
+        return Math.max(HudText.textWidth(renderer, text, shadow, scale), HudText.textWidth(renderer, template, shadow, scale));
     }
 
     /**
@@ -764,23 +765,23 @@ public class TravelHud extends HudElement {
     private double drawRow(HudRenderer renderer, double y, String label, String value, String template,
                            SettingColor color, boolean shadow, double scale) {
         double x0 = this.x + panel.padding();
-        renderer.text(label, x0, y, labelColor.get(), shadow, scale);
-        double labelWidth = renderer.textWidth("Travelled ", shadow, scale);
-        renderer.text(value, x0 + labelWidth, y, color, shadow, scale);
-        return labelWidth + Math.max(renderer.textWidth(value, shadow, scale),
-            renderer.textWidth(template, shadow, scale));
+        HudText.text(renderer, label, x0, y, labelColor.get(), shadow, scale);
+        double labelWidth = HudText.textWidth(renderer, "Travelled ", shadow, scale);
+        HudText.text(renderer, value, x0 + labelWidth, y, color, shadow, scale);
+        return labelWidth + Math.max(HudText.textWidth(renderer, value, shadow, scale),
+            HudText.textWidth(renderer, template, shadow, scale));
     }
 
     private double drawSegment(HudRenderer renderer, double x, double y, String text, SettingColor color,
                                boolean shadow, double scale) {
-        renderer.text(text, x, y, color, shadow, scale);
-        return x + renderer.textWidth(text, shadow, scale);
+        HudText.text(renderer, text, x, y, color, shadow, scale);
+        return x + HudText.textWidth(renderer, text, shadow, scale);
     }
 
     private double separator(HudRenderer renderer, double x, double y, double pad, boolean shadow, double scale) {
         x += pad;
-        renderer.text("·", x, y, labelColor.get(), shadow, scale);
-        return x + renderer.textWidth("·", shadow, scale) + pad;
+        HudText.text(renderer, "\u00b7", x, y, labelColor.get(), shadow, scale);
+        return x + HudText.textWidth(renderer, "\u00b7", shadow, scale) + pad;
     }
 
     /** Bearing to the target relative to where you are looking. */
@@ -843,9 +844,9 @@ public class TravelHud extends HudElement {
      */
     private double drawFixed(HudRenderer renderer, double x, double y, String text, String template,
                              SettingColor color, boolean shadow, double scale) {
-        renderer.text(text, x, y, color, shadow, scale);
-        return x + Math.max(renderer.textWidth(text, shadow, scale),
-            renderer.textWidth(template, shadow, scale));
+        HudText.text(renderer, text, x, y, color, shadow, scale);
+        return x + Math.max(HudText.textWidth(renderer, text, shadow, scale),
+            HudText.textWidth(renderer, template, shadow, scale));
     }
 
     private static String formatDistance(double blocks) {

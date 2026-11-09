@@ -1,5 +1,6 @@
 package com.hunterbuddy.hud.elytrahelper;
 
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 
@@ -28,16 +29,16 @@ public final class PanelWriter {
     }
 
     public void line(String text, Color color) {
-        renderer.text(text, left, cursorY, color, shadow, scale);
-        widest = Math.max(widest, renderer.textWidth(text, shadow, scale));
+        HudText.text(renderer, text, left, cursorY, color, shadow, scale);
+        widest = Math.max(widest, HudText.textWidth(renderer, text, shadow, scale));
         advance();
     }
 
     public void pair(String label, String value) {
-        double labelWidth = renderer.textWidth(label, shadow, scale);
-        renderer.text(label, left, cursorY, labelColor, shadow, scale);
-        renderer.text(value, left + labelWidth, cursorY, valueColor, shadow, scale);
-        widest = Math.max(widest, labelWidth + renderer.textWidth(value, shadow, scale));
+        double labelWidth = HudText.textWidth(renderer, label, shadow, scale);
+        HudText.text(renderer, label, left, cursorY, labelColor, shadow, scale);
+        HudText.text(renderer, value, left + labelWidth, cursorY, valueColor, shadow, scale);
+        widest = Math.max(widest, labelWidth + HudText.textWidth(renderer, value, shadow, scale));
         advance();
     }
 
@@ -50,6 +51,6 @@ public final class PanelWriter {
     }
 
     private void advance() {
-        cursorY += renderer.textHeight(shadow, scale) + LINE_SPACING;
+        cursorY += HudText.textHeight(renderer, shadow, scale) + LINE_SPACING;
     }
 }

@@ -17,6 +17,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -207,14 +208,14 @@ public class SpiralCoverageHud extends HudElement {
 
         double pad = panel.padding();
         double box = boxSize.get();
-        double lineH = renderer.textHeight(shadow, scale);
+        double lineH = HudText.textHeight(renderer, shadow, scale);
         double gap = 3.0 * scale;
         double barH = Math.max(3.0, 4.0 * scale);
         double w = box;
-        w = Math.max(w, renderer.textWidth("ZIGZAG PAUSED COMBAT 999s next 88888 b", shadow, scale));
-        w = Math.max(w, renderer.textWidth("turns 88888 lines 88888 88888/88888", shadow, scale));
-        w = Math.max(w, renderer.textWidth("center 8888.8 km · flown 8888.8 km", shadow, scale));
-        w = Math.max(w, renderer.textWidth("progress 100%", shadow, scale));
+        w = Math.max(w, HudText.textWidth(renderer, "ZIGZAG PAUSED COMBAT 999s next 88888 b", shadow, scale));
+        w = Math.max(w, HudText.textWidth(renderer, "turns 88888 lines 88888 88888/88888", shadow, scale));
+        w = Math.max(w, HudText.textWidth(renderer, "center 8888.8 km \u00b7 flown 8888.8 km", shadow, scale));
+        w = Math.max(w, HudText.textWidth(renderer, "progress 100%", shadow, scale));
         double h = lineH + gap + box + gap + lineH * 3.0 + gap + barH;
 
         panel.draw(renderer, x + pad, y + pad, w, h, state.severity);
@@ -298,8 +299,8 @@ public class SpiralCoverageHud extends HudElement {
         double tx = x + pad;
         tx = value(renderer, mode, tx, headerY, shadow, scale, appear);
         tx = label(renderer, " ", tx, headerY, shadow, scale, appear);
-        renderer.text(state.badge, tx, headerY, fade(badgeColor, appear), shadow, scale);
-        tx += renderer.textWidth(state.badge, shadow, scale);
+        HudText.text(renderer, state.badge, tx, headerY, fade(badgeColor, appear), shadow, scale);
+        tx += HudText.textWidth(renderer, state.badge, shadow, scale);
         if (state.stale) {
             tx = label(renderer, " ", tx, headerY, shadow, scale, appear);
             tx = value(renderer, state.ageSeconds + "s", tx, headerY, shadow, scale, appear);
@@ -387,8 +388,8 @@ public class SpiralCoverageHud extends HudElement {
         double ty = top + box + gap;
         tx = x + pad;
         tx = label(renderer, "turns ", tx, ty, shadow, scale, appear);
-        renderer.text(String.valueOf(turns), tx, ty, fade(turnColor, appear), shadow, scale);
-        tx += renderer.textWidth(String.valueOf(turns), shadow, scale);
+        HudText.text(renderer, String.valueOf(turns), tx, ty, fade(turnColor, appear), shadow, scale);
+        tx += HudText.textWidth(renderer, String.valueOf(turns), shadow, scale);
         if (!modeMetric(mode, preview, turns).isEmpty()) {
             tx = value(renderer, modeMetric(mode, preview, turns), tx, ty, shadow, scale, appear);
         }
@@ -589,14 +590,14 @@ public class SpiralCoverageHud extends HudElement {
 
     private double label(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale,
                          double appear) {
-        renderer.text(s, tx, ty, fade(labelColor.get(), appear), shadow, scale);
-        return tx + renderer.textWidth(s, shadow, scale);
+        HudText.text(renderer, s, tx, ty, fade(labelColor.get(), appear), shadow, scale);
+        return tx + HudText.textWidth(renderer, s, shadow, scale);
     }
 
     private double value(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale,
                          double appear) {
-        renderer.text(s, tx, ty, fade(valueColor.get(), appear), shadow, scale);
-        return tx + renderer.textWidth(s, shadow, scale);
+        HudText.text(renderer, s, tx, ty, fade(valueColor.get(), appear), shadow, scale);
+        return tx + HudText.textWidth(renderer, s, shadow, scale);
     }
 
     private void dashedLine(HudRenderer renderer, double x1, double y1, double x2, double y2,

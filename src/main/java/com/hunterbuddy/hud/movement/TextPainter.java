@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud.movement;
 
 import com.hunterbuddy.hud.MovementStatusHud.Layout;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 
 final class TextPainter implements EntryPainter {
@@ -33,7 +34,7 @@ final class TextPainter implements EntryPainter {
 
     @Override
     public void draw(StatusEntry entry, double x, double y) {
-        renderer.text(entry.text(), x, y, entry.color(), options.textShadow.get(), options.textScale.get());
+        HudText.text(renderer, entry.text(), x, y, entry.color(), options.textShadow.get(), options.textScale.get());
     }
 
     @Override
@@ -47,10 +48,10 @@ final class TextPainter implements EntryPainter {
     }
 
     private double textWidth(String text) {
-        return renderer.textWidth(text, options.textShadow.get(), options.textScale.get());
+        return HudText.textWidth(renderer, text, options.textShadow.get(), options.textScale.get());
     }
 
     private double lineHeight() {
-        return renderer.textHeight(options.textShadow.get(), options.textScale.get());
+        return HudText.textHeight(renderer, options.textShadow.get(), options.textScale.get());
     }
 }

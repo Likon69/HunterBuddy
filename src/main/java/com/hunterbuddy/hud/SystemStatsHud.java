@@ -12,6 +12,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -291,7 +292,7 @@ public class SystemStatsHud extends HudElement {
    public void render(HudRenderer renderer) {
       boolean shadow = this.textShadow.get();
       double scale = this.textScale.get();
-      double textHeight = renderer.textHeight(shadow, scale);
+      double textHeight = HudText.textHeight(renderer, shadow, scale);
       double spacing = 3.0;
 
       double curY = this.y;
@@ -300,15 +301,15 @@ public class SystemStatsHud extends HudElement {
 
       if (this.showTitle.get()) {
          String title = this.titleText.get();
-         double tw = renderer.textWidth(title, shadow, scale);
-         renderer.text(title, this.x, curY, this.titleColor.get(), shadow, scale);
+         double tw = HudText.textWidth(renderer, title, shadow, scale);
+         HudText.text(renderer, title, this.x, curY, this.titleColor.get(), shadow, scale);
          curY += textHeight + spacing;
          maxWidth = Math.max(maxWidth, tw);
       }
 
       // === RAM ===
-      double ramLabelW = renderer.textWidth("RAM", shadow, scale);
-      renderer.text("RAM", this.x, curY, new SettingColor(140, 140, 140, 255), shadow, scale);
+      double ramLabelW = HudText.textWidth(renderer, "RAM", shadow, scale);
+      HudText.text(renderer, "RAM", this.x, curY, new SettingColor(140, 140, 140, 255), shadow, scale);
 
       String ramValueText;
       if (this.maxRamBytes <= 0) {
@@ -324,8 +325,8 @@ public class SystemStatsHud extends HudElement {
          : (this.currentRamPct >= this.warnRamPct.get()
             ? new SettingColor(255, 200, 80, 255)
             : this.ramTextColor.get());
-      double ramValueW = renderer.textWidth(ramValueText, shadow, scale);
-      renderer.text(ramValueText, this.x + ramLabelW, curY, ramTextCol, shadow, scale);
+      double ramValueW = HudText.textWidth(renderer, ramValueText, shadow, scale);
+      HudText.text(renderer, ramValueText, this.x + ramLabelW, curY, ramTextCol, shadow, scale);
       curY += textHeight + 1.0;
       maxWidth = Math.max(maxWidth, ramLabelW + ramValueW);
 
@@ -340,7 +341,7 @@ public class SystemStatsHud extends HudElement {
       maxWidth = Math.max(maxWidth, gw);
 
       // === CPU ===
-      renderer.text("CPU", this.x, curY, new SettingColor(140, 140, 140, 255), shadow, scale);
+      HudText.text(renderer, "CPU", this.x, curY, new SettingColor(140, 140, 140, 255), shadow, scale);
       String cpuValueText;
       if (this.currentCpuPct < 0) {
          cpuValueText = " -- (unsupported)";
@@ -357,8 +358,8 @@ public class SystemStatsHud extends HudElement {
       } else {
          cpuTextCol = this.cpuTextColor.get();
       }
-      double cpuValueW = renderer.textWidth(cpuValueText, shadow, scale);
-      renderer.text(cpuValueText, this.x + ramLabelW, curY, cpuTextCol, shadow, scale);
+      double cpuValueW = HudText.textWidth(renderer, cpuValueText, shadow, scale);
+      HudText.text(renderer, cpuValueText, this.x + ramLabelW, curY, cpuTextCol, shadow, scale);
       curY += textHeight + 1.0;
       maxWidth = Math.max(maxWidth, ramLabelW + cpuValueW);
 
@@ -453,14 +454,14 @@ public class SystemStatsHud extends HudElement {
 
       // Current value label at top-right
       if (showValue) {
-         double vw = renderer.textWidth(currentText, shadow, scale);
-         renderer.text(currentText, gx + w - vw - 2.0, gy + 1.0, lineColor, shadow, scale);
+         double vw = HudText.textWidth(renderer, currentText, shadow, scale);
+         HudText.text(renderer, currentText, gx + w - vw - 2.0, gy + 1.0, lineColor, shadow, scale);
       }
 
       // Average label at top-left
       if (showAverage) {
          String avgStr = String.format("avg %.0f%%", averageValue);
-         renderer.text(avgStr, gx + 2.0, gy + 1.0, new SettingColor(200, 200, 200, 200), shadow, scale);
+         HudText.text(renderer, avgStr, gx + 2.0, gy + 1.0, new SettingColor(200, 200, 200, 200), shadow, scale);
       }
 
       return gy + gh;

@@ -2,6 +2,7 @@ package com.hunterbuddy.hud;
 
 import com.hunterbuddy.modules.messenger.ui.Painter;
 import com.hunterbuddy.modules.messenger.ui.Rect;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 
@@ -22,11 +23,11 @@ final class MessengerBadge {
 
         String label = unread > 99 ? "99+" : String.valueOf(unread);
         double height = size * 0.34;
-        double scale = Math.min(textScale, height * 0.64 / renderer.textHeight(shadow, 1.0));
-        scale = Math.min(scale, size * 0.46 / renderer.textWidth(label, shadow, 1.0));
+        double scale = Math.min(textScale, height * 0.64 / HudText.textHeight(renderer, shadow, 1.0));
+        scale = Math.min(scale, size * 0.46 / HudText.textWidth(renderer, label, shadow, 1.0));
         scale *= grow;
-        double tw = renderer.textWidth(label, shadow, scale);
-        double th = renderer.textHeight(shadow, scale);
+        double tw = HudText.textWidth(renderer, label, shadow, scale);
+        double th = HudText.textHeight(renderer, shadow, scale);
         height *= grow;
         double width = Math.max(height, tw + height * 0.48);
         double left = x + size * 1.05 - width;
@@ -38,6 +39,6 @@ final class MessengerBadge {
         p.round(left, top, width, height, height / 2.0, color);
         Color ink = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722 > 175.0
             ? new Color(18, 24, 36, 255) : new Color(255, 255, 255, 255);
-        renderer.text(label, left + (width - tw) / 2.0, top + (height - th) / 2.0, ink, shadow, scale);
+        HudText.text(renderer, label, left + (width - tw) / 2.0, top + (height - th) / 2.0, ink, shadow, scale);
     }
 }

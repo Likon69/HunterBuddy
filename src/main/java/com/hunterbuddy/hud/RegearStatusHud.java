@@ -18,6 +18,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -275,8 +276,8 @@ public class RegearStatusHud extends HudElement {
         double gap = 3.0 * s;
         double badgeIcon = 13.0 * s * iconSize.get();
         double ico = 11.0 * s * iconSize.get();
-        double lineH = renderer.textHeight(shadow, ts);
-        double stateH = renderer.textHeight(shadow, ts * stateMul);
+        double lineH = HudText.textHeight(renderer, shadow, ts);
+        double stateH = HudText.textHeight(renderer, shadow, ts * stateMul);
         double rowH = Math.max(lineH, ico);
         double stateRowH = Math.max(stateH, badgeIcon);
 
@@ -302,8 +303,8 @@ public class RegearStatusHud extends HudElement {
 
         // ---- width, majored throughout so nothing jitters as the numbers move
         double badgeW = badgeWidth(renderer, repair, shadow, ts, badgeIcon, s);
-        double stateW = Math.max(renderer.textWidth(stateText, shadow, ts * stateMul),
-            renderer.textWidth(STATE_TEMPLATE, shadow, ts * stateMul));
+        double stateW = Math.max(HudText.textWidth(renderer, stateText, shadow, ts * stateMul),
+            HudText.textWidth(renderer, STATE_TEMPLATE, shadow, ts * stateMul));
         double width = badgeW + gap + stateW;
 
         if (mergedRow) width = Math.max(width, mergedWidth(renderer, regear, rockets, elytras, gaps, totems, shadow, ts, ico, s));
@@ -311,12 +312,12 @@ public class RegearStatusHud extends HudElement {
         if (countersRow) width = Math.max(width, countersWidth(renderer, shadow, ts, ico, s));
         if (eventRow) {
             String event = regear.hudLastEvent();
-            width = Math.max(width, renderer.textWidth(event == null ? "" : event, shadow, ts));
+            width = Math.max(width, HudText.textWidth(renderer, event == null ? "" : event, shadow, ts));
         }
         if (showSpine) width = Math.max(width, Math.max(72.0 * s, spineMinWidth(stations.size(), s, spineIcons)));
 
         // ---- height
-        double labelH = renderer.textHeight(shadow, ts * 0.6);
+        double labelH = HudText.textHeight(renderer, shadow, ts * 0.6);
         double spineH = showSpine ? 2.0 * spineHalf(s, spineIcons) + labelH + 1.0 * s : 0.0;
         double height = stateRowH
             + (showSpine ? gap + spineH : 0.0)
@@ -353,7 +354,7 @@ public class RegearStatusHud extends HudElement {
                 stateDraw.a);
         }
         double stateTextY = y + (stateRowH - stateH) / 2.0 + HudPulse.bounce(HudPulse.Style.Lively, fresh, ts);
-        renderer.text(stateText, x0 + badgeW + gap, stateTextY, stateDraw, shadow, ts * stateMul);
+        HudText.text(renderer, stateText, x0 + badgeW + gap, stateTextY, stateDraw, shadow, ts * stateMul);
         y += stateRowH;
 
         // ---- row: metro spine
@@ -392,7 +393,7 @@ public class RegearStatusHud extends HudElement {
             float alpha = 1.0f - eventAge;
             if (event != null && !event.isEmpty() && alpha > 0.02f) {
                 SettingColor m = mutedColor.get();
-                renderer.text(event, x0, y, new Color(m.r, m.g, m.b, (int) (m.a * alpha)), shadow, ts);
+                HudText.text(renderer, event, x0, y, new Color(m.r, m.g, m.b, (int) (m.a * alpha)), shadow, ts);
             }
         }
 
@@ -408,7 +409,7 @@ public class RegearStatusHud extends HudElement {
         double ts = s * textScale.get();
         double ico = 11.0 * s * iconSize.get();
         double inset = panel.padding();
-        double lineH = renderer.textHeight(shadow, ts);
+        double lineH = HudText.textHeight(renderer, shadow, ts);
         double rowH = Math.max(lineH, ico);
 
         int rockets = regear.getRocketCount();
@@ -452,10 +453,10 @@ public class RegearStatusHud extends HudElement {
         // no empty tail. The panel only nudges when the numbers actually change, never per frame.
         String nextTime = nextTimeText(regear.hudSecondsToNextRegear());
         boolean nextHasIcon = boundStack(regear.hudNextRegearBound()) != null;
-        double nextW = renderer.textWidth("next ", shadow, ts)
+        double nextW = HudText.textWidth(renderer, "next ", shadow, ts)
             + (nextHasIcon ? ico + 2.0 * s : 0.0)
-            + renderer.textWidth(nextTime, shadow, ts);
-        double width = renderer.textWidth(head, shadow, ts) + nextW + renderer.textWidth(tail, shadow, ts);
+            + HudText.textWidth(renderer, nextTime, shadow, ts);
+        double width = HudText.textWidth(renderer, head, shadow, ts) + nextW + HudText.textWidth(renderer, tail, shadow, ts);
 
         boolean failed = last != null && last.outcome != null && !last.outcome.startsWith("complete");
         int secsNext = regear.hudSecondsToNextRegear();
@@ -476,10 +477,10 @@ public class RegearStatusHud extends HudElement {
         double textY = y + (rowH - lineH) / 2.0;
         double centerY = y + rowH / 2.0;
 
-        renderer.text(head, x0, textY, color, shadow, ts);
-        double x = x0 + renderer.textWidth(head, shadow, ts);
+        HudText.text(renderer, head, x0, textY, color, shadow, ts);
+        double x = x0 + HudText.textWidth(renderer, head, shadow, ts);
         x = drawNext(renderer, x, textY, centerY, regear, color, shadow, ts, ico, s);
-        renderer.text(tail, x, textY, color, shadow, ts);
+        HudText.text(renderer, tail, x, textY, color, shadow, ts);
 
         setSize(width + inset * 2.0, rowH + inset * 2.0);
     }
@@ -487,7 +488,7 @@ public class RegearStatusHud extends HudElement {
     // ---------------------------------------------------------------- the badge
 
     private double badgeWidth(HudRenderer renderer, boolean repair, boolean shadow, double ts, double badgeIcon, double s) {
-        double w = badgeIcon + 2.0 * s + renderer.textWidth("R", shadow, ts);
+        double w = badgeIcon + 2.0 * s + HudText.textWidth(renderer, "R", shadow, ts);
         if (repair) w += 2.0 * s + badgeIcon * 0.85;
         return w;
     }
@@ -503,9 +504,9 @@ public class RegearStatusHud extends HudElement {
 
         String tag = repair ? "P" : "R";
         SettingColor tagColor = repair ? mendColor.get() : busyColor.get();
-        double tagH = renderer.textHeight(shadow, ts);
-        renderer.text(tag, x, centerY - tagH / 2.0, tagColor, shadow, ts);
-        x += renderer.textWidth("R", shadow, ts);
+        double tagH = HudText.textHeight(renderer, shadow, ts);
+        HudText.text(renderer, tag, x, centerY - tagH / 2.0, tagColor, shadow, ts);
+        x += HudText.textWidth(renderer, "R", shadow, ts);
 
         if (repair) {
             x += 2.0 * s;
@@ -590,8 +591,8 @@ public class RegearStatusHud extends HudElement {
             if (st == AutoFlyingRegear.Step.LAND || st == AutoFlyingRegear.Step.FLY) {
                 String lbl = st == AutoFlyingRegear.Step.LAND ? "LAND" : "FLY";
                 double lts = ts * 0.6;
-                double lw = renderer.textWidth(lbl, shadow, lts);
-                renderer.text(lbl, nx[i] - lw / 2.0, yc + half + 1.0 * s,
+                double lw = HudText.textWidth(renderer, lbl, shadow, lts);
+                HudText.text(renderer, lbl, nx[i] - lw / 2.0, yc + half + 1.0 * s,
                     new Color(dim.r, dim.g, dim.b, (int) (dim.a * 0.8)), shadow, lts);
             }
         }
@@ -631,11 +632,11 @@ public class RegearStatusHud extends HudElement {
     private double mergedWidth(HudRenderer renderer, AutoFlyingRegear regear, int rockets, int elytras, int gaps, int totems,
                                boolean shadow, double ts, double ico, double s) {
         List<Field> fields = mergedFields(regear, rockets, elytras, gaps, totems);
-        double sep = renderer.textWidth(" · ", shadow, ts);
+        double sep = HudText.textWidth(renderer, " \u00b7 ", shadow, ts);
         double w = 0.0;
         for (Field f : fields) {
-            w += renderer.textWidth(f.label, shadow, ts)
-                + Math.max(renderer.textWidth(f.value, shadow, ts), renderer.textWidth(f.template, shadow, ts));
+            w += HudText.textWidth(renderer, f.label, shadow, ts)
+                + Math.max(HudText.textWidth(renderer, f.value, shadow, ts), HudText.textWidth(renderer, f.template, shadow, ts));
         }
         w += fields.size() * sep;
         return w + nextWidth(renderer, shadow, ts, ico, s);
@@ -644,7 +645,7 @@ public class RegearStatusHud extends HudElement {
     private void drawMerged(HudRenderer renderer, double x0, double y, double rowH, AutoFlyingRegear regear,
                             int rockets, int elytras, int gaps, int totems, boolean anim,
                             boolean shadow, double ts, double ico, double s) {
-        double textY = y + (rowH - renderer.textHeight(shadow, ts)) / 2.0;
+        double textY = y + (rowH - HudText.textHeight(renderer, shadow, ts)) / 2.0;
         double centerY = y + rowH / 2.0;
         List<Field> fields = mergedFields(regear, rockets, elytras, gaps, totems);
         double x = x0;
@@ -652,11 +653,11 @@ public class RegearStatusHud extends HudElement {
         for (int i = 0; i < fields.size(); i++) {
             Field f = fields.get(i);
             if (i > 0) x = sep(renderer, x, textY, shadow, ts);
-            renderer.text(f.label, x, textY, mutedColor.get(), shadow, ts);
-            x += renderer.textWidth(f.label, shadow, ts);
+            HudText.text(renderer, f.label, x, textY, mutedColor.get(), shadow, ts);
+            x += HudText.textWidth(renderer, f.label, shadow, ts);
             float fresh = anim ? pulse.freshness("m" + f.label, f.value, 800L) : 0.0f;
-            renderer.text(f.value, x, textY, HudPulse.tint(HudPulse.Style.Subtle, f.color, mendColor.get(), fresh), shadow, ts);
-            x += renderer.textWidth(f.value, shadow, ts);
+            HudText.text(renderer, f.value, x, textY, HudPulse.tint(HudPulse.Style.Subtle, f.color, mendColor.get(), fresh), shadow, ts);
+            x += HudText.textWidth(renderer, f.value, shadow, ts);
         }
 
         x = sep(renderer, x, textY, shadow, ts);
@@ -706,18 +707,18 @@ public class RegearStatusHud extends HudElement {
     }
 
     private double stockLead(HudRenderer renderer, Stock st, boolean shadow, double ts, double ico, double s) {
-        return showStockIcons.get() ? ico + 2.0 * s : renderer.textWidth(st.label + " ", shadow, ts);
+        return showStockIcons.get() ? ico + 2.0 * s : HudText.textWidth(renderer, st.label + " ", shadow, ts);
     }
 
     private double stocksWidth(HudRenderer renderer, List<Stock> stocks, boolean shadow, double ts, double ico, double s) {
-        double sep = renderer.textWidth(" · ", shadow, ts);
-        double gainReserve = renderer.textWidth(" (+0000)", shadow, ts);
+        double sep = HudText.textWidth(renderer, " \u00b7 ", shadow, ts);
+        double gainReserve = HudText.textWidth(renderer, " (+0000)", shadow, ts);
         double w = 0.0;
         for (int i = 0; i < stocks.size(); i++) {
             if (i > 0) w += sep;
             Stock st = stocks.get(i);
             w += stockLead(renderer, st, shadow, ts, ico, s)
-                + Math.max(renderer.textWidth(st.value, shadow, ts), renderer.textWidth(st.template, shadow, ts))
+                + Math.max(HudText.textWidth(renderer, st.value, shadow, ts), HudText.textWidth(renderer, st.template, shadow, ts))
                 + gainReserve;
         }
         return w;
@@ -725,7 +726,7 @@ public class RegearStatusHud extends HudElement {
 
     private void drawStocks(HudRenderer renderer, double x0, double y, double rowH, List<Stock> stocks, boolean anim,
                             boolean shadow, double ts, double ico, double s) {
-        double textY = y + (rowH - renderer.textHeight(shadow, ts)) / 2.0;
+        double textY = y + (rowH - HudText.textHeight(renderer, shadow, ts)) / 2.0;
         double centerY = y + rowH / 2.0;
         double x = x0;
 
@@ -740,17 +741,17 @@ public class RegearStatusHud extends HudElement {
                 postItem(renderer, st.stack, x + (ico - sz) / 2.0, centerY - sz / 2.0, sz);
                 x += ico + 2.0 * s;
             } else {
-                renderer.text(st.label + " ", x, textY, mutedColor.get(), shadow, ts);
-                x += renderer.textWidth(st.label + " ", shadow, ts);
+                HudText.text(renderer, st.label + " ", x, textY, mutedColor.get(), shadow, ts);
+                x += HudText.textWidth(renderer, st.label + " ", shadow, ts);
             }
 
-            renderer.text(st.value, x, textY, HudPulse.tint(HudPulse.Style.Subtle, st.color, mendColor.get(), fresh), shadow, ts);
-            x += renderer.textWidth(st.value, shadow, ts);
+            HudText.text(renderer, st.value, x, textY, HudPulse.tint(HudPulse.Style.Subtle, st.color, mendColor.get(), fresh), shadow, ts);
+            x += HudText.textWidth(renderer, st.value, shadow, ts);
 
             if (!st.gain.isEmpty()) {
                 String g = " " + st.gain;
-                renderer.text(g, x, textY, st.gain.startsWith("(-") ? warnColor.get() : mendColor.get(), shadow, ts);
-                x += renderer.textWidth(g, shadow, ts);
+                HudText.text(renderer, g, x, textY, st.gain.startsWith("(-") ? warnColor.get() : mendColor.get(), shadow, ts);
+                x += HudText.textWidth(renderer, g, shadow, ts);
             }
         }
     }
@@ -770,24 +771,24 @@ public class RegearStatusHud extends HudElement {
     }
 
     private double countersWidth(HudRenderer renderer, boolean shadow, double ts, double ico, double s) {
-        double head = renderer.textWidth("#000 session · 0000 total · last 00m00 · avg 00m00 · ", shadow, ts);
+        double head = HudText.textWidth(renderer, "#000 session \u00b7 0000 total \u00b7 last 00m00 \u00b7 avg 00m00 \u00b7 ", shadow, ts);
         return head + nextWidth(renderer, shadow, ts, ico, s);
     }
 
     private void drawCounters(HudRenderer renderer, double x0, double y, double rowH, AutoFlyingRegear regear, long now,
                               boolean shadow, double ts, double ico, double s) {
-        double textY = y + (rowH - renderer.textHeight(shadow, ts)) / 2.0;
+        double textY = y + (rowH - HudText.textHeight(renderer, shadow, ts)) / 2.0;
         double centerY = y + rowH / 2.0;
         String head = countersHead(regear, now);
-        renderer.text(head, x0, textY, mutedColor.get(), shadow, ts);
-        double x = x0 + renderer.textWidth(head, shadow, ts);
+        HudText.text(renderer, head, x0, textY, mutedColor.get(), shadow, ts);
+        double x = x0 + HudText.textWidth(renderer, head, shadow, ts);
         drawNext(renderer, x, textY, centerY, regear, mutedColor.get(), shadow, ts, ico, s);
     }
 
     // ---------------------------------------------------------------- the next-regear reading
 
     private double nextWidth(HudRenderer renderer, boolean shadow, double ts, double ico, double s) {
-        return renderer.textWidth("next ", shadow, ts) + ico + 2.0 * s + renderer.textWidth("≈000h00", shadow, ts);
+        return HudText.textWidth(renderer, "next ", shadow, ts) + ico + 2.0 * s + HudText.textWidth(renderer, "\u2248000h00", shadow, ts);
     }
 
     /**
@@ -801,8 +802,8 @@ public class RegearStatusHud extends HudElement {
         String time = nextTimeText(secs);
         SettingColor timeColor = secs >= 0 && secs < 300 ? warnColor.get() : labelColor;
 
-        renderer.text("next ", x, textY, labelColor, shadow, ts);
-        x += renderer.textWidth("next ", shadow, ts);
+        HudText.text(renderer, "next ", x, textY, labelColor, shadow, ts);
+        x += HudText.textWidth(renderer, "next ", shadow, ts);
 
         ItemStack bs = boundStack(bound);
         if (bs != null) {
@@ -810,8 +811,8 @@ public class RegearStatusHud extends HudElement {
             x += ico + 2.0 * s;
         }
 
-        renderer.text(time, x, textY, timeColor, shadow, ts);
-        x += renderer.textWidth(time, shadow, ts);
+        HudText.text(renderer, time, x, textY, timeColor, shadow, ts);
+        x += HudText.textWidth(renderer, time, shadow, ts);
         return x;
     }
 
@@ -850,21 +851,21 @@ public class RegearStatusHud extends HudElement {
         double gap = 3.0 * s;
         double badgeIcon = 13.0 * s * iconSize.get();
         double ico = 11.0 * s * iconSize.get();
-        double lineH = renderer.textHeight(shadow, ts);
+        double lineH = HudText.textHeight(renderer, shadow, ts);
         double rowH = Math.max(lineH, ico);
-        double stateH = renderer.textHeight(shadow, ts * STATE_SCALE);
+        double stateH = HudText.textHeight(renderer, shadow, ts * STATE_SCALE);
         double stateRowH = Math.max(stateH, badgeIcon);
 
         String stateText = "REGEAR #4 · ROCKETS 178";
         double badgeW = badgeWidth(renderer, false, shadow, ts, badgeIcon, s);
-        double stateW = Math.max(renderer.textWidth(stateText, shadow, ts * STATE_SCALE),
-            renderer.textWidth(STATE_TEMPLATE, shadow, ts * STATE_SCALE));
+        double stateW = Math.max(HudText.textWidth(renderer, stateText, shadow, ts * STATE_SCALE),
+            HudText.textWidth(renderer, STATE_TEMPLATE, shadow, ts * STATE_SCALE));
         String merged = "rkt 178 · ely 5 · gap 32 · tot 4 · ech 6 · obs 45 · next ";
 
-        double labelH = renderer.textHeight(shadow, ts * 0.6);
+        double labelH = HudText.textHeight(renderer, shadow, ts * 0.6);
         double spineH = 2.0 * spineHalf(s, showSpineIcons.get() && s >= SPINE_ICON_SIZE) + labelH + 1.0 * s;
         double width = Math.max(badgeW + gap + stateW,
-            renderer.textWidth(merged, shadow, ts) + ico + 2.0 * s + renderer.textWidth("≈38m", shadow, ts));
+            HudText.textWidth(renderer, merged, shadow, ts) + ico + 2.0 * s + HudText.textWidth(renderer, "\u224838m", shadow, ts));
         width = Math.max(width, Math.max(72.0 * s, spineMinWidth(8, s, showSpineIcons.get() && s >= SPINE_ICON_SIZE)));
         double height = stateRowH + gap + spineH + gap + rowH;
 
@@ -874,7 +875,7 @@ public class RegearStatusHud extends HudElement {
         double y = this.y + inset;
 
         drawBadge(renderer, x0, y, stateRowH, false, shadow, ts, badgeIcon, s);
-        renderer.text(stateText, x0 + badgeW + gap, y + (stateRowH - stateH) / 2.0, busyColor.get(), shadow, ts * STATE_SCALE);
+        HudText.text(renderer, stateText, x0 + badgeW + gap, y + (stateRowH - stateH) / 2.0, busyColor.get(), shadow, ts * STATE_SCALE);
         y += stateRowH + gap;
 
         List<AutoFlyingRegear.Step> demo = List.of(
@@ -886,11 +887,11 @@ public class RegearStatusHud extends HudElement {
 
         double textY = y + (rowH - lineH) / 2.0;
         double centerY = y + rowH / 2.0;
-        renderer.text(merged, x0, textY, mutedColor.get(), shadow, ts);
-        double x = x0 + renderer.textWidth(merged, shadow, ts);
+        HudText.text(renderer, merged, x0, textY, mutedColor.get(), shadow, ts);
+        double x = x0 + HudText.textWidth(renderer, merged, shadow, ts);
         postItem(renderer, Items.FIREWORK_ROCKET.getDefaultStack(), x, centerY - ico / 2.0, ico);
         x += ico + 2.0 * s;
-        renderer.text("≈38m", x, textY, mutedColor.get(), shadow, ts);
+        HudText.text(renderer, "\u224838m", x, textY, mutedColor.get(), shadow, ts);
 
         setSize(width + inset * 2.0, height + inset * 2.0);
     }
@@ -898,8 +899,8 @@ public class RegearStatusHud extends HudElement {
     // ---------------------------------------------------------------- small shared pieces
 
     private double sep(HudRenderer renderer, double x, double y, boolean shadow, double ts) {
-        renderer.text(" · ", x, y, mutedColor.get(), shadow, ts);
-        return x + renderer.textWidth(" · ", shadow, ts);
+        HudText.text(renderer, " \u00b7 ", x, y, mutedColor.get(), shadow, ts);
+        return x + HudText.textWidth(renderer, " \u00b7 ", shadow, ts);
     }
 
     private SettingColor stockColor(int value, int low) {

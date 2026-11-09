@@ -15,6 +15,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -70,11 +71,11 @@ public final class SorterStatusHud extends HudElement {
         double scale = size.get();
         boolean shade = shadow.get();
         double pad = 8 * scale;
-        double rowHeight = renderer.textHeight(shade, scale) + 4 * scale;
+        double rowHeight = HudText.textHeight(renderer, shade, scale) + 4 * scale;
         double titleScale = scale * 1.15;
-        double titleHeight = renderer.textHeight(shade, titleScale) + 5 * scale;
+        double titleHeight = HudText.textHeight(renderer, shade, titleScale) + 5 * scale;
         double contentWidth = Math.max(340 * scale,
-            renderer.textWidth("Delivered 000 shulkers (000 purified) · 000 loose stacks", shade, scale));
+            HudText.textWidth(renderer, "Delivered 000 shulkers (000 purified) \u00b7 000 loose stacks", shade, scale));
         List<Line> lines = lines(snapshot);
         boolean steps = density.get() == Density.FULL && snapshot.stage() != null;
         List<String> alerts = new ArrayList<>();
@@ -104,22 +105,22 @@ public final class SorterStatusHud extends HudElement {
         double left = x + pad;
         double top = y + pad;
         String clock = snapshot.durationMillis() > 0 ? duration(snapshot.durationMillis()) : "";
-        double clockWidth = renderer.textWidth(clock, shade, scale);
-        renderer.text("SHULKER SORTER", left, top, MUTED, shade, titleScale);
+        double clockWidth = HudText.textWidth(renderer, clock, shade, scale);
+        HudText.text(renderer, "SHULKER SORTER", left, top, MUTED, shade, titleScale);
         if (!clock.isEmpty()) {
-            renderer.text(clock, left + contentWidth - clockWidth, top, WHITE, shade, scale);
+            HudText.text(renderer, clock, left + contentWidth - clockWidth, top, WHITE, shade, scale);
         }
         top += titleHeight;
         float stateFreshness = pulse.freshness("state", snapshot.mode() + ":" + snapshot.state(), 700);
         Color stateColor = animations.get() ? HudPulse.tint(HudPulse.Style.Subtle, accent, WHITE, stateFreshness) : accent;
-        renderer.text(fit(renderer, snapshot.state(), contentWidth, shade, scale), left, top, stateColor, shade, scale);
+        HudText.text(renderer, fit(renderer, snapshot.state(), contentWidth, shade, scale), left, top, stateColor, shade, scale);
         top += rowHeight;
         if (steps) {
             String[] names = { "Inputs", "Sort", "Station", "Pack", "Store" };
             double segment = contentWidth / names.length;
             for (int i = 0; i < names.length; i++) {
                 boolean current = snapshot.stage().ordinal() == i;
-                renderer.text(names[i], left + segment * i, top, current ? accent : MUTED, shade, scale);
+                HudText.text(renderer, names[i], left + segment * i, top, current ? accent : MUTED, shade, scale);
                 if (current) {
                     renderer.quad(left + segment * i, top + rowHeight - 2 * scale, segment - 10 * scale,
                         Math.max(1, scale), accent);
@@ -128,8 +129,8 @@ public final class SorterStatusHud extends HudElement {
             top += rowHeight + 4 * scale;
         }
         for (Line line : lines) {
-            double labelWidth = renderer.textWidth(line.label(), shade, scale) + 10 * scale;
-            renderer.text(line.label(), left, top, MUTED, shade, scale);
+            double labelWidth = HudText.textWidth(renderer, line.label(), shade, scale) + 10 * scale;
+            HudText.text(renderer, line.label(), left, top, MUTED, shade, scale);
             Color color = line.color();
             if (line.counter() != null) {
                 float freshness = pulse.freshness(line.counter(), line.value(), 900);
@@ -137,16 +138,16 @@ public final class SorterStatusHud extends HudElement {
                     color = HudPulse.tint(HudPulse.Style.Subtle, line.color(), GREEN, freshness);
                 }
             }
-            renderer.text(fit(renderer, line.value(), contentWidth - labelWidth, shade, scale),
+            HudText.text(renderer, fit(renderer, line.value(), contentWidth - labelWidth, shade, scale),
                 left + labelWidth, top, color, shade, scale);
             top += rowHeight;
         }
         if (!alerts.isEmpty()) {
             top += 4 * scale;
-            renderer.text(alertLabel, left, top, alertColor, shade, scale);
+            HudText.text(renderer, alertLabel, left, top, alertColor, shade, scale);
             top += rowHeight;
             for (String line : alerts) {
-                renderer.text(line, left, top, alertColor, shade, scale);
+                HudText.text(renderer, line, left, top, alertColor, shade, scale);
                 top += rowHeight;
             }
         }
@@ -238,11 +239,11 @@ public final class SorterStatusHud extends HudElement {
     }
 
     private static String fit(HudRenderer renderer, String text, double width, boolean shadow, double scale) {
-        if (renderer.textWidth(text, shadow, scale) <= width) {
+        if (HudText.textWidth(renderer, text, shadow, scale) <= width) {
             return text;
         }
         int length = text.length();
-        while (length > 0 && renderer.textWidth(text.substring(0, length) + "…", shadow, scale) > width) {
+        while (length > 0 && HudText.textWidth(renderer, text.substring(0, length) + "\u2026", shadow, scale) > width) {
             length--;
         }
         return length == 0 ? "" : text.substring(0, length) + "…";
@@ -253,7 +254,7 @@ public final class SorterStatusHud extends HudElement {
         StringBuilder line = new StringBuilder();
         for (String word : text.split("\\s+")) {
             String candidate = line.isEmpty() ? word : line + " " + word;
-            if (!line.isEmpty() && renderer.textWidth(candidate, shadow, scale) > width) {
+            if (!line.isEmpty() && HudText.textWidth(renderer, candidate, shadow, scale) > width) {
                 lines.add(fit(renderer, line.toString(), width, shadow, scale));
                 line.setLength(0);
             }

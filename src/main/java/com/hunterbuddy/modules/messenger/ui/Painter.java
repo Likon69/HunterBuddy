@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules.messenger.ui;
 
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 
@@ -25,11 +26,11 @@ public final class Painter {
     }
 
     public double lineHeight() {
-        return renderer.textHeight(shadow, scale);
+        return HudText.textHeight(renderer, shadow, scale);
     }
 
     public double width(String text) {
-        return renderer.textWidth(text, shadow, scale);
+        return HudText.textWidth(renderer, text, shadow, scale);
     }
 
     public double advance(String text) {
@@ -48,7 +49,7 @@ public final class Painter {
     }
 
     public void text(String text, double x, double y, Color color) {
-        renderer.text(text, x, y, tint(color), shadow, scale);
+        HudText.text(renderer, text, x, y, tint(color), shadow, scale);
     }
 
     public void rect(double x, double y, double w, double h, Color color) {

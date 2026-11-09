@@ -16,6 +16,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -387,7 +388,7 @@ public class FollowerRouteHud extends HudElement {
         double inset = panel.padding();
         double width = laneWidth.get() * scale;
         double laneH = LANE_HEIGHT * scale;
-        double lineHeight = renderer.textHeight(shadow, scale);
+        double lineHeight = HudText.textHeight(renderer, shadow, scale);
         double underH = showUnder.get() ? lineHeight + 2.0 * scale : 0.0;
         double height = laneH + underH;
 
@@ -642,7 +643,7 @@ public class FollowerRouteHud extends HudElement {
             // with the age of the pause: a fresh pause breathes, a long one is
             // nearly asleep. The one motion of a frozen lane.
             String chip = "PAUSED";
-            double cw = renderer.textWidth(chip, shadow, scale * 0.8);
+            double cw = HudText.textWidth(renderer, chip, shadow, scale * 0.8);
             renderer.quad(x0, y0, cw + 8.0 * scale, lineHeight + 2.0 * scale, new Color(74, 82, 97, 165));
 
             int chipTextA = 255;
@@ -651,12 +652,12 @@ public class FollowerRouteHud extends HudElement {
                 double chipT = MathHelper.clamp(2.0 + pauseAge / 20.0, 2.0, 4.5);
                 chipTextA = (int) (150.0 + 85.0 * (0.5 + 0.5 * Math.sin(animTime * Math.PI * 2.0 / chipT)));
             }
-            renderer.text(chip, x0 + 4.0 * scale, y0 + 1.0 * scale,
+            HudText.text(renderer, chip, x0 + 4.0 * scale, y0 + 1.0 * scale,
                 new Color(205, 211, 221, chipTextA), shadow, scale * 0.8);
         } else {
-            double tailW = renderer.textWidth(mode, shadow, scale * 0.85);
+            double tailW = HudText.textWidth(renderer, mode, shadow, scale * 0.85);
             tailX = x0 + width - tailW;
-            renderer.text(mode, tailX, textY, laneColor.get(), shadow, scale * 0.85);
+            HudText.text(renderer, mode, tailX, textY, laneColor.get(), shadow, scale * 0.85);
         }
 
         if (overflow > 0) {
@@ -664,11 +665,11 @@ public class FollowerRouteHud extends HudElement {
             // a shrinking route shows its progress even out in the overflow.
             String more = "+" + overflow;
             float overflowFresh = anim ? pulse.freshness("overflow", more, 800L) : 0.0f;
-            double mw = renderer.textWidth(more, shadow, scale * 0.85);
+            double mw = HudText.textWidth(renderer, more, shadow, scale * 0.85);
             double px = tailX - mw - 10.0 * scale;
             renderer.quad(px - 3.0 * scale, textY - 1.0 * scale, mw + 6.0 * scale, lineHeight + 2.0 * scale,
                 new Color(laneColor.get().r, laneColor.get().g, laneColor.get().b, 60));
-            renderer.text(more, px, textY,
+            HudText.text(renderer, more, px, textY,
                 HudPulse.tint(HudPulse.Style.Subtle, laneColor.get(), accentColor.get(), overflowFresh),
                 shadow, scale * 0.85);
         }
@@ -678,8 +679,8 @@ public class FollowerRouteHud extends HudElement {
             // arrival dimmed behind its dot.
             String bright = distText;
             String dim = " · " + etaText;
-            double bw = renderer.textWidth(bright, shadow, scale);
-            double uw = bw + renderer.textWidth(dim, shadow, scale);
+            double bw = HudText.textWidth(renderer, bright, shadow, scale);
+            double uw = bw + HudText.textWidth(renderer, dim, shadow, scale);
 
             // Centred under the current milestone, but never sliding into the
             // lane's reserved right end -- the +N pill and the mode live there,
@@ -694,7 +695,7 @@ public class FollowerRouteHud extends HudElement {
             float distFresh = anim && !paused && cumulative.length > 0
                 ? pulse.freshness("dist100", String.valueOf((int) (cumulative[0] / 100.0)), 350L)
                 : 0.0f;
-            renderer.text(bright, ux, uy,
+            HudText.text(renderer, bright, ux, uy,
                 paused ? laneColor.get()
                     : HudPulse.tint(HudPulse.Style.Subtle, textColor.get(), accentColor.get(), distFresh),
                 shadow, scale);
@@ -708,7 +709,7 @@ public class FollowerRouteHud extends HudElement {
                     (int) (laneColor.get().b + (STALL_AMBER.b - laneColor.get().b) * etaWarnFresh),
                     255)
                 : laneColor.get();
-            renderer.text(dim, ux + bw, uy, dimC, shadow, scale);
+            HudText.text(renderer, dim, ux + bw, uy, dimC, shadow, scale);
         }
 
         setSize(width + inset * 2.0, height + inset * 2.0);

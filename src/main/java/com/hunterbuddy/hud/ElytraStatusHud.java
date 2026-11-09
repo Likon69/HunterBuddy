@@ -11,6 +11,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.BoolSetting.Builder;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -209,7 +210,7 @@ public class ElytraStatusHud extends HudElement {
    public void render(HudRenderer renderer) {
       boolean shadow = this.textShadow.get();
       double scale = this.textScale.get();
-      double textHeight = renderer.textHeight(shadow, scale);
+      double textHeight = HudText.textHeight(renderer, shadow, scale);
       // Padding on each side of the separator, scaled with the text so the line
       // does not fall apart when the element is enlarged.
       double pad = (this.compactSpacing.get() ? 2.0 : 5.0) * scale;
@@ -522,10 +523,10 @@ public class ElytraStatusHud extends HudElement {
    private double segmentWidth(HudRenderer renderer, String prefix, String value, String unit,
                                boolean first, boolean shadow, double scale, double pad) {
       double w = 0.0;
-      if (!first) w += pad * 2 + renderer.textWidth("·", shadow, scale);
-      if (prefix != null) w += renderer.textWidth(prefix, shadow, scale);
-      w += renderer.textWidth(value, shadow, scale);
-      if (unit != null) w += renderer.textWidth(unit, shadow, scale);
+      if (!first) w += pad * 2 + HudText.textWidth(renderer, "\u00b7", shadow, scale);
+      if (prefix != null) w += HudText.textWidth(renderer, prefix, shadow, scale);
+      w += HudText.textWidth(renderer, value, shadow, scale);
+      if (unit != null) w += HudText.textWidth(renderer, unit, shadow, scale);
       return w;
    }
 
@@ -537,21 +538,21 @@ public class ElytraStatusHud extends HudElement {
       for (Segment segment : this.segments) {
          if (!segment.first) {
             x += pad;
-            renderer.text("·", x, y, this.labelColor.get(), shadow, scale);
-            x += renderer.textWidth("·", shadow, scale) + pad;
+            HudText.text(renderer, "\u00b7", x, y, this.labelColor.get(), shadow, scale);
+            x += HudText.textWidth(renderer, "\u00b7", shadow, scale) + pad;
          }
 
          if (segment.prefix != null) {
-            renderer.text(segment.prefix, x, y, this.labelColor.get(), shadow, scale);
-            x += renderer.textWidth(segment.prefix, shadow, scale);
+            HudText.text(renderer, segment.prefix, x, y, this.labelColor.get(), shadow, scale);
+            x += HudText.textWidth(renderer, segment.prefix, shadow, scale);
          }
 
-         renderer.text(segment.value, x, y, segment.color, shadow, scale);
-         x += renderer.textWidth(segment.value, shadow, scale);
+         HudText.text(renderer, segment.value, x, y, segment.color, shadow, scale);
+         x += HudText.textWidth(renderer, segment.value, shadow, scale);
 
          if (segment.unit != null) {
-            renderer.text(segment.unit, x, y, this.labelColor.get(), shadow, scale);
-            x += renderer.textWidth(segment.unit, shadow, scale);
+            HudText.text(renderer, segment.unit, x, y, this.labelColor.get(), shadow, scale);
+            x += HudText.textWidth(renderer, segment.unit, shadow, scale);
          }
       }
    }

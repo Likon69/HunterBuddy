@@ -10,6 +10,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.world.Timer;
@@ -68,21 +69,21 @@ public class TimerGaugeHud extends HudElement {
         String value = String.format("%." + decimals.get() + "fx", speed);
         boolean useShadow = shadow.get();
         double s = scale.get();
-        double lineHeight = renderer.textHeight(useShadow, s);
+        double lineHeight = HudText.textHeight(renderer, useShadow, s);
 
-        double width = renderer.textWidth(value, useShadow, s);
+        double width = HudText.textWidth(renderer, value, useShadow, s);
         double valueY = y;
         double height = lineHeight;
 
         if (showTitle.get()) {
             String title = "Timer";
-            renderer.text(title, x, y, titleColor.get(), useShadow, s);
-            width = Math.max(width, renderer.textWidth(title, useShadow, s));
+            HudText.text(renderer, title, x, y, titleColor.get(), useShadow, s);
+            width = Math.max(width, HudText.textWidth(renderer, title, useShadow, s));
             valueY = y + lineHeight + 2;
             height = lineHeight * 2 + 2;
         }
 
-        renderer.text(value, x, valueY, speedColor.get(), useShadow, s);
+        HudText.text(renderer, value, x, valueY, speedColor.get(), useShadow, s);
         setSize(width, height);
     }
 }

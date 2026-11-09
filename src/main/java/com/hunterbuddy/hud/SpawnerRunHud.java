@@ -19,6 +19,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -1055,16 +1056,16 @@ public class SpawnerRunHud extends HudElement {
 
     private double maxTextWidth(HudRenderer renderer, String[] arr, boolean shadow, double s) {
         double m = 0.0;
-        for (String w : arr) m = Math.max(m, renderer.textWidth(w, shadow, s));
+        for (String w : arr) m = Math.max(m, HudText.textWidth(renderer, w, shadow, s));
         return m;
     }
 
     private void drawClipped(HudRenderer renderer, String text, double x, double y, double maxWidth, Color color, boolean shadow, double s) {
         String t = text;
-        while (!t.isEmpty() && renderer.textWidth(t, shadow, s) > maxWidth) {
+        while (!t.isEmpty() && HudText.textWidth(renderer, t, shadow, s) > maxWidth) {
             t = t.substring(0, t.length() - 1);
         }
-        if (!t.isEmpty()) renderer.text(t, x, y, color, shadow, s);
+        if (!t.isEmpty()) HudText.text(renderer, t, x, y, color, shadow, s);
     }
 
 
@@ -1131,27 +1132,27 @@ public class SpawnerRunHud extends HudElement {
         double sectionGap = CONSOLE_SECTION_GAP * s;
         double pillPadX = 3.0 * s;
 
-        double titleH = renderer.textHeight(shadow, titleScale);
-        double textH = renderer.textHeight(shadow, textScale);
-        double microH = renderer.textHeight(shadow, microScale);
-        double valueH = renderer.textHeight(shadow, s);
+        double titleH = HudText.textHeight(renderer, shadow, titleScale);
+        double textH = HudText.textHeight(renderer, shadow, textScale);
+        double microH = HudText.textHeight(renderer, shadow, microScale);
+        double valueH = HudText.textHeight(renderer, shadow, s);
         double pillH = microH + 2.0 * s;
 
         double dotLeft = stripeW + 4.0 * s;
         double titleX = dotLeft + dotR * 2.0 + 5.0 * s;
         double titleW = maxTextWidth(renderer, CARD_LABELS, shadow, titleScale);
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, titleScale);
-        double runInfoW = renderer.textWidth(RUN_INFO_TEMPLATE, shadow, textScale);
-        double clockW = renderer.textWidth(CLOCK_TEMPLATE, shadow, clockScale);
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, titleScale);
+        double runInfoW = HudText.textWidth(renderer, RUN_INFO_TEMPLATE, shadow, textScale);
+        double clockW = HudText.textWidth(renderer, CLOCK_TEMPLATE, shadow, clockScale);
         double tagW = maxTextWidth(renderer, CONSOLE_LOG_TAGS, shadow, microScale) + pillPadX * 2.0;
-        double numW = renderer.textWidth(RUN_NUM_TEMPLATE, shadow, textScale);
-        double durW = renderer.textWidth(CHRONO_TEMPLATE, shadow, textScale);
-        double chestsW = renderer.textWidth(CHESTS_TEMPLATE, shadow, textScale);
-        double shulkW = renderer.textWidth(SHULKERS_TEMPLATE, shadow, textScale);
+        double numW = HudText.textWidth(renderer, RUN_NUM_TEMPLATE, shadow, textScale);
+        double durW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, textScale);
+        double chestsW = HudText.textWidth(renderer, CHESTS_TEMPLATE, shadow, textScale);
+        double shulkW = HudText.textWidth(renderer, SHULKERS_TEMPLATE, shadow, textScale);
         double badgeW = maxTextWidth(renderer, OUTCOME_WORDS, shadow, microScale) + pillPadX * 2.0;
-        double activeW = renderer.textWidth(ACTIVE_TEMPLATE, shadow, microScale);
+        double activeW = HudText.textWidth(renderer, ACTIVE_TEMPLATE, shadow, microScale);
         double tileContentW = Math.max(
-            Math.max(renderer.textWidth(TILE_VALUE_TEMPLATE, shadow, s), renderer.textWidth(CHRONO_TEMPLATE, shadow, s)),
+            Math.max(HudText.textWidth(renderer, TILE_VALUE_TEMPLATE, shadow, s), HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s)),
             maxTrackedWidth(renderer, TILE_LABELS, shadow, microScale, tracking));
 
         boolean showHist = historyRuns.get() > 0;
@@ -1206,8 +1207,8 @@ public class SpawnerRunHud extends HudElement {
         drawClipped(renderer, v.label(), x0 + titleX, titleY + (1.0 - labelProgress) * slide, titleAvail,
             faded(v.titleColor(), (float) labelProgress), shadow, titleScale);
 
-        double chronoTextW = renderer.textWidth(v.chrono(), shadow, titleScale);
-        renderer.text(v.chrono(), x0 + width - chronoTextW, titleY, toneColor(v.tone()), shadow, titleScale);
+        double chronoTextW = HudText.textWidth(renderer, v.chrono(), shadow, titleScale);
+        HudText.text(renderer, v.chrono(), x0 + width - chronoTextW, titleY, toneColor(v.tone()), shadow, titleScale);
 
         double line2Y = line1Y + line1H;
         double detailY = line2Y + (line2H - textH) / 2.0;
@@ -1216,12 +1217,12 @@ public class SpawnerRunHud extends HudElement {
         drawClipped(renderer, v.detail(), x0 + titleX, detailY, detailAvail, mutedColor.get(), shadow, textScale);
         if (hasRun) {
             String sep = " · ";
-            double totalX = x0 + width - renderer.textWidth(v.runTotal(), shadow, textScale);
-            double sepX = totalX - renderer.textWidth(sep, shadow, textScale);
-            double tagX = sepX - renderer.textWidth(v.runTag(), shadow, textScale);
-            renderer.text(v.runTag(), tagX, detailY, accentColor.get(), shadow, textScale);
-            renderer.text(sep, sepX, detailY, faded(mutedColor.get(), 0.7f), shadow, textScale);
-            renderer.text(v.runTotal(), totalX, detailY, valueColor.get(), shadow, textScale);
+            double totalX = x0 + width - HudText.textWidth(renderer, v.runTotal(), shadow, textScale);
+            double sepX = totalX - HudText.textWidth(renderer, sep, shadow, textScale);
+            double tagX = sepX - HudText.textWidth(renderer, v.runTag(), shadow, textScale);
+            HudText.text(renderer, v.runTag(), tagX, detailY, accentColor.get(), shadow, textScale);
+            HudText.text(renderer, sep, sepX, detailY, faded(mutedColor.get(), 0.7f), shadow, textScale);
+            HudText.text(renderer, v.runTotal(), totalX, detailY, valueColor.get(), shadow, textScale);
         }
 
         double barY = line2Y + line2H + 3.0 * s;
@@ -1310,11 +1311,11 @@ public class SpawnerRunHud extends HudElement {
 
     private void drawCaption(HudRenderer renderer, String caption, String right, double rightW, double x, double y, double w, double h,
                              boolean shadow, double scale, double tracking, double s) {
-        double ty = y + (h - renderer.textHeight(shadow, scale)) / 2.0;
+        double ty = y + (h - HudText.textHeight(renderer, shadow, scale)) / 2.0;
         double end = drawTracked(renderer, caption, x, ty, faded(mutedColor.get(), 0.9f), shadow, scale, tracking);
         double ruleEnd = x + w;
         if (!right.isEmpty()) {
-            renderer.text(right, x + w - renderer.textWidth(right, shadow, scale), ty, faded(mutedColor.get(), 0.75f), shadow, scale);
+            HudText.text(renderer, right, x + w - HudText.textWidth(renderer, right, shadow, scale), ty, faded(mutedColor.get(), 0.75f), shadow, scale);
             ruleEnd = x + w - rightW - 4.0 * s;
         }
         double ruleX = end + 4.0 * s;
@@ -1334,14 +1335,14 @@ public class SpawnerRunHud extends HudElement {
             logSlideStartMs = now;
             lastBottomLogKey = bottomKey;
         }
-        double textH = renderer.textHeight(shadow, textScale);
-        double clockH = renderer.textHeight(shadow, clockScale);
+        double textH = HudText.textHeight(renderer, shadow, textScale);
+        double clockH = HudText.textHeight(renderer, shadow, clockScale);
         double tagX = x + clockW + gap * 2.0;
         double textX = tagX + tagW + gap * 2.0;
         double textAvail = Math.max(0.0, x + w - textX);
         double drawnH = Math.max(pillH, Math.max(textH, clockH));
         if (lines.isEmpty()) {
-            renderer.text("waiting for the first event", textX, y + (rowH - textH) / 2.0, faded(mutedColor.get(), 0.6f), shadow, textScale);
+            HudText.text(renderer, "waiting for the first event", textX, y + (rowH - textH) / 2.0, faded(mutedColor.get(), 0.6f), shadow, textScale);
             return;
         }
         int total = lines.size();
@@ -1360,7 +1361,7 @@ public class SpawnerRunHud extends HudElement {
             float a = (float) (rowAlpha * enter);
             if (e.seq() == -2L && anim) a *= (float) (0.6 + 0.4 * Math.cos(animTime * 2.0 * Math.PI / 1.1));
             double rowY = y + i * rowH + dy;
-            renderer.text(formatClock(e.whenMs()), x, rowY + (rowH - clockH) / 2.0, faded(mutedColor.get(), a * 0.85f), shadow, clockScale);
+            HudText.text(renderer, formatClock(e.whenMs()), x, rowY + (rowH - clockH) / 2.0, faded(mutedColor.get(), a * 0.85f), shadow, clockScale);
             drawPill(renderer, e.tag(), tagX, rowY + (rowH - pillH) / 2.0, tagW, pillH, logTagColor(e), a, (float) (0.18 + 0.32 * flash), shadow, microScale);
             drawClipped(renderer, e.text(), textX, rowY + (rowH - textH) / 2.0, textAvail, faded(toneColor(e.tone()), a), shadow, textScale);
         }
@@ -1376,9 +1377,9 @@ public class SpawnerRunHud extends HudElement {
     private void drawConsoleHistory(HudRenderer renderer, List<RunSummary> runs, int shown, double reveal, double x, double y, double w, double rowH,
                                     double numW, double durW, double chestsW, double shulkW, double badgeW, double pillH, double limitY,
                                     boolean shadow, double textScale, double microScale, double gap, double s) {
-        double textH = renderer.textHeight(shadow, textScale);
+        double textH = HudText.textHeight(renderer, shadow, textScale);
         if (shown == 0) {
-            renderer.text("no finished run yet", x, y + (rowH - textH) / 2.0, faded(mutedColor.get(), 0.6f), shadow, textScale);
+            HudText.text(renderer, "no finished run yet", x, y + (rowH - textH) / 2.0, faded(mutedColor.get(), 0.6f), shadow, textScale);
             return;
         }
         double badgeX = x + w - badgeW;
@@ -1399,7 +1400,7 @@ public class SpawnerRunHud extends HudElement {
             double rowY = y + i * rowH + drop;
             double ty = rowY + (rowH - textH) / 2.0;
 
-            renderer.text("#" + r.number(), x, ty, faded(mutedColor.get(), a), shadow, textScale);
+            HudText.text(renderer, "#" + r.number(), x, ty, faded(mutedColor.get(), a), shadow, textScale);
 
             double by = rowY + (rowH - bandH) / 2.0;
             renderer.quad(bandX, by, bandW, bandH, faded(mutedColor.get(), 0.14f * a));
@@ -1415,7 +1416,7 @@ public class SpawnerRunHud extends HudElement {
             }
 
             String dur = formatSpan(r.run().totalMs());
-            renderer.text(dur, durX + durW - renderer.textWidth(dur, shadow, textScale), ty, faded(valueColor.get(), a), shadow, textScale);
+            HudText.text(renderer, dur, durX + durW - HudText.textWidth(renderer, dur, shadow, textScale), ty, faded(valueColor.get(), a), shadow, textScale);
             if (r.outcome() != Outcome.CRUISE) {
                 Color chestColor = r.chests() > 0 ? faded(valueColor.get(), a) : faded(mutedColor.get(), a * 0.7f);
                 drawClipped(renderer, plural(r.chests(), "chest"), chestsX, ty, chestsW, chestColor, shadow, textScale);
@@ -1443,7 +1444,7 @@ public class SpawnerRunHud extends HudElement {
             Integer.toString(v.rooms()), Integer.toString(v.spawners()), Integer.toString(v.chests()),
             Integer.toString(v.shulkers()), v.avgRun(), v.perHour()
         };
-        double valueH = renderer.textHeight(shadow, s);
+        double valueH = HudText.textHeight(renderer, shadow, s);
         double tileW = w / values.length;
         for (int i = 0; i < values.length; i++) {
             double tx = x + i * tileW;
@@ -1453,7 +1454,7 @@ public class SpawnerRunHud extends HudElement {
             Color base = empty ? faded(mutedColor.get(), 0.7f) : i == 3 ? accentColor.get() : valueColor.get();
             Color c = anim && fresh > 0.0f ? mix(base, accentColor.get(), fresh) : base;
             double inner = i == 0 ? 0.0 : gap;
-            renderer.text(values[i], tx + inner, y, c, shadow, s);
+            HudText.text(renderer, values[i], tx + inner, y, c, shadow, s);
             drawTracked(renderer, TILE_LABELS[i], tx + inner, y + valueH + 2.0 * s, faded(mutedColor.get(), 0.85f), shadow, microScale, tracking);
         }
     }
@@ -1461,10 +1462,10 @@ public class SpawnerRunHud extends HudElement {
     private void drawPill(HudRenderer renderer, String text, double x, double y, double w, double h, Color color,
                           float alpha, float fillAlpha, boolean shadow, double scale) {
         pill(renderer, x, y, w, h, faded(color, fillAlpha * alpha));
-        double tw = renderer.textWidth(text, shadow, scale);
-        double ty = y + (h - renderer.textHeight(shadow, scale)) / 2.0;
+        double tw = HudText.textWidth(renderer, text, shadow, scale);
+        double ty = y + (h - HudText.textHeight(renderer, shadow, scale)) / 2.0;
         if (tw > w) drawClipped(renderer, text, x, ty, w, faded(color, alpha), shadow, scale);
-        else renderer.text(text, x + (w - tw) / 2.0, ty, faded(color, alpha), shadow, scale);
+        else HudText.text(renderer, text, x + (w - tw) / 2.0, ty, faded(color, alpha), shadow, scale);
     }
 
     private void pill(HudRenderer renderer, double x, double y, double w, double h, Color colour) {
@@ -1493,15 +1494,15 @@ public class SpawnerRunHud extends HudElement {
         double cx = x;
         for (int i = 0; i < text.length(); i++) {
             String ch = String.valueOf(text.charAt(i));
-            renderer.text(ch, cx, y, color, shadow, scale);
-            cx += renderer.textWidth(ch, shadow, scale) + tracking;
+            HudText.text(renderer, ch, cx, y, color, shadow, scale);
+            cx += HudText.textWidth(renderer, ch, shadow, scale) + tracking;
         }
         return text.isEmpty() ? x : cx - tracking;
     }
 
     private double trackedWidth(HudRenderer renderer, String text, boolean shadow, double scale, double tracking) {
         double w = 0.0;
-        for (int i = 0; i < text.length(); i++) w += renderer.textWidth(String.valueOf(text.charAt(i)), shadow, scale);
+        for (int i = 0; i < text.length(); i++) w += HudText.textWidth(renderer, String.valueOf(text.charAt(i)), shadow, scale);
         return w + tracking * Math.max(0, text.length() - 1);
     }
 
@@ -1539,11 +1540,11 @@ public class SpawnerRunHud extends HudElement {
         double histGap = HIST_GAP * s;
 
         double wordW = maxTextWidth(renderer, SHORT_WORDS, shadow, s);
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s);
 
         boolean withHistory = showHistory.get();
         int historyRows = withHistory ? Math.min(HIST_ROWS, history.size()) : 0;
-        double legendH = historyRows > 0 ? renderer.textHeight(shadow, s * 0.75) + 2.0 * s : 0.0;
+        double legendH = historyRows > 0 ? HudText.textHeight(renderer, shadow, s * 0.75) + 2.0 * s : 0.0;
 
         double width = Math.max(wordW + gap + gaugeW + gap + chronoW, MIN_BAND_W * s);
         double height = row1H + gap + row2H + (historyRows > 0 ? gap + legendH + historyRows * (histH + histGap) : 0.0);
@@ -1557,18 +1558,18 @@ public class SpawnerRunHud extends HudElement {
 
         double y = y0 + row1H + gap;
         boolean pausedForDisplay = isPausableState(stateName) && detector.isAutoPaused();
-        double totalW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s * 0.8);
+        double totalW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s * 0.8);
         double bandW = Math.max(0.0, width - gap - totalW);
         long liveTotal = runStartMs > 0L ? now - runStartMs : 0L;
         drawBand(renderer, x0, y, bandW, row2H, now, shadow, s, anim, runSegments, liveTotal, runFailedCap, pausedForDisplay);
         String totalText = formatSpan(liveTotal);
-        double totalTextH = renderer.textHeight(shadow, s * 0.8);
-        renderer.text(totalText, x0 + width - renderer.textWidth(totalText, shadow, s * 0.8), y + (row2H - totalTextH) / 2.0, valueColor.get(), shadow, s * 0.8);
+        double totalTextH = HudText.textHeight(renderer, shadow, s * 0.8);
+        HudText.text(renderer, totalText, x0 + width - HudText.textWidth(renderer, totalText, shadow, s * 0.8), y + (row2H - totalTextH) / 2.0, valueColor.get(), shadow, s * 0.8);
         y += row2H;
 
         if (historyRows > 0) {
             y += gap;
-            renderer.text("last runs", x0, y, mutedColor.get(), shadow, s * 0.75);
+            HudText.text(renderer, "last runs", x0, y, mutedColor.get(), shadow, s * 0.75);
             y += legendH;
             double maxTotal = maxHistTotal(now);
             double scale = maxTotal > 0.0 ? bandW / maxTotal : 1.0;
@@ -1603,7 +1604,7 @@ public class SpawnerRunHud extends HudElement {
     private void drawRow1(HudRenderer renderer, SpawnerDetector detector, String stateName, StepInfo step, long elapsed, long now,
                           double x0, double y0, double rowH, double wordW, double gaugeW, double gap, double chronoW,
                           boolean shadow, double s, boolean anim) {
-        double textH = renderer.textHeight(shadow, s);
+        double textH = HudText.textHeight(renderer, shadow, s);
         double textY = y0 + (rowH - textH) / 2.0;
 
         double wordProgress = anim ? Math.min(1.0, (now - wordChangeMs) / (double) WORD_ANIM_MS) : 1.0;
@@ -1625,7 +1626,7 @@ public class SpawnerRunHud extends HudElement {
         SettingColor chronoColor = chronoColor(detector, stateName, elapsed, now);
         String chronoText = formatSpan(elapsed);
         double cx = x0 + wordW + gap + gaugeW + gap;
-        renderer.text(chronoText, cx, textY, chronoColor, shadow, s);
+        HudText.text(renderer, chronoText, cx, textY, chronoColor, shadow, s);
     }
 
     private void drawGauge(HudRenderer renderer, StepInfo step, double x, double y, double w, double h, boolean shadow, double s, boolean anim) {
@@ -1697,7 +1698,7 @@ public class SpawnerRunHud extends HudElement {
     private void drawBarWithNumber(HudRenderer renderer, double x, double y, double w, double h,
                                    double fraction, SettingColor color, String numberText, String numberTemplate, boolean shadow, double s) {
         double numScale = s * 0.85;
-        double numberW = numberTemplate.isEmpty() ? 0.0 : renderer.textWidth(numberTemplate, shadow, numScale);
+        double numberW = numberTemplate.isEmpty() ? 0.0 : HudText.textWidth(renderer, numberTemplate, shadow, numScale);
         double numGap = numberText.isEmpty() ? 0.0 : 4.0 * s;
         double barW = Math.max(4.0, w - numberW - numGap);
         double barH = Math.max(3.0, h * 0.4);
@@ -1708,10 +1709,10 @@ public class SpawnerRunHud extends HudElement {
         if (fillW > 0.3) renderer.quad(x, barY, fillW, barH, color);
 
         if (!numberText.isEmpty()) {
-            double textH = renderer.textHeight(shadow, numScale);
-            double textW = renderer.textWidth(numberText, shadow, numScale);
+            double textH = HudText.textHeight(renderer, shadow, numScale);
+            double textW = HudText.textWidth(renderer, numberText, shadow, numScale);
             double tx = x + w - textW;
-            renderer.text(numberText, tx, y + (h - textH) / 2.0, color, shadow, numScale);
+            HudText.text(renderer, numberText, tx, y + (h - textH) / 2.0, color, shadow, numScale);
         }
     }
 
@@ -1859,8 +1860,8 @@ public class SpawnerRunHud extends HudElement {
         double pipRowH = CARD_PIP_ROW_H * s;
 
         double labelW = maxTextWidth(renderer, CARD_LABELS, shadow, s);
-        double rangeW = renderer.textWidth(RANGE_TEMPLATE, shadow, s);
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
+        double rangeW = HudText.textWidth(renderer, RANGE_TEMPLATE, shadow, s);
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s);
         double width = Math.max(labelW + gap + rangeW + gap + chronoW, MIN_CARD_W * s);
 
         boolean showBar = step.kind() == Kind.BAR || step.kind() == Kind.PIPS;
@@ -1872,7 +1873,7 @@ public class SpawnerRunHud extends HudElement {
         double x0 = this.x + pad, y0 = this.y + pad;
         if (background.get()) renderer.quad(this.x, this.y, width + pad * 2.0, height + pad * 2.0, backgroundColor.get());
 
-        double textH = renderer.textHeight(shadow, s);
+        double textH = HudText.textHeight(renderer, shadow, s);
         double textY = y0 + (labelRowH - textH) / 2.0;
         String rangeText = step.rangeFrom() != null
             ? String.format(Locale.ROOT, "y %d -> %d", fmtY(step.rangeFrom()), fmtY(step.rangeTo()))
@@ -1881,10 +1882,10 @@ public class SpawnerRunHud extends HudElement {
 
         String chronoText = formatSpan(elapsed);
         SettingColor chronoColor = chronoColor(detector, stateName, elapsed, now);
-        double chronoTextW = renderer.textWidth(chronoText, shadow, s);
+        double chronoTextW = HudText.textWidth(renderer, chronoText, shadow, s);
         double availableForBig = Math.max(0.0, width - gap - chronoW);
         drawClipped(renderer, bigLine, x0, textY, availableForBig, step.labelColor(), shadow, s);
-        renderer.text(chronoText, x0 + width - chronoTextW, textY, chronoColor, shadow, s);
+        HudText.text(renderer, chronoText, x0 + width - chronoTextW, textY, chronoColor, shadow, s);
 
         double y = y0 + labelRowH;
         if (showBar) {
@@ -1895,12 +1896,12 @@ public class SpawnerRunHud extends HudElement {
         if (showPips) {
             y += gap;
             if (showNote) {
-                double ph = renderer.textHeight(shadow, s * 0.8);
+                double ph = HudText.textHeight(renderer, shadow, s * 0.8);
                 drawClipped(renderer, step.note(), x0, y + (pipRowH - ph) / 2.0, width, mutedColor.get(), shadow, s * 0.8);
             } else {
                 String text = step.valueText().isEmpty() ? step.pillsFilled() + "/" + step.pillsTotal() : step.valueText();
-                double ph = renderer.textHeight(shadow, s * 0.8);
-                double tw = Math.min(width * 0.6, renderer.textWidth(text, shadow, s * 0.8));
+                double ph = HudText.textHeight(renderer, shadow, s * 0.8);
+                double tw = Math.min(width * 0.6, HudText.textWidth(renderer, text, shadow, s * 0.8));
                 drawClipped(renderer, text, x0, y + (pipRowH - ph) / 2.0, width * 0.6, mutedColor.get(), shadow, s * 0.8);
                 double dotsX = x0 + tw + gap;
                 double dotsW = Math.max(10.0 * s, width - tw - gap);
@@ -1921,11 +1922,11 @@ public class SpawnerRunHud extends HudElement {
         double barH = LINE_BAR_H * s;
 
         double wordW = maxTextWidth(renderer, SHORT_WORDS, shadow, s);
-        double rangeW = renderer.textWidth(RANGE_TEMPLATE_COMPACT, shadow, s);
-        double valueW = Math.max(renderer.textWidth(FRACTION_TEMPLATE, shadow, s),
-            Math.max(renderer.textWidth(DIST_TEMPLATE, shadow, s), renderer.textWidth(RETRY_TEMPLATE, shadow, s)));
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
-        double sep = renderer.textWidth(" · ", shadow, s);
+        double rangeW = HudText.textWidth(renderer, RANGE_TEMPLATE_COMPACT, shadow, s);
+        double valueW = Math.max(HudText.textWidth(renderer, FRACTION_TEMPLATE, shadow, s),
+            Math.max(HudText.textWidth(renderer, DIST_TEMPLATE, shadow, s), HudText.textWidth(renderer, RETRY_TEMPLATE, shadow, s)));
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s);
+        double sep = HudText.textWidth(renderer, " \u00b7 ", shadow, s);
 
         double width = Math.max(wordW + sep + rangeW + sep + valueW + sep + chronoW, MIN_LINE_W * s);
         double height = rowH + gap + barH;
@@ -1943,14 +1944,14 @@ public class SpawnerRunHud extends HudElement {
         }
         String prefix = String.join(" · ", parts);
 
-        double textH = renderer.textHeight(shadow, s);
+        double textH = HudText.textHeight(renderer, shadow, s);
         double textY = y0 + (rowH - textH) / 2.0;
         String chronoText = formatSpan(elapsed);
         SettingColor chronoColor = chronoColor(detector, stateName, elapsed, now);
-        double chronoTextW = renderer.textWidth(chronoText, shadow, s);
+        double chronoTextW = HudText.textWidth(renderer, chronoText, shadow, s);
         double availableForPrefix = Math.max(0.0, width - gap - chronoW);
         drawClipped(renderer, prefix, x0, textY, availableForPrefix, step.labelColor(), shadow, s);
-        renderer.text(chronoText, x0 + width - chronoTextW, textY, chronoColor, shadow, s);
+        HudText.text(renderer, chronoText, x0 + width - chronoTextW, textY, chronoColor, shadow, s);
 
         double y = y0 + rowH + gap;
         if (step.kind() == Kind.BAR || step.kind() == Kind.PIPS) {
@@ -2026,29 +2027,29 @@ public class SpawnerRunHud extends HudElement {
         double pipRowH = CARD_PIP_ROW_H * s;
 
         double labelW = maxTextWidth(renderer, CARD_LABELS, shadow, s);
-        double rangeW = renderer.textWidth(RANGE_TEMPLATE, shadow, s);
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
+        double rangeW = HudText.textWidth(renderer, RANGE_TEMPLATE, shadow, s);
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s);
         double width = Math.max(labelW + gap + rangeW + gap + chronoW, MIN_CARD_W * s);
         double height = labelRowH + gap + barRowH + gap + pipRowH;
 
         double x0 = this.x + pad, y0 = this.y + pad;
         if (background.get()) renderer.quad(this.x, this.y, width + pad * 2.0, height + pad * 2.0, backgroundColor.get());
 
-        double textH = renderer.textHeight(shadow, s);
+        double textH = HudText.textHeight(renderer, shadow, s);
         double textY = y0 + (labelRowH - textH) / 2.0;
         String bigLine = "DIGGING  y 45 -> 17";
         String chronoText = "0:37";
-        double chronoTextW = renderer.textWidth(chronoText, shadow, s);
+        double chronoTextW = HudText.textWidth(renderer, chronoText, shadow, s);
         drawClipped(renderer, bigLine, x0, textY, width - gap - chronoW, creuseColor.get(), shadow, s);
-        renderer.text(chronoText, x0 + width - chronoTextW, textY, valueColor.get(), shadow, s);
+        HudText.text(renderer, chronoText, x0 + width - chronoTextW, textY, valueColor.get(), shadow, s);
 
         double y = y0 + labelRowH + gap;
         drawThinBar(renderer, x0, y, width, barRowH, 0.55, creuseColor.get());
         y += barRowH + gap;
 
         String pipText = "retry 2/5";
-        double ph = renderer.textHeight(shadow, s * 0.8);
-        double tw = Math.min(width * 0.6, renderer.textWidth(pipText, shadow, s * 0.8));
+        double ph = HudText.textHeight(renderer, shadow, s * 0.8);
+        double tw = Math.min(width * 0.6, HudText.textWidth(renderer, pipText, shadow, s * 0.8));
         drawClipped(renderer, pipText, x0, y + (pipRowH - ph) / 2.0, width * 0.6, mutedColor.get(), shadow, s * 0.8);
         drawDots(renderer, x0 + tw + gap, y, Math.max(10.0 * s, width - tw - gap), pipRowH, 2, 5, sortieColor.get());
 
@@ -2064,11 +2065,11 @@ public class SpawnerRunHud extends HudElement {
         double barH = LINE_BAR_H * s;
 
         double wordW = maxTextWidth(renderer, SHORT_WORDS, shadow, s);
-        double rangeW = renderer.textWidth(RANGE_TEMPLATE_COMPACT, shadow, s);
-        double valueW = Math.max(renderer.textWidth(FRACTION_TEMPLATE, shadow, s),
-            Math.max(renderer.textWidth(DIST_TEMPLATE, shadow, s), renderer.textWidth(RETRY_TEMPLATE, shadow, s)));
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
-        double sep = renderer.textWidth(" · ", shadow, s);
+        double rangeW = HudText.textWidth(renderer, RANGE_TEMPLATE_COMPACT, shadow, s);
+        double valueW = Math.max(HudText.textWidth(renderer, FRACTION_TEMPLATE, shadow, s),
+            Math.max(HudText.textWidth(renderer, DIST_TEMPLATE, shadow, s), HudText.textWidth(renderer, RETRY_TEMPLATE, shadow, s)));
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s);
+        double sep = HudText.textWidth(renderer, " \u00b7 ", shadow, s);
         double width = Math.max(wordW + sep + rangeW + sep + valueW + sep + chronoW, MIN_LINE_W * s);
         double height = rowH + gap + barH;
 
@@ -2077,11 +2078,11 @@ public class SpawnerRunHud extends HudElement {
 
         String prefix = "DIG · y45->17 · 23/57";
         String chronoText = "0:12";
-        double textH = renderer.textHeight(shadow, s);
+        double textH = HudText.textHeight(renderer, shadow, s);
         double textY = y0 + (rowH - textH) / 2.0;
-        double chronoTextW = renderer.textWidth(chronoText, shadow, s);
+        double chronoTextW = HudText.textWidth(renderer, chronoText, shadow, s);
         drawClipped(renderer, prefix, x0, textY, width - gap - chronoW, creuseColor.get(), shadow, s);
-        renderer.text(chronoText, x0 + width - chronoTextW, textY, valueColor.get(), shadow, s);
+        HudText.text(renderer, chronoText, x0 + width - chronoTextW, textY, valueColor.get(), shadow, s);
 
         double y = y0 + rowH + gap;
         drawThinBar(renderer, x0, y, width, barH, 0.4, creuseColor.get());
@@ -2101,10 +2102,10 @@ public class SpawnerRunHud extends HudElement {
 
         double wordW = maxTextWidth(renderer, SHORT_WORDS, shadow, s);
         double gaugeW = GAUGE_W * s;
-        double chronoW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s);
+        double chronoW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s);
         double width = Math.max(wordW + gap + gaugeW + gap + chronoW, MIN_BAND_W * s);
         int histRows = 3;
-        double legendH = renderer.textHeight(shadow, s * 0.75) + 2.0 * s;
+        double legendH = HudText.textHeight(renderer, shadow, s * 0.75) + 2.0 * s;
         double height = row1H + gap + row2H + gap + legendH + histRows * (histH + histGap);
 
         double x0 = this.x + pad;
@@ -2112,18 +2113,18 @@ public class SpawnerRunHud extends HudElement {
 
         if (background.get()) renderer.quad(this.x, this.y, width + pad * 2.0, height + pad * 2.0, backgroundColor.get());
 
-        double textH = renderer.textHeight(shadow, s);
-        renderer.text("DIG", x0, y0 + (row1H - textH) / 2.0, creuseColor.get(), shadow, s);
+        double textH = HudText.textHeight(renderer, shadow, s);
+        HudText.text(renderer, "DIG", x0, y0 + (row1H - textH) / 2.0, creuseColor.get(), shadow, s);
         drawBarWithNumber(renderer, x0 + wordW + gap, y0, gaugeW, row1H, 0.55, creuseColor.get(), "23/57", FRACTION_TEMPLATE, shadow, s);
         String chronoText = "0:37";
-        renderer.text(chronoText, x0 + wordW + gap + gaugeW + gap, y0 + (row1H - textH) / 2.0, valueColor.get(), shadow, s);
+        HudText.text(renderer, chronoText, x0 + wordW + gap + gaugeW + gap, y0 + (row1H - textH) / 2.0, valueColor.get(), shadow, s);
 
         double y = y0 + row1H + gap;
         int[] demoGroups = {0, 1, 2, 2};
         long[] demoDur = {18_000L, 6_000L, 30_000L, 14_000L};
         double total = 0;
         for (long dd : demoDur) total += dd;
-        double demoTotalW = renderer.textWidth(CHRONO_TEMPLATE, shadow, s * 0.8);
+        double demoTotalW = HudText.textWidth(renderer, CHRONO_TEMPLATE, shadow, s * 0.8);
         double demoBandW = Math.max(0.0, width - gap - demoTotalW);
         double scale = demoBandW / total;
         double cx = x0;
@@ -2134,11 +2135,11 @@ public class SpawnerRunHud extends HudElement {
         }
         drawHatch(renderer, cx - demoDur[3] * scale * 0.3, y, demoDur[3] * scale * 0.3, row2H, amberColor.get(), 0.0);
         String totalText = "1:08";
-        renderer.text(totalText, x0 + width - renderer.textWidth(totalText, shadow, s * 0.8),
-            y + (row2H - renderer.textHeight(shadow, s * 0.8)) / 2.0, valueColor.get(), shadow, s * 0.8);
+        HudText.text(renderer, totalText, x0 + width - HudText.textWidth(renderer, totalText, shadow, s * 0.8),
+            y + (row2H - HudText.textHeight(renderer, shadow, s * 0.8)) / 2.0, valueColor.get(), shadow, s * 0.8);
         y += row2H + gap;
 
-        renderer.text("last runs", x0, y, mutedColor.get(), shadow, s * 0.75);
+        HudText.text(renderer, "last runs", x0, y, mutedColor.get(), shadow, s * 0.75);
         y += legendH;
 
         for (int r = 0; r < histRows; r++) {

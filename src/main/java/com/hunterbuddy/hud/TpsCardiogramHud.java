@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -145,7 +146,7 @@ public class TpsCardiogramHud extends HudElement {
         double pad = panel.padding();
         double w = width.get();
         double traceH = traceHeight.get();
-        double lineH = renderer.textHeight(shadow, scale);
+        double lineH = HudText.textHeight(renderer, shadow, scale);
         double h = traceH + 4.0 + lineH;
 
         boolean flatlined = sinceLastTick > 1.0f;
@@ -287,14 +288,14 @@ public class TpsCardiogramHud extends HudElement {
     }
 
     private double label(HudRenderer renderer, String s, double tx, double ty, boolean shadow, double scale) {
-        renderer.text(s, tx, ty, labelColor.get(), shadow, scale);
-        return tx + renderer.textWidth(s, shadow, scale);
+        HudText.text(renderer, s, tx, ty, labelColor.get(), shadow, scale);
+        return tx + HudText.textWidth(renderer, s, shadow, scale);
     }
 
     /** A value in a reserved slot sized by a template, so the row holds still as digits roll. */
     private double fixed(HudRenderer renderer, String s, String template, double tx, double ty,
                          Color color, boolean shadow, double scale) {
-        renderer.text(s, tx, ty, color, shadow, scale);
-        return tx + Math.max(renderer.textWidth(template, shadow, scale), renderer.textWidth(s, shadow, scale));
+        HudText.text(renderer, s, tx, ty, color, shadow, scale);
+        return tx + Math.max(HudText.textWidth(renderer, template, shadow, scale), HudText.textWidth(renderer, s, shadow, scale));
     }
 }

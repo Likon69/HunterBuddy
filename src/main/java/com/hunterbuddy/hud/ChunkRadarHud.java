@@ -15,6 +15,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -355,7 +356,7 @@ public class ChunkRadarHud extends HudElement {
         }
 
         box = size.get();
-        double lineHeight = showText.get() ? renderer.textHeight(textShadow.get(), textScale.get()) : 0.0;
+        double lineHeight = showText.get() ? HudText.textHeight(renderer, textShadow.get(), textScale.get()) : 0.0;
         setSize(box, box + lineHeight);
 
         boolean here = MeteorClient.mc.world != null
@@ -810,7 +811,7 @@ public class ChunkRadarHud extends HudElement {
 
     private void caption(HudRenderer renderer, String text, Color colour) {
         if (!showText.get()) return;
-        renderer.text(text, x, y + box, alpha(colour, 1.0), textShadow.get(), textScale.get());
+        HudText.text(renderer, text, x, y + box, alpha(colour, 1.0), textShadow.get(), textScale.get());
     }
 
     // Shapes

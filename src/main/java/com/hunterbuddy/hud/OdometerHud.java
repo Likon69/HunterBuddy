@@ -14,6 +14,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -165,8 +166,8 @@ public class OdometerHud extends HudElement {
         DigitStyle style = digitStyle.get();
 
         double digitScale = scale * 1.3;
-        double digitW = renderer.textWidth("8", shadow, digitScale);
-        double digitH = renderer.textHeight(shadow, digitScale);
+        double digitW = HudText.textWidth(renderer, "8", shadow, digitScale);
+        double digitH = HudText.textHeight(renderer, shadow, digitScale);
 
         // Each style carries its own cell. Flat has no case to sit in, so it takes none of the
         // width one would need; the seven-segment figure is drawn rather than typed, so its
@@ -183,10 +184,10 @@ public class OdometerHud extends HudElement {
         int separators = (count - 1) / 3;
         double groupGap = 3.0 * scale;
         double drumsW = count * cellW + (count - 1) * gap + separators * groupGap;
-        double lineH = renderer.textHeight(shadow, scale);
+        double lineH = HudText.textHeight(renderer, shadow, scale);
         // The caption sits above the drums, so it belongs in the height too — left out, the
         // panel is short by a line and the bottom text falls outside it.
-        double captionH = renderer.textHeight(shadow, scale * 0.8) + 2.0 * scale;
+        double captionH = HudText.textHeight(renderer, shadow, scale * 0.8) + 2.0 * scale;
         // The first line under the drums sits a little lower than the ones that follow it, so the
         // block reads as attached to the counter rather than floating below it.
         double firstGap = 3.0 * scale;
@@ -197,8 +198,8 @@ public class OdometerHud extends HudElement {
             + (showFlightTime.get() ? (showLifetime.get() ? nextGap : firstGap) + lineH : 0.0);
 
         double w = Math.max(drumsW, Math.max(
-            showLifetime.get() ? renderer.textWidth(bottomTemplate(), shadow, scale) : 0.0,
-            showFlightTime.get() ? renderer.textWidth(flightTemplate(), shadow, scale) : 0.0));
+            showLifetime.get() ? HudText.textWidth(renderer, bottomTemplate(), shadow, scale) : 0.0,
+            showFlightTime.get() ? HudText.textWidth(renderer, flightTemplate(), shadow, scale) : 0.0));
 
         // The all-time mark is the rarer event, so it burns longer and harder than the session one.
         double sessionFlash = milestoneFlash.get()
@@ -216,9 +217,9 @@ public class OdometerHud extends HudElement {
         double top = y + pad;
 
         // The drums are a number and nothing else; without this they could be counting anything.
-        renderer.text("BLOCKS TRAVELLED", x + pad + (w - renderer.textWidth("BLOCKS TRAVELLED", shadow, scale * 0.8)) / 2.0,
+        HudText.text(renderer, "BLOCKS TRAVELLED", x + pad + (w - HudText.textWidth(renderer, "BLOCKS TRAVELLED", shadow, scale * 0.8)) / 2.0,
             top, labelColor.get(), shadow, scale * 0.8);
-        top += renderer.textHeight(shadow, scale * 0.8) + 2.0 * scale;
+        top += HudText.textHeight(renderer, shadow, scale * 0.8) + 2.0 * scale;
 
         long whole = (long) session;
         double frac = session - whole;
@@ -255,12 +256,12 @@ public class OdometerHud extends HudElement {
                 char next = (char) ('0' + (digit - '0' + 1) % 10);
                 int outAlpha = (int) (color.a * (1.0 - frac));
                 int inAlpha = (int) (color.a * frac);
-                renderer.text(String.valueOf(digit), dx, dy - frac * 2.0,
+                HudText.text(renderer, String.valueOf(digit), dx, dy - frac * 2.0,
                     new Color(color.r, color.g, color.b, outAlpha), shadow, digitScale);
-                renderer.text(String.valueOf(next), dx, dy + (1.0 - frac) * 2.0,
+                HudText.text(renderer, String.valueOf(next), dx, dy + (1.0 - frac) * 2.0,
                     new Color(color.r, color.g, color.b, inAlpha), shadow, digitScale);
             } else {
-                renderer.text(String.valueOf(digit), dx, dy, color, shadow, digitScale);
+                HudText.text(renderer, String.valueOf(digit), dx, dy, color, shadow, digitScale);
             }
         }
 
@@ -436,7 +437,7 @@ public class OdometerHud extends HudElement {
     private void drawPair(HudRenderer renderer, String label, String session, String lifetime,
                           double left, double ty, double w, boolean shadow, double scale) {
         String middle = "  ·  all time ";
-        double lineW = renderer.textWidth(label + session + middle + lifetime, shadow, scale);
+        double lineW = HudText.textWidth(renderer, label + session + middle + lifetime, shadow, scale);
         double tx = left + (w - lineW) / 2.0;
 
         tx = draw(renderer, label, tx, ty, labelColor.get(), shadow, scale);
@@ -478,7 +479,7 @@ public class OdometerHud extends HudElement {
     }
 
     private double draw(HudRenderer renderer, String s, double tx, double ty, Color color, boolean shadow, double scale) {
-        renderer.text(s, tx, ty, color, shadow, scale);
-        return tx + renderer.textWidth(s, shadow, scale);
+        HudText.text(renderer, s, tx, ty, color, shadow, scale);
+        return tx + HudText.textWidth(renderer, s, shadow, scale);
     }
 }

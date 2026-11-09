@@ -14,6 +14,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -140,7 +141,7 @@ public class SpeedSpectrumHud extends HudElement {
         double gap = 2.0;
         double rackH = spectrumHeight.get();
         double w = barCount * bw + (barCount - 1) * gap;
-        double lineH = renderer.textHeight(shadow, scale);
+        double lineH = HudText.textHeight(renderer, shadow, scale);
         double h = rackH + (showSpeed.get() ? 2.0 + lineH : 0.0);
 
         panel.draw(renderer, x + pad, y + pad, w, h, HudGlowPanel.Severity.OK);
@@ -169,13 +170,13 @@ public class SpeedSpectrumHud extends HudElement {
         if (showSpeed.get()) {
             double ty = top + rackH + 2.0;
             String value = String.format("%.0f", speedBs * 3.6);
-            double valueW = renderer.textWidth("888", shadow, scale);
-            double totalW = valueW + renderer.textWidth(" km/h", shadow, scale);
+            double valueW = HudText.textWidth(renderer, "888", shadow, scale);
+            double totalW = valueW + HudText.textWidth(renderer, " km/h", shadow, scale);
             double tx = left + (w - totalW) / 2.0;
 
-            renderer.text(value, tx + valueW - renderer.textWidth(value, shadow, scale), ty,
+            HudText.text(renderer, value, tx + valueW - HudText.textWidth(renderer, value, shadow, scale), ty,
                 valueColor.get(), shadow, scale);
-            renderer.text(" km/h", tx + valueW, ty, labelColor.get(), shadow, scale);
+            HudText.text(renderer, " km/h", tx + valueW, ty, labelColor.get(), shadow, scale);
         }
 
         setSize(w + pad * 2.0, h + pad * 2.0);

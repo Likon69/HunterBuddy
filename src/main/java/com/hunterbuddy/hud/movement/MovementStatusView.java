@@ -5,6 +5,7 @@ import com.hunterbuddy.hud.movement.StatusEntries.Status;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -30,8 +31,8 @@ public final class MovementStatusView {
         }
         boolean shadow = options.textShadow.get();
         double scale = options.textScale.get();
-        renderer.text(ACTION_BAR_PREVIEW, x, y, options.sneakingColor.get(), shadow, scale);
-        return new Size(renderer.textWidth(ACTION_BAR_PREVIEW, shadow, scale), renderer.textHeight(shadow, scale));
+        HudText.text(renderer, ACTION_BAR_PREVIEW, x, y, options.sneakingColor.get(), shadow, scale);
+        return new Size(HudText.textWidth(renderer, ACTION_BAR_PREVIEW, shadow, scale), HudText.textHeight(renderer, shadow, scale));
     }
 
     public Size renderLive(HudRenderer renderer, int x, int y) {

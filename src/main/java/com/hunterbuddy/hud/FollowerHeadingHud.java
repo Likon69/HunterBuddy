@@ -16,6 +16,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -174,7 +175,7 @@ public class FollowerHeadingHud extends HudElement {
         double inset = panel.padding();
         double width = tapeWidth.get() * scale;
         double tapeH = TAPE_HEIGHT * scale;
-        double lineHeight = renderer.textHeight(shadow, scale);
+        double lineHeight = HudText.textHeight(renderer, shadow, scale);
         double footH = showFoot.get() ? lineHeight + 3.0 * scale : 0.0;
         double height = tapeH + footH;
 
@@ -220,9 +221,9 @@ public class FollowerHeadingHud extends HudElement {
             }
 
             if (label != null) {
-                double lw = renderer.textWidth(label, shadow, labelScale);
+                double lw = HudText.textWidth(renderer, label, shadow, labelScale);
                 if (tx - lw / 2.0 > x0 && tx + lw / 2.0 < x0 + width) {
-                    renderer.text(label, tx - lw / 2.0, y0 + tick + 1.0 * scale, tapeColor.get(), shadow, labelScale);
+                    HudText.text(renderer, label, tx - lw / 2.0, y0 + tick + 1.0 * scale, tapeColor.get(), shadow, labelScale);
                 }
             }
         }
@@ -289,26 +290,26 @@ public class FollowerHeadingHud extends HudElement {
             // leans toward its own edge on a quick beat: a pointing hand, not
             // an alarm.
             String text = String.format(Locale.ROOT, error < 0 ? "< %.0f°" : "%.0f° >", Math.abs(error));
-            double tw = renderer.textWidth(text, shadow, scale);
+            double tw = HudText.textWidth(renderer, text, shadow, scale);
             double lean = anim && !held ? (0.5 + 0.5 * Math.sin(animTime * Math.PI * 2.0 / 0.9)) * 1.5 * scale : 0.0;
             double tx = error < 0
                 ? x0 + 2.0 * scale - lean
                 : x0 + width - tw - 2.0 * scale + lean;
-            renderer.text(text, tx, y0 + tapeH / 2.0 - lineHeight / 2.0, edge, shadow, scale);
+            HudText.text(renderer, text, tx, y0 + tapeH / 2.0 - lineHeight / 2.0, edge, shadow, scale);
         }
 
         if (showFoot.get()) {
             double fy = y0 + tapeH + 3.0 * scale;
 
-            renderer.text(wpText, x0, fy, tapeColor.get(), shadow, scale);
+            HudText.text(renderer, wpText, x0, fy, tapeColor.get(), shadow, scale);
 
-            double dw = Math.max(renderer.textWidth(distText, shadow, scale),
-                renderer.textWidth("00000.0 km", shadow, scale));
-            renderer.text(distText, cx - dw / 2.0, fy, footColor.get(), shadow, scale);
+            double dw = Math.max(HudText.textWidth(renderer, distText, shadow, scale),
+                HudText.textWidth(renderer, "00000.0 km", shadow, scale));
+            HudText.text(renderer, distText, cx - dw / 2.0, fy, footColor.get(), shadow, scale);
 
-            double ew = Math.max(renderer.textWidth(etaText, shadow, scale),
-                renderer.textWidth("~000h 00m", shadow, scale));
-            renderer.text(etaText, x0 + width - ew, fy, footColor.get(), shadow, scale);
+            double ew = Math.max(HudText.textWidth(renderer, etaText, shadow, scale),
+                HudText.textWidth(renderer, "~000h 00m", shadow, scale));
+            HudText.text(renderer, etaText, x0 + width - ew, fy, footColor.get(), shadow, scale);
         }
 
         setSize(width + inset * 2.0, height + inset * 2.0);

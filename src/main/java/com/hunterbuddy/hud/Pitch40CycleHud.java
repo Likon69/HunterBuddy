@@ -13,6 +13,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -143,7 +144,7 @@ public class Pitch40CycleHud extends HudElement {
         double pad = panel.padding();
         double w = width.get();
         double curveH = waveHeight.get();
-        double lineH = renderer.textHeight(shadow, scale);
+        double lineH = HudText.textHeight(renderer, shadow, scale);
         double h = curveH + 4.0 + lineH;
 
         HudGlowPanel.Severity severity = severity(live, altitude, lower, upper);
@@ -184,7 +185,7 @@ public class Pitch40CycleHud extends HudElement {
         double ty = top + curveH + 4.0;
         double tx = left;
         tx = text(renderer, "alt ", tx, ty, labelColor.get(), shadow, scale);
-        tx = value(renderer, String.format("%.0f", altitude), tx, ty, valueColor.get(), shadow, scale, renderer.textWidth("8888", shadow, scale));
+        tx = value(renderer, String.format("%.0f", altitude), tx, ty, valueColor.get(), shadow, scale, HudText.textWidth(renderer, "8888", shadow, scale));
         tx = text(renderer, climbing ? " climb " : " dive ", tx, ty, climbing ? markerColor.get() : ceilingColor.get(), shadow, scale);
         tx = text(renderer, climbing ? "to " + String.format("%.0f", upper) : "to " + String.format("%.0f", lower),
             tx, ty, labelColor.get(), shadow, scale);
@@ -265,23 +266,23 @@ public class Pitch40CycleHud extends HudElement {
         double scale = textScale.get();
         double pad = panel.padding();
         String label = "Pitch40 off";
-        double w = renderer.textWidth(label, shadow, scale);
-        double h = renderer.textHeight(shadow, scale);
+        double w = HudText.textWidth(renderer, label, shadow, scale);
+        double h = HudText.textHeight(renderer, shadow, scale);
 
         panel.draw(renderer, x + pad, y + pad, w, h, HudGlowPanel.Severity.OK);
-        renderer.text(label, x + pad, y + pad, labelColor.get(), shadow, scale);
+        HudText.text(renderer, label, x + pad, y + pad, labelColor.get(), shadow, scale);
         setSize(w + pad * 2.0, h + pad * 2.0);
     }
 
     private double text(HudRenderer renderer, String s, double tx, double ty, Color color, boolean shadow, double scale) {
-        renderer.text(s, tx, ty, color, shadow, scale);
-        return tx + renderer.textWidth(s, shadow, scale);
+        HudText.text(renderer, s, tx, ty, color, shadow, scale);
+        return tx + HudText.textWidth(renderer, s, shadow, scale);
     }
 
     /** Draws a value inside a reserved width, so the line does not tremble as digits change. */
     private double value(HudRenderer renderer, String s, double tx, double ty,
                          Color color, boolean shadow, double scale, double reserved) {
-        renderer.text(s, tx, ty, color, shadow, scale);
-        return tx + Math.max(reserved, renderer.textWidth(s, shadow, scale));
+        HudText.text(renderer, s, tx, ty, color, shadow, scale);
+        return tx + Math.max(reserved, HudText.textWidth(renderer, s, shadow, scale));
     }
 }

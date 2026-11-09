@@ -17,6 +17,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -236,7 +237,7 @@ public class FindsTickerHud extends HudElement {
         boolean shadow = textShadow.get();
         double scale = textScale.get();
         double pad = panel.padding();
-        double lineH = renderer.textHeight(shadow, scale) + 2.0 * scale;
+        double lineH = HudText.textHeight(renderer, shadow, scale) + 2.0 * scale;
         double w = panelWidth.get();
         slidePx = Math.min(SLIDE_PX * scale, pad);
         double h = Math.max(0.0, heightLines * lineH - 2.0 * scale);
@@ -253,9 +254,9 @@ public class FindsTickerHud extends HudElement {
 
         boolean whereOn = showDistance.get() || showCoords.get();
         double gap = 4.0 * scale;
-        double ageSlot = renderer.textWidth("88 min", shadow, scale);
-        double whereSlot = whereOn ? renderer.textWidth(whereTemplate(), shadow, scale) : 0.0;
-        double textH = renderer.textHeight(shadow, scale);
+        double ageSlot = HudText.textWidth(renderer, "88 min", shadow, scale);
+        double whereSlot = whereOn ? HudText.textWidth(renderer, whereTemplate(), shadow, scale) : 0.0;
+        double textH = HudText.textHeight(renderer, shadow, scale);
 
         for (int i = 0; i < slots.size(); i++) {
             Slot slot = slots.get(i);
@@ -535,7 +536,7 @@ public class FindsTickerHud extends HudElement {
 
         fitLabel(renderer, slot, textRight - textLeft, shadow, scale, gap);
 
-        double labelW = renderer.textWidth(slot.fitted, shadow, scale);
+        double labelW = HudText.textWidth(renderer, slot.fitted, shadow, scale);
         double labelX;
         double countX;
 
@@ -554,22 +555,22 @@ public class FindsTickerHud extends HudElement {
             (int) (base.g + (dot.g - base.g) * mix),
             (int) (base.b + (dot.b - base.b) * mix),
             alpha(base.a * fade));
-        renderer.text(slot.fitted, labelX, top, scratch, shadow, scale);
+        HudText.text(renderer, slot.fitted, labelX, top, scratch, shadow, scale);
 
         if (slot.fitCount != null) {
             scratch.set(labelColor.get().r, labelColor.get().g, labelColor.get().b, alpha(labelColor.get().a * fade));
-            renderer.text(slot.fitCount, countX, top, scratch, shadow, scale);
+            HudText.text(renderer, slot.fitCount, countX, top, scratch, shadow, scale);
         }
 
         SettingColor ageBase = labelColor.get();
         scratch.set(ageBase.r, ageBase.g, ageBase.b, alpha(ageBase.a * fade));
 
         if (whereOn && slot.where != null) {
-            double whereW = renderer.textWidth(slot.where, shadow, scale);
-            renderer.text(slot.where, right ? whereX : whereX + whereSlot - whereW, top, scratch, shadow, scale);
+            double whereW = HudText.textWidth(renderer, slot.where, shadow, scale);
+            HudText.text(renderer, slot.where, right ? whereX : whereX + whereSlot - whereW, top, scratch, shadow, scale);
         }
 
-        renderer.text(slot.ageText, right ? ageX : ageX + ageSlot - renderer.textWidth(slot.ageText, shadow, scale),
+        HudText.text(renderer, slot.ageText, right ? ageX : ageX + ageSlot - HudText.textWidth(renderer, slot.ageText, shadow, scale),
             top, scratch, shadow, scale);
     }
 
@@ -590,7 +591,7 @@ public class FindsTickerHud extends HudElement {
         slot.fitAvail = available;
         slot.fitScale = scale;
         slot.fitShadow = shadow;
-        slot.fitCountW = slot.countText == null ? 0.0 : renderer.textWidth(slot.countText, shadow, scale);
+        slot.fitCountW = slot.countText == null ? 0.0 : HudText.textWidth(renderer, slot.countText, shadow, scale);
 
         double room = slot.countText == null ? available : Math.max(0.0, available - slot.fitCountW - gap);
         slot.fitted = fit(renderer, slot.name, room, shadow, scale);
@@ -716,10 +717,10 @@ public class FindsTickerHud extends HudElement {
     }
 
     private String fit(HudRenderer renderer, String label, double available, boolean shadow, double scale) {
-        if (renderer.textWidth(label, shadow, scale) <= available) return label;
+        if (HudText.textWidth(renderer, label, shadow, scale) <= available) return label;
 
         int end = label.length();
-        while (end > 0 && renderer.textWidth(label.substring(0, end) + ELLIPSIS, shadow, scale) > available) end--;
+        while (end > 0 && HudText.textWidth(renderer, label.substring(0, end) + ELLIPSIS, shadow, scale) > available) end--;
 
         return end == 0 ? "" : label.substring(0, end) + ELLIPSIS;
     }

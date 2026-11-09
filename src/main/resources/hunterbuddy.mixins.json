@@ -44,6 +44,7 @@
     "LegacyModuleNameMixin",
     "LegacyHudNameMixin",
     "HudEditorScreenMixin",
+    "HudFontProfileMixin",
     "ChatScreenOverlayMixin",
     "KeyboardCharMixin",
     "DroneCameraMixin",

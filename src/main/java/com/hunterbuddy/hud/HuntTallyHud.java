@@ -16,6 +16,7 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -206,7 +207,7 @@ public class HuntTallyHud extends HudElement {
     public void render(HudRenderer renderer) {
         boolean shadow = textShadow.get();
         double scale = textScale.get();
-        double lineHeight = renderer.textHeight(shadow, scale);
+        double lineHeight = HudText.textHeight(renderer, shadow, scale);
         double inset = panel.padding();
 
         List<Stat> stats = collect();
@@ -215,9 +216,9 @@ public class HuntTallyHud extends HudElement {
             // Nothing has happened yet and hide-zero is on. The editor still needs a handle, so
             // it gets the title rather than a zero-size element nobody can grab.
             if (isInEditor()) {
-                double w = renderer.textWidth("HuntTally", shadow, scale);
+                double w = HudText.textWidth(renderer, "HuntTally", shadow, scale);
                 panel.draw(renderer, this.x + inset, this.y + inset, w, lineHeight, HudGlowPanel.Severity.OK);
-                renderer.text("HuntTally", this.x + inset, this.y + inset, labelColor.get(), shadow, scale);
+                HudText.text(renderer, "HuntTally", this.x + inset, this.y + inset, labelColor.get(), shadow, scale);
                 setSize(w + inset * 2.0, lineHeight + inset * 2.0);
             } else {
                 setSize(0.0, 0.0);
@@ -290,7 +291,7 @@ public class HuntTallyHud extends HudElement {
     private double measureInline(HudRenderer renderer, List<Stat> stats, boolean shadow, double scale,
                                  double iconSize) {
         double w = 0.0;
-        double sep = renderer.textWidth("  ", shadow, scale);
+        double sep = HudText.textWidth(renderer, "  ", shadow, scale);
 
         for (int i = 0; i < stats.size(); i++) {
             w += entryWidth(renderer, stats.get(i), shadow, scale, iconSize);
@@ -321,14 +322,14 @@ public class HuntTallyHud extends HudElement {
         boolean hasIcon = mode != LabelMode.Text && !stat.icon.isEmpty();
 
         if (hasIcon) w += iconSize + 2.0 * scale;
-        if (mode != LabelMode.Icon) w += renderer.textWidth(stat.label + " ", shadow, scale);
+        if (mode != LabelMode.Icon) w += HudText.textWidth(renderer, stat.label + " ", shadow, scale);
 
-        return w + renderer.textWidth(stat.value, shadow, scale);
+        return w + HudText.textWidth(renderer, stat.value, shadow, scale);
     }
 
     private void drawInline(HudRenderer renderer, List<Stat> stats, double x, double y, double rowHeight,
                             boolean shadow, double scale, double iconSize) {
-        double sep = renderer.textWidth("  ", shadow, scale);
+        double sep = HudText.textWidth(renderer, "  ", shadow, scale);
 
         for (int i = 0; i < stats.size(); i++) {
             x = drawEntry(renderer, stats.get(i), x, y, rowHeight, shadow, scale, iconSize);
@@ -362,7 +363,7 @@ public class HuntTallyHud extends HudElement {
                              boolean shadow, double scale, double iconSize) {
         LabelMode mode = labelMode.get();
         boolean hasIcon = mode != LabelMode.Text && !stat.icon.isEmpty();
-        double textY = y + (rowHeight - renderer.textHeight(shadow, scale)) / 2.0;
+        double textY = y + (rowHeight - HudText.textHeight(renderer, shadow, scale)) / 2.0;
 
         // Read before anything is drawn: the icon reacts too, and on a left-hand icon it is drawn
         // before the number that the freshness used to be measured at.
@@ -378,15 +379,15 @@ public class HuntTallyHud extends HudElement {
         }
 
         if (mode != LabelMode.Icon) {
-            renderer.text(stat.label + " ", x, textY, labelColor.get(), shadow, scale);
-            x += renderer.textWidth(stat.label + " ", shadow, scale);
+            HudText.text(renderer, stat.label + " ", x, textY, labelColor.get(), shadow, scale);
+            x += HudText.textWidth(renderer, stat.label + " ", shadow, scale);
         }
 
-        renderer.text(stat.value, x,
+        HudText.text(renderer, stat.value, x,
             textY + HudPulse.bounce(bounceStyle(), freshness, scale),
             HudPulse.tint(tintStyle(), valueColor.get(), accentColor.get(), freshness),
             shadow, scale);
-        x += renderer.textWidth(stat.value, shadow, scale);
+        x += HudText.textWidth(renderer, stat.value, shadow, scale);
 
         if (hasIcon && !iconOnLeft.get()) {
             x += 2.0 * scale;
