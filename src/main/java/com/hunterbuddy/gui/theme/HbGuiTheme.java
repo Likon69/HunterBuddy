@@ -9,6 +9,7 @@ import com.hunterbuddy.gui.theme.widgets.HbLabel;
 import com.hunterbuddy.gui.theme.widgets.HbMultiLabel;
 import com.hunterbuddy.gui.theme.widgets.HbDropdown;
 import com.hunterbuddy.gui.theme.widgets.HbFavorite;
+import com.hunterbuddy.gui.theme.widgets.HbItem;
 import com.hunterbuddy.gui.theme.widgets.HbModuleEntry;
 import com.hunterbuddy.gui.theme.screens.HbModulesScreen;
 import com.hunterbuddy.gui.theme.widgets.HbSlider;
@@ -31,6 +32,7 @@ import meteordevelopment.meteorclient.gui.renderer.packer.GuiTexture;
 import meteordevelopment.meteorclient.gui.utils.CharFilter;
 import meteordevelopment.meteorclient.gui.tabs.TabScreen;
 import meteordevelopment.meteorclient.gui.themes.meteor.MeteorGuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.WItem;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.WHorizontalSeparator;
 import meteordevelopment.meteorclient.gui.widgets.WLabel;
@@ -64,6 +66,7 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 
 import java.util.List;
@@ -230,6 +233,11 @@ public class HbGuiTheme extends MeteorGuiTheme {
     @Override
     public WWindow window(WWidget icon, String title) {
         return w(new HbWindow(icon, title, clickGui() ? categories.find(title) : null));
+    }
+
+    @Override
+    public WItem item(ItemStack itemStack) {
+        return w(new HbItem(itemStack));
     }
 
     @Override

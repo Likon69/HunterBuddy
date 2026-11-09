@@ -20,6 +20,8 @@ import static meteordevelopment.meteorclient.utils.Utils.getWindowWidth;
 
 public class HbWindow extends WWindow implements HbWidget {
     private static final double DRAG_THRESHOLD = 3;
+    private static final double ICON_SIDE = 16;
+    private static final double ICON_GAP = 4;
     private final HbCategoryActivity activity;
 
     public HbWindow(WWidget icon, String title, HbCategoryActivity activity) {
@@ -161,6 +163,7 @@ public class HbWindow extends WWindow implements HbWidget {
         }
 
         private boolean moduleLook;
+        private HbItem categoryIcon;
         private double rawX;
         private double rawY;
         private double travelX;
@@ -241,6 +244,14 @@ public class HbWindow extends WWindow implements HbWidget {
                 for (int i = 0; i < display.length(); i++) letters[i] = display.substring(i, i + 1);
             }
             if (style().lamp()) add(new HbLamp(() -> true));
+            if (beforeHeaderInit != null) {
+                int before = cells.size();
+                beforeHeaderInit.accept(this);
+                if (cells.size() > before && cells.getLast().widget() instanceof HbItem item) {
+                    categoryIcon = item;
+                    item.fit(theme().hbScale(ICON_SIDE));
+                }
+            }
             if (style().counter() && activity != null) add(new HbCounter(activity));
         }
 
@@ -250,7 +261,7 @@ public class HbWindow extends WWindow implements HbWidget {
                 super.onCalculateSize();
                 return;
             }
-            width = theme().typography().width(display, 12, style().strongTitle()) + theme().hbScale(80);
+            width = theme().typography().width(display, 12, style().strongTitle()) + theme().hbScale(80) + iconSpan();
             if (style().hasCounter()) {
                 double offset = 0;
                 for (int i = 0; i < letters.length; i++) {
@@ -262,6 +273,18 @@ public class HbWindow extends WWindow implements HbWidget {
             height = theme().hbScale(style().headerHeight());
         }
 
+        private double titleStart() {
+            double start = x + theme().hbScale(style().titleInset());
+            if (style().inverted() && activity != null) {
+                start += theme().typography().width(activity.number(), 12, false) + theme().hbScale(10);
+            }
+            return start;
+        }
+
+        private double iconSpan() {
+            return categoryIcon == null ? 0 : theme().hbScale(ICON_SIDE + ICON_GAP);
+        }
+
         @Override
         protected void onCalculateWidgetPositions() {
             if (!moduleLook) {
@@ -271,7 +294,8 @@ public class HbWindow extends WWindow implements HbWidget {
             for (int i = 0; i < cells.size(); i++) {
                 Cell<?> cell = cells.get(i);
                 WWidget widget = cell.widget();
-                cell.x = widget instanceof HbCounter ? x + width - theme().hbScale(10) - widget.width : x + theme().hbScale(10);
+                cell.x = widget instanceof HbCounter ? x + width - theme().hbScale(10) - widget.width
+                    : widget == categoryIcon ? titleStart() : x + theme().hbScale(10);
                 cell.y = y + theme().hbScale(11) - widget.height / 2;
                 cell.width = widget.width;
                 cell.height = widget.height;
@@ -295,12 +319,10 @@ public class HbWindow extends WWindow implements HbWidget {
             double phase = "Visuals".equals(title) ? 2.5 : "Utility".equals(title) ? 4.2 : 0;
             theme().fitted(this, style().headerHeight(), () -> style().drawWindowHeader(renderer, theme(), this, active, phase));
             if (!moduleLook) return;
-            double textX = x + theme().hbScale(style().titleInset());
             if (style().inverted() && activity != null) {
-                String number = activity.number();
-                theme().typography().draw(renderer, number, textX, y + theme().hbScale(5), 12, theme().colors().dim(), false);
-                textX += theme().typography().width(number, 12, false) + theme().hbScale(10);
+                theme().typography().draw(renderer, activity.number(), x + theme().hbScale(style().titleInset()), y + theme().hbScale(5), 12, theme().colors().dim(), false);
             }
+            double textX = titleStart() + iconSpan();
             if (style().hasCounter()) {
                 for (int i = 0; i < letters.length; i++) {
                     theme().typography().draw(renderer, letters[i], textX + offsets[i], y + theme().hbScale(5), 12, theme().titleTextColor.get(), false);
