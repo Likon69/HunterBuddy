@@ -1,7 +1,5 @@
 package com.hunterbuddy.chatdock;
 
-import meteordevelopment.meteorclient.gui.GuiTheme;
-import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.settings.Settings;
 import java.util.HashSet;
 import com.hunterbuddy.chatdock.entries.LogDockEntry;
@@ -32,10 +30,6 @@ public final class DockRegistry {
     public void shutdown() { for (DockEntry entry : entries()) entry.shutdown(); }
 
     public void fontChanged() { for (DockEntry entry : entries()) entry.fontChanged(); }
-
-    public void widgets(GuiTheme theme, WVerticalList controls) {
-        for (DockEntry entry : entries()) entry.widgets(theme, controls);
-    }
 
     public void render(DrawContext context, boolean chat) {
         DockEntry[] all = entries();

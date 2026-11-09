@@ -86,7 +86,6 @@ public final class HunterBuddyMenu extends Module implements DockPreferences {
         var controls = theme.verticalList();
         WButton reset = controls.add(theme.button("Reset position")).expandX().widget();
         reset.action = ChatDock.INSTANCE::resetPosition;
-        ChatDock.INSTANCE.widgets(theme, controls);
         return controls;
     }
 

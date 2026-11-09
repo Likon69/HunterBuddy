@@ -134,18 +134,4 @@ final class JournalPerformanceTest {
         assertTrue(live.refresh(1000, 0, 1920, 1080, 2));
         assertTrue(live.refresh(1000, 0, 1920, 1080, 2));
     }
-
-    @Test
-    void profilerSeparatesClosedAndOpenFramesAndExcludesInactiveTime() {
-        JournalProfile profile = new JournalProfile();
-        long now = 1;
-        for (int i = 0; i < 100; i++) profile.frame(now += 10_000_000, false);
-        profile.pause();
-        now += 30_000_000_000L;
-        for (int i = 0; i < 100; i++) { profile.frame(now += 20_000_000, true); profile.add(JournalProfile.Stage.ROWS, 5000); }
-        String report = profile.report();
-        assertTrue(report.contains("mean FPS: 100.00"));
-        assertTrue(report.contains("mean FPS: 50.00"));
-        assertTrue(report.contains("ROWS mean: 0.005000 ms"));
-    }
 }

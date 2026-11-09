@@ -13,7 +13,6 @@ public final class JournalSettings {
     private final SettingGroup group;
     public final Setting<Boolean> enabled;
     public final Setting<Boolean> hideCoordinates;
-    public final Setting<Boolean> profilePerformance;
     public final Setting<Boolean> autoOpen;
     public final Setting<Double> scale;
     public final Setting<Double> textScale;
@@ -31,8 +30,6 @@ public final class JournalSettings {
         this.group = group;
         enabled = group.add(new BoolSetting.Builder().name("log")
             .description("Show the Log entry and capture local mod messages.").defaultValue(true).onChanged(value -> changed.run()).build());
-        profilePerformance = group.add(new BoolSetting.Builder().name("profile-performance")
-            .description("Record chat frame intervals and journal CPU submission stages for a performance report.").defaultValue(false).build());
         autoOpen = group.add(new BoolSetting.Builder().name("auto-open")
             .description("Open the journal when a new chat screen opens.").defaultValue(false).build());
         scale = group.add(new DoubleSetting.Builder().name("window-scale")

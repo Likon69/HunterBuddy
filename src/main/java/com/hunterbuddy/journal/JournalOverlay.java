@@ -5,9 +5,6 @@ import com.hunterbuddy.hud.glass.GlassPainter;
 import com.hunterbuddy.chatdock.ChatDock;
 import com.hunterbuddy.HunterBuddyAddon;
 import java.util.function.UnaryOperator;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
-import java.nio.charset.StandardCharsets;
 import com.hunterbuddy.modules.messenger.ui.Pointer;
 import java.util.function.ToDoubleFunction;
 import meteordevelopment.meteorclient.MeteorClient;
@@ -27,8 +24,6 @@ public final class JournalOverlay {
     private final UnaryOperator<String> prefix;
     private final JournalBuffer buffer = new JournalBuffer();
     private final ModuleToastBlur blur = ModuleToastBlur.cached(125_000_000L);
-    private final JournalProfile profile = new JournalProfile();
-    private boolean profiling;
     private boolean chatSeen;
     private long refreshAt;
     private final JournalWriter writer = new JournalWriter(message -> status = message,
@@ -74,7 +69,6 @@ public final class JournalOverlay {
     public void chatClosed() {
         close();
         chatSeen = false;
-        profile.pause();
         ChatDock.INSTANCE.cancel();
     }
 
@@ -106,41 +100,28 @@ public final class JournalOverlay {
             if (config.autoOpen.get()) { open = true; focused = false; rows.end(); refreshAt = 0; }
         }
         hidden = config.hideCoordinates.get();
-        boolean measuring = config.profilePerformance.get();
-        if (measuring && !profiling) profile.clear();
-        if (!measuring && profiling) profile.pause();
-        profiling = measuring;
         long now = System.nanoTime();
-        if (measuring) profile.frame(now, open);
         if (!open) return;
         var screen = MeteorClient.mc.getWindow();
         HudRenderer renderer = HudRenderer.INSTANCE;
         OverlayPass.begin(context);
-        long stamp = measuring ? System.nanoTime() : 0;
         try {
             layout.update(renderer, config, screen.getFramebufferWidth(), screen.getFramebufferHeight(),
                 Math.max(24, screen.getScaleFactor() * 18), expanded, font);
-            if (measuring) { profile.add(JournalProfile.Stage.LAYOUT, System.nanoTime() - stamp); stamp = System.nanoTime(); }
             if (now >= refreshAt) {
                 if (config.store.read(buffer)) count = buffer.size() + " messages";
                 refreshAt = now + 250_000_000L;
             }
-            if (measuring) { profile.add(JournalProfile.Stage.BUFFER, System.nanoTime() - stamp); stamp = System.nanoTime(); }
             rows.update(buffer, hidden, Math.max(1, layout.content.w() - layout.prefixWidth - 5 * config.scale.get()),
                 config.textScale.get(), font, layout.visible, measure, prefix);
             double mx = Pointer.x();
             double my = Pointer.y();
             if (dragging || selecting) hold(mx, my);
-            if (measuring) { profile.add(JournalProfile.Stage.ROWS, System.nanoTime() - stamp); stamp = System.nanoTime(); }
             blur.begin(2);
             blur.draw(layout.window.x(), layout.window.y(), layout.window.w(), layout.window.h(), GlassPainter.radius(config.scale.get()), 1);
-            if (measuring) { profile.add(JournalProfile.Stage.BLUR_SUBMIT, System.nanoTime() - stamp); stamp = System.nanoTime(); }
             painter.window(renderer, layout, config, rows, selection, hidden, expanded, count, status, mx, my);
-            if (measuring) profile.add(JournalProfile.Stage.DRAW_SUBMIT, System.nanoTime() - stamp);
         } finally {
-            stamp = measuring ? System.nanoTime() : 0;
             OverlayPass.end(context);
-            if (measuring) profile.add(JournalProfile.Stage.TEXT_FLUSH, System.nanoTime() - stamp);
         }
     }
 
@@ -216,21 +197,6 @@ public final class JournalOverlay {
             case TEXT_UP -> config.textScale.set(Math.min(1.6, config.textScale.get() + 0.1));
             case SCALE_DOWN -> config.scale.set(Math.max(0.6, config.scale.get() - 0.1));
             case SCALE_UP -> config.scale.set(Math.min(1.8, config.scale.get() + 0.1));
-        }
-    }
-
-    public void savePerformance() {
-        try {
-            String report = profile.report() + "\n" + com.hunterbuddy.hud.text.HudFontProfile.report();
-            var directory = MeteorClient.FOLDER.toPath().toAbsolutePath().normalize().resolve("hunterbuddy/logs");
-            writer.save("performance report", () -> {
-                Files.createDirectories(directory);
-                var target = directory.resolve("log-performance-" + System.currentTimeMillis() + ".txt");
-                Files.writeString(target, report, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-                return target;
-            });
-        } catch (RuntimeException error) {
-            writer.failed("performance report", error);
         }
     }
 

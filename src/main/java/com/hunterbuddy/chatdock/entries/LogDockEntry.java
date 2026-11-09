@@ -4,8 +4,6 @@ import com.hunterbuddy.chatdock.DockEntry;
 import com.hunterbuddy.journal.JournalCapture;
 import com.hunterbuddy.journal.JournalOverlay;
 import com.hunterbuddy.journal.JournalSettings;
-import meteordevelopment.meteorclient.gui.GuiTheme;
-import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -48,11 +46,6 @@ public final class LogDockEntry implements DockEntry {
 
     @Override
     public void fontChanged() { overlay.fontChanged(); }
-
-    @Override
-    public void widgets(GuiTheme theme, WVerticalList controls) {
-        controls.add(theme.button("Save log performance report")).expandX().widget().action = overlay::savePerformance;
-    }
 
     @Override
     public String id() { return "log"; }

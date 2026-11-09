@@ -1,7 +1,5 @@
 package com.hunterbuddy.chatdock;
 
-import meteordevelopment.meteorclient.gui.GuiTheme;
-import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.settings.Settings;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -13,7 +11,6 @@ public interface DockEntry {
     default void deactivate() { }
     default void shutdown() { }
     default void fontChanged() { }
-    default void widgets(GuiTheme theme, WVerticalList controls) { }
     String id();
     String label();
     boolean visible();

@@ -6,8 +6,6 @@ import com.hunterbuddy.modules.messenger.ui.Pointer;
 import com.hunterbuddy.modules.messenger.ui.Rect;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.renderer.Renderer2D;
-import meteordevelopment.meteorclient.gui.GuiTheme;
-import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
 import meteordevelopment.meteorclient.settings.Settings;
 import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
@@ -58,8 +56,6 @@ public final class ChatDock {
         registry.configure(settings);
         shown = new DockEntry[registry.entries().length];
     }
-
-    public void widgets(GuiTheme theme, WVerticalList controls) { registry.widgets(theme, controls); }
 
     private boolean menuVisible() {
         return enabled && preferences != null && (!(MeteorClient.mc.currentScreen instanceof ChatScreen) || preferences.dockInChat());
