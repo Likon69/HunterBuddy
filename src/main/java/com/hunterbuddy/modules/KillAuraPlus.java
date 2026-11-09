@@ -1,6 +1,9 @@
 package com.hunterbuddy.modules;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.modules.aura.AuraVitals;
+import com.hunterbuddy.modules.aura.AuraVitalsSettings;
+import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import com.hunterbuddy.modules.mixin.accessors.LivingEntityAttackAccessor;
 import com.hunterbuddy.util.ActionSwap;
 import com.hunterbuddy.util.AttackCooldown;
@@ -541,6 +544,8 @@ public class KillAuraPlus extends Module {
         Items.DIAMOND_SWORD, Items.DIAMOND_AXE, Items.DIAMOND_PICKAXE, Items.DIAMOND_SHOVEL,
         Items.DIAMOND_HOE, Items.MACE, Items.TRIDENT);
 
+    private final AuraVitals vitals = new AuraVitals(new AuraVitalsSettings(settings));
+
     private final List<Entity> targets = new ArrayList<>();
     private final Set<Entity> lethal = new HashSet<>();
     private final Set<Entity> hitThisRound = new HashSet<>();
@@ -577,6 +582,7 @@ public class KillAuraPlus extends Module {
 
     @Override
     public void onActivate() {
+        vitals.activate();
         targets.clear();
         lethal.clear();
         hitThisRound.clear();
@@ -602,10 +608,17 @@ public class KillAuraPlus extends Module {
 
     @Override
     public void onDeactivate() {
+        vitals.deactivate();
         release();
         targets.clear();
         current = null;
     }
+
+    @EventHandler
+    private void onVitalsTick(TickEvent.Post event) { vitals.tick(current); }
+
+    @EventHandler
+    private void onVitalsRender(Render2DEvent event) { vitals.render(event); }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
@@ -1159,6 +1172,7 @@ public class KillAuraPlus extends Module {
         // agreeing -- which is the half the original tap of the key gets for free.
         if (reset) sprint(false);
 
+        vitals.hit(target);
         mc.interactionManager.attackEntity(mc.player, target);
         mc.player.swingHand(Hand.MAIN_HAND);
 
