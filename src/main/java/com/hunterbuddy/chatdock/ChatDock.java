@@ -1,67 +1,87 @@
 package com.hunterbuddy.chatdock;
 
 import com.hunterbuddy.hud.glass.GlassPainter;
+import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import com.hunterbuddy.modules.messenger.ui.Pointer;
 import com.hunterbuddy.modules.messenger.ui.Rect;
-import java.util.ArrayList;
-import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.renderer.Renderer2D;
+import meteordevelopment.meteorclient.gui.GuiTheme;
+import meteordevelopment.meteorclient.gui.widgets.containers.WVerticalList;
+import meteordevelopment.meteorclient.settings.Settings;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
-import meteordevelopment.meteorclient.utils.Utils;
+import com.hunterbuddy.hud.text.OverlayPass;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.ChatHud;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public final class ChatDock {
     public static final ChatDock INSTANCE = new ChatDock();
-    private final List<DockEntry> entries = new ArrayList<>();
+    private static final Identifier BEE = Identifier.of("hunterbuddy", "textures/gui/bee.png");
+    private final DockRegistry registry = new DockRegistry();
     private final GlassPainter glass = new GlassPainter();
+    private final ModuleToastBlur blur = ModuleToastBlur.cached(125_000_000L);
     private final DockDrag drag = new DockDrag();
-    private final DockEntry[] shown = new DockEntry[32];
-    private final double[] widths = new double[32];
-    private final double[] offsets = new double[32];
+    private final DockMenuLayout menu = new DockMenuLayout();
+    private DockEntry[] shown;
     private DockPreferences preferences;
-    private Rect bounds;
+    private Rect initial;
     private int count;
-    private int pressed = -1;
     private int font;
     private int measuredFont = -1;
     private double scale;
     private double textScale;
-    private double measuredScreen;
-    private double width;
-    private double height;
+    private double guiScale;
+    private double size;
+    private double beeSize;
+    private double x;
+    private double y;
+    private double menuWidth;
+    private double rowHeight;
     private double lineHeight;
-    private Rect initial;
-    private double initialScreenWidth;
-    private double initialScreenHeight;
-    private double initialChatRight;
-    private double initialChatTop;
-    private double initialGap;
+    private double screenWidth;
+    private double screenHeight;
+    private double chatRight;
+    private double chatTop;
+    private boolean enabled;
+    private boolean expanded;
+    private long openedAt;
 
     private ChatDock() {
     }
 
-    public void configure(DockPreferences preferences) {
+    public void configure(DockPreferences preferences, Settings settings) {
         this.preferences = preferences;
+        registry.configure(settings);
+        shown = new DockEntry[registry.entries().length];
     }
 
-    public void register(DockEntry entry) {
-        for (int i = 0; i < entries.size(); i++) {
-            if (entries.get(i).id().equals(entry.id())) {
-                entries.set(i, entry);
-                measuredFont = -1;
-                return;
-            }
+    public void widgets(GuiTheme theme, WVerticalList controls) { registry.widgets(theme, controls); }
+
+    private boolean menuVisible() {
+        return enabled && preferences != null && (!(MeteorClient.mc.currentScreen instanceof ChatScreen) || preferences.dockInChat());
+    }
+
+    public void enabled(boolean enabled) {
+        this.enabled = enabled;
+        if (enabled) registry.activate();
+        else {
+            registry.deactivate();
+            if (MeteorClient.mc.currentScreen instanceof HunterBuddyScreen) MeteorClient.mc.setScreen(null);
+            closed();
         }
-        if (entries.size() >= shown.length) throw new IllegalStateException("Dock capacity reached");
-        entries.add(entry);
-        measuredFont = -1;
     }
 
-    public void fontChanged() {
-        font++;
+    public void toggleScreen() {
+        if (!enabled || MeteorClient.mc.player == null) return;
+        if (MeteorClient.mc.currentScreen instanceof HunterBuddyScreen) MeteorClient.mc.setScreen(null);
+        else if (MeteorClient.mc.currentScreen == null) MeteorClient.mc.setScreen(new HunterBuddyScreen());
     }
+
+    public void fontChanged() { font++; registry.fontChanged(); }
 
     public void resetPosition() {
         cancel();
@@ -70,116 +90,148 @@ public final class ChatDock {
 
     public void cancel() {
         drag.cancel();
-        pressed = -1;
+        expanded = false;
     }
 
-    public boolean click(double x, double y, int button) {
-        if (bounds == null || count == 0 || !bounds.contains(x, y)) return false;
-        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-            pressed = hit(x);
-            drag.begin(x, y, bounds.x(), bounds.y());
+    public void closed() {
+        cancel();
+        registry.closed();
+        blur.invalidateCache();
+    }
+
+    public void shutdown() { registry.shutdown(); blur.close(); }
+
+    public boolean inputFocused() { return enabled && registry.inputFocused(); }
+
+    public boolean key(int key, int modifiers) { return enabled && registry.key(key, modifiers); }
+
+    public boolean scroll(double px, double py, double amount) {
+        return enabled && (contains(px, py) || registry.scroll(px, py, amount));
+    }
+
+    public boolean contains(double px, double py) {
+        return menuVisible() && initial != null && (buttonContains(px, py) || expanded && menu.contains(px, py));
+    }
+
+    private boolean buttonContains(double px, double py) {
+        return px >= x && px < x + size && py >= y && py < y + size;
+    }
+
+    public boolean click(double px, double py, int button) {
+        if (!enabled) return false;
+        if (!menuVisible() || initial == null) return registry.click(px, py, button);
+        if (buttonContains(px, py)) {
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) drag.begin(px, py, x, y);
+            return true;
         }
-        return true;
-    }
-
-    public boolean contains(double x, double y) {
-        return bounds != null && count > 0 && bounds.contains(x, y);
-    }
-
-    private int hit(double x) {
-        double left = bounds.x() + 20 * scale;
-        for (int i = 0; i < count; i++) {
-            if (x >= left && x < left + widths[i]) return i;
-            left += widths[i] + 4 * scale;
+        if (expanded && menu.contains(px, py)) {
+            int hit = menu.hit(px, py, count);
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT && hit >= 0 && shown[hit].visible()) {
+                shown[hit].toggle();
+                expanded = false;
+            }
+            return true;
         }
-        return -1;
+        expanded = false;
+        return registry.click(px, py, button);
     }
 
     public void render(DrawContext context) {
-        if (preferences == null) return;
+        if (!enabled || preferences == null) return;
+        registry.render(context, MeteorClient.mc.currentScreen instanceof ChatScreen);
+        if (!menuVisible()) { cancel(); return; }
+        DockEntry[] all = registry.entries();
         int next = 0;
         boolean changed = false;
-        for (int i = 0; i < entries.size(); i++) {
-            DockEntry entry = entries.get(i);
-            if (!entry.visible().getAsBoolean()) continue;
-            if (shown[next] != entry) changed = true;
-            shown[next++] = entry;
+        for (int i = 0; i < all.length; i++) {
+            if (!all[i].visible()) continue;
+            if (shown[next] != all[i]) changed = true;
+            shown[next++] = all[i];
         }
         changed |= next != count;
         for (int i = next; i < count; i++) shown[i] = null;
-        if (changed) cancel();
         count = next;
-        if (count == 0) { bounds = null; cancel(); return; }
+        if (changed) cancel();
         var window = MeteorClient.mc.getWindow();
         double sw = window.getFramebufferWidth();
         double sh = window.getFramebufferHeight();
         double s = preferences.dockScale();
-        double t = preferences.dockTextScale();
+        double t = s;
+        double gui = window.getScaleFactor();
+        double cs = MeteorClient.mc.options.getChatScale().getValue();
+        double right = (ChatHud.getWidth(MeteorClient.mc.options.getChatWidth().getValue()) + 8 * cs) * gui;
+        double top = (window.getScaledHeight() - 40) * gui - MeteorClient.mc.inGameHud.getChatHud().getVisibleLineCount()
+            * (int) (9 * (MeteorClient.mc.options.getChatLineSpacing().getValue() + 1)) * cs * gui;
         HudRenderer renderer = HudRenderer.INSTANCE;
-        Utils.unscaledProjection();
-        renderer.begin(context);
+        OverlayPass.begin(context);
         try {
-            if (changed || measuredFont != font || scale != s || textScale != t || measuredScreen != sw) {
+            if (changed || measuredFont != font || scale != s || textScale != t || guiScale != gui
+                || screenWidth != sw || screenHeight != sh || chatRight != right || chatTop != top) {
                 scale = s;
                 textScale = t;
+                guiScale = gui;
                 measuredFont = font;
-                measuredScreen = sw;
-                lineHeight = renderer.textHeight(false, 0.82 * t);
-                height = Math.max(34 * s, lineHeight + 14 * s);
-                width = 28 * s;
-                for (int i = 0; i < count; i++) {
-                    double label = renderer.textWidth(shown[i].label(), false, 0.82 * t);
-                    widths[i] = Math.max(48 * s, label + 22 * s);
-                    offsets[i] = (widths[i] - label) / 2;
-                    width += widths[i] + 4 * s;
-                }
+                screenWidth = sw;
+                screenHeight = sh;
+                chatRight = right;
+                chatTop = top;
+                beeSize = (2 * MeteorClient.mc.textRenderer.fontHeight + 2) * gui * s;
+                size = beeSize + 12 * s;
+                lineHeight = HudText.textHeight(renderer, false, 0.82 * t);
+                rowHeight = Math.max(32 * s, lineHeight + 14 * s);
+                menuWidth = 116 * s;
+                for (int i = 0; i < count; i++) menuWidth = Math.max(menuWidth, HudText.textWidth(renderer, shown[i].label(), false, 0.82 * t) + 52 * s);
+                initial = DockPlacement.initial(sw, sh, size, size, right, top, Math.max(32, 9 * gui));
             }
-            double gui = window.getScaleFactor();
-            double cs = MeteorClient.mc.options.getChatScale().getValue();
-            double chatRight = (ChatHud.getWidth(MeteorClient.mc.options.getChatWidth().getValue()) + 8 * cs) * gui;
-            double chatTop = (window.getScaledHeight() - 40) * gui - MeteorClient.mc.inGameHud.getChatHud().getVisibleLineCount()
-                * (int) (9 * (MeteorClient.mc.options.getChatLineSpacing().getValue() + 1)) * cs * gui;
-            double gap = Math.max(32, 9 * gui);
-            if (initial == null || initialScreenWidth != sw || initialScreenHeight != sh || initial.w() != width || initial.h() != height
-                || initialChatRight != chatRight || initialChatTop != chatTop || initialGap != gap) {
-                initial = DockPlacement.initial(sw, sh, width, height, chatRight, chatTop, gap);
-                initialScreenWidth = sw;
-                initialScreenHeight = sh;
-                initialChatRight = chatRight;
-                initialChatTop = chatTop;
-                initialGap = gap;
-            }
-            double x = DockPlacement.coordinate(preferences.dockX(), sw, width, initial.x());
-            double y = DockPlacement.coordinate(preferences.dockY(), sh, height, initial.y());
+            x = DockPlacement.coordinate(preferences.dockX(), sw, size, initial.x());
+            y = DockPlacement.coordinate(preferences.dockY(), sh, size, initial.y());
             double mx = Pointer.x();
             double my = Pointer.y();
             if (drag.active) {
                 boolean released = drag.update(mx, my, GLFW.glfwGetMouseButton(window.getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS,
-                    sw, sh, width, height, 4 * s);
-                if (drag.moved) { x = drag.x; y = drag.y; }
+                    sw, sh, size, size, 4 * s);
+                if (drag.moved) { x = drag.x; y = drag.y; expanded = false; }
                 if (released) {
-                    if (drag.moved) preferences.dockPosition(DockPlacement.fraction(x, sw, width), DockPlacement.fraction(y, sh, height));
-                    else if (pressed >= 0 && pressed < count && bounds.contains(mx, my) && hit(mx) == pressed) shown[pressed].action().run();
-                    pressed = -1;
+                    if (drag.moved) preferences.dockPosition(DockPlacement.fraction(x, sw, size), DockPlacement.fraction(y, sh, size));
+                    else if (buttonContains(mx, my)) {
+                        expanded = !expanded && count > 0;
+                        openedAt = System.nanoTime();
+                    }
                 }
             }
-            if (bounds == null || bounds.x() != x || bounds.y() != y || bounds.w() != width || bounds.h() != height)
-                bounds = new Rect(x, y, width, height);
-            glass.card(renderer, x, y, width, height, s, 1, true, preferences.dockBackground());
-            for (int i = 0; i < 3; i++) renderer.quad(x + 9 * s, y + height / 2 + (i - 1) * 5 * s, 3 * s, 2 * s, glass.white(0.3));
-            double left = x + 20 * s;
-            for (int i = 0; i < count; i++) {
-                boolean selected = shown[i].selected().getAsBoolean();
-                boolean hover = mx >= left && mx < left + widths[i] && my >= y && my < y + height;
-                if (selected || hover) glass.pill(renderer, left, y + 4 * s, widths[i], height - 8 * s, s,
-                    glass.tint(preferences.dockAccent(), selected ? 0.2 : 0.1));
-                renderer.text(shown[i].label(), left + offsets[i], y + (height - lineHeight) / 2,
-                    selected || hover ? preferences.dockAccent() : glass.white(0.85), false, 0.82 * t);
-                left += widths[i] + 4 * s;
-            }
+            blur.begin(2);
+            blur.draw(x, y, size, size, GlassPainter.radius(s), 1);
+            glass.card(renderer, x, y, size, size, s, 1, true, preferences.dockBackground());
+            if (expanded || buttonContains(mx, my)) glass.pill(renderer, x + 3 * s, y + 3 * s, size - 6 * s, size - 6 * s, s,
+                glass.tint(preferences.dockAccent(), expanded ? 0.2 : 0.12));
+            Renderer2D.COLOR.render();
+            Renderer2D.COLOR.begin();
+            renderer.texture(BEE, x + 6 * s, y + 6 * s, beeSize, beeSize, glass.white(1));
+            if (expanded) drawMenu(renderer, sw, sh, mx, my);
         } finally {
-            renderer.end();
-            Utils.scaledProjection();
+            OverlayPass.end(context);
+        }
+    }
+
+    private void drawMenu(HudRenderer renderer, double sw, double sh, double mx, double my) {
+        double elapsed = Math.min(1, Math.max(0, (System.nanoTime() - openedAt) / 130_000_000.0));
+        double progress = 1 - Math.pow(1 - elapsed, 3);
+        menu.update(x, y, size, sw, sh, menuWidth, rowHeight, count, scale, progress);
+        blur.draw(menu.x, menu.y, menu.width, menu.height, GlassPainter.radius(scale), progress);
+        glass.card(renderer, menu.x, menu.y, menu.width, menu.height, scale, progress, true, preferences.dockBackground());
+        int hover = menu.hit(mx, my, count);
+        for (int i = 0; i < count; i++) {
+            DockEntry entry = shown[i];
+            double rowY = menu.y + menu.padding + i * rowHeight;
+            boolean selected = entry.selected();
+            if (selected || hover == i) glass.pill(renderer, menu.x + menu.padding, rowY, menu.width - 2 * menu.padding, rowHeight,
+                scale, glass.tint(preferences.dockAccent(), progress * (selected ? 0.2 : 0.12)));
+            entry.icon(renderer, menu.x + 14 * scale, rowY + (rowHeight - 14 * scale) / 2, 14 * scale,
+                glass.tint(preferences.dockAccent(), progress * (selected || hover == i ? 1 : 0.7)));
+            HudText.text(renderer, entry.label(), menu.x + 38 * scale, rowY + (rowHeight - lineHeight) / 2,
+                glass.white(progress * (hover == i || selected ? 1 : 0.82)), false, 0.82 * textScale);
+            if (selected) glass.pill(renderer, menu.x + menu.width - 13 * scale, rowY + rowHeight / 2 - 2 * scale,
+                4 * scale, 4 * scale, scale, glass.tint(preferences.dockAccent(), progress));
         }
     }
 }

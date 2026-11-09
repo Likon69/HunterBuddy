@@ -7,7 +7,7 @@ public interface DockPreferences {
     double dockY();
     void dockPosition(double x, double y);
     double dockScale();
-    double dockTextScale();
+    boolean dockInChat();
     Color dockAccent();
     Color dockBackground();
 }

@@ -13,7 +13,8 @@ public final class LegacyNames {
         "sign-render", "sign-reader",
         "pearlloader", "pearl-butler",
         "mlep-scaffold", "grim-scaffold",
-        "mlep-air-place", "grim-air-place"
+        "mlep-air-place", "grim-air-place",
+        "log", "hunterbuddy-menu"
     );
 
     private static final Map<String, String> HUD = Map.of(

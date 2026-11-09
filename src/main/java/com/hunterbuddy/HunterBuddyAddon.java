@@ -19,7 +19,7 @@ import com.hunterbuddy.modules.AutoPortal;
 import com.hunterbuddy.modules.CaveAirESP;
 import com.hunterbuddy.modules.ChunkRadar;
 import com.hunterbuddy.modules.ClientSideTime;
-import com.hunterbuddy.modules.ClientLog;
+import com.hunterbuddy.modules.HunterBuddyMenu;
 import com.hunterbuddy.modules.KickAlarm;
 import com.hunterbuddy.modules.ElytraAutoFly;
 import com.hunterbuddy.modules.ElytraBounce;
@@ -127,7 +127,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new AutoLogPlus());
         Modules.get().add(new AutoEXPPlus());
         Modules.get().add(new ClientSideTime());
-        Modules.get().add(new ClientLog());
+        Modules.get().add(new HunterBuddyMenu());
         Modules.get().add(new ShulkerPeek());
         Modules.get().add(new ElytraSwap());
         Modules.get().add(new InventoryCleaner());

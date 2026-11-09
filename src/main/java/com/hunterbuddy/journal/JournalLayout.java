@@ -1,13 +1,13 @@
 package com.hunterbuddy.journal;
 
-import com.hunterbuddy.modules.ClientLog;
 import com.hunterbuddy.modules.messenger.ui.Rect;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 
 public final class JournalLayout {
     public enum Action {
         LOG("Log"), CLEAR("Clear"), SAVE("Save"), SIZE("Restore"), COORDS("Coords: Visible"),
-        TEXT_DOWN("Aa -"), TEXT_UP("Aa +"), SCALE_DOWN("UI -"), SCALE_UP("UI +");
+        TEXT_DOWN("Aa -"), TEXT_UP("Aa +"), SCALE_DOWN("UI -"), SCALE_UP("UI +"), CLOSE("x");
 
         public static final Action[] ALL = values();
         public final String label;
@@ -35,7 +35,7 @@ public final class JournalLayout {
     private double x = Double.NaN;
     private double y;
 
-    public void update(HudRenderer renderer, ClientLog config, double sw, double sh, double bottom, boolean expanded, int font) {
+    public void update(HudRenderer renderer, JournalSettings config, double sw, double sh, double bottom, boolean expanded, int font) {
         double s = config.scale.get();
         double t = config.textScale.get();
         if (window != null && sw == screenWidth && sh == screenHeight && s == scale && t == textScale
@@ -54,25 +54,26 @@ public final class JournalLayout {
         double wx = expanded ? (sw - w) / 2 : Math.max(8, Math.min(sw - w - 8, x));
         double wy = expanded ? 18 : Math.max(8, Math.min(sh - bottom - h - 8, y));
         window = new Rect(wx, wy, w, h);
-        double labelWidth = renderer.textWidth("Log", false, 0.82 * t) + 45 * s;
-        double labelHeight = renderer.textHeight(false, 0.82 * t) + 10 * s;
+        double labelWidth = HudText.textWidth(renderer, "Log", false, 0.82 * t) + 45 * s;
+        double labelHeight = HudText.textHeight(renderer, false, 0.82 * t) + 10 * s;
         double logHeight = Math.max(29 * s, labelHeight);
         headerHeight = Math.max(44 * s, logHeight + 18 * s);
         buttons[Action.LOG.ordinal()] = new Rect(wx + 12 * s, wy + 9 * s, Math.max(72 * s, labelWidth), logHeight);
+        buttons[Action.CLOSE.ordinal()] = new Rect(wx + w - 34 * s, wy + 12 * s, 22 * s, 22 * s);
         double left = wx + 12 * s;
         double top = wy + headerHeight + 4 * s;
-        double bh = Math.max(24 * s, renderer.textHeight(false, 0.72 * t) + 10 * s);
+        double bh = Math.max(24 * s, HudText.textHeight(renderer, false, 0.72 * t) + 10 * s);
         for (Action action : Action.ALL) {
-            if (action == Action.LOG) continue;
-            double bw = Math.min(w - 24 * s, renderer.textWidth(action.label, false, 0.72 * t) + 20 * s);
+            if (action == Action.LOG || action == Action.CLOSE) continue;
+            double bw = Math.min(w - 24 * s, HudText.textWidth(renderer, action.label, false, 0.72 * t) + 20 * s);
             if (left + bw > wx + w - 12 * s) { left = wx + 12 * s; top += bh + 6 * s; }
             buttons[action.ordinal()] = new Rect(left, top, bw, bh);
             left += bw + 6 * s;
         }
         double bodyTop = top + bh + 10 * s;
-        rowHeight = Math.ceil(renderer.textHeight(false, t) + 5 * s);
+        rowHeight = Math.ceil(HudText.textHeight(renderer, false, t) + 5 * s);
         content = new Rect(wx + 14 * s, bodyTop, Math.max(1, w - 34 * s), Math.max(0, wy + h - 30 * s - bodyTop));
-        prefixWidth = Math.min(content.w() * 0.42, renderer.textWidth("88:88:88 [HunterBuddy]", false, 0.65 * t) + 12 * s);
+        prefixWidth = Math.min(content.w() * 0.42, HudText.textWidth(renderer, "88:88:88 [HunterBuddy]", false, 0.65 * t) + 12 * s);
         visible = Math.max(0, (int) (content.h() / rowHeight));
     }
 

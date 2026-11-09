@@ -15,8 +15,8 @@ public final class JournalExport {
     private JournalExport() {
     }
 
-    public static Path save(Path gameDirectory, JournalEntry[] entries, boolean hidden) throws IOException {
-        Path directory = gameDirectory.resolve("hunterbuddy").resolve("logs");
+    public static Path save(Path dataDirectory, JournalEntry[] entries, boolean hidden) throws IOException {
+        Path directory = dataDirectory.resolve("hunterbuddy").resolve("logs");
         Files.createDirectories(directory);
         StringBuilder text = new StringBuilder();
         for (JournalEntry entry : entries) text.append(JournalText.format(entry, hidden)).append('\n');

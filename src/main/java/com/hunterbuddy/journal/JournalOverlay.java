@@ -3,25 +3,22 @@ package com.hunterbuddy.journal;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import com.hunterbuddy.hud.glass.GlassPainter;
 import com.hunterbuddy.chatdock.ChatDock;
+import com.hunterbuddy.HunterBuddyAddon;
 import java.util.function.UnaryOperator;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
-import com.hunterbuddy.modules.ClientLog;
 import com.hunterbuddy.modules.messenger.ui.Pointer;
-import java.io.IOException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.ToDoubleFunction;
 import meteordevelopment.meteorclient.MeteorClient;
+import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
-import meteordevelopment.meteorclient.utils.Utils;
+import com.hunterbuddy.hud.text.OverlayPass;
 import net.minecraft.client.gui.DrawContext;
 import org.lwjgl.glfw.GLFW;
 
 public final class JournalOverlay {
-    private static JournalOverlay active;
-    private final ClientLog config;
+    private final JournalSettings config;
     private final JournalLayout layout = new JournalLayout();
     private final JournalRows rows = new JournalRows();
     private final JournalSelection selection = new JournalSelection();
@@ -34,11 +31,8 @@ public final class JournalOverlay {
     private boolean profiling;
     private boolean chatSeen;
     private long refreshAt;
-    private final ExecutorService writer = Executors.newSingleThreadExecutor(task -> {
-        Thread thread = new Thread(task, "HunterBuddy Journal Export");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final JournalWriter writer = new JournalWriter(message -> status = message,
+        (message, error) -> HunterBuddyAddon.LOG.error(message, error), message -> HunterBuddyAddon.LOG.info(message));
     private boolean open;
     private boolean hidden = true;
     private boolean expanded;
@@ -50,29 +44,18 @@ public final class JournalOverlay {
     private int font;
     private long lastScroll;
     private volatile String status = "";
-    private volatile boolean saving;
     private String count = "0 messages";
 
-    public JournalOverlay(ClientLog config) {
+    public JournalOverlay(JournalSettings config) {
         this.config = config;
-        measure = text -> HudRenderer.INSTANCE.textWidth(text, false, config.textScale.get());
+        measure = text -> HudText.textWidth(HudRenderer.INSTANCE, text, false, config.textScale.get());
         prefix = text -> GlassPainter.fit(HudRenderer.INSTANCE, text, Math.max(1, layout.prefixWidth - 8 * config.scale.get()),
             0.65 * config.textScale.get());
     }
 
-    public static JournalOverlay active() {
-        return active;
-    }
-
-    public static void activate(JournalOverlay overlay) {
-        overlay.hidden = true;
-        overlay.chatSeen = false;
-        active = overlay;
-    }
-
-    public static void deactivate(JournalOverlay overlay) {
-        overlay.chatClosed();
-        if (active == overlay) active = null;
+    public void reset() {
+        hidden = config.hideCoordinates.get();
+        chatSeen = false;
     }
 
     public boolean isOpen() {
@@ -85,7 +68,6 @@ public final class JournalOverlay {
             open = focused = true;
             rows.end();
             refreshAt = 0;
-            status = "";
         }
     }
 
@@ -118,11 +100,12 @@ public final class JournalOverlay {
         font++;
     }
 
-    public void render(DrawContext context) {
-        if (!chatSeen) {
+    public void render(DrawContext context, boolean chat) {
+        if (chat && !chatSeen) {
             chatSeen = true;
             if (config.autoOpen.get()) { open = true; focused = false; rows.end(); refreshAt = 0; }
         }
+        hidden = config.hideCoordinates.get();
         boolean measuring = config.profilePerformance.get();
         if (measuring && !profiling) profile.clear();
         if (!measuring && profiling) profile.pause();
@@ -131,9 +114,8 @@ public final class JournalOverlay {
         if (measuring) profile.frame(now, open);
         if (!open) return;
         var screen = MeteorClient.mc.getWindow();
-        Utils.unscaledProjection();
         HudRenderer renderer = HudRenderer.INSTANCE;
-        renderer.begin(context);
+        OverlayPass.begin(context);
         long stamp = measuring ? System.nanoTime() : 0;
         try {
             layout.update(renderer, config, screen.getFramebufferWidth(), screen.getFramebufferHeight(),
@@ -157,8 +139,7 @@ public final class JournalOverlay {
             if (measuring) profile.add(JournalProfile.Stage.DRAW_SUBMIT, System.nanoTime() - stamp);
         } finally {
             stamp = measuring ? System.nanoTime() : 0;
-            renderer.end();
-            Utils.scaledProjection();
+            OverlayPass.end(context);
             if (measuring) profile.add(JournalProfile.Stage.TEXT_FLUSH, System.nanoTime() - stamp);
         }
     }
@@ -226,11 +207,11 @@ public final class JournalOverlay {
     private void act(JournalLayout.Action action) {
         focused = true;
         switch (action) {
-            case LOG -> toggle();
+            case LOG, CLOSE -> close();
             case CLEAR -> { config.store.clear(); selection.clear(); rows.end(); refreshAt = 0; status = "Journal cleared"; }
             case SAVE -> save();
             case SIZE -> expanded = !expanded;
-            case COORDS -> { hidden = !hidden; status = hidden ? "Coordinates are hidden" : "Coordinates are visible"; }
+            case COORDS -> { hidden = !hidden; config.hideCoordinates.set(hidden); status = hidden ? "Coordinates are hidden" : "Coordinates are visible"; }
             case TEXT_DOWN -> config.textScale.set(Math.max(0.5, config.textScale.get() - 0.1));
             case TEXT_UP -> config.textScale.set(Math.min(1.6, config.textScale.get() + 0.1));
             case SCALE_DOWN -> config.scale.set(Math.max(0.6, config.scale.get() - 0.1));
@@ -239,36 +220,29 @@ public final class JournalOverlay {
     }
 
     public void savePerformance() {
-        String report = profile.report();
-        var directory = MeteorClient.mc.runDirectory.toPath().resolve("hunterbuddy/logs");
-        writer.execute(() -> {
-            try {
+        try {
+            String report = profile.report() + "\n" + com.hunterbuddy.hud.text.HudFontProfile.report();
+            var directory = MeteorClient.FOLDER.toPath().toAbsolutePath().normalize().resolve("hunterbuddy/logs");
+            writer.save("performance report", () -> {
                 Files.createDirectories(directory);
                 var target = directory.resolve("log-performance-" + System.currentTimeMillis() + ".txt");
                 Files.writeString(target, report, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-                status = "Performance report saved";
-            } catch (IOException exception) {
-                status = "Could not save performance report";
-            }
-        });
+                return target;
+            });
+        } catch (RuntimeException error) {
+            writer.failed("performance report", error);
+        }
     }
 
     private void save() {
-        if (saving) return;
-        JournalEntry[] entries = config.store.snapshot().entries();
-        boolean censor = hidden;
-        var directory = MeteorClient.mc.runDirectory.toPath();
-        saving = true;
-        status = "Saving journal...";
-        writer.execute(() -> {
-            try {
-                status = "Saved " + JournalExport.save(directory, entries, censor).getFileName();
-            } catch (IOException exception) {
-                status = "Could not save the journal";
-            } finally {
-                saving = false;
-            }
-        });
+        try {
+            JournalEntry[] entries = config.store.snapshot().entries();
+            boolean censor = hidden;
+            var directory = MeteorClient.FOLDER.toPath().toAbsolutePath().normalize();
+            writer.save("journal", () -> JournalExport.save(directory, entries, censor));
+        } catch (RuntimeException error) {
+            writer.failed("journal", error);
+        }
     }
 
     private void hold(double x, double y) {

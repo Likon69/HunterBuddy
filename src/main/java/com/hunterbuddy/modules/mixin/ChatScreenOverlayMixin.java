@@ -1,7 +1,6 @@
 package com.hunterbuddy.modules.mixin;
 
 import com.hunterbuddy.modules.messenger.Messenger;
-import com.hunterbuddy.journal.JournalOverlay;
 import com.hunterbuddy.chatdock.ChatDock;
 import com.hunterbuddy.modules.messenger.ui.MessengerOverlay;
 import com.hunterbuddy.modules.messenger.ui.Pointer;
@@ -36,10 +35,8 @@ public abstract class ChatScreenOverlayMixin {
     private void hunterBuddy$renderOverlay(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         MessengerOverlay overlay = hunterBuddy$overlay();
         if (overlay != null) overlay.render(context);
-        JournalOverlay journal = JournalOverlay.active();
-        if (journal != null) journal.render(context);
         ChatDock.INSTANCE.render(context);
-        boolean owns = overlay != null && overlay.inputFocused() || journal != null && journal.inputFocused();
+        boolean owns = overlay != null && overlay.inputFocused() || ChatDock.INSTANCE.inputFocused();
         if (owns != hunterBuddy$ownsInput) {
             hunterBuddy$ownsInput = owns;
             chatField.setFocused(!owns);
@@ -49,11 +46,6 @@ public abstract class ChatScreenOverlayMixin {
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void hunterBuddy$click(Click click, boolean doubled, CallbackInfoReturnable<Boolean> cir) {
         if (ChatDock.INSTANCE.click(Pointer.fromGui(click.x()), Pointer.fromGui(click.y()), click.button())) {
-            cir.setReturnValue(true);
-            return;
-        }
-        JournalOverlay journal = JournalOverlay.active();
-        if (journal != null && journal.click(Pointer.fromGui(click.x()), Pointer.fromGui(click.y()), click.button())) {
             cir.setReturnValue(true);
             return;
         }
@@ -67,12 +59,7 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
     private void hunterBuddy$scroll(double mouseX, double mouseY, double horizontal, double vertical, CallbackInfoReturnable<Boolean> cir) {
-        if (ChatDock.INSTANCE.contains(Pointer.fromGui(mouseX), Pointer.fromGui(mouseY))) {
-            cir.setReturnValue(true);
-            return;
-        }
-        JournalOverlay journal = JournalOverlay.active();
-        if (journal != null && journal.scroll(Pointer.fromGui(mouseX), Pointer.fromGui(mouseY), vertical)) {
+        if (ChatDock.INSTANCE.scroll(Pointer.fromGui(mouseX), Pointer.fromGui(mouseY), vertical)) {
             cir.setReturnValue(true);
             return;
         }
@@ -86,8 +73,7 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
     private void hunterBuddy$key(KeyInput input, CallbackInfoReturnable<Boolean> cir) {
-        JournalOverlay journal = JournalOverlay.active();
-        if (journal != null && journal.key(input.key(), input.modifiers())) {
+        if (ChatDock.INSTANCE.key(input.key(), input.modifiers())) {
             cir.setReturnValue(true);
             return;
         }
@@ -101,9 +87,7 @@ public abstract class ChatScreenOverlayMixin {
 
     @Inject(method = "removed", at = @At("HEAD"))
     private void hunterBuddy$closed(CallbackInfo ci) {
-        JournalOverlay journal = JournalOverlay.active();
-        if (journal != null) journal.chatClosed();
-        ChatDock.INSTANCE.cancel();
+        ChatDock.INSTANCE.closed();
         MessengerOverlay overlay = hunterBuddy$overlay();
         if (overlay != null) overlay.reset();
     }
