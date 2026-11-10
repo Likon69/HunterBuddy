@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.modules.regear.util.ModuleToggles;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.hunterbuddy.HunterBuddyAddon;
@@ -1074,6 +1075,7 @@ public class SpawnerDetector extends Module {
         resetAutoState();
         loadVisited();
         retryAbandonedSites();
+        if (autoFarm.get()) enableHMineForAutoFarmLater();
     }
 
     @Override
@@ -3326,6 +3328,20 @@ public class SpawnerDetector extends Module {
     private void onAutoFarmChanged(Boolean v) {
         if (!Boolean.TRUE.equals(v) && state == AutoState.FAILED) state = AutoState.IDLE;
         if (Boolean.TRUE.equals(v)) retryAbandonedSites();
+        if (Boolean.TRUE.equals(v) && isActive()) enableHMineForAutoFarm();
+    }
+
+    private void enableHMineForAutoFarmLater() {
+        HMine mine = hMineModule();
+        if (mine == null || mine.isActive()) return;
+        ModuleToggles.enableLater(this, mine, () -> info("HMine enabled for auto-farm."));
+    }
+
+    private void enableHMineForAutoFarm() {
+        HMine mine = hMineModule();
+        if (mine == null || mine.isActive()) return;
+        mine.toggle();
+        info("HMine enabled for auto-farm.");
     }
 
     private void retryAbandonedSites() {
