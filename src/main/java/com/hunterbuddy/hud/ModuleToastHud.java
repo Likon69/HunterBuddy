@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.hud.glass.GlassStyle;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import com.hunterbuddy.hud.toast.ModuleToastFeed;
 import com.hunterbuddy.hud.toast.ModuleToastInbox;
@@ -9,6 +10,7 @@ import com.hunterbuddy.hud.toast.ModuleToastTimeline;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -24,6 +26,9 @@ public final class ModuleToastHud extends HudElement {
     private static final ModuleToastTimeline.Notice PREVIEW_OFF = new ModuleToastTimeline.Notice("Kill Aura Plus", "Ctrl + G", false);
     private final SettingGroup general = settings.getDefaultGroup();
     private final SettingGroup colors = settings.createGroup("Colors");
+    private final Setting<GlassStyle> style = general.add(new EnumSetting.Builder<GlassStyle>()
+        .name("style").description("Glass: rounded glass cards. Flat: square flat panel.")
+        .defaultValue(GlassStyle.Glass).build());
     private final Setting<Double> duration = general.add(new DoubleSetting.Builder().name("duration")
         .description("Seconds each notification remains visible, including its fade.").defaultValue(4).min(1).max(15).sliderRange(2, 8).build());
     private final Setting<Integer> maximum = general.add(new IntSetting.Builder().name("visible-cards")
@@ -76,13 +81,13 @@ public final class ModuleToastHud extends HudElement {
         inbox.read(boundOnly.get());
         if (blur.get()) ModuleToastBlur.INSTANCE.begin(blurStrength.get());
         timeline.update(now, maximum.get(), duration.get());
-        if (isInEditor()) {
+        if (HudEditing.active()) {
             int count = Math.min(2, maximum.get());
             for (int i = 0; i < count; i++) {
                 ModuleToastTimeline.Notice notice = i == 0 ? PREVIEW_ON : PREVIEW_OFF;
                 double rowY = upward.get() ? h - cardHeight - i * stride : i * stride;
                 painter.draw(renderer, i, notice, x + pad, y + pad + rowY, w, cardHeight, s, textScale.get(),
-                    compact.get(), 1, i == 0 ? 0.76 : 0.43,
+                    compact.get(), style.get(), 1, i == 0 ? 0.76 : 0.43,
                     reflection.get(), blur.get(), notice.enabled() ? enabledColor.get() : disabledColor.get(), background.get(), text.get());
             }
             return;
@@ -92,7 +97,7 @@ public final class ModuleToastHud extends HudElement {
             double alpha = slot.opacity(now, duration.get());
             double rowY = upward.get() ? h - cardHeight - slot.row * stride : slot.row * stride;
             painter.draw(renderer, i, slot.notice, x + pad + (1 - alpha) * 14 * s, y + pad + rowY,
-                w, cardHeight, s, textScale.get(), compact.get(), alpha, slot.remaining(now, duration.get()), reflection.get(), blur.get(),
+                w, cardHeight, s, textScale.get(), compact.get(), style.get(), alpha, slot.remaining(now, duration.get()), reflection.get(), blur.get(),
                 slot.notice.enabled() ? enabledColor.get() : disabledColor.get(), background.get(), text.get());
         }
     }

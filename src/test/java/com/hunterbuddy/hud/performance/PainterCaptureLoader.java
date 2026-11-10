@@ -22,9 +22,7 @@ final class PainterCaptureLoader extends ClassLoader {
             || name.equals("com.hunterbuddy.hud.performance.PerformanceLayout")
             || name.equals("com.hunterbuddy.hud.glass.GlassPainter")
             || name.equals("com.hunterbuddy.hud.text.HudText")
-            || name.startsWith("com.hunterbuddy.hud.toast.ModuleToastPainter")
-            || name.equals("com.hunterbuddy.modules.aura.AuraNameplatePainter")
-            || name.equals("com.hunterbuddy.modules.aura.AuraTrack");
+            || name.startsWith("com.hunterbuddy.hud.toast.ModuleToastPainter");
         if (!isolated) return super.loadClass(name, resolve);
         Class<?> found = findLoadedClass(name);
         if (found == null) {

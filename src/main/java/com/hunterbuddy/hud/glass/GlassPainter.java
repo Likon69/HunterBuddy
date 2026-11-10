@@ -58,6 +58,22 @@ public final class GlassPainter {
         }
     }
 
+    public void flatCard(HudRenderer renderer, double x, double y, double width, double height, double scale,
+                         double alpha, Color background) {
+        renderer.quad(x, y, width, height, tint(background, alpha));
+        frame(renderer, x, y, width, height, 0.7 * scale, tint(WHITE, alpha * 0.12));
+    }
+
+    public static void frame(HudRenderer renderer, double x, double y, double width, double height,
+                             double thickness, Color color) {
+        if (width <= 0 || height <= 0 || thickness <= 0) return;
+        thickness = Math.min(thickness, Math.min(width, height) / 2);
+        renderer.quad(x, y, width, thickness, color);
+        renderer.quad(x, y + height - thickness, width, thickness, color);
+        renderer.quad(x, y + thickness, thickness, height - thickness * 2, color);
+        renderer.quad(x + width - thickness, y + thickness, thickness, height - thickness * 2, color);
+    }
+
     public void accentBar(HudRenderer renderer, double x, double y, double height, double scale, double alpha, Color accent) {
         rounded(renderer, x + 5 * scale, y + height * 0.23, 3 * scale, height * 0.54,
             1.5 * scale, tint(accent, alpha * 0.9));
@@ -66,6 +82,10 @@ public final class GlassPainter {
     public void pill(HudRenderer renderer, double x, double y, double width, double height, double scale,
                      Color fill) {
         rounded(renderer, x, y, width, height, pillRadius(scale), fill);
+    }
+
+    public void flatPill(HudRenderer renderer, double x, double y, double width, double height, Color fill) {
+        renderer.quad(x, y, width, height, fill);
     }
 
     public void outline(HudRenderer renderer, double x, double y, double width, double height,

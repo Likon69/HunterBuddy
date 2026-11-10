@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud.toast;
 
 import com.hunterbuddy.hud.glass.GlassPainter;
+import com.hunterbuddy.hud.glass.GlassStyle;
 import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
@@ -47,10 +48,11 @@ public final class ModuleToastPainter {
     }
 
     public void draw(HudRenderer renderer, int index, ModuleToastTimeline.Notice notice, double x, double y,
-                     double width, double height, double scale, double textScale, boolean compact, double alpha,
+                     double width, double height, double scale, double textScale, boolean compact, GlassStyle style, double alpha,
                      double remaining, boolean reflection, boolean blur, Color accent, Color background, Color text) {
         if (alpha < 0.002) return;
-        if (blur) ModuleToastBlur.INSTANCE.draw(x, y, width, height, GlassPainter.radius(scale), alpha);
+        boolean flat = style == GlassStyle.Flat;
+        if (blur) ModuleToastBlur.INSTANCE.draw(x, y, width, height, flat ? 0 : GlassPainter.radius(scale), alpha);
         Label label = labels[index];
         if (label.notice != notice || label.width != width || label.scale != scale
             || label.textScale != textScale || label.compact != compact) {
@@ -66,13 +68,17 @@ public final class ModuleToastPainter {
             double reserved = compact ? 43 * scale + label.statePill + label.bindWidth : 51 * scale + label.statePill;
             label.title = GlassPainter.fit(renderer, notice.name(), width - reserved, TITLE * textScale);
         }
-        glass.card(renderer, x, y, width, height, scale, alpha, reflection, background);
-        glass.accentBar(renderer, x, y, height, scale, alpha, accent);
+        if (flat) {
+            glass.flatCard(renderer, x, y, width, height, scale, alpha, background);
+        } else {
+            glass.card(renderer, x, y, width, height, scale, alpha, reflection, background);
+            glass.accentBar(renderer, x, y, height, scale, alpha, accent);
+        }
         double pillHeight = pillHeight(renderer, scale, textScale);
         double topHeight = topHeight(renderer, scale, textScale);
         double topCenter = y + (compact ? height / 2 : 11 * scale + topHeight / 2);
         double stateX = x + width - 13 * scale - label.statePill;
-        glass.pill(renderer, stateX, topCenter - pillHeight / 2, label.statePill, pillHeight, scale,
+        pill(flat, renderer, stateX, topCenter - pillHeight / 2, label.statePill, pillHeight, scale,
             glass.tint(accent, alpha * 0.16));
         HudText.text(renderer, notice.enabled() ? "ON" : "OFF", stateX + (label.statePill - label.stateWidth) / 2,
             GlassPainter.centered(renderer, topCenter, STATE * textScale), glass.tint(accent, alpha), false, STATE * textScale);
@@ -84,12 +90,18 @@ public final class ModuleToastPainter {
                 GlassPainter.centered(renderer, bindCenter, SMALL * textScale), glass.tint(text, alpha * 0.58), false, SMALL * textScale);
         }
         double bindX = compact ? stateX - 6 * scale - label.bindWidth : x + width - label.bindWidth - 13 * scale;
-        glass.pill(renderer, bindX, bindCenter - pillHeight / 2, label.bindWidth, pillHeight, scale,
+        pill(flat, renderer, bindX, bindCenter - pillHeight / 2, label.bindWidth, pillHeight, scale,
             glass.white(alpha * 0.07));
         HudText.text(renderer, label.bind, bindX + 8 * scale, GlassPainter.centered(renderer, bindCenter, SMALL * textScale),
             glass.tint(text, alpha * 0.85), false, SMALL * textScale);
         renderer.quad(x + 13 * scale, y + height - 3 * scale, width - 26 * scale, scale, glass.tint(accent, alpha * 0.09));
         renderer.quad(x + 13 * scale, y + height - 3 * scale, (width - 26 * scale) * remaining,
             scale, glass.tint(accent, alpha * 0.55));
+    }
+
+    private void pill(boolean flat, HudRenderer renderer, double x, double y, double width, double height, double scale,
+                      Color fill) {
+        if (flat) glass.flatPill(renderer, x, y, width, height, fill);
+        else glass.pill(renderer, x, y, width, height, scale, fill);
     }
 }

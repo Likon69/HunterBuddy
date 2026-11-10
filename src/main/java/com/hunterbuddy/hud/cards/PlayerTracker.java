@@ -18,6 +18,7 @@ public final class PlayerTracker {
     private static final long GHOST_MS = 10_000L;
 
     private final Map<UUID, PlayerTrack> tracks = new HashMap<>();
+    private final List<PlayerTrack> ordered = new ArrayList<>();
 
     public void clear() {
         tracks.clear();
@@ -39,14 +40,23 @@ public final class PlayerTracker {
     }
 
     public List<PlayerTrack> nearest(int limit, long now) {
-        List<PlayerTrack> sorted = new ArrayList<>(tracks.values());
-        sorted.sort((a, b) -> {
+        ordered.clear();
+        ordered.addAll(tracks.values());
+        ordered.sort((a, b) -> {
             boolean ghostA = !a.present(now);
             boolean ghostB = !b.present(now);
             if (ghostA != ghostB) return ghostA ? 1 : -1;
             return Double.compare(a.distance(), b.distance());
         });
-        return sorted.size() > limit ? sorted.subList(0, limit) : sorted;
+        return ordered.size() > limit ? ordered.subList(0, limit) : ordered;
+    }
+
+    public int presentCount(long now) {
+        int count = 0;
+        for (PlayerTrack track : tracks.values()) {
+            if (track.present(now)) count++;
+        }
+        return count;
     }
 
     private static SkinTextures skin(MinecraftClient mc, UUID uuid) {

@@ -31,19 +31,6 @@ final class PerformanceLayoutTest {
     }
 
     @Test
-    void compactTitleSitsToTheLeftWithoutAddingAnExtraRow() {
-        PerformanceLayout layout = new PerformanceLayout();
-        layout.update(1, true, false, 12, 18, 15, 90, LABELS, VALUES);
-        double height = layout.height;
-        double width = layout.width;
-        layout.update(1, true, true, 12, 18, 15, 90, LABELS, VALUES);
-        assertEquals(height, layout.height);
-        assertEquals(width + 102, layout.width);
-        assertEquals(102, layout.inlineTitle);
-        assertEquals(layout.padding, layout.rowY);
-    }
-
-    @Test
     void realFontMetricsExpandTheFrameInsteadOfClippingLargerGlyphs() {
         PerformanceLayout layout = new PerformanceLayout();
         layout.update(1, false, true, 12, 18, 15, 90, LABELS, VALUES);

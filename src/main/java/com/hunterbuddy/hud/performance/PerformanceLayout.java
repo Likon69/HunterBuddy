@@ -8,7 +8,6 @@ public final class PerformanceLayout {
     public double gap;
     public double rowY;
     public double rowHeight;
-    public double inlineTitle;
     public double labelInset;
     public double valueInset;
 
@@ -20,9 +19,8 @@ public final class PerformanceLayout {
         valueInset = (compact ? 10 : 12) * scale;
         rowHeight = Math.max((compact ? 26 : 34) * scale,
             Math.max(labelHeight, valueHeight) + (compact ? 8 : 14) * scale);
-        inlineTitle = compact && title ? titleWidth + 12 * scale : 0;
-        rowY = padding + (title && !compact ? titleHeight + 6 * scale : 0);
-        width = padding * 2 + gap * (widths.length - 1) + inlineTitle;
+        rowY = padding + (title ? titleHeight + 6 * scale : 0);
+        width = padding * 2 + gap * (widths.length - 1);
         for (int i = 0; i < widths.length; i++) {
             widths[i] = labelInset + labels[i] + (compact ? 12 : 14) * scale + values[i] + valueInset;
             width += widths[i];

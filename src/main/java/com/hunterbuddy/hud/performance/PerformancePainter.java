@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud.performance;
 
 import com.hunterbuddy.hud.glass.GlassPainter;
+import com.hunterbuddy.hud.glass.GlassStyle;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import com.hunterbuddy.hud.text.HudText;
 import com.hunterbuddy.hud.text.HudTextScale;
@@ -24,8 +25,11 @@ public final class PerformancePainter {
     private boolean title;
     private boolean shadow;
     private boolean invalid = true;
+    private GlassStyle style = GlassStyle.Glass;
 
     public void invalidate() { invalid = true; }
+
+    public void style(GlassStyle style) { this.style = style; }
 
     public double width() { return layout.width; }
 
@@ -60,7 +64,8 @@ public final class PerformancePainter {
 
     public void draw(HudRenderer renderer, PerformanceMetric[] metrics, double x, double y, long now,
                      boolean blur, boolean reflection, Color background, Color titleColor, Color critical) {
-        if (blur) ModuleToastBlur.INSTANCE.draw(x, y, layout.width, layout.height, GlassPainter.radius(scale), 1);
+        boolean flat = style == GlassStyle.Flat;
+        if (blur) ModuleToastBlur.INSTANCE.draw(x, y, layout.width, layout.height, flat ? 0 : GlassPainter.radius(scale), 1);
         int level = 0;
         float flash = 0;
         for (int i = 0; i < metrics.length; i++) {
@@ -70,33 +75,44 @@ public final class PerformancePainter {
         double wave = 0.5 + 0.5 * Math.sin(now * 0.0026);
         double pulse = 0.65 + 0.35 * wave * wave;
         double alert = Math.max(level * 0.5, flash);
-        glass.card(renderer, x, y, layout.width, layout.height, scale, 1, reflection, background);
-        if (alert > 0) glass.outline(renderer, x, y, layout.width, layout.height, GlassPainter.radius(scale), 0.8 * scale,
-            glass.tint(critical, 0.38 + alert * pulse * 0.36));
+        Color alertColor = glass.tint(critical, 0.38 + alert * pulse * 0.36);
+        if (flat) {
+            glass.flatCard(renderer, x, y, layout.width, layout.height, scale, 1, background);
+            if (alert > 0) GlassPainter.frame(renderer, x, y, layout.width, layout.height, 0.8 * scale, alertColor);
+        } else {
+            glass.card(renderer, x, y, layout.width, layout.height, scale, 1, reflection, background);
+            if (alert > 0) glass.outline(renderer, x, y, layout.width, layout.height, GlassPainter.radius(scale), 0.8 * scale, alertColor);
+        }
         double center = y + layout.rowY + layout.rowHeight / 2;
         if (title) {
-            double titleCenter = compact ? center : y + layout.padding + titleHeight / 2;
-            HudText.text(renderer, TITLE, x + layout.padding + (compact ? 3 * scale : 2 * scale),
+            double titleCenter = y + layout.padding + titleHeight / 2;
+            HudText.text(renderer, TITLE, x + layout.padding + 2 * scale,
                 titleCenter - titleHeight / 2, titleColor, shadow, HudTextScale.NORMAL);
         }
-        double left = x + layout.padding + layout.inlineTitle;
+        double left = x + layout.padding;
         for (int i = 0; i < metrics.length; i++) {
-            metric(renderer, metrics[i], i, left, y + layout.rowY, center, pulse, reflection, background, titleColor);
+            metric(renderer, metrics[i], i, left, y + layout.rowY, center, pulse, reflection, background, titleColor, flat);
+            if (flat && i < metrics.length - 1) {
+                renderer.quad(left + layout.widths[i] + layout.gap / 2 - scale / 2, y + layout.rowY, scale,
+                    layout.rowHeight, glass.white(0.16));
+            }
             left += layout.widths[i] + layout.gap;
         }
     }
 
     private void metric(HudRenderer renderer, PerformanceMetric metric, int index, double x, double y, double center,
-                        double pulse, boolean reflection, Color background, Color titleColor) {
+                        double pulse, boolean reflection, Color background, Color titleColor, boolean flat) {
         double alert = Math.max(metric.level * 0.5, metric.flash) * pulse;
         double width = layout.widths[index];
         double radius = GlassPainter.pillRadius(scale);
-        glass.pill(renderer, x, y, width, layout.rowHeight, scale, glass.tint(background, 0.46));
-        glass.pill(renderer, x, y, width, layout.rowHeight, scale, glass.tint(metric.color, 0.055 + alert * 0.09));
-        glass.outline(renderer, x, y, width, layout.rowHeight, radius, 0.8 * scale,
-            glass.tint(metric.color, 0.32 + alert * 0.2));
-        glass.accentBar(renderer, x, y, layout.rowHeight, scale * 0.65, 0.85, metric.color);
-        if (reflection) renderer.quad(x + radius, y + scale, width - radius * 2, scale, glass.white(0.12));
+        if (!flat) {
+            glass.pill(renderer, x, y, width, layout.rowHeight, scale, glass.tint(background, 0.46));
+            glass.pill(renderer, x, y, width, layout.rowHeight, scale, glass.tint(metric.color, 0.055 + alert * 0.09));
+            glass.outline(renderer, x, y, width, layout.rowHeight, radius, 0.8 * scale,
+                glass.tint(metric.color, 0.32 + alert * 0.2));
+            glass.accentBar(renderer, x, y, layout.rowHeight, scale * 0.65, 0.85, metric.color);
+            if (reflection) renderer.quad(x + radius, y + scale, width - radius * 2, scale, glass.white(0.12));
+        }
         HudText.text(renderer, metric.label, x + layout.labelInset, center - labelHeight / 2,
             glass.tint(titleColor, 0.58), false, HudTextScale.SMALL);
         HudText.text(renderer, metric.text, x + width - layout.valueInset - valueWidths[index], center - valueHeight / 2,

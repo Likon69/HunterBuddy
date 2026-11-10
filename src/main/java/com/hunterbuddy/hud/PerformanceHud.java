@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.hud.glass.GlassStyle;
 import com.hunterbuddy.hud.performance.PerformanceMetric;
 import com.hunterbuddy.hud.performance.PerformancePainter;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
@@ -11,6 +12,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -46,6 +48,10 @@ public class PerformanceHud extends HudElement {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgGlass = settings.createGroup("Glass");
 
+    private final Setting<GlassStyle> style = sgGeneral.add(new EnumSetting.Builder<GlassStyle>()
+        .name("style").description("Glass: rounded glass cards. Flat: square flat panel.")
+        .defaultValue(GlassStyle.Glass).build());
+
     private final Setting<Double> scale = sgGlass.add(new DoubleSetting.Builder()
         .name("scale").description("Scale of the glass frame and spacing, independent of text size.")
         .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.6, 1.5).build());
@@ -67,11 +73,11 @@ public class PerformanceHud extends HudElement {
         .defaultValue(new SettingColor(17, 24, 35, 184)).build());
 
     private final Setting<Boolean> compact = sgGlass.add(new BoolSetting.Builder()
-        .name("compact").description("A thin single row, including the title when enabled.")
+        .name("compact").description("A thin single row of the three pills, without a title.")
         .defaultValue(false).build());
 
     private final Setting<Boolean> showTitle = sgGeneral.add(new BoolSetting.Builder()
-        .name("show-title").description("Display the title above the normal layout. Compact always includes its inline title.")
+        .name("show-title").description("Display the title above the normal layout.")
         .defaultValue(false).visible(() -> !compact.get()).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
@@ -189,7 +195,8 @@ public class PerformanceHud extends HudElement {
         pingDisplayColor(now);
         tpsDisplayColor(live && TpsSampler.get().timeSinceLastTick() > TPS_FLATLINE_SECONDS, now);
         double s = scale.get();
-        painter.measure(renderer, metrics, s, textScale.get(), compact.get(), compact.get() || showTitle.get(), textShadow.get());
+        painter.style(style.get());
+        painter.measure(renderer, metrics, s, textScale.get(), compact.get(), !compact.get() && showTitle.get(), textShadow.get());
         double pad = 8 * s;
         setSize(painter.width() + pad * 2, painter.height() + pad * 2);
         if (backgroundBlur.get()) ModuleToastBlur.INSTANCE.begin(blurStrength.get());

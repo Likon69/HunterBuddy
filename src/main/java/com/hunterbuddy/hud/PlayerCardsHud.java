@@ -3,17 +3,20 @@ package com.hunterbuddy.hud;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.hud.cards.CardMetrics;
 import com.hunterbuddy.hud.cards.CardStyle;
+import com.hunterbuddy.hud.cards.CrowdPainter;
 import com.hunterbuddy.hud.cards.PlayerCard;
 import com.hunterbuddy.hud.cards.PlayerCardsPainter;
 import com.hunterbuddy.hud.cards.PlayerCardsPreview;
 import com.hunterbuddy.hud.cards.PlayerMovement;
 import com.hunterbuddy.hud.cards.PlayerTrack;
 import com.hunterbuddy.hud.cards.PlayerTracker;
+import com.hunterbuddy.hud.glass.GlassStyle;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import java.util.List;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -29,8 +32,14 @@ public final class PlayerCardsHud extends HudElement {
     private static final double GHOST_ALPHA = 0.45;
     private final SettingGroup general = settings.getDefaultGroup();
     private final SettingGroup colors = settings.createGroup("Colors");
+    private final Setting<GlassStyle> glassStyle = general.add(new EnumSetting.Builder<GlassStyle>()
+        .name("style").description("Glass: rounded glass cards. Flat: square flat panel.")
+        .defaultValue(GlassStyle.Glass).build());
     private final Setting<Integer> maxCards = general.add(new IntSetting.Builder().name("max-cards")
         .description("How many players to show, nearest first.").defaultValue(4).min(1).max(8).sliderRange(1, 8).build());
+    private final Setting<Integer> crowdThreshold = general.add(new IntSetting.Builder().name("crowd-threshold")
+        .description("Above this many players in range, one card of heads replaces the big cards.")
+        .defaultValue(4).min(1).max(20).sliderRange(1, 20).build());
     private final Setting<Boolean> includeFriends = general.add(new BoolSetting.Builder().name("include-friends")
         .description("Show friends too.").defaultValue(false).build());
     private final Setting<Integer> alertDistance = general.add(new IntSetting.Builder().name("alert-distance")
@@ -67,6 +76,7 @@ public final class PlayerCardsHud extends HudElement {
         .description("Names and distances, including their opacity.").defaultValue(new SettingColor(236, 243, 252, 255)).build());
     private final PlayerTracker tracker = new PlayerTracker();
     private final PlayerCardsPainter painter = new PlayerCardsPainter();
+    private final CrowdPainter crowd = new CrowdPainter();
 
     public PlayerCardsHud() {
         super(INFO);
@@ -82,16 +92,20 @@ public final class PlayerCardsHud extends HudElement {
     public void render(HudRenderer renderer) {
         long now = System.currentTimeMillis();
         CardStyle style = new CardStyle(scale.get(), textScale.get(), compact.get(), blur.get(), reflection.get(),
-            background.get(), text.get());
+            glassStyle.get(), background.get(), text.get());
         CardMetrics metrics = painter.measure(renderer, style);
         double s = style.scale();
         double cardWidth = Math.max(width.get() * s, metrics.minWidth());
         double stride = metrics.height() + 8 * s;
         double h = maxCards.get() * stride - 8 * s;
         double pad = 7 * s;
+        if (tracker.presentCount(now) > crowdThreshold.get()) {
+            renderCrowd(renderer, style, cardWidth + pad * 2, now);
+            return;
+        }
         setSize(cardWidth + pad * 2, h + pad * 2);
         List<PlayerTrack> tracks = tracker.nearest(maxCards.get(), now);
-        if (isInEditor() && tracks.stream().noneMatch(track -> track.present(now))) {
+        if (HudEditing.active() && tracks.stream().noneMatch(track -> track.present(now))) {
             tracks = PlayerCardsPreview.tracks(now);
         }
         if (style.blur()) ModuleToastBlur.INSTANCE.begin(blurStrength.get());
@@ -103,6 +117,23 @@ public final class PlayerCardsHud extends HudElement {
             PlayerCard card = new PlayerCard(track, movement, accent, pill, track.present(now) ? 1 : GHOST_ALPHA);
             double rowY = upward.get() ? h - metrics.height() - i * stride : i * stride;
             painter.draw(renderer, style, metrics, card, x + pad, y + pad + rowY, cardWidth);
+        }
+    }
+
+    private void renderCrowd(HudRenderer renderer, CardStyle style, double cardWidth, long now) {
+        List<PlayerTrack> tracks = tracker.nearest(Integer.MAX_VALUE, now);
+        int count = 0;
+        while (count < tracks.size() && tracks.get(count).present(now)) count++;
+        double height = crowd.height(count, cardWidth, style.scale());
+        setSize(cardWidth, height);
+        if (style.blur()) ModuleToastBlur.INSTANCE.begin(blurStrength.get());
+        crowd.card(renderer, style, x, y, cardWidth, height);
+        int columns = crowd.columns(cardWidth, style.scale());
+        for (int i = 0; i < count; i++) {
+            PlayerTrack track = tracks.get(i);
+            SettingColor ring = track.closingWithin(alertDistance.get(), now) ? criticalColor.get()
+                : pillColor(track.movement(now));
+            crowd.head(renderer, style, track, ring, i, columns, x, y);
         }
     }
 

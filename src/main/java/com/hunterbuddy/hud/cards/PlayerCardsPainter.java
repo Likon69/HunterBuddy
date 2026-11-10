@@ -1,6 +1,7 @@
 package com.hunterbuddy.hud.cards;
 
 import com.hunterbuddy.hud.glass.GlassPainter;
+import com.hunterbuddy.hud.glass.GlassStyle;
 import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import com.hunterbuddy.hud.text.HudText;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
@@ -55,9 +56,14 @@ public final class PlayerCardsPainter {
         double t = style.textScale();
         double alpha = card.alpha();
         PlayerTrack track = card.track();
-        if (style.blur()) ModuleToastBlur.INSTANCE.draw(x, y, width, metrics.height(), GlassPainter.radius(s), alpha);
-        glass.card(renderer, x, y, width, metrics.height(), s, alpha, style.reflection(), style.background());
-        glass.accentBar(renderer, x, y, metrics.height(), s, alpha, card.accent());
+        boolean flat = style.glassStyle() == GlassStyle.Flat;
+        if (style.blur()) ModuleToastBlur.INSTANCE.draw(x, y, width, metrics.height(), flat ? 0 : GlassPainter.radius(s), alpha);
+        if (flat) {
+            glass.flatCard(renderer, x, y, width, metrics.height(), s, alpha, style.background());
+        } else {
+            glass.card(renderer, x, y, width, metrics.height(), s, alpha, style.reflection(), style.background());
+            glass.accentBar(renderer, x, y, metrics.height(), s, alpha, card.accent());
+        }
         double top = y + metrics.padding();
         double left = x + 12 * s;
         double right = x + width - 12 * s;
@@ -69,14 +75,14 @@ public final class PlayerCardsPainter {
         HudText.text(renderer, name, textX, GlassPainter.centered(renderer, firstCenter, NAME * t),
             glass.tint(style.text(), alpha), false, NAME * t);
         if (style.compact()) {
-            pill(renderer, distance, right, firstCenter, metrics, card.pill(), alpha, s, t);
+            pill(renderer, style, distance, right, firstCenter, metrics, card.pill(), alpha, s, t);
             return;
         }
         double valueWidth = HudText.textWidth(renderer, distance, false, VALUE * t);
         HudText.text(renderer, distance, right - valueWidth, GlassPainter.centered(renderer, firstCenter, VALUE * t),
             glass.tint(style.text(), alpha * 0.85), false, VALUE * t);
         double secondCenter = top + metrics.firstRow() + 4 * s + metrics.secondRow() / 2;
-        pill(renderer, card.movement().label(), right, secondCenter, metrics, card.pill(), alpha, s, t);
+        pill(renderer, style, card.movement().label(), right, secondCenter, metrics, card.pill(), alpha, s, t);
         double gearX = textX;
         for (int i = 0; i < PlayerTrack.GEAR_SLOTS.length; i++) {
             ItemStack stack = track.gear(i);
@@ -86,11 +92,16 @@ public final class PlayerCardsPainter {
         }
     }
 
-    private void pill(HudRenderer renderer, String label, double right, double center, CardMetrics metrics,
+    private void pill(HudRenderer renderer, CardStyle style, String label, double right, double center, CardMetrics metrics,
                       Color color, double alpha, double scale, double textScale) {
         double left = right - metrics.pillWidth();
-        glass.pill(renderer, left, center - metrics.pillHeight() / 2, metrics.pillWidth(), metrics.pillHeight(),
-            scale, glass.tint(color, alpha * 0.16));
+        if (style.glassStyle() == GlassStyle.Flat) {
+            glass.flatPill(renderer, left, center - metrics.pillHeight() / 2, metrics.pillWidth(), metrics.pillHeight(),
+                glass.tint(color, alpha * 0.16));
+        } else {
+            glass.pill(renderer, left, center - metrics.pillHeight() / 2, metrics.pillWidth(), metrics.pillHeight(),
+                scale, glass.tint(color, alpha * 0.16));
+        }
         double labelWidth = HudText.textWidth(renderer, label, false, PILL * textScale);
         HudText.text(renderer, label, left + (metrics.pillWidth() - labelWidth) / 2,
             GlassPainter.centered(renderer, center, PILL * textScale), glass.tint(color, alpha), false, PILL * textScale);
