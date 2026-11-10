@@ -44,8 +44,29 @@ public class Skybox extends Module {
 
     private final Setting<Integer> quality = sgGeneral.add(new IntSetting.Builder()
         .name("quality")
-        .description("Maximum ray integration steps for Ember Lens.")
+        .description("Maximum ray integration steps for Black Hole.")
         .defaultValue(32).min(16).max(64).sliderRange(16, 64)
+        .visible(() -> uses(SkyboxStyle.BLACK_HOLE))
+        .build());
+
+    private final Setting<Double> blackHoleElevation = sgGeneral.add(new DoubleSetting.Builder()
+        .name("black-hole-elevation")
+        .description("Height of the black hole above the horizon, in degrees.")
+        .defaultValue(40.0).min(10.0).max(80.0).sliderRange(10.0, 80.0)
+        .visible(() -> uses(SkyboxStyle.BLACK_HOLE))
+        .build());
+
+    private final Setting<Double> blackHoleTilt = sgGeneral.add(new DoubleSetting.Builder()
+        .name("black-hole-tilt")
+        .description("Angle of the viewpoint above the accretion disk plane, in degrees; small values show the disk edge-on.")
+        .defaultValue(8.0).min(0.0).max(60.0).sliderRange(0.0, 60.0)
+        .visible(() -> uses(SkyboxStyle.BLACK_HOLE))
+        .build());
+
+    private final Setting<Double> blackHoleSize = sgGeneral.add(new DoubleSetting.Builder()
+        .name("black-hole-size")
+        .description("Angular size multiplier of the black hole.")
+        .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0)
         .visible(() -> uses(SkyboxStyle.BLACK_HOLE))
         .build());
 
@@ -103,17 +124,10 @@ public class Skybox extends Module {
     private final Setting<SettingColor> voidBottom = color("void-bottom", "Colour of the sky at the horizon.",
         new SettingColor(60, 20, 90), SkyboxStyle.DEEP_VOID);
 
-    private final Setting<SettingColor> planetSurface = color("planet-surface", "Cloud bands of the ringed planet.",
-        new SettingColor(168, 143, 112), SkyboxStyle.RINGED_PLANET);
-    private final Setting<SettingColor> planetAtmosphere = color("planet-atmosphere", "Atmospheric halo of the ringed planet.",
-        new SettingColor(107, 166, 196), SkyboxStyle.RINGED_PLANET);
-    private final Setting<SettingColor> planetRings = color("planet-rings", "Dust and ice in the tilted rings.",
-        new SettingColor(194, 181, 155), SkyboxStyle.RINGED_PLANET);
-
     private final Setting<SettingColor> blackHoleOuter = color("black-hole-outer", "Cooler outer edge of the accretion disk.",
-        new SettingColor(191, 83, 48), SkyboxStyle.BLACK_HOLE);
+        new SettingColor(235, 105, 38), SkyboxStyle.BLACK_HOLE);
     private final Setting<SettingColor> blackHoleInner = color("black-hole-inner", "Hot inner edge of the accretion disk.",
-        new SettingColor(255, 213, 151), SkyboxStyle.BLACK_HOLE);
+        new SettingColor(255, 222, 165), SkyboxStyle.BLACK_HOLE);
     private final Setting<SettingColor> blackHolePhoton = color("black-hole-photon", "Thin photon ring around the shadow.",
         new SettingColor(163, 204, 222), SkyboxStyle.BLACK_HOLE);
 
@@ -175,7 +189,6 @@ public class Skybox extends Module {
             case TWILIGHT -> new SettingColor[] {twilightHorizon.get(), twilightZenith.get(), twilightClouds.get()};
             case STORM_NIGHT -> new SettingColor[] {stormCloud.get(), stormFlash.get(), stormFlash.get()};
             case DEEP_VOID -> new SettingColor[] {voidTop.get(), voidBottom.get(), voidBottom.get()};
-            case RINGED_PLANET -> new SettingColor[] {planetSurface.get(), planetAtmosphere.get(), planetRings.get()};
             case BLACK_HOLE -> new SettingColor[] {blackHoleOuter.get(), blackHoleInner.get(), blackHolePhoton.get()};
             case MILKY_WAY -> new SettingColor[] {milkyWayStars.get(), milkyWayCore.get(), milkyWayDust.get()};
         };
@@ -195,6 +208,18 @@ public class Skybox extends Module {
 
     public int quality() {
         return quality.get();
+    }
+
+    public double blackHoleElevation() {
+        return blackHoleElevation.get();
+    }
+
+    public double blackHoleTilt() {
+        return blackHoleTilt.get();
+    }
+
+    public double blackHoleSize() {
+        return blackHoleSize.get();
     }
 
     public boolean keepCelestial() {

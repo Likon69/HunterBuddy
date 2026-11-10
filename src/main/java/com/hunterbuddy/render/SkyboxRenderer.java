@@ -78,7 +78,6 @@ public final class SkyboxRenderer {
     private static Framebuffer target(SkyboxStyle style) {
         Framebuffer main = mc.getFramebuffer();
         int divisor = switch (style) {
-            case RINGED_PLANET, MILKY_WAY -> 3;
             case BLACK_HOLE -> 2;
             default -> 1;
         };
@@ -108,13 +107,21 @@ public final class SkyboxRenderer {
         SkyboxStyle style = module.style(end);
         SettingColor[] palette = module.palette(style);
         Vector4f fog = SkyboxState.fog();
+        Vector4f color0 = color(palette[0]);
+        Vector4f color1 = color(palette[1]);
+        Vector4f color2 = color(palette[2]);
+        if (style == SkyboxStyle.BLACK_HOLE) {
+            color0.w = (float) Math.toRadians(module.blackHoleElevation());
+            color1.w = (float) Math.toRadians(module.blackHoleTilt());
+            color2.w = (float) module.blackHoleSize();
+        }
 
         return new SkyboxUniforms.SkyData(
             SkyboxState.inverseViewProjection(),
             new Vector4f((float) glfwGetTime(), (float) module.speed(), (float) module.intensity(), style.shaderId()),
-            color(palette[0]),
-            color(palette[1]),
-            color(palette[2]),
+            color0,
+            color1,
+            color2,
             new Vector4f(timeOfDay(module, end), rain(module, end), (float) module.starDensity(), module.quality()),
             new Vector4f(fog.x, fog.y, fog.z, (float) module.horizonFogBlend())
         );
