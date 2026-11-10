@@ -126,7 +126,7 @@ public class TpsCardiogramHud extends HudElement {
             current = sampler.current();
             worst = sampler.worst();
             sinceLastTick = sampler.timeSinceLastTick();
-        } else if (isInEditor()) {
+        } else if (HudEditing.active()) {
             history = new float[120];
             long now = System.currentTimeMillis();
             for (int i = 0; i < history.length; i++) {

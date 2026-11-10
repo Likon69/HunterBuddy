@@ -215,7 +215,7 @@ public class HuntTallyHud extends HudElement {
         if (stats.isEmpty()) {
             // Nothing has happened yet and hide-zero is on. The editor still needs a handle, so
             // it gets the title rather than a zero-size element nobody can grab.
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 double w = HudText.textWidth(renderer, "HuntTally", shadow, scale);
                 panel.draw(renderer, this.x + inset, this.y + inset, w, lineHeight, HudGlowPanel.Severity.OK);
                 HudText.text(renderer, "HuntTally", this.x + inset, this.y + inset, labelColor.get(), shadow, scale);

@@ -344,7 +344,7 @@ public class ChunkRadarHud extends HudElement {
     @Override
     public void render(HudRenderer renderer) {
         ChunkRadar radar = ChunkRadar.get();
-        boolean wanted = isInEditor() || !onlyWhenActive.get() || hasSomethingToShow(radar);
+        boolean wanted = HudEditing.active() || !onlyWhenActive.get() || hasSomethingToShow(radar);
 
         // Fades in and out rather than appearing. A panel that pops into being is
         // a panel you look at instead of through.

@@ -36,7 +36,7 @@ public class ElytraHelperHud extends HudElement {
         ClientPlayerEntity player = MeteorClient.mc.player;
         if (player != null && MeteorClient.mc.world != null) {
             writeLive(writer, player);
-        } else if (isInEditor()) {
+        } else if (HudEditing.active()) {
             writePreview(writer);
         } else {
             return;

@@ -367,7 +367,7 @@ public class SpawnerRunHud extends HudElement {
         SpawnerDetector detector = Modules.get().get(SpawnerDetector.class);
 
         if (!isLive(detector)) {
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 renderEditorDemo(renderer);
                 return;
             }

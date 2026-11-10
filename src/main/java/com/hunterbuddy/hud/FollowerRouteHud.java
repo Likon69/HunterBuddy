@@ -201,7 +201,7 @@ public class FollowerRouteHud extends HudElement {
         int index = live ? follower.hudRouteIndex() : -1;
 
         if (!live || index < 0) {
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 // The demo needs the frozen scale the live path derives at
                 // acquisition, or every milestone lands on the far edge. It
                 // also runs the motors at a plausible cruise so the editor

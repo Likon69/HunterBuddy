@@ -55,7 +55,7 @@ public class TimerGaugeHud extends HudElement {
     @Override
     public void render(HudRenderer renderer) {
         boolean inGame = MeteorClient.mc.player != null && MeteorClient.mc.world != null;
-        if (!inGame && !isInEditor()) {
+        if (!inGame && !HudEditing.active()) {
             setSize(0.0, 0.0);
             return;
         }

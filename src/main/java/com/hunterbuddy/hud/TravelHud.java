@@ -230,7 +230,7 @@ public class TravelHud extends HudElement {
             // Both ways out of here used to happen before the format switch, so the editor —
             // where there is rarely a waypoint to aim at — only ever saw "no destination", and
             // toggling Compact against Detailed changed nothing on screen.
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 renderDemo(renderer, shadow, scale, lineHeight);
                 return;
             }

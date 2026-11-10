@@ -61,7 +61,7 @@ public final class SorterStatusHud extends HudElement {
     public void render(HudRenderer renderer) {
         ShulkerSorter sorter = Modules.get().get(ShulkerSorter.class);
         SorterRunSnapshot snapshot = sorter == null ? SorterRunSnapshot.empty() : sorter.snapshot();
-        if (isInEditor() && snapshot.mode() == SorterRunSnapshot.Mode.OFF) {
+        if (HudEditing.active() && snapshot.mode() == SorterRunSnapshot.Mode.OFF) {
             snapshot = example();
         }
         draw(renderer, snapshot);

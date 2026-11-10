@@ -195,7 +195,7 @@ public class RegearStatusHud extends HudElement {
         boolean live = MeteorClient.mc.player != null && MeteorClient.mc.world != null && regear != null && regear.isActive();
 
         if (!live) {
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 renderEditorDemo(renderer);
                 return;
             }

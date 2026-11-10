@@ -148,7 +148,7 @@ public class OdometerHud extends HudElement {
             // Only on the live path. The editor's counter is a fabrication that climbs on its own,
             // and would ring the bell every few seconds for distance nobody flew.
             checkMilestones(session, lifetime);
-        } else if (isInEditor()) {
+        } else if (HudEditing.active()) {
             // Rolls on its own in the editor, at cruising speed.
             session = 412_806.0 + (System.currentTimeMillis() % 3_600_000L) / 1000.0 * 47.0;
             lifetime = 8_122_407.0 + session - 412_806.0;

@@ -270,7 +270,7 @@ public class FindsTickerHud extends HudElement {
 
     private void refresh(long nowMs, boolean anim) {
         List<HuntFeed.Entry> entries = collect(nowMs);
-        demoMode = entries.isEmpty() && isInEditor();
+        demoMode = entries.isEmpty() && HudEditing.active();
         if (demoMode) entries = demoEntries();
 
         groups.clear();

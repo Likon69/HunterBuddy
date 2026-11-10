@@ -168,7 +168,7 @@ public class MessengerBubbleHud extends HudElement {
         boolean live = messenger != null && messenger.isActive();
         boolean chatOpen = MeteorClient.mc.currentScreen instanceof ChatScreen;
 
-        if (!live && !isInEditor()) {
+        if (!live && !HudEditing.active()) {
             setSize(0.0, 0.0);
             return;
         }
@@ -178,7 +178,7 @@ public class MessengerBubbleHud extends HudElement {
         double pad = inset();
         setSize(d + pad * 2.0, d + pad * 2.0);
 
-        if (live && unread == 0 && !showWhenEmpty.get() && !chatOpen && !isInEditor()) return;
+        if (live && unread == 0 && !showWhenEmpty.get() && !chatOpen && !HudEditing.active()) return;
 
         boolean animate = pulse.get() && (!live || messenger.cfg().animations.get());
         boolean hasUnread = unread > 0;

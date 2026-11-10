@@ -121,7 +121,7 @@ public class SpeedSpectrumHud extends HudElement {
             int rockets = SessionStats.get().rocketsUsed();
             if (reactToRockets.get() && lastRockets >= 0 && rockets > lastRockets) boostAt = now;
             lastRockets = rockets;
-        } else if (isInEditor()) {
+        } else if (HudEditing.active()) {
             speedBs = 38.0 + 14.0 * Math.sin(now / 2600.0);
         } else {
             setSize(0.0, 0.0);

@@ -88,7 +88,7 @@ public class SpawnerFarmHud extends HudElement {
         List<Row> rows;
         String stateLine;
 
-        if (isInEditor()) {
+        if (HudEditing.active()) {
             rows = demoRows();
             stateLine = "ROOM";
         } else if (MeteorClient.mc.player == null || MeteorClient.mc.world == null) {

@@ -124,7 +124,7 @@ public class FollowerHeadingHud extends HudElement {
         float targetYaw = live ? follower.hudTargetYaw() : Float.NaN;
 
         if (Float.isNaN(targetYaw)) {
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 // The demo runs the real path: a target twelve degrees right of
                 // wherever you look, a ghost further out, plausible numbers.
                 renderTape(renderer, yaw, MathHelper.wrapDegrees(yaw + 12.0f),

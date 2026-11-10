@@ -23,7 +23,7 @@ public class MovementStatusHud extends HudElement {
 
     @Override
     public void render(HudRenderer renderer) {
-        Size size = isInEditor() ? view.renderPreview(renderer, x, y) : view.renderLive(renderer, x, y);
+        Size size = HudEditing.active() ? view.renderPreview(renderer, x, y) : view.renderLive(renderer, x, y);
         if (size != null) {
             setSize(size.width(), size.height());
         }

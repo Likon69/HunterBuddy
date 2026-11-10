@@ -226,7 +226,7 @@ public class ElytraStatusHud extends HudElement {
       // With nothing to report there was nothing on screen, so the editor showed an empty box and
       // none of these settings could be judged. Standing in for the missing readings lets the
       // whole line — and the bar under it — be laid out against something.
-      if (this.isInEditor() && !hasElytra) {
+      if (HudEditing.active() && !hasElytra) {
          this.renderDemo(renderer, shadow, scale, textHeight, pad);
          return;
       }

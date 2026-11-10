@@ -149,7 +149,7 @@ public class SpiralCoverageHud extends HudElement {
         }
 
         if (!validPreview(preview)) {
-            if (isInEditor()) {
+            if (HudEditing.active()) {
                 preview = demoPreview();
             } else {
                 hidden = true;

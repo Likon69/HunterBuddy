@@ -117,7 +117,7 @@ public class PingMeterHud extends HudElement {
             history = sampler.history();
             jitter = sampler.jitter();
             keepAliveAge = sampler.keepAliveAgeSeconds();
-        } else if (isInEditor()) {
+        } else if (HudEditing.active()) {
             ping = 118;
             history = new int[30];
             long now = System.currentTimeMillis();

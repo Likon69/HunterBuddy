@@ -118,7 +118,7 @@ public class Pitch40CycleHud extends HudElement {
             // Climb vs dive from actual vertical velocity, so the marker reads the same for both
             // Pitch40 and Pitch40Classic without either exposing an internal cycle flag.
             climbing = verticalSpeed >= 0.0;
-        } else if (isInEditor()) {
+        } else if (HudEditing.active()) {
             // A cycle that runs by itself, so the element can be judged and placed without a
             // flight behind it.
             lower = 120.0;
