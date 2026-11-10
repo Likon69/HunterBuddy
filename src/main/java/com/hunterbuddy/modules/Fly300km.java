@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.modules.regear.util.ModuleToggles;
 import com.hunterbuddy.util.QuietClicks;
 import com.hunterbuddy.util.Rockets;
 import com.hunterbuddy.HunterBuddyAddon;
@@ -194,8 +195,7 @@ public class Fly300km extends Module {
          if (this.useRocketBoost.get()) {
             RocketBoost boost = Modules.get().get(RocketBoost.class);
             if (boost != null && !boost.isActive()) {
-               boost.toggle();
-               this.boostEnabledByUs = true;
+               ModuleToggles.enableLater(this, boost, () -> this.boostEnabledByUs = true);
             }
 
             if (boost != null && this.autoSpeed.get() && !boost.autoSpeed.get()) {
@@ -206,8 +206,7 @@ public class Fly300km extends Module {
       } else {
          RocketBoost boost = Modules.get().get(RocketBoost.class);
          if (boost != null && boost.isActive()) {
-            boost.toggle();
-            this.rocketBoostPausedByUs = true;
+            ModuleToggles.disableLater(this, boost, () -> this.rocketBoostPausedByUs = true);
          }
       }
 

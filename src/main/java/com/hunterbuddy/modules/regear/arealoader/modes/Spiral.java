@@ -55,7 +55,6 @@ public class Spiral extends AreaLoaderMode {
         } else if (!loadSaved(file)) {
             return;
         }
-        initializeFlightModes();
     }
 
     private void clearTargets() {

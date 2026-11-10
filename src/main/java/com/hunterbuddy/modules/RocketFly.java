@@ -400,6 +400,9 @@ public class RocketFly extends Module {
 
    @EventHandler
    private void onTick(Pre event) {
+      if (!this.isActive() || this.mc.player == null) {
+         return;
+      }
       // The machine owns the jump key while it runs, so the fly logic must stay
       // out of its way — pitch steering during the jump is what drops you back
       // onto the ground before the elytra ever opens.
@@ -422,7 +425,11 @@ public class RocketFly extends Module {
 
    @EventHandler
    private void onTickPost(Post event) {
-      if (this.mc.player != null && this.mc.world != null && this.takeoff.isActive()) {
+      if (!this.isActive() || this.mc.player == null) {
+         return;
+      }
+
+      if (this.mc.world != null && this.takeoff.isActive()) {
          this.takeoff.tickPost();
 
          if (++this.takeoffTicks > TAKEOFF_TIMEOUT_TICKS) {

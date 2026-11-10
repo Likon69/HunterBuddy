@@ -38,7 +38,6 @@ public class ZigZag extends NetherRouteMode {
         } else {
             startFresh();
         }
-        initializeFlightModes();
     }
 
     private void startFresh() {

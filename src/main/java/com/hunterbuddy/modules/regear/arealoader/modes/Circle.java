@@ -98,7 +98,6 @@ public class Circle extends AreaLoaderMode {
          }
       }
 
-      this.initializeFlightModes();
    }
 
    /** Start a fresh spiral from the player position: snap angle to the nearest

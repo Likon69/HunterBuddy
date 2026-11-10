@@ -41,7 +41,6 @@ public class Rectangle extends NetherRouteMode {
         } else {
             startFresh();
         }
-        initializeFlightModes();
     }
 
     private void startFresh() {

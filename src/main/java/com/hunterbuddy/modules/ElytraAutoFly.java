@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.modules.regear.util.ModuleToggles;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.Utils;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -125,7 +126,7 @@ public class ElytraAutoFly extends Module {
         }
         pitch40WasActiveBefore = pitch40Classic.isActive();
         descendFireworkCooldown = 0;
-        enterClimb();
+        enterClimb(true);
     }
 
     @Override
@@ -142,13 +143,17 @@ public class ElytraAutoFly extends Module {
         pitch40Classic.lowerBound.set(y - boundGap.get());
     }
 
-    private void enterClimb() {
+    private void enterClimb(boolean deferToggle) {
         currentPhase = Phase.CLIMB;
         if (mc.player != null && autoBoundAdjust.get()) {
             resetBounds();
         }
         if (!pitch40Classic.isActive()) {
-            pitch40Classic.toggle();
+            if (deferToggle) {
+                ModuleToggles.enableLater(this, pitch40Classic, () -> { });
+            } else {
+                pitch40Classic.toggle();
+            }
         }
     }
 
@@ -221,7 +226,7 @@ public class ElytraAutoFly extends Module {
 
         // Cycle: switch back to climb phase when min altitude reached.
         if (mc.player.getY() <= minAltitude.get()) {
-            enterClimb();
+            enterClimb(false);
         }
     }
 }

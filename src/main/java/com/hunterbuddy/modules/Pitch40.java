@@ -1,5 +1,6 @@
 package com.hunterbuddy.modules;
 
+import com.hunterbuddy.modules.regear.util.ModuleToggles;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.modules.regear.util.Utils;
@@ -323,15 +324,14 @@ public class Pitch40 extends Module {
       this.syncRotationSpeedUp((Double)this.rotationSpeedUp.get());
       this.syncRotationSpeedDown((Double)this.rotationSpeedDown.get());
       if ((Boolean)this.autoRecast.get() && this.elytraRecast != null && !this.elytraRecast.isActive()) {
-         this.elytraRecast.toggle();
+         ModuleToggles.enableLater(this, this.elytraRecast, () -> { });
       }
 
       this.rocketBoostEnabledByUs = false;
       if (this.useRocketBoost.get()) {
          RocketBoost rocketBoost = Modules.get().get(RocketBoost.class);
          if (rocketBoost != null && !rocketBoost.isActive()) {
-            rocketBoost.toggle();
-            this.rocketBoostEnabledByUs = true;
+            ModuleToggles.enableLater(this, rocketBoost, () -> this.rocketBoostEnabledByUs = true);
          }
       }
 
