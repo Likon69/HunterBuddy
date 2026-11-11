@@ -34,7 +34,6 @@ import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.EnchantmentEffectComponentTypes;
 import net.minecraft.component.type.EquippableComponent;
@@ -1202,7 +1201,6 @@ public class ElytraBounce extends Module {
       }
 
       long age = this.mc.player.age;
-      boolean screenOpen = this.mc.currentScreen instanceof HandledScreen<?>;
 
       boolean meal = this.mealInProgress() || age - this.mealPreparedAge <= 20L;
       if (meal != this.mealPause) {
@@ -1237,7 +1235,7 @@ public class ElytraBounce extends Module {
             return;
          }
 
-         if (age % 2L != 0L || screenOpen) return;
+         if (age % 2L != 0L) return;
 
          ItemStack main = this.mc.player.getStackInHand(Hand.MAIN_HAND);
          ItemStack off = this.mc.player.getStackInHand(Hand.OFF_HAND);
@@ -1265,6 +1263,17 @@ public class ElytraBounce extends Module {
          return;
       }
 
+      if (isChestPiece(worn) && this.mc.player.isOnGround()
+         && !isGlider(this.mc.player.getStackInHand(Hand.MAIN_HAND)) && !isGlider(this.mc.player.getStackInHand(Hand.OFF_HAND))) {
+         for (int i = 0; i < 9; i++) {
+            ItemStack candidate = this.mc.player.getInventory().getStack(i);
+            if (isGlider(candidate) && !candidate.willBreakNextUse()) {
+               this.mc.player.getInventory().setSelectedSlot(i);
+               break;
+            }
+         }
+      }
+
       Hand gliderHand = this.fakeFlyReadyHand();
       this.fakeFlyPairReady = gliderHand != null;
       if (gliderHand == null) return;
@@ -1272,11 +1281,6 @@ public class ElytraBounce extends Module {
       if (!this.isFreeTick() || this.mc.player.isGliding()) return;
 
       if (!this.fakeFlyPrevSentOnGround && !this.fakeFlyLastSentOnGround) {
-         if (screenOpen) {
-            BounceProbe.get().line("FAKEFLY-WAIT", "reason=screen");
-            return;
-         }
-
          if (age - this.fakeFlyLastStartAge < 2L) {
             BounceProbe.get().line("FAKEFLY-WAIT", "reason=start");
             return;
