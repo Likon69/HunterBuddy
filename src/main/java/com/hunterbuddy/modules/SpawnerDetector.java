@@ -16,6 +16,7 @@ import com.hunterbuddy.modules.regear.util.Utils;
 import com.hunterbuddy.modules.regear.util.XaeroWaypointManager;
 import com.hunterbuddy.pet.PetEvent;
 import com.hunterbuddy.pet.PetEvents;
+import com.hunterbuddy.util.BaritoneStallReplan;
 import com.hunterbuddy.util.DugHoles;
 import com.hunterbuddy.util.GlideEscape;
 import com.hunterbuddy.util.ShipwreckDetector;
@@ -499,6 +500,7 @@ public class SpawnerDetector extends Module {
         .build());
 
     private final Set<BlockPos> trialPending = ConcurrentHashMap.newKeySet();
+    private final BaritoneStallReplan stallReplan = new BaritoneStallReplan("SpawnerDetector");
     private final Map<BlockPos, Detection> trialFound = new ConcurrentHashMap<>();
 
     private final Set<BlockPos> rejected = ConcurrentHashMap.newKeySet();
@@ -1080,6 +1082,7 @@ public class SpawnerDetector extends Module {
 
     @Override
     public void onDeactivate() {
+        stallReplan.reset();
         purgeAllState();
         setChestplateHold(false);
         if (state != AutoState.IDLE && state != AutoState.FAILED) {
@@ -1299,6 +1302,7 @@ public class SpawnerDetector extends Module {
         }
 
         autoTick();
+        if (state != AutoState.IDLE) stallReplan.tick(mc); else stallReplan.reset();
         if (detectShipwrecks.get()) ShipwreckDetector.tick(mc.world, this::isVisited);
 
         if (scanCooldown > 0) {
