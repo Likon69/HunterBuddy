@@ -1,6 +1,8 @@
 package com.hunterbuddy.modules;
 
 import baritone.api.BaritoneAPI;
+import baritone.api.IBaritone;
+import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import com.hunterbuddy.HunterBuddyAddon;
 import com.hunterbuddy.modules.regear.util.BaritoneHelper;
@@ -10,6 +12,7 @@ import com.hunterbuddy.util.PlanSlot;
 import com.hunterbuddy.util.BounceHazards;
 import com.hunterbuddy.util.BounceProbe;
 import com.hunterbuddy.util.HopPlanner;
+import com.hunterbuddy.util.PathStallWatch;
 import com.hunterbuddy.util.SwapWindow;
 import java.util.ArrayDeque;
 import java.util.Set;
@@ -438,6 +441,7 @@ public class ElytraBounce extends Module {
    private Vec3d lastPos;
    private final double maxDistance = 80.0;
    private BlockPos tempPath = null;
+   private final PathStallWatch pathStall = new PathStallWatch();
    private boolean waitingForChunksToLoad;
 
    public ElytraBounce() {
@@ -654,6 +658,7 @@ public class ElytraBounce extends Module {
    }
 
    public void onActivate() {
+      this.pathStall.reset();
       this.lastDurability = -1;
       this.peakSpeed = 0.0;
       this.speedWindowTicks = 0;
@@ -767,7 +772,19 @@ public class ElytraBounce extends Module {
       }
    }
 
+   private void replanIfStalled() {
+      IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
+      boolean busy = !baritone.getPathingBehavior().isPathing() || this.mc.interactionManager.isBreakingBlock();
+      if (this.pathStall.tick(this.mc.player.getX(), this.mc.player.getZ(), this.mc.player.isOnGround(), busy)) {
+         Goal goal = baritone.getCustomGoalProcess().getGoal();
+         baritone.getPathingBehavior().forceCancel();
+         if (goal != null) baritone.getCustomGoalProcess().setGoalAndPath(goal);
+         HunterBuddyAddon.LOG.info("[ElytraBounce] path stalled on the ground, replanning");
+      }
+   }
+
    public void onDeactivate() {
+      this.pathStall.reset();
       BounceProbe.get().stop();
       if (this.pendingSwap != null) this.pendingSwap.cancel();
       this.pendingSwap = null;
@@ -868,10 +885,12 @@ public class ElytraBounce extends Module {
                BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoal(null);
             } else if (this.tempPath != null) {
                BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(new GoalBlock(this.tempPath));
+               this.replanIfStalled();
                return;
             }
 
             if ((Boolean)this.highwayObstaclePasser.get() && BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().getGoal() != null) {
+               this.replanIfStalled();
                return;
             }
 
