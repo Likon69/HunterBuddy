@@ -1,6 +1,8 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.hud.glass.GlassPanel;
+import com.hunterbuddy.hud.text.HudTextScale;
 import com.hunterbuddy.util.HudGlowPanel;
 import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.SessionStats;
@@ -58,6 +60,7 @@ public class HuntTallyHud extends HudElement {
     private final SettingGroup sgFields = settings.createGroup("Fields");
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
+    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel);
 
     private final Setting<Layout> layout = sgGeneral.add(new EnumSetting.Builder<Layout>()
         .name("layout").description("One line, or one entry per line.")
@@ -88,8 +91,8 @@ public class HuntTallyHud extends HudElement {
         .defaultValue(0.6).min(0.2).max(2.0).sliderRange(0.3, 1.5).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
-        .name("text-scale").description("Scale of the text.")
-        .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
+        .name("text-scale").description("Shared text sizes: 0.65 small, 0.85 normal, 1.0 large.")
+        .defaultValue(1.0).min(0.65).max(1.0).sliderRange(0.65, 1.0).build());
 
     private final Setting<Boolean> textShadow = sgGeneral.add(new BoolSetting.Builder()
         .name("text-shadow").description("Render shadow behind text.").defaultValue(true).build());
@@ -185,7 +188,7 @@ public class HuntTallyHud extends HudElement {
 
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
-    private final HudGlowPanel panel = new HudGlowPanel(this.sgPanel);
+
 
     /**
      * One line of the tally.
@@ -206,7 +209,7 @@ public class HuntTallyHud extends HudElement {
     @Override
     public void render(HudRenderer renderer) {
         boolean shadow = textShadow.get();
-        double scale = textScale.get();
+        double scale = HudTextScale.fixed(textScale.get());
         double lineHeight = HudText.textHeight(renderer, shadow, scale);
         double inset = panel.padding();
 
@@ -227,7 +230,7 @@ public class HuntTallyHud extends HudElement {
             return;
         }
 
-        double iconSize = 16.0 * iconScale.get();
+        double iconSize = 16.0 * iconScale.get() * panel.scale();
         double rowHeight = Math.max(lineHeight, labelMode.get() == LabelMode.Text ? 0.0 : iconSize);
 
         if (layout.get() == Layout.Inline) {
@@ -455,7 +458,7 @@ public class HuntTallyHud extends HudElement {
             return;
         }
 
-        renderer.item(stat.icon, (int) x, (int) y, iconScale.get().floatValue(), false);
+        renderer.item(stat.icon, (int) x, (int) y, (float) (size / 16.0), false);
     }
 
     private static String formatDistance(double blocks) {

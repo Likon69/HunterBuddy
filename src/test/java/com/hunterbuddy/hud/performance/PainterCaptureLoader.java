@@ -20,6 +20,7 @@ final class PainterCaptureLoader extends ClassLoader {
             || name.startsWith("meteordevelopment.meteorclient.renderer.text.Font$")
             || name.equals("com.hunterbuddy.hud.performance.PerformancePainter")
             || name.equals("com.hunterbuddy.hud.performance.PerformanceLayout")
+            || name.equals("com.hunterbuddy.hud.system.SystemStatsPainter")
             || name.equals("com.hunterbuddy.hud.glass.GlassPainter")
             || name.equals("com.hunterbuddy.hud.text.HudText")
             || name.startsWith("com.hunterbuddy.hud.toast.ModuleToastPainter");

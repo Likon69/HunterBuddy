@@ -54,7 +54,7 @@ public class PerformanceHud extends HudElement {
 
     private final Setting<Double> scale = sgGlass.add(new DoubleSetting.Builder()
         .name("scale").description("Scale of the glass frame and spacing, independent of text size.")
-        .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.6, 1.5).build());
+        .defaultValue(1.0).min(0.1).sliderRange(0.1, 4.0).build());
 
     private final Setting<Boolean> backgroundBlur = sgGlass.add(new BoolSetting.Builder()
         .name("background-blur").description("Blur the actual scene behind the rounded glass frame.")
@@ -81,8 +81,8 @@ public class PerformanceHud extends HudElement {
         .defaultValue(false).visible(() -> !compact.get()).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
-        .name("text-scale").description("Select normal or large fixed-size values; labels stay small.")
-        .defaultValue(1.0).min(0.1).sliderRange(0.1, 3.0).build());
+        .name("text-scale").description("Shared value sizes: 0.65 small, 0.85 normal, 1.0 large; labels stay small.")
+        .defaultValue(1.0).min(0.65).max(1.0).sliderRange(0.65, 1.0).build());
 
     private final Setting<Boolean> textShadow = sgGeneral.add(new BoolSetting.Builder()
         .name("text-shadow").description("Render shadow behind the text.")

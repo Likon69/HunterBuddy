@@ -36,7 +36,16 @@ public final class GlassPainter {
 
     public void card(HudRenderer renderer, double x, double y, double width, double height, double scale,
                      double alpha, boolean reflection, Color background) {
-        double radius = radius(scale);
+        paint(renderer, x, y, width, height, scale, radius(scale), alpha, reflection, background);
+    }
+
+    public void flatCard(HudRenderer renderer, double x, double y, double width, double height, double scale,
+                         double alpha, Color background) {
+        paint(renderer, x, y, width, height, scale, 0, alpha, true, background);
+    }
+
+    private void paint(HudRenderer renderer, double x, double y, double width, double height, double scale,
+                       double radius, double alpha, boolean reflection, Color background) {
         rounded(renderer, x, y, width, height, radius, tint(background, alpha));
         outline(renderer, x, y, width, height, radius, 0.7 * scale, tint(WHITE, alpha * 0.12));
         if (reflection) {
@@ -56,12 +65,6 @@ public final class GlassPainter {
                 x + width * 0.62, y + height * 0.56, tint(WHITE, alpha * 0.025));
             renderer.quad(x + radius, y + scale, width - radius * 2, scale, tint(WHITE, alpha * 0.14));
         }
-    }
-
-    public void flatCard(HudRenderer renderer, double x, double y, double width, double height, double scale,
-                         double alpha, Color background) {
-        renderer.quad(x, y, width, height, tint(background, alpha));
-        frame(renderer, x, y, width, height, 0.7 * scale, tint(WHITE, alpha * 0.12));
     }
 
     public static void frame(HudRenderer renderer, double x, double y, double width, double height,
@@ -104,6 +107,7 @@ public final class GlassPainter {
         renderer.quad(x + radius, y + height - thickness, width - radius * 2, thickness, color);
         renderer.quad(x, y + radius, thickness, height - radius * 2, color);
         renderer.quad(x + width - thickness, y + radius, thickness, height - radius * 2, color);
+        if (radius <= 0) return;
         double inner = Math.max(0, radius - thickness);
         int segments = GlassCorners.segments(radius);
         for (int corner = 0; corner < 4; corner++) {
@@ -142,6 +146,7 @@ public final class GlassPainter {
         renderer.quad(x + radius, y, width - radius * 2, height, color);
         renderer.quad(x, y + radius, radius, height - radius * 2, color);
         renderer.quad(x + width - radius, y + radius, radius, height - radius * 2, color);
+        if (radius <= 0) return;
         int segments = GlassCorners.segments(radius);
         for (int corner = 0; corner < 4; corner++) {
             double cx = corner == 0 || corner == 3 ? x + radius : x + width - radius;

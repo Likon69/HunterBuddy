@@ -14,6 +14,41 @@ final class PerformanceCaptureTest {
         capture("scale-0.7", 0.7);
     }
 
+    @Test
+    void sharedTextSizesChangeTheLayoutWithoutCreatingExtraFontAtlases() throws Exception {
+        PainterCaptureLoader loader = new PainterCaptureLoader();
+        PerformanceCaptureSurface surface = new PerformanceCaptureSurface(loader);
+        Class<?> rendererClass = loader.loadClass("meteordevelopment.meteorclient.systems.hud.HudRenderer");
+        Object renderer = rendererClass.getConstructor(PerformanceCaptureSurface.class).newInstance(surface);
+        Class<?> painterClass = loader.loadClass("com.hunterbuddy.hud.performance.PerformancePainter");
+        Object painter = painterClass.getConstructor().newInstance();
+        var measure = painterClass.getMethod("measure", rendererClass, PerformanceMetric[].class, double.class, double.class,
+            boolean.class, boolean.class, boolean.class);
+        PerformanceMetric[] metrics = {
+            new PerformanceMetric("FPS", "8888", ""), new PerformanceMetric("Ping", "8888 ms", " ms"),
+            new PerformanceMetric("TPS", "88.8", "")
+        };
+        metrics[0].integer(144);
+        metrics[1].integer(43);
+        metrics[2].decimal(20);
+        for (boolean compact : new boolean[] {false, true}) {
+            double previousWidth = 0;
+            double previousHeight = 0;
+            for (double textScale : new double[] {0.65, 0.85, 1.0}) {
+                measure.invoke(painter, renderer, metrics, 1.0, textScale, compact, false, false);
+                double width = (double) painterClass.getMethod("width").invoke(painter);
+                double height = (double) painterClass.getMethod("height").invoke(painter);
+                assertTrue(width > previousWidth);
+                assertTrue(height >= previousHeight);
+                previousWidth = width;
+                previousHeight = height;
+            }
+            measure.invoke(painter, renderer, metrics, 4.0, 1.0, compact, false, false);
+            assertTrue((double) painterClass.getMethod("width").invoke(painter) > previousWidth);
+            assertTrue((double) painterClass.getMethod("height").invoke(painter) > previousHeight);
+        }
+        assertEquals(3, surface.atlasCount());
+    }
     private static void capture(String name, double scale) throws Exception {
         PainterCaptureLoader loader = new PainterCaptureLoader();
         PerformanceCaptureSurface surface = new PerformanceCaptureSurface(loader);

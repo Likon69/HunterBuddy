@@ -1,6 +1,8 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.hud.glass.GlassPanel;
+import com.hunterbuddy.hud.text.HudTextScale;
 import com.hunterbuddy.util.HudGlowPanel;
 import com.hunterbuddy.util.HudPulse;
 import com.hunterbuddy.util.HuntFeed;
@@ -40,6 +42,7 @@ public class FindsTickerHud extends HudElement {
     private final SettingGroup sgTypes = settings.createGroup("Types");
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
+    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel);
 
     private final Setting<Integer> maxLines = sgGeneral.add(new IntSetting.Builder()
         .name("max-lines").description("How many entries to show.")
@@ -69,8 +72,8 @@ public class FindsTickerHud extends HudElement {
         .defaultValue(true).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
-        .name("text-scale").description("Scale of the text.")
-        .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
+        .name("text-scale").description("Shared text sizes: 0.65 small, 0.85 normal, 1.0 large.")
+        .defaultValue(1.0).min(0.65).max(1.0).sliderRange(0.65, 1.0).build());
 
     private final Setting<Boolean> textShadow = sgGeneral.add(new BoolSetting.Builder()
         .name("text-shadow").description("Render shadow behind text.").defaultValue(true).build());
@@ -141,7 +144,7 @@ public class FindsTickerHud extends HudElement {
         .name("combat-color").description("Crystal and anchor activity dot.")
         .defaultValue(new SettingColor(255, 100, 40, 255)).build());
 
-    private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
+
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
     private static final long ENTER_MS = 280L;
@@ -235,10 +238,17 @@ public class FindsTickerHud extends HudElement {
         }
 
         boolean shadow = textShadow.get();
-        double scale = textScale.get();
+        double scale = HudTextScale.fixed(textScale.get());
         double pad = panel.padding();
         double lineH = HudText.textHeight(renderer, shadow, scale) + 2.0 * scale;
-        double w = panelWidth.get();
+        boolean whereOn = showDistance.get() || showCoords.get();
+        double gap = 4.0 * scale;
+        double ageSlot = HudText.textWidth(renderer, "88 min", shadow, scale);
+        double whereSlot = whereOn ? HudText.textWidth(renderer, whereTemplate(), shadow, scale) : 0.0;
+        double textH = HudText.textHeight(renderer, shadow, scale);
+        double minimumWidth = ageSlot + whereSlot + gap * (whereOn ? 4 : 3) + 3 * scale
+            + HudText.textWidth(renderer, "... (8888x)", shadow, scale);
+        double w = Math.max(panelWidth.get() * panel.scale(), minimumWidth);
         slidePx = Math.min(SLIDE_PX * scale, pad);
         double h = Math.max(0.0, heightLines * lineH - 2.0 * scale);
 
@@ -252,15 +262,12 @@ public class FindsTickerHud extends HudElement {
 
         float freshness = anim ? pulse.freshness("newest", newestSignature, 700) : 0.0f;
 
-        boolean whereOn = showDistance.get() || showCoords.get();
-        double gap = 4.0 * scale;
-        double ageSlot = HudText.textWidth(renderer, "88 min", shadow, scale);
-        double whereSlot = whereOn ? HudText.textWidth(renderer, whereTemplate(), shadow, scale) : 0.0;
-        double textH = HudText.textHeight(renderer, shadow, scale);
+
 
         for (int i = 0; i < slots.size(); i++) {
             Slot slot = slots.get(i);
             double top = y + pad + slot.y * lineH;
+            if (top + textH > y + pad + h) continue;
             drawSlot(renderer, slot, x + pad, top, w, shadow, scale, gap, ageSlot, whereSlot, textH,
                 slot.target == 0 && slot.exitAt < 0L ? freshness : 0.0f, nowMs, anim);
         }

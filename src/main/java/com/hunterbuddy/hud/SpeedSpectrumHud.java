@@ -14,7 +14,10 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
+import com.hunterbuddy.hud.glass.GlassPainter;
 import com.hunterbuddy.hud.text.HudText;
+import com.hunterbuddy.hud.text.HudTextScale;
+import com.hunterbuddy.hud.toast.ModuleToastBlur;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
@@ -44,33 +47,67 @@ public class SpeedSpectrumHud extends HudElement {
         Pulse
     }
 
+    public enum Look {
+        Spectrum,
+        Glass,
+        Flat
+    }
+
+    private static final double RACK_GAP = 2.0;
+    private static final double BAR_STRIP = 0.4;
+    private static final double BAR_ALPHA = 0.55;
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
 
+    private final Setting<Look> look = sgGeneral.add(new EnumSetting.Builder<Look>()
+        .name("style").description("Spectrum: animated bars. Glass and Flat: the speed as a number in a card.")
+        .defaultValue(Look.Spectrum).build());
+
     private final Setting<Style> style = sgGeneral.add(new EnumSetting.Builder<Style>()
-        .name("style").description("How the rack animates.")
-        .defaultValue(Style.Bars).build());
+        .name("animation").description("How the rack animates.")
+        .defaultValue(Style.Bars).visible(this::rack).build());
+
+    private final Setting<Boolean> showAnimation = sgGeneral.add(new BoolSetting.Builder()
+        .name("show-animation").description("Draw the animated bars inside the card, behind the number.")
+        .defaultValue(false).visible(() -> !spectrum()).build());
+
+    private final Setting<Double> cardScale = sgGeneral.add(new DoubleSetting.Builder()
+        .name("scale").description("Scale of the card.")
+        .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.6, 1.5).visible(() -> !spectrum()).build());
+
+    private final Setting<SettingColor> cardBackground = sgGeneral.add(new ColorSetting.Builder()
+        .name("background").description("Card background, including its opacity.")
+        .defaultValue(new SettingColor(17, 24, 35, 222)).visible(() -> !spectrum()).build());
+
+    private final Setting<SettingColor> cardText = sgGeneral.add(new ColorSetting.Builder()
+        .name("text-color").description("The speed and its unit, including opacity.")
+        .defaultValue(new SettingColor(236, 243, 252, 255)).visible(() -> !spectrum()).build());
+
+    private final Setting<Boolean> blur = sgGeneral.add(new BoolSetting.Builder()
+        .name("background-blur").description("Blur the actual scene behind the card.")
+        .defaultValue(true).visible(() -> !spectrum()).build());
 
     private final Setting<Integer> bars = sgGeneral.add(new IntSetting.Builder()
         .name("bars").description("How many bars.")
-        .defaultValue(24).min(8).max(48).sliderRange(12, 36).build());
+        .defaultValue(24).min(8).max(48).sliderRange(12, 36).visible(this::rack).build());
 
     private final Setting<Integer> barWidth = sgGeneral.add(new IntSetting.Builder()
         .name("bar-width").description("Pixels per bar.")
-        .defaultValue(4).min(2).max(10).sliderRange(3, 8).build());
+        .defaultValue(4).min(2).max(10).sliderRange(3, 8).visible(this::rack).build());
 
     private final Setting<Double> spectrumHeight = sgGeneral.add(new DoubleSetting.Builder()
         .name("height").description("Height of the rack.")
-        .defaultValue(26.0).min(14.0).max(80.0).sliderRange(18.0, 60.0).build());
+        .defaultValue(26.0).min(14.0).max(80.0).sliderRange(18.0, 60.0).visible(this::spectrum).build());
 
     private final Setting<Boolean> reactToRockets = sgGeneral.add(new BoolSetting.Builder()
         .name("react-to-rockets").description("Slam the rack on each rocket you fire.")
-        .defaultValue(true).build());
+        .defaultValue(true).visible(this::rack).build());
 
     private final Setting<Boolean> showSpeed = sgGeneral.add(new BoolSetting.Builder()
         .name("show-speed").description("The km/h line under the rack.")
-        .defaultValue(true).build());
+        .defaultValue(true).visible(this::spectrum).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
         .name("text-scale").description("Scale of the text.")
@@ -96,6 +133,7 @@ public class SpeedSpectrumHud extends HudElement {
         .defaultValue(new SettingColor(255, 255, 255, 255)).build());
 
     private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
+    private final GlassPainter glass = new GlassPainter();
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
 
     private int lastRockets = -1;
@@ -128,19 +166,18 @@ public class SpeedSpectrumHud extends HudElement {
             return;
         }
 
-        // 55 b/s is about 200 km/h — the loud end of the scale for a pitch40 cruise.
-        double energy = Math.min(1.0, speedBs / 55.0);
-        double boost = boostAt == 0L ? 0.0 : Math.max(0.0, 1.0 - (now - boostAt) / 900.0);
-        double factor = Math.max(0.05, energy + boost * 0.4);
+        if (!spectrum()) {
+            drawCard(renderer, speedBs, now);
+            return;
+        }
 
         boolean shadow = textShadow.get();
         double scale = textScale.get();
         double pad = panel.padding();
         int barCount = bars.get();
         double bw = barWidth.get();
-        double gap = 2.0;
         double rackH = spectrumHeight.get();
-        double w = barCount * bw + (barCount - 1) * gap;
+        double w = rackWidth(barCount, bw);
         double lineH = HudText.textHeight(renderer, shadow, scale);
         double h = rackH + (showSpeed.get() ? 2.0 + lineH : 0.0);
 
@@ -148,10 +185,48 @@ public class SpeedSpectrumHud extends HudElement {
 
         double left = x + pad;
         double top = y + pad;
-        double t = now / 1000.0;
 
-        SettingColor tip = tipColor.get();
-        SettingColor base = baseColor.get();
+        drawRack(renderer, left, top, barCount, bw, rackH, speedBs, now, 1.0);
+
+        if (showSpeed.get()) {
+            double ty = top + rackH + 2.0;
+            String value = String.format("%.0f", speedBs * 3.6);
+            double valueW = HudText.textWidth(renderer, "888", shadow, scale);
+            double totalW = valueW + HudText.textWidth(renderer, " km/h", shadow, scale);
+            double tx = left + (w - totalW) / 2.0;
+
+            HudText.text(renderer, value, tx + valueW - HudText.textWidth(renderer, value, shadow, scale), ty,
+                valueColor.get(), shadow, scale);
+            HudText.text(renderer, " km/h", tx + valueW, ty, labelColor.get(), shadow, scale);
+        }
+
+        setSize(w + pad * 2.0, h + pad * 2.0);
+    }
+
+    private boolean spectrum() {
+        return look.get() == Look.Spectrum;
+    }
+
+    private boolean rack() {
+        return spectrum() || showAnimation.get();
+    }
+
+    private static double rackWidth(int barCount, double bw) {
+        return barCount * bw + (barCount - 1) * RACK_GAP;
+    }
+
+    private void drawRack(HudRenderer renderer, double left, double top, int barCount, double bw,
+                          double rackH, double speedBs, long now, double alpha) {
+        // 55 b/s is about 200 km/h — the loud end of the scale for a pitch40 cruise.
+        double energy = Math.min(1.0, speedBs / 55.0);
+        double boost = boostAt == 0L ? 0.0 : Math.max(0.0, 1.0 - (now - boostAt) / 900.0);
+        double factor = Math.max(0.05, energy + boost * 0.4);
+        double t = now / 1000.0;
+        double gap = RACK_GAP;
+        double w = rackWidth(barCount, bw);
+
+        SettingColor tip = faded(tipColor.get(), alpha);
+        SettingColor base = faded(baseColor.get(), alpha);
 
         double[] amp = new double[barCount];
         for (int i = 0; i < barCount; i++) {
@@ -166,19 +241,61 @@ public class SpeedSpectrumHud extends HudElement {
             case Wave -> drawWave(renderer, amp, left, top, bw, gap, rackH, tip, base);
             case Pulse -> drawPulse(renderer, amp, left, top, bw, gap, rackH, tip, base, now, w);
         }
+    }
 
-        if (showSpeed.get()) {
-            double ty = top + rackH + 2.0;
-            String value = String.format("%.0f", speedBs * 3.6);
-            double valueW = HudText.textWidth(renderer, "888", shadow, scale);
-            double totalW = valueW + HudText.textWidth(renderer, " km/h", shadow, scale);
-            double tx = left + (w - totalW) / 2.0;
+    private static SettingColor faded(SettingColor c, double alpha) {
+        return new SettingColor(c.r, c.g, c.b, (int) Math.round(c.a * alpha));
+    }
 
-            HudText.text(renderer, value, tx + valueW - HudText.textWidth(renderer, value, shadow, scale), ty,
-                valueColor.get(), shadow, scale);
-            HudText.text(renderer, " km/h", tx + valueW, ty, labelColor.get(), shadow, scale);
+    private void drawCard(HudRenderer renderer, double speedBs, long now) {
+        int kmh = (int) Math.round(speedBs * 3.6);
+        boolean flat = look.get() == Look.Flat;
+        double s = cardScale.get();
+        double padX = 14.0 * s;
+        double padY = 8.0 * s;
+        String value = Integer.toString(kmh);
+        String unit = "km/h";
+        double gap = 4.0 * s;
+        double valueH = HudText.textHeight(renderer, false, HudTextScale.TITLE);
+        double unitH = HudText.textHeight(renderer, false, HudTextScale.SMALL);
+        double valueW = HudText.textWidth(renderer, value, false, HudTextScale.TITLE);
+        double unitW = HudText.textWidth(renderer, unit, false, HudTextScale.SMALL);
+        double w = padX * 2.0 + HudText.textWidth(renderer, "888", false, HudTextScale.TITLE) + gap + unitW;
+        double textH = padY * 2.0 + valueH;
+        double h = showAnimation.get() ? textH / (1.0 - BAR_STRIP) : textH;
+        double pad = 8.0 * s;
+        double left = x + pad;
+        double top = y + pad;
+
+        if (blur.get()) {
+            ModuleToastBlur.INSTANCE.begin(2);
+            ModuleToastBlur.INSTANCE.draw(left, top, w, h, flat ? 0.0 : GlassPainter.radius(s), 1.0);
         }
 
+        if (flat) {
+            glass.flatCard(renderer, left, top, w, h, s, 1.0, cardBackground.get());
+        } else {
+            glass.card(renderer, left, top, w, h, s, 1.0, true, cardBackground.get());
+            glass.accentBar(renderer, left, top, h, s, 1.0, tipColor.get());
+        }
+
+        if (showAnimation.get()) {
+            double inset = flat ? 2.0 * s : GlassPainter.radius(s);
+            double bw = barWidth.get();
+            double room = w - inset * 2.0;
+            int fit = (int) Math.floor((room + RACK_GAP) / (bw + RACK_GAP));
+            int barCount = Math.min(bars.get(), fit);
+            double stripH = h - textH;
+            if (barCount >= 2) {
+                double rackLeft = left + (w - rackWidth(barCount, bw)) / 2.0;
+                drawRack(renderer, rackLeft, top + textH, barCount, bw, stripH - 2.0 * s, speedBs, now, BAR_ALPHA);
+            }
+        }
+
+        double tx = left + (w - valueW - gap - unitW) / 2.0;
+        SettingColor ink = cardText.get();
+        HudText.text(renderer, value, tx, top + padY, ink, false, HudTextScale.TITLE);
+        HudText.text(renderer, unit, tx + valueW + gap, top + padY + valueH - unitH, ink, false, HudTextScale.SMALL);
         setSize(w + pad * 2.0, h + pad * 2.0);
     }
 

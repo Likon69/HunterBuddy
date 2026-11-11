@@ -37,7 +37,7 @@ public final class PerformancePainter {
 
     public void measure(HudRenderer renderer, PerformanceMetric[] metrics, double scale, double textScale,
                         boolean compact, boolean title, boolean shadow) {
-        double valueScale = Math.max(HudTextScale.NORMAL, HudTextScale.fixed(textScale));
+        double valueScale = HudTextScale.fixed(textScale);
         boolean changed = invalid || this.scale != scale || this.valueScale != valueScale || this.compact != compact
             || this.title != title || this.shadow != shadow;
         for (int i = 0; i < metrics.length; i++) changed |= measured[i] != metrics[i].text;

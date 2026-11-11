@@ -1,6 +1,8 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
+import com.hunterbuddy.hud.glass.GlassPanel;
+import com.hunterbuddy.hud.text.HudTextScale;
 import com.hunterbuddy.modules.SpawnerDetector;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoader;
 import com.hunterbuddy.modules.regear.arealoader.AreaLoaderMode;
@@ -46,6 +48,7 @@ public class SpiralCoverageHud extends HudElement {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
+    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel);
 
     private final Setting<Double> boxSize = sgGeneral.add(new DoubleSetting.Builder()
         .name("size").description("Side of the drawing, in pixels.")
@@ -71,8 +74,8 @@ public class SpiralCoverageHud extends HudElement {
         .defaultValue(TrailStyle.Glow).build());
 
     private final Setting<Double> textScale = sgGeneral.add(new DoubleSetting.Builder()
-        .name("text-scale").description("Scale of the text.")
-        .defaultValue(1.0).min(0.5).max(2.0).sliderRange(0.5, 2.0).build());
+        .name("text-scale").description("Shared text sizes: 0.65 small, 0.85 normal, 1.0 large.")
+        .defaultValue(1.0).min(0.65).max(1.0).sliderRange(0.65, 1.0).build());
 
     private final Setting<Boolean> textShadow = sgGeneral.add(new BoolSetting.Builder()
         .name("text-shadow").description("Render shadow behind text.").defaultValue(true).build());
@@ -106,7 +109,7 @@ public class SpiralCoverageHud extends HudElement {
         .defaultValue(new SettingColor(6, 10, 16, 170))
         .visible(() -> mapStyle.get() != MapStyle.Clean).build());
 
-    private final HudGlowPanel panel = new HudGlowPanel(sgPanel);
+
 
     private final HudPulse.Tracker pulse = new HudPulse.Tracker();
     private long lastFrameNanos;
@@ -172,7 +175,7 @@ public class SpiralCoverageHud extends HudElement {
     private void renderPreview(HudRenderer renderer, long now, double dt, AreaLoaderMode.CoveragePreview preview,
                                List<double[]> pts, HudState state) {
         boolean shadow = textShadow.get();
-        double scale = textScale.get();
+        double scale = HudTextScale.fixed(textScale.get());
         boolean anim = animations.get();
         animTime += dt;
 
@@ -207,7 +210,7 @@ public class SpiralCoverageHud extends HudElement {
         double maxZ = anim ? pulse.ease("boundsMaxZ", rawMaxZ, dt, 0.6) : rawMaxZ;
 
         double pad = panel.padding();
-        double box = boxSize.get();
+        double box = boxSize.get() * panel.scale();
         double lineH = HudText.textHeight(renderer, shadow, scale);
         double gap = 3.0 * scale;
         double barH = Math.max(3.0, 4.0 * scale);
