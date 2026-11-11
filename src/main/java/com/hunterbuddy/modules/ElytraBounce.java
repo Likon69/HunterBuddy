@@ -17,7 +17,6 @@ import com.hunterbuddy.util.SwapWindow;
 import java.util.ArrayDeque;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent.Receive;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
@@ -33,7 +32,6 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.player.ChestSwap;
-import meteordevelopment.meteorclient.systems.modules.world.Timer;
 import meteordevelopment.meteorclient.utils.network.MeteorExecutor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Blocks;
@@ -45,7 +43,6 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.MovementType;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
@@ -65,86 +62,6 @@ public class ElytraBounce extends Module {
    private final SettingGroup sgHazards = this.settings.createGroup("Hazards");
    private final Setting<Boolean> bounce = this.sgGeneral
       .add(new Builder().name("bounce").description("Automatically does bounce efly.").defaultValue(true).build());
-   private final Setting<Boolean> motionYBoost = this.sgGeneral
-      .add(
-         new Builder().name("motion-y-boost").description("Greatly increases speed by cancelling Y momentum.")
-                  .defaultValue(false)
-               .visible(this.bounce::get)
-            .build()
-      );
-   private final Setting<Boolean> onlyWhileColliding = this.sgGeneral
-      .add(
-         new Builder().name("only-while-colliding")
-                     .description("Only enables motion y boost if colliding with a wall.")
-                  .defaultValue(true)
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get())
-               .build()
-      );
-   private final Setting<Boolean> tunnelBounce = this.sgGeneral
-      .add(
-         new Builder().name("tunnel-bounce")
-                     .description("Allows you to bounce in 1x2 tunnels. This should not be on if you are not in a tunnel.")
-                  .defaultValue(false)
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get())
-               .build()
-      );
-   private final Setting<Boolean> fakeLag = this.sgGeneral
-      .add(
-         new Builder().name("fake-lag")
-                     .description(
-                        "Emulates lag by holding packets while skimming the tunnel floor, then releasing them in bursts (Lambda-style). Required for 1x2 tunnel bounce."
-                     ).defaultValue(true)
-               .onChanged(v -> {
-                  if (!v) {
-                     this.flushPackets();
-                  }
-               })
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get() && (Boolean)this.tunnelBounce.get())
-               .build()
-      );
-   private final Setting<Integer> fakeLagFlushTicks = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.IntSetting.Builder()
-                        .name("fake-lag-flush-ticks")
-                     .description("How many ticks to hold packets before releasing them in a burst.")
-                  .defaultValue(10)
-               .min(2)
-               .sliderRange(2, 40)
-               .visible(
-                  () -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get() && (Boolean)this.tunnelBounce.get() && (Boolean)this.fakeLag.get()
-               )
-               .build()
-      );
-   private final Setting<Double> speed = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                     .name("speed")
-                  .description("The speed in blocks per second to keep you at.")
-               .defaultValue(100.0)
-               .sliderRange(20.0, 250.0)
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get())
-               .build()
-      );
-   private final Setting<Boolean> onlyOnDiagonal = this.sgGeneral
-      .add(
-         new Builder().name("only-on-diagonal")
-                     .description(
-                        "Only cancel Y momentum when flying on a non-axial (diagonal) heading. Cancelling Y on axis-aligned headings scrubs speed instead of adding it."
-                     ).defaultValue(true)
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get())
-               .build()
-      );
-   private final Setting<Double> minDiagonalAngle = this.sgGeneral
-      .add(
-         new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
-                     .name("min-diagonal-angle")
-                  .description("Minimum angle away from an axis (0/90/180/270) before a heading counts as diagonal for motion-y-boost.")
-               .defaultValue(15.0)
-               .min(0.0)
-               .sliderRange(0.0, 45.0)
-               .visible(() -> (Boolean)this.bounce.get() && (Boolean)this.motionYBoost.get() && (Boolean)this.onlyOnDiagonal.get())
-               .build()
-      );
    private final Setting<Boolean> lockPitch = this.sgGeneral
       .add(
          new Builder().name("lock-pitch").description("Whether to lock your pitch when bounce is enabled.")
@@ -426,19 +343,12 @@ public class ElytraBounce extends Module {
 
    private volatile boolean realGliding = false;
 
-   private final java.util.Queue<net.minecraft.network.packet.Packet<?>> sendQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
-   private final java.util.Queue<net.minecraft.network.packet.s2c.common.CommonPingS2CPacket> pingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
-
-   private volatile boolean flushingPackets = false;
-   private int fakeLagTicks = 0;
-   private double lastGroundY;
    private boolean elytraToggled = false;
    private Vec3d lastUnstuckPos;
    private int stuckTimer = 0;
    private int targetY = 120;
    private BlockPos startPos = new BlockPos(0, 0, 0);
    public float cameraPitch;
-   private Vec3d lastPos;
    private final double maxDistance = 80.0;
    private BlockPos tempPath = null;
    private final PathStallWatch pathStall = new PathStallWatch();
@@ -490,9 +400,6 @@ public class ElytraBounce extends Module {
          this.releaseHeldGlideState();
       } else if (this.handleGlideClearPacket(event)) {
          return;
-      } else if (event.packet instanceof net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping && this.shouldQueuePackets()) {
-         this.pingQueue.add(ping);
-         event.cancel();
       } else if (event.packet instanceof CloseScreenS2CPacket) {
          event.cancel();
       }
@@ -515,71 +422,6 @@ public class ElytraBounce extends Module {
          && event.packet instanceof ClientCommandC2SPacket command
          && command.getMode() == ClientCommandC2SPacket.Mode.START_FALL_FLYING) {
          this.fakeFlyLastStartAge = this.mc.player.age;
-      }
-      if (this.flushingPackets) return;
-      if (this.shouldQueuePackets()) {
-         this.sendQueue.add(event.packet);
-         event.cancel();
-      } else {
-         this.flushPackets();
-      }
-   }
-
-   private boolean shouldQueuePackets() {
-      return (Boolean)this.bounce.get()
-         && (Boolean)this.motionYBoost.get()
-         && (Boolean)this.tunnelBounce.get()
-         && (Boolean)this.fakeLag.get()
-         && !(Boolean)this.fakeFly.get()
-         && this.enabled()
-         && this.mc.player != null
-         && this.mc.player.isGliding()
-         && this.mc.player.getY() - this.lastGroundY < 0.163;
-   }
-
-   private void tickFakeLag() {
-      if (this.mc.player != null && this.mc.player.isOnGround()) {
-         this.lastGroundY = this.mc.player.getY();
-      }
-
-      if (!this.shouldQueuePackets()) {
-         this.fakeLagTicks = 0;
-         this.flushPackets();
-      } else if (++this.fakeLagTicks >= (Integer)this.fakeLagFlushTicks.get()) {
-         this.fakeLagTicks = 0;
-         this.flushPackets();
-      }
-   }
-
-   private void flushPackets() {
-      if (!this.sendQueue.isEmpty() || !this.pingQueue.isEmpty()) {
-         if (this.mc.getNetworkHandler() == null) {
-            this.sendQueue.clear();
-            this.pingQueue.clear();
-            return;
-         }
-
-         this.flushingPackets = true;
-
-         try {
-            net.minecraft.network.ClientConnection connection = this.mc.getNetworkHandler().getConnection();
-            net.minecraft.network.packet.Packet<?> packet;
-            while ((packet = this.sendQueue.poll()) != null) {
-               connection.send(packet, null, true);
-            }
-
-            net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping;
-            while ((ping = this.pingQueue.poll()) != null) {
-               net.minecraft.network.packet.s2c.common.CommonPingS2CPacket finalPing = ping;
-               if (this.mc.isOnThread()) {
-                  finalPing.apply(this.mc.getNetworkHandler());
-               } else {
-                  this.mc.execute(() -> finalPing.apply(this.mc.getNetworkHandler()));
-               }
-            }
-         } finally {
-            this.flushingPackets = false;
-         }
       }
    }
 
@@ -702,13 +544,8 @@ public class ElytraBounce extends Module {
          this.fakeFlyLastSentOnGround = true;
          this.fakeFlyPrevSentOnGround = true;
          this.realGliding = false;
-         this.sendQueue.clear();
-         this.pingQueue.clear();
-         this.fakeLagTicks = 0;
-         this.lastGroundY = this.mc.player.getY();
          this.waitingForChunksToLoad = false;
          this.elytraToggled = false;
-         this.lastPos = this.mc.player.getEntityPos();
          this.lastUnstuckPos = this.mc.player.getEntityPos();
          this.stuckTimer = 0;
          this.cameraPitch = this.mc.player.getPitch();
@@ -743,35 +580,6 @@ public class ElytraBounce extends Module {
       }
    }
 
-   @EventHandler
-   private void onPlayerMove(PlayerMoveEvent event) {
-      if (this.mc.player != null && event.type == MovementType.SELF && this.enabled() && (Boolean)this.motionYBoost.get() && (Boolean)this.bounce.get()
-         )
-       {
-         if (!(Boolean)this.onlyWhileColliding.get() || this.mc.player.horizontalCollision) {
-            if (!(Boolean)this.onlyOnDiagonal.get() || (Boolean)this.tunnelBounce.get() || this.isDiagonalHeading()) {
-               if (this.lastPos != null) {
-                  double speedBps = this.mc.player.getEntityPos().subtract(this.lastPos).multiply(20.0, 0.0, 20.0).length();
-                  Timer timer = (Timer)Modules.get().get(Timer.class);
-                  if (timer.isActive()) {
-                     speedBps *= timer.getMultiplier();
-                  }
-
-                  if (this.mc.player.isOnGround() && this.mc.player.isSprinting() && speedBps < (Double)this.speed.get()) {
-                     if (speedBps > 20.0 || (Boolean)this.tunnelBounce.get()) {
-                        event.movement = new Vec3d(event.movement.x, 0.0, event.movement.z);
-                     }
-
-                     this.mc.player.setVelocity(this.mc.player.getVelocity().x, 0.0, this.mc.player.getVelocity().z);
-                  }
-               }
-
-               this.lastPos = this.mc.player.getEntityPos();
-            }
-         }
-      }
-   }
-
    private void replanIfStalled() {
       IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
       boolean busy = !baritone.getPathingBehavior().isPathing() || this.mc.interactionManager.isBreakingBlock();
@@ -794,9 +602,7 @@ public class ElytraBounce extends Module {
       this.realGliding = false;
       this.jumpHeld = false;
       this.jumpHeldLastTick = false;
-      this.fakeLagTicks = 0;
       this.releaseHeldGlideState();
-      this.flushPackets();
       if (this.mc.player != null) {
          if (this.freePitch.get() && this.lockPitch.get() && this.bounce.get()) this.mc.player.setPitch(this.cameraPitch);
          if (this.bounce.get()
@@ -821,7 +627,6 @@ public class ElytraBounce extends Module {
          this.activeRoute = null;
          this.routeKey = null;
          this.releaseHeldGlideState();
-         this.flushPackets();
          return;
       }
       if (this.mc.player != this.timerPlayer) {
@@ -849,7 +654,6 @@ public class ElytraBounce extends Module {
       this.logGliderWear();
       this.watchSpeed();
       this.watchStats();
-      this.tickFakeLag();
       if (SwapWindow.silent()) {
          this.mc.player.setSprinting(false);
          this.releaseHeldGlideState();
@@ -973,12 +777,6 @@ public class ElytraBounce extends Module {
 
          }
       }
-   }
-
-   private boolean isDiagonalHeading() {
-      double m = Math.abs(this.mc.player.getYaw() % 90.0);
-      double distToAxis = Math.min(m, 90.0 - m);
-      return distToAxis > (Double)this.minDiagonalAngle.get();
    }
 
    private void refreshRoute() {
@@ -1134,19 +932,13 @@ public class ElytraBounce extends Module {
             this.heldSince = 0L;
             return;
          }
-         boolean wasFlushing = this.flushingPackets;
-         this.flushingPackets = true;
-         try {
-            while (!this.pendingPongs.isEmpty()) {
-               int id = this.pendingPongs.removeFirst();
-               if (this.mc.isOnThread()) {
-                  handler.sendPacket(new net.minecraft.network.packet.c2s.common.CommonPongC2SPacket(id));
-               } else {
-                  this.applyPacket(handler, new net.minecraft.network.packet.s2c.common.CommonPingS2CPacket(id));
-               }
+         while (!this.pendingPongs.isEmpty()) {
+            int id = this.pendingPongs.removeFirst();
+            if (this.mc.isOnThread()) {
+               handler.sendPacket(new net.minecraft.network.packet.c2s.common.CommonPongC2SPacket(id));
+            } else {
+               this.applyPacket(handler, new net.minecraft.network.packet.s2c.common.CommonPingS2CPacket(id));
             }
-         } finally {
-            this.flushingPackets = wasFlushing;
          }
          net.minecraft.network.packet.s2c.common.CommonPingS2CPacket ping;
          while ((ping = this.glideClearPingQueue.poll()) != null) this.applyPacket(handler, ping);
@@ -1423,9 +1215,7 @@ public class ElytraBounce extends Module {
       if (!this.enabled() || !this.autoJumpAllowed()) {
          decision = false;
       } else if (onGround) {
-         boolean fastEnough = this.motionYBoost.get()
-            && meteordevelopment.meteorclient.utils.Utils.getPlayerSpeed().multiply(1.0, 0.0, 1.0).length() >= this.speed.get();
-         decision = !fastEnough;
+         decision = true;
       } else if (this.forcePressThisTick) {
          decision = flipped;
       } else if (player.isGliding()) {
