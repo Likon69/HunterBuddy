@@ -48,7 +48,7 @@ public class SpiralCoverageHud extends HudElement {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
-    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel);
+    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel, settings.createGroup("Glow"));
 
     private final Setting<Double> boxSize = sgGeneral.add(new DoubleSetting.Builder()
         .name("size").description("Side of the drawing, in pixels.")

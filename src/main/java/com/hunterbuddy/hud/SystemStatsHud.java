@@ -23,7 +23,7 @@ public final class SystemStatsHud extends HudElement {
     private final SettingGroup appearance = settings.createGroup("Panel");
     private final SettingGroup thresholds = settings.createGroup("Thresholds");
     private final SettingGroup colors = settings.createGroup("Colors");
-    private final GlassPanel panel = new GlassPanel(general, appearance);
+    private final GlassPanel panel = new GlassPanel(general, appearance, settings.createGroup("Glow"));
     private final Setting<Boolean> showRam = general.add(new BoolSetting.Builder()
         .name("show-ram").description("Show used and maximum JVM heap memory.").defaultValue(true).build());
     private final Setting<Boolean> showCpu = general.add(new BoolSetting.Builder()

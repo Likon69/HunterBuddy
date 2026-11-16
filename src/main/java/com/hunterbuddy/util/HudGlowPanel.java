@@ -3,6 +3,7 @@ package com.hunterbuddy.util;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.IVisible;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -50,74 +51,78 @@ public final class HudGlowPanel {
      * one place, while each keeps its own saved values.
      */
     public HudGlowPanel(SettingGroup group) {
+        this(group, () -> true);
+    }
+
+    public HudGlowPanel(SettingGroup group, IVisible shown) {
         background = group.add(new BoolSetting.Builder()
             .name("background")
             .description("Draw a translucent panel behind the line.")
-            .defaultValue(true).build());
+            .defaultValue(true).visible(shown).build());
 
         backgroundColor = group.add(new ColorSetting.Builder()
             .name("background-color").description("Colour of that panel.")
             .defaultValue(new SettingColor(0, 0, 0, 120))
-            .visible(background::get).build());
+            .visible(() -> shown.isVisible() && background.get()).build());
 
         padding = group.add(new DoubleSetting.Builder()
             .name("padding").description("Space between the text and the edge of the panel.")
-            .defaultValue(4.0).min(0.0).max(20.0).sliderRange(0.0, 12.0).build());
+            .defaultValue(4.0).min(0.0).max(20.0).sliderRange(0.0, 12.0).visible(shown).build());
 
         glow = group.add(new BoolSetting.Builder()
             .name("glow").description("Soft halo around the panel.")
-            .defaultValue(true).build());
+            .defaultValue(true).visible(shown).build());
 
         glowLayers = group.add(new IntSetting.Builder()
             .name("glow-layers")
             .description("How many rings make up the halo. More is smoother and slightly costlier.")
             .defaultValue(4).min(1).max(12).sliderRange(1, 8)
-            .visible(glow::get).build());
+            .visible(() -> shown.isVisible() && glow.get()).build());
 
         glowSpread = group.add(new DoubleSetting.Builder()
             .name("glow-spread").description("How far each ring reaches beyond the last, in pixels.")
             .defaultValue(3.0).min(0.5).max(16.0).sliderRange(1.0, 8.0)
-            .visible(glow::get).build());
+            .visible(() -> shown.isVisible() && glow.get()).build());
 
         glowAlpha = group.add(new IntSetting.Builder()
             .name("glow-alpha").description("Opacity of the innermost ring.")
             .defaultValue(90).min(4).max(255).sliderRange(10, 200)
-            .visible(glow::get).build());
+            .visible(() -> shown.isVisible() && glow.get()).build());
 
         glowUnderPanel = group.add(new BoolSetting.Builder()
             .name("glow-under-panel")
             .description("Let the halo spread under the panel too, which tints its inside. Off keeps the halo around the panel only.")
-            .defaultValue(false).visible(glow::get).build());
+            .defaultValue(false).visible(() -> shown.isVisible() && glow.get()).build());
 
         glowFollowsState = group.add(new BoolSetting.Builder()
             .name("glow-follows-state")
             .description("Take the halo colour from the worst field on the line, instead of one fixed colour.")
-            .defaultValue(true).visible(glow::get).build());
+            .defaultValue(true).visible(() -> shown.isVisible() && glow.get()).build());
 
         glowIntensifies = group.add(new BoolSetting.Builder()
             .name("glow-intensifies")
             .description("Grow the halo as things get worse. A halo that is always bright stops being read after a minute; one that only swells when it matters pulls the eye at the right moment.")
-            .defaultValue(true).visible(glow::get).build());
+            .defaultValue(true).visible(() -> shown.isVisible() && glow.get()).build());
 
         glowColor = group.add(new ColorSetting.Builder()
             .name("glow-color").description("Fixed halo colour, used when it does not follow the state.")
             .defaultValue(new SettingColor(90, 200, 255, 255))
-            .visible(() -> glow.get() && !glowFollowsState.get()).build());
+            .visible(() -> shown.isVisible() && glow.get() && !glowFollowsState.get()).build());
 
         okColor = group.add(new ColorSetting.Builder()
             .name("glow-ok-color").description("Halo colour while everything is fine.")
             .defaultValue(new SettingColor(90, 220, 130, 255))
-            .visible(() -> glow.get() && glowFollowsState.get()).build());
+            .visible(() -> shown.isVisible() && glow.get() && glowFollowsState.get()).build());
 
         warnColor = group.add(new ColorSetting.Builder()
             .name("glow-warn-color").description("Halo colour once a field is low.")
             .defaultValue(new SettingColor(255, 190, 70, 255))
-            .visible(() -> glow.get() && glowFollowsState.get()).build());
+            .visible(() -> shown.isVisible() && glow.get() && glowFollowsState.get()).build());
 
         criticalColor = group.add(new ColorSetting.Builder()
             .name("glow-critical-color").description("Halo colour once something is actually wrong.")
             .defaultValue(new SettingColor(255, 70, 70, 255))
-            .visible(() -> glow.get() && glowFollowsState.get()).build());
+            .visible(() -> shown.isVisible() && glow.get() && glowFollowsState.get()).build());
     }
 
     public double padding() {

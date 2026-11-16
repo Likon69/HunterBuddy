@@ -42,7 +42,7 @@ public class FindsTickerHud extends HudElement {
     private final SettingGroup sgTypes = settings.createGroup("Types");
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
-    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel);
+    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel, settings.createGroup("Glow"));
 
     private final Setting<Integer> maxLines = sgGeneral.add(new IntSetting.Builder()
         .name("max-lines").description("How many entries to show.")

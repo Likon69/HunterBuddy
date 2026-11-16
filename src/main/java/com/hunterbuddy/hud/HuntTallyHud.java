@@ -60,7 +60,7 @@ public class HuntTallyHud extends HudElement {
     private final SettingGroup sgFields = settings.createGroup("Fields");
     private final SettingGroup sgColors = settings.createGroup("Colors");
     private final SettingGroup sgPanel = settings.createGroup("Panel");
-    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel);
+    private final GlassPanel panel = new GlassPanel(sgGeneral, sgPanel, settings.createGroup("Glow"));
 
     private final Setting<Layout> layout = sgGeneral.add(new EnumSetting.Builder<Layout>()
         .name("layout").description("One line, or one entry per line.")
