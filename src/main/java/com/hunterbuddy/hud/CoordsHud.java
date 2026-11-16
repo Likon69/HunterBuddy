@@ -1,11 +1,10 @@
 package com.hunterbuddy.hud;
 
 import com.hunterbuddy.HunterBuddyAddon;
-import com.hunterbuddy.hud.glass.GlassPainter;
-import com.hunterbuddy.hud.glass.GlassStyle;
+import com.hunterbuddy.hud.glass.GlassPanel;
 import com.hunterbuddy.hud.text.HudText;
 import com.hunterbuddy.hud.text.HudTextScale;
-import com.hunterbuddy.hud.toast.ModuleToastBlur;
+import com.hunterbuddy.util.HudGlowPanel;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
@@ -24,7 +23,6 @@ import net.minecraft.world.World;
 public final class CoordsHud extends HudElement {
     public static final HudElementInfo<CoordsHud> INFO = new HudElementInfo<>(HunterBuddyAddon.HUD_GROUP,
         "Coords", "Current coordinates and their Overworld or Nether equivalent.", CoordsHud::new);
-    private static final String[] DIGITS = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
 
     public enum Show {
         Both,
@@ -34,54 +32,84 @@ public final class CoordsHud extends HudElement {
         @Override
         public String toString() {
             return switch (this) {
-                case Both -> "Both";
+                case Both -> "Current and opposite";
                 case CurrentOnly -> "Current only";
                 case OppositeOnly -> "Opposite only";
             };
         }
     }
 
+    public enum Labels {
+        Full,
+        Short,
+        None
+    }
+
+    public enum TextSize {
+        Small,
+        Normal
+    }
+
     private final SettingGroup general = settings.getDefaultGroup();
-    private final Setting<GlassStyle> style = general.add(new EnumSetting.Builder<GlassStyle>()
-        .name("style").description("Glass: rounded glass card. Flat: square flat panel.")
-        .defaultValue(GlassStyle.Glass).build());
+    private final GlassPanel panel = new GlassPanel(general, settings.createGroup("Panel"),
+        settings.createGroup("Glow"));
     private final Setting<Show> show = general.add(new EnumSetting.Builder<Show>()
-        .name("show").description("Choose current coordinates, opposite coordinates, or both.")
+        .name("dimensions").description("Choose current coordinates, opposite coordinates, or both.")
         .defaultValue(Show.Both).build());
     private final Setting<Boolean> showY = general.add(new BoolSetting.Builder()
         .name("show-y").description("Include the Y coordinate.").defaultValue(true).build());
     private final Setting<Integer> decimals = general.add(new IntSetting.Builder()
         .name("decimals").description("Decimal places for coordinates.")
         .defaultValue(0).min(0).max(3).sliderRange(0, 3).build());
-    private final Setting<Double> scale = general.add(new DoubleSetting.Builder()
-        .name("scale").description("Scale of the card and spacing, independent of text size.")
-        .defaultValue(1).min(0.5).max(2).sliderRange(0.6, 1.5).build());
-    private final Setting<Boolean> backgroundBlur = general.add(new BoolSetting.Builder()
-        .name("background-blur").description("Blur the actual scene behind the card.")
-        .defaultValue(true).build());
-    private final Setting<SettingColor> background = general.add(new ColorSetting.Builder()
-        .name("background").description("Card background color and opacity.")
-        .defaultValue(new SettingColor(17, 24, 35, 222)).build());
+    private final Setting<Labels> labels = general.add(new EnumSetting.Builder<Labels>()
+        .name("labels").description("Dimension label before each row: full name, short name, or none.")
+        .defaultValue(Labels.Full).build());
+    private final Setting<TextSize> labelSize = general.add(new EnumSetting.Builder<TextSize>()
+        .name("label-size").description("Text size of the dimension label.")
+        .defaultValue(TextSize.Normal).visible(() -> labels.get() != Labels.None).build());
+    private final Setting<SettingColor> labelColor = general.add(new ColorSetting.Builder()
+        .name("label-color").description("Dimension label color and opacity.")
+        .defaultValue(new SettingColor(126, 200, 255, 255)).visible(() -> labels.get() != Labels.None).build());
+    private final Setting<Boolean> direction = general.add(new BoolSetting.Builder()
+        .name("direction").description("Show the facing direction from the player's yaw.")
+        .defaultValue(false).build());
+    private final Setting<TextSize> oppositeSize = general.add(new EnumSetting.Builder<TextSize>()
+        .name("opposite-size").description("Text size of the opposite dimension row.")
+        .defaultValue(TextSize.Normal).visible(() -> show.get() != Show.CurrentOnly).build());
+    private final Setting<Double> oppositeOpacity = general.add(new DoubleSetting.Builder()
+        .name("opposite-opacity").description("Opacity of the opposite dimension row.")
+        .defaultValue(0.85).min(0.2).max(1).sliderRange(0.2, 1)
+        .visible(() -> show.get() != Show.CurrentOnly).build());
     private final Setting<SettingColor> textColor = general.add(new ColorSetting.Builder()
         .name("text-color").description("Coordinate text color and opacity.")
         .defaultValue(new SettingColor(236, 243, 252, 255)).build());
-    private final Setting<SettingColor> accentColor = general.add(new ColorSetting.Builder()
-        .name("accent-color").description("Left accent color in Glass style.")
-        .defaultValue(new SettingColor(126, 200, 255, 235)).build());
+    private final Setting<Boolean> axisColors = general.add(new BoolSetting.Builder()
+        .name("axis-colors").description("Draw X, Y and Z in their own colors.")
+        .defaultValue(false).build());
+    private final Setting<SettingColor> xColor = general.add(new ColorSetting.Builder()
+        .name("x-color").description("Color of the X coordinate.")
+        .defaultValue(new SettingColor(255, 120, 120, 255)).visible(axisColors::get).build());
+    private final Setting<SettingColor> yColor = general.add(new ColorSetting.Builder()
+        .name("y-color").description("Color of the Y coordinate.")
+        .defaultValue(new SettingColor(130, 230, 140, 255)).visible(axisColors::get).build());
+    private final Setting<SettingColor> zColor = general.add(new ColorSetting.Builder()
+        .name("z-color").description("Color of the Z coordinate.")
+        .defaultValue(new SettingColor(120, 170, 255, 255)).visible(axisColors::get).build());
 
-    private final GlassPainter glass = new GlassPainter();
     private final Row current = new Row();
     private final Row opposite = new Row();
-    private final Color muted = new Color();
-    private final StringBuilder template = new StringBuilder(64);
+    private final CoordsGlyphs normalGlyphs = new CoordsGlyphs();
+    private final CoordsGlyphs smallGlyphs = new CoordsGlyphs();
+    private final Color paint = new Color();
     private String dimension = "Overworld";
     private String otherDimension = "Nether";
+    private float yaw = 225;
     private double labelWidth;
-    private double valueWidth;
-    private double currentHeight;
-    private double oppositeHeight;
-    private int measuredDecimals = -1;
-    private boolean measuredY;
+    private double compassWidth;
+    private double normalHeight;
+    private double smallHeight;
+    private Labels measuredLabels;
+    private TextSize measuredLabelSize;
     private boolean measured;
 
     public CoordsHud() {
@@ -96,6 +124,7 @@ public final class CoordsHud extends HudElement {
         dimension = key.equals(World.NETHER) ? "Nether" : key.equals(World.END) ? "End"
             : key.equals(World.OVERWORLD) ? "Overworld" : "Other";
         otherDimension = key.equals(World.NETHER) ? "Overworld" : key.equals(World.OVERWORLD) ? "Nether" : null;
+        yaw = MeteorClient.mc.player.getYaw();
         update(MeteorClient.mc.player.getX(), MeteorClient.mc.player.getY(), MeteorClient.mc.player.getZ());
     }
 
@@ -122,76 +151,124 @@ public final class CoordsHud extends HudElement {
         measure(renderer);
         boolean first = otherDimension == null || show.get() != Show.OppositeOnly;
         boolean second = otherDimension != null && show.get() != Show.CurrentOnly;
-        double s = scale.get();
-        double padX = 14 * s;
-        double padY = Math.max(6 * s, GlassPainter.radius(s) * 0.6);
+        boolean compass = direction.get();
+        boolean smallOpposite = oppositeSize.get() == TextSize.Small;
+        double oppositeScale = smallOpposite ? HudTextScale.SMALL : HudTextScale.NORMAL;
+        CoordsGlyphs oppositeGlyphs = smallOpposite ? smallGlyphs : normalGlyphs;
+        double s = panel.scale();
+        double pad = panel.padding();
         double gap = 4 * s;
-        double rowHeight = Math.max(currentHeight, oppositeHeight);
-        double width = padX * 2 + labelWidth + 8 * s + valueWidth;
-        double height = padY * 2 + (first ? rowHeight : 0) + (second ? rowHeight : 0)
-            + (first && second ? gap : 0);
-        boolean flat = style.get() == GlassStyle.Flat;
-        setSize(width, height);
-        if (backgroundBlur.get()) {
-            ModuleToastBlur.INSTANCE.begin(2);
-            ModuleToastBlur.INSTANCE.draw(x, y, width, height, flat ? 0 : GlassPainter.radius(s), 1);
-        }
-        if (flat) glass.flatCard(renderer, x, y, width, height, s, 1, background.get());
-        else {
-            glass.card(renderer, x, y, width, height, s, 1, true, background.get());
-            glass.accentBar(renderer, x, y, height, s, 1, accentColor.get());
-        }
-        SettingColor ink = textColor.get();
-        muted.set(ink.r, ink.g, ink.b, (int) Math.round(ink.a * 0.65));
-        double top = y + padY;
-        double valueX = x + padX + labelWidth + 8 * s;
+        double labelGap = labelWidth > 0 ? 8 * s : 0;
+        double currentRow = Math.max(normalHeight, smallHeight);
+        double oppositeRow = smallOpposite ? smallHeight : normalHeight;
+        double valueWidth = Math.max(first ? normalGlyphs.width(current) : 0,
+            second ? oppositeGlyphs.width(opposite) : 0);
+        double contentWidth = labelWidth + labelGap + valueWidth;
+        double contentHeight = 0;
+        int rows = 0;
         if (first) {
-            drawRow(renderer, dimension, current.text, x + padX, valueX, top, rowHeight,
-                HudTextScale.NORMAL, ink);
-            top += rowHeight + gap;
+            contentHeight += currentRow;
+            rows++;
         }
-        if (second) drawRow(renderer, otherDimension, opposite.text, x + padX, valueX, top, rowHeight,
-            HudTextScale.SMALL, muted);
+        if (second) {
+            contentHeight += oppositeRow;
+            rows++;
+        }
+        if (compass) {
+            contentWidth = Math.max(contentWidth, compassWidth);
+            contentHeight += smallHeight;
+            rows++;
+        }
+        contentHeight += gap * (rows - 1);
+        setSize(contentWidth + pad * 2, contentHeight + pad * 2);
+        panel.draw(renderer, x + pad, y + pad, contentWidth, contentHeight, HudGlowPanel.Severity.OK);
+        double top = y + pad;
+        double valueX = x + pad + labelWidth + labelGap;
+        if (first) {
+            drawRow(renderer, dimension, current, x + pad, valueX, top, currentRow, HudTextScale.NORMAL, 1);
+            top += currentRow + gap;
+        }
+        if (second) {
+            drawRow(renderer, otherDimension, opposite, x + pad, valueX, top, oppositeRow, oppositeScale,
+                oppositeOpacity.get());
+            top += oppositeRow + gap;
+        }
+        if (compass) {
+            SettingColor ink = textColor.get();
+            paint.set(ink.r, ink.g, ink.b, ink.a);
+            HudText.text(renderer, CoordsCompass.name(yaw), x + pad, top, paint, false, HudTextScale.SMALL);
+        }
     }
 
-    private void drawRow(HudRenderer renderer, String label, String value, double labelX, double valueX,
-                         double top, double height, double textScale, Color ink) {
-        HudText.text(renderer, label, labelX, top + (height - oppositeHeight) / 2, muted, false, HudTextScale.SMALL);
-        String visible = HudText.textWidth(renderer, value, false, textScale) <= valueWidth ? value : "...";
-        HudText.text(renderer, visible, valueX, top + (height - HudText.textHeight(renderer, false, textScale)) / 2,
-            ink, false, textScale);
+    private void drawRow(HudRenderer renderer, String label, Row row, double labelX, double valueX,
+                         double top, double height, double textScale, double opacity) {
+        SettingColor ink = textColor.get();
+        if (labels.get() != Labels.None) {
+            SettingColor tint = labelColor.get();
+            paint.set(tint.r, tint.g, tint.b, (int) Math.round(tint.a * opacity));
+            String shown = labels.get() == Labels.Short ? shortLabel(label) : label;
+            double labelScale = labelScale();
+            HudText.text(renderer, shown, labelX, top + (height - HudText.textHeight(renderer, false, labelScale)) / 2,
+                paint, false, labelScale);
+        }
+        double textY = top + (height - HudText.textHeight(renderer, false, textScale)) / 2;
+        paint.set(ink.r, ink.g, ink.b, (int) Math.round(ink.a * opacity));
+        if (!axisColors.get()) {
+            HudText.text(renderer, row.text, valueX, textY, paint, false, textScale);
+            return;
+        }
+        SettingColor[] colors = { xColor.get(), yColor.get(), zColor.get() };
+        double cursor = valueX;
+        boolean started = false;
+        for (int axis = 0; axis < colors.length; axis++) {
+            String part = row.part[axis];
+            if (part == null) continue;
+            if (started) {
+                paint.set(ink.r, ink.g, ink.b, (int) Math.round(ink.a * opacity));
+                HudText.text(renderer, ", ", cursor, textY, paint, false, textScale);
+                cursor += HudText.textWidth(renderer, ", ", false, textScale);
+            }
+            started = true;
+            SettingColor color = colors[axis];
+            paint.set(color.r, color.g, color.b, (int) Math.round(color.a * opacity));
+            HudText.text(renderer, part, cursor, textY, paint, false, textScale);
+            cursor += HudText.textWidth(renderer, part, false, textScale);
+        }
+    }
+
+    private double labelScale() {
+        return labelSize.get() == TextSize.Small ? HudTextScale.SMALL : HudTextScale.NORMAL;
+    }
+
+    private static String shortLabel(String label) {
+        return switch (label) {
+            case "Overworld" -> "OW";
+            case "Nether" -> "N";
+            case "End" -> "End";
+            default -> "?";
+        };
     }
 
     private void measure(HudRenderer renderer) {
-        int precision = decimals.get();
-        boolean withY = showY.get();
-        if (measured && measuredDecimals == precision && measuredY == withY) return;
+        if (measured && measuredLabels == labels.get() && measuredLabelSize == labelSize.get()) return;
         measured = true;
-        measuredDecimals = precision;
-        measuredY = withY;
-        labelWidth = HudText.textWidth(renderer, "Overworld", false, HudTextScale.SMALL);
-        currentHeight = HudText.textHeight(renderer, false, HudTextScale.NORMAL);
-        oppositeHeight = HudText.textHeight(renderer, false, HudTextScale.SMALL);
-        int widest = 0;
-        double digitWidth = 0;
-        for (int i = 0; i < DIGITS.length; i++) {
-            double width = HudText.textWidth(renderer, DIGITS[i], false, HudTextScale.NORMAL);
-            if (width > digitWidth) {
-                widest = i;
-                digitWidth = width;
+        measuredLabels = labels.get();
+        measuredLabelSize = labelSize.get();
+        normalGlyphs.measure(renderer, HudTextScale.NORMAL);
+        smallGlyphs.measure(renderer, HudTextScale.SMALL);
+        normalHeight = HudText.textHeight(renderer, false, HudTextScale.NORMAL);
+        smallHeight = HudText.textHeight(renderer, false, HudTextScale.SMALL);
+        labelWidth = 0;
+        if (measuredLabels != Labels.None) {
+            for (String name : new String[] { "Overworld", "Nether", "End", "Other" }) {
+                String shown = measuredLabels == Labels.Short ? shortLabel(name) : name;
+                labelWidth = Math.max(labelWidth, HudText.textWidth(renderer, shown, false, labelScale()));
             }
         }
-        template.setLength(0);
-        for (int axis = 0; axis < (withY ? 3 : 2); axis++) {
-            if (axis > 0) template.append(", ");
-            template.append('-');
-            for (int i = 0; i < 9; i++) template.append(DIGITS[widest]);
-            if (precision > 0) {
-                template.append('.');
-                for (int i = 0; i < precision; i++) template.append(DIGITS[widest]);
-            }
+        compassWidth = 0;
+        for (String name : CoordsCompass.NAMES) {
+            compassWidth = Math.max(compassWidth, HudText.textWidth(renderer, name, false, HudTextScale.SMALL));
         }
-        valueWidth = HudText.textWidth(renderer, template.toString(), false, HudTextScale.NORMAL);
     }
 
     @Override
@@ -200,12 +277,12 @@ public final class CoordsHud extends HudElement {
     }
 
     static final class Row {
-        private final StringBuilder buffer = new StringBuilder(64);
         private long x = Long.MIN_VALUE;
         private long y = Long.MIN_VALUE;
         private long z = Long.MIN_VALUE;
         private int decimals = -1;
         private boolean showY;
+        final String[] part = new String[3];
         String text = "";
 
         void update(double px, double py, double pz, int precision, boolean withY) {
@@ -224,25 +301,22 @@ public final class CoordsHud extends HudElement {
             z = nz;
             decimals = precision;
             showY = withY;
-            buffer.setLength(0);
-            append(nx, factor);
-            buffer.append(", ");
-            if (withY) {
-                append(ny, factor);
-                buffer.append(", ");
-            }
-            append(nz, factor);
-            text = buffer.toString();
+            part[0] = format(nx, factor);
+            part[1] = withY ? format(ny, factor) : null;
+            part[2] = format(nz, factor);
+            text = withY ? part[0] + ", " + part[1] + ", " + part[2] : part[0] + ", " + part[2];
         }
 
-        private void append(long value, int factor) {
-            if (value < 0) buffer.append('-');
+        private String format(long value, int factor) {
+            StringBuilder out = new StringBuilder(16);
+            if (value < 0) out.append('-');
             long absolute = Math.abs(value);
-            buffer.append(absolute / factor);
-            if (decimals == 0) return;
-            buffer.append('.');
+            out.append(absolute / factor);
+            if (decimals == 0) return out.toString();
+            out.append('.');
             long fraction = absolute % factor;
-            for (int place = factor / 10; place > 0; place /= 10) buffer.append(fraction / place % 10);
+            for (int place = factor / 10; place > 0; place /= 10) out.append(fraction / place % 10);
+            return out.toString();
         }
     }
 }
