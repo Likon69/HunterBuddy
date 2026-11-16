@@ -24,7 +24,6 @@ public class Spiral extends AreaLoaderMode {
     private BlockPos nextCorner;
     private BlockPos recoveryTarget;
     private final AutosaveTimer autosave = new AutosaveTimer();
-    private final TeleportGuard teleportGuard = new TeleportGuard();
 
     public Spiral() {
         super(AreaLoaderModes.Spiral);
@@ -47,7 +46,6 @@ public class Spiral extends AreaLoaderMode {
         super.onActivate();
         goingToStart = true;
         clearTargets();
-        teleportGuard.reset();
         autosave.restart();
         File file = getJsonFile(toString());
         if (file == null || !file.exists()) {
@@ -109,7 +107,6 @@ public class Spiral extends AreaLoaderMode {
         pd = null;
         goingToStart = true;
         clearTargets();
-        teleportGuard.reset();
         debugInfo("Spiral state reset, the next activation starts fresh");
     }
 
@@ -117,7 +114,6 @@ public class Spiral extends AreaLoaderMode {
     public void onTick() {
         super.onTick();
         if (mc.player == null || mc.world == null || pd == null) return;
-        if (isHeldByTeleportGuard()) return;
         if (autosave.isDue()) {
             saveToJson(goingToStart, pd);
         }
@@ -128,28 +124,6 @@ public class Spiral extends AreaLoaderMode {
         } else {
             tickOverworld();
         }
-    }
-
-    private boolean isHeldByTeleportGuard() {
-        BlockPos here = mc.player.getBlockPos();
-        if (!goingToStart && !isRecovering() && teleportGuard.hasTeleported(here)) {
-            pauseAfterTeleport();
-            return true;
-        }
-        teleportGuard.remember(here);
-        if (!teleportGuard.isPaused()) return false;
-        releaseForward();
-        return true;
-    }
-
-    private void pauseAfterTeleport() {
-        pd.currPos = teleportGuard.lastTickPosition();
-        saveToJson(true, pd);
-        teleportGuard.pause();
-        releaseForward();
-        stopForTurn();
-        ChatUtils.warning("Teleport detected, the spiral is paused");
-        ChatUtils.info("Disable and re-enable the module to resume");
     }
 
     private void tickOverworld() {

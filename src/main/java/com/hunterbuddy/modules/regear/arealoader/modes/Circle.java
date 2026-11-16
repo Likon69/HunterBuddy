@@ -25,9 +25,6 @@ public class Circle extends AreaLoaderMode {
    private long startTime;
    private BlockPos nextSpiralTarget = null;
    private static final int REACH_DISTANCE_OVERWORLD = 1;
-   private static final int TELEPORT_THRESHOLD = 100;
-   private boolean teleportPaused = false;
-   private BlockPos lastTickPos = null;
 
    public Circle() {
       super(AreaLoaderModes.Circle);
@@ -59,8 +56,6 @@ public class Circle extends AreaLoaderMode {
       this.startTime = System.nanoTime();
       this.goingToStart = true;
       this.nextSpiralTarget = null;
-      this.teleportPaused = false;
-      this.lastTickPos = null;
       File file = this.getJsonFile(super.toString());
       if (file == null) {
          this.debugInfo("Error: Cannot create save file path. Check save-name setting.");
@@ -174,8 +169,6 @@ public class Circle extends AreaLoaderMode {
       this.pd = null;
       this.goingToStart = true;
       this.nextSpiralTarget = null;
-      this.teleportPaused = false;
-      this.lastTickPos = null;
       this.debugInfo("Polar spiral state reset. Next activation will start fresh.");
    }
 
@@ -183,26 +176,6 @@ public class Circle extends AreaLoaderMode {
    public void onTick() {
       super.onTick();
       if (this.mc.player == null || this.mc.world == null || this.pd == null) {
-         return;
-      }
-
-      BlockPos currentPos = this.mc.player.getBlockPos();
-      if (this.lastTickPos != null && !this.goingToStart && !this.teleportPaused) {
-         double tickDistance = Math.sqrt(this.lastTickPos.getSquaredDistance(currentPos));
-         if (tickDistance > (double)TELEPORT_THRESHOLD) {
-            this.debugInfo("TELEPORT DETECTED! Moved %.0f blocks in one tick. Pausing polar spiral.", tickDistance);
-            this.lastTickPos = currentPos;
-            this.teleportPaused = true;
-            Utils.setPressed(this.mc.options.forwardKey, false);
-            this.stopForTurn();
-            ChatUtils.info("Polar spiral PAUSED due to teleportation.", new Object[0]);
-            ChatUtils.info("Disable and re-enable the module to resume.", new Object[0]);
-            return;
-         }
-      }
-      this.lastTickPos = currentPos;
-      if (this.teleportPaused) {
-         Utils.setPressed(this.mc.options.forwardKey, false);
          return;
       }
 
