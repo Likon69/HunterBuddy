@@ -5,6 +5,7 @@ import com.hunterbuddy.modules.mixin.accessors.PlayerInventoryAccessor;
 import com.hunterbuddy.modules.mine.BreakMath;
 import com.hunterbuddy.modules.mine.EnemyBlocks;
 import com.hunterbuddy.modules.mine.MineRender;
+import com.hunterbuddy.modules.mine.MiningSource;
 import com.hunterbuddy.modules.mine.ToolHold;
 import com.hunterbuddy.modules.regear.util.RotationUtils;
 import com.hunterbuddy.util.ActionSwap;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import meteordevelopment.meteorclient.events.entity.player.StartBreakingBlockEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -38,8 +40,10 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.FluidBlock;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.EntityPose;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
@@ -412,6 +416,9 @@ public class HMine extends Module {
     private boolean instantKeyDown;
     private long lastAutoAt;
     private long lastCrawlAt;
+    private MiningSource source;
+    private ClientWorld sourceWorld;
+    private final Predicate<BlockPos> unavailable = pos -> this.busy(pos) || this.waitingHas(pos);
 
     public HMine() {
         super(HunterBuddyAddon.UTILITY_CATEGORY, "h-mine", "Breaks blocks with packets, faster and more quietly than holding the button.");
@@ -512,11 +519,87 @@ public class HMine extends Module {
     }
 
     private boolean doubleQueueMode() {
-        return this.queue.get() && this.doubleBreak.get() && this.packetMode();
+        return (this.queue.get() || this.source != null) && this.doubleBreak.get() && this.packetMode();
     }
 
-    private boolean packetMode() {
+    public boolean packetMode() {
         return this.mode.get() == SpeedmineMode.PACKET;
+    }
+
+    public double miningRange() {
+        return this.range.get();
+    }
+
+    public int miningCapacity() {
+        return this.doubleBreak.get() ? 2 : 1;
+    }
+
+    public ItemStack miningTool(BlockState state) {
+        int slot = this.autoSwap.get() == Swap.OFF ? this.mc.player.getInventory().getSelectedSlot()
+            : BreakMath.bestToolSlot(this.mc.player, state);
+        return this.mc.player.getInventory().getStack(slot);
+    }
+
+    public boolean excludedFromAutomation(BlockState state) {
+        return this.leaveToVanilla.get().contains(state.getBlock());
+    }
+
+    public boolean acquireSource(MiningSource request) {
+        if (this.source == request && request != null) return true;
+        if (request == null || !this.isActive() || !this.packetMode() || this.hunt.get() || this.source != null
+            || this.mc.player == null || this.mc.world == null || !request.ready()
+            || this.solidLeft() || !this.waiting.isEmpty() || !this.doubleQueue.retries.isEmpty()) return false;
+        this.doubleQueue.stop(false);
+        this.active.clear();
+        this.source = request;
+        this.sourceWorld = this.mc.world;
+        return true;
+    }
+
+    public void releaseSource(MiningSource request) {
+        if (request == null || this.source != request) return;
+        boolean abort = this.sourceWorld == this.mc.world && this.mc.player != null && this.mc.world != null;
+        this.source = null;
+        this.sourceWorld = null;
+        if (this.doubleQueue.running) {
+            this.doubleQueue.stop(abort);
+        } else if (abort) {
+            for (MiningData data : this.active) this.cancel(data);
+        }
+        this.active.clear();
+        this.waiting.clear();
+        this.renderer.clear();
+        if (abort) this.tool.shutDown();
+        else this.tool.forget();
+    }
+
+    private void updateSource() {
+        if (this.source == null) return;
+        if (this.sourceWorld != this.mc.world || !this.packetMode() || this.hunt.get() || !this.source.ready()) {
+            this.releaseSource(this.source);
+            return;
+        }
+        for (MiningData data : this.active) {
+            if (!cleared(data.state()) && !this.source.accepts(data.position)) {
+                this.releaseSource(this.source);
+                return;
+            }
+        }
+    }
+
+    private void fillSource() {
+        if (this.source == null || (this.mc.player.isUsingItem() && !this.keepWhileUsing.get())) return;
+        if (!this.doubleQueueMode() && this.grimDelay()) return;
+        int occupied = this.active.size() + this.waiting.size() + this.doubleQueue.retries.size();
+        for (int i = occupied; i < this.miningCapacity(); i++) {
+            BlockPos pos = this.source.next(this.unavailable);
+            if (pos == null || this.unavailable.test(pos) || !this.source.accepts(pos)) return;
+            this.queueInternal(new MiningData(pos, EnemyBlocks.facing(pos)));
+        }
+    }
+
+    private boolean renderEnabled() {
+        return this.source == null ? this.render.get() : this.source.shouldRender();
     }
 
     private static boolean cleared(BlockState state) {
@@ -567,7 +650,7 @@ public class HMine extends Module {
         return this.breakDelta(state, pos);
     }
 
-    private float breakDelta(BlockState state, BlockPos pos) {
+    public float breakDelta(BlockState state, BlockPos pos) {
         if (this.autoSwap.get() == Swap.OFF) {
             return state.calcBlockBreakingDelta(this.mc.player, this.mc.world, pos);
         }
@@ -668,6 +751,8 @@ public class HMine extends Module {
 
     @Override
     public void onActivate() {
+        this.source = null;
+        this.sourceWorld = null;
         this.doubleQueue.stop(false);
         this.active.clear();
         this.capacity = this.doubleBreak.get() ? 2 : 1;
@@ -681,6 +766,7 @@ public class HMine extends Module {
             return;
         }
 
+        this.releaseSource(this.source);
         this.doubleQueue.stop(true);
         this.active.clear();
         this.waiting.clear();
@@ -692,6 +778,8 @@ public class HMine extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        this.source = null;
+        this.sourceWorld = null;
         this.doubleQueue.stop(true);
         this.active.clear();
         this.waiting.clear();
@@ -744,12 +832,14 @@ public class HMine extends Module {
         }
 
         this.handleKeys();
+        this.updateSource();
 
         if (this.doubleQueue.running && !this.doubleQueueMode()) this.doubleQueue.stop(true);
         if (this.mode.get() == SpeedmineMode.DAMAGE) {
             return;
         }
         this.syncCapacity();
+        this.fillSource();
         if (this.doubleQueueMode()) {
             if (this.hunt.get()) this.runAutoMine();
             this.doubleQueue.tick();
@@ -825,7 +915,7 @@ public class HMine extends Module {
             if (cleared(state)) {
                 d.refreshAttempt();
                 d.seenEmpty(now);
-                boolean stayHot = this.instant.get() && (window <= 0 || !d.emptyFor(now, window));
+                boolean stayHot = this.source == null && this.instant.get() && (window <= 0 || !d.emptyFor(now, window));
                 if (!stayHot) {
                     dropped.add(d);
                     continue;
@@ -1029,6 +1119,11 @@ public class HMine extends Module {
     }
 
     public void queueMiningData(MiningData data) {
+        this.releaseSource(this.source);
+        this.queueInternal(data);
+    }
+
+    private void queueInternal(MiningData data) {
         if (this.doubleQueueMode()) {
             if (!cleared(data.state()) && !this.busy(data.position) && !this.waitingHas(data.position) && this.waiting.size() < WAITING_LIMIT) this.waiting.add(data);
             return;
@@ -1053,6 +1148,7 @@ public class HMine extends Module {
     }
 
     public void clickMine(MiningData data) {
+        this.releaseSource(this.source);
         this.click(data, true);
     }
 
@@ -1063,6 +1159,7 @@ public class HMine extends Module {
         }
 
         int tick = this.mc.player.age;
+        this.releaseSource(this.source);
         boolean fresh = tick < this.lastEventTick || tick - this.lastEventTick > 1;
         this.lastEventTick = tick;
 
@@ -1270,7 +1367,7 @@ public class HMine extends Module {
 
     private MineRender.Look look() {
         return new MineRender.Look(this.style.get(), this.shapeMode.get(), this.mineColor.get(), this.doneColor.get(),
-            this.queueColor.get(), this.blockOutline.get(), this.queueChain.get(), this.queueNumbers.get(), this.queue.get(),
+            this.queueColor.get(), this.blockOutline.get(), this.queueChain.get(), this.queueNumbers.get(), this.queue.get() || this.source != null,
             this.pulseRate.get(), this.fadeTime.get());
     }
 
@@ -1285,7 +1382,7 @@ public class HMine extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (this.mc.player == null || this.mc.world == null || this.mc.player.isCreative() || !this.packetMode() || !this.render.get()) {
+        if (this.mc.player == null || this.mc.world == null || this.mc.player.isCreative() || !this.packetMode() || !this.renderEnabled()) {
             return;
         }
 
@@ -1295,7 +1392,7 @@ public class HMine extends Module {
 
     @EventHandler
     private void onRender2D(Render2DEvent event) {
-        if (this.mc.player == null || this.mc.world == null || !this.packetMode() || !this.render.get() || !this.queue.get()
+        if (this.mc.player == null || this.mc.world == null || !this.packetMode() || !this.renderEnabled() || (!this.queue.get() && this.source == null)
             || !this.queueNumbers.get() || this.waiting.isEmpty()) {
             return;
         }
@@ -1459,7 +1556,7 @@ public class HMine extends Module {
         }
 
         private boolean remine() {
-            if (!HMine.this.instant.get() || this.last == null || this.primary != null || this.secondary != null) return false;
+            if (HMine.this.source != null || !HMine.this.instant.get() || this.last == null || this.primary != null || this.secondary != null) return false;
             int window = HMine.this.instantWindow.get();
             if (window > 0 && System.currentTimeMillis() - this.lastConfirmedAt >= window) return false;
             BlockState state = this.last.state();
@@ -1480,7 +1577,10 @@ public class HMine extends Module {
         }
 
         private boolean retryHas(BlockPos pos) {
-            return this.retries.stream().anyMatch(retry -> retry.request().position.equals(pos));
+            for (Retry retry : this.retries) {
+                if (retry.request().position.equals(pos)) return true;
+            }
+            return false;
         }
 
         private void onServerBlockUpdate(BlockPos pos, BlockState state) {
@@ -1835,6 +1935,7 @@ public class HMine extends Module {
         private boolean breakable(BlockPos pos, BlockState state) {
             return this.reachable(pos) && !state.isAir()
                 && !(state.getBlock() instanceof FluidBlock)
+                && (HMine.this.source == null || HMine.this.source.accepts(pos))
                 && state.getHardness(HMine.this.mc.world, pos) >= 0.0F;
         }
 

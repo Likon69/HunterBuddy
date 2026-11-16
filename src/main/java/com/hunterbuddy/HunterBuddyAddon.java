@@ -33,6 +33,7 @@ import com.hunterbuddy.modules.GrimAirPlace;
 import com.hunterbuddy.modules.FutureTotem;
 import com.hunterbuddy.modules.KillAuraPlus;
 import com.hunterbuddy.modules.HMine;
+import com.hunterbuddy.modules.HNuker;
 import com.hunterbuddy.modules.GrimScaffold;
 import com.hunterbuddy.modules.logistics.PearlButler;
 import com.hunterbuddy.modules.OldChunkNotifier;
@@ -144,6 +145,7 @@ public class HunterBuddyAddon extends MeteorAddon {
         Modules.get().add(new WaypointFollower());
         Modules.get().add(new TrailFollower());
         Modules.get().add(new HMine());
+        Modules.get().add(new HNuker());
         Modules.get().add(new KillAuraPlus());
         Modules.get().add(new AutoEatSync());
         Modules.get().add(new FutureTotem());
