@@ -66,9 +66,9 @@ ESP, overlays, and render helpers.
 | `shader` | Draws a crisp outline, an optional glow and an optional fill around entities (players, mobs, items, pearls...), nether portals, storage blocks and spawners, each with its own color. `outline-width`, `glow` and `filled` set the look. The alpha of each color also sets how opaque its outline and glow are. |
 | `sign-reader` | Shows the text of nearby signs on screen, through walls, grouping the ones that overlap. |
 | `sign-history` | Remembers every sign you see, per server and dimension, and marks the ones destroyed (red) or changed (yellow) since, with their original text above. Place a sign where one was destroyed, or open a changed one, and it writes the original text back on that face, then its dye color and glow from your hotbar. Signs you break or edit yourself update the history. Multiplayer only. |
-| `skybox` | Replaces the Overworld sky with an animated shader sky. `style` picks Aurora, Nebula, Twilight, Storm Night or Deep Void; `end-sky` (on by default) does the same in the End with `end-style` (Nebula by default). `speed`, `intensity`, `star-density`, the per-style colors and the World group (`follow-world-time`, `rain-dims`, `horizon-fog-blend`) tune it. The vanilla sun, moon, stars and clouds are hidden unless `keep-celestial` or `keep-clouds` is on. |
+| `skybox` | Replaces the Overworld sky with an animated shader sky. `style` picks Aurora, Nebula, Twilight, Storm Night, Deep Void, Black Hole or Milky Way; `end-sky` (on by default) does the same in the End with `end-style` (Nebula by default). `speed`, `intensity`, `star-density`, `quality`, the Black Hole `black-hole-elevation`, `black-hole-tilt` and `black-hole-size`, the per-style colors and the World group (`follow-world-time`, `rain-dims`, `horizon-fog-blend`) tune it. The vanilla sun, moon, stars and clouds are hidden unless `keep-celestial` or `keep-clouds` is on. |
 | `speed-blur` | A radial motion blur that grows with your flight speed and keeps you sharp in the middle. Never shows on the ground. |
-| `SpawnerDetector` | Finds classic monster-room dungeons (with or without spawner), activated trial spawners and shipwrecks, and scores the player traces around each room. With `auto-farm` it flies to a traced room (`auto-farm-all`: any room with a chest), digs down, mines the spawner, loots the chests and climbs out. Runs need at least `auto-min-health` and `auto-min-rockets`. On the approach it holds level when the line to the site is blocked and backs off a wall instead of sliding down it. The direct tunnel falls back to Baritone after 20 seconds without progress, or when a falling block has refilled the same spot 8 times. An empty shulker box is not counted as a find. |
+| `SpawnerDetector` | Finds classic monster-room dungeons (with or without spawner), activated trial spawners and shipwrecks, and scores the player traces around each room. With `auto-farm` it flies to a traced room (`auto-farm-all`: any room with a chest), digs down, mines the spawner, loots the chests and climbs out. Runs need at least `auto-min-health` and `auto-min-rockets`. On the approach it holds level when the line to the site is blocked and backs off a wall instead of sliding down it. The direct tunnel falls back to Baritone after 20 seconds without progress, or when a falling block has refilled the same spot 8 times. A Baritone path that stalls is planned again, and `auto-farm` turns `h-mine` on by itself. An empty shulker box is not counted as a find. |
 | `VanityESP` | Highlights map and shulker item frames, banners, ominous vaults, buried treasure, endermen holding blocks, XP orbs and stacked chest minecarts. Each type has its own colors and tracers; buried treasure can alert in chat and add temporary waypoints. |
 
 ### Logistics (6)
@@ -84,7 +84,7 @@ Restocking and inventory handling tools.
 | `shulker-peek` | Draws the main item of each shulker box over its icon, in inventories and on the hotbar, with a mark when the box holds several kinds of items. |
 | `shulker-sorter` | Sorts the shulkers and loose items from your input chests into category chests, walking between them with Baritone. Register chests with `tag-key` and the buttons in its settings; `dry-run` reports where items would go without moving them. It pauses while another player is in sight. |
 
-### Utility (16)
+### Utility (18)
 
 | Meteor name | Description |
 |---|---|
@@ -95,11 +95,13 @@ Restocking and inventory handling tools.
 | `Experience Trader Starter` | Switches Villager Trading on once per in-game day, at the time you choose (13:00 by default), with a fresh list of clerics to visit. |
 | `f-totem` | Keeps a totem in your off hand, replaced the moment it is used. |
 | `grim-air-place` | Places a block in air where your crosshair is pointing. |
-| `grim-scaffold` | Places blocks under you as you move, ahead of your motion, with `tower`, `air-place` and `safewalk` options. |
-| `h-mine` | Breaks blocks with packets, faster than holding the button. Click several blocks to queue them (`queue`, `queue-through` lines up a row), `instant` re-breaks a cleared spot, `double-break` works two blocks at once, `auto-mine` clears around enemies and `anti-crawl` stands you up. |
+| `grim-scaffold` | Places blocks directly under your feet, in the air with the Grim air place and a client prediction (`velocity-predict`), or on visible support faces. `tower` builds up anywhere, `safewalk` keeps you on the edge, and no extra movement packets are sent. |
+| `h-mine` | Breaks blocks with packets, faster than holding the button. Click several blocks to queue them (`queue`, `queue-through` lines up a row), `instant` re-breaks a cleared spot, `double-break` works two blocks at once, `auto-mine` clears around enemies and `anti-crawl` stands you up. `auto-swap` silently swaps the best tool in only around the start and stop packets and back in the same tick. |
+| `h-nuker` | Picks the blocks around you and mines them through `h-mine`, with its tool, timing and double break. `range`, `shape` (All, Flatten, Tunnel), `ignore-standing-block`, a `block-filter` whitelist or blacklist, `mine-order` (closest, farthest, fastest, slowest), `visible-only` and `anti-break` for worn tools. It turns `h-mine` on if needed and never changes its settings. |
+| `hunterbuddy-menu` | The bee button docked to the chat (`dock-x`, `dock-y`) with a dropdown, also opened by `menu-key`. Its first entry is a glass client log window with Meteor, Baritone and mod messages only: scrolling, selection, copy, clear, save, and hidden coordinates. |
 | `inventory-cleaner` | Throws out every item not on its list (or only the listed ones in blacklist mode), one stack every `delay` ticks. The hotbar is optional; works in the inventory, a crafting table or a container. |
 | `kick-alarm` | Plays a sound when you get disconnected from a server: kicked, timed out or the connection failed. |
-| `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. While it swings, your walking direction is turned to the aim, also while Baritone walks. |
+| `kill-aura-plus` | Attacks the entities you choose with the weapon that hurts them most, timed to the attack cooldown for full damage. Has target filters, `only-crits`, rotation options and pauses while eating or mining. It keeps fighting with the Meteor menu or the chat open and pauses only for containers and the inventory. `switch-mode` can hit with a silent switch to the weapon for one tick, timed to the weapon's own cooldown. While it swings, your walking direction is turned to the aim, also while Baritone walks. |
 | `messenger` | Private messages in movable windows with Classic, Bubbles, Slate or Compact chat styles and an unread badge. Replies go out through `reply-command` (`msg` by default), spaced by `send-interval`. `hide-from-main-chat`, `friends-only`, `ignored-names` and `stream-mode` keep the chat clean, and `keep-history` brings conversations back next session. |
 | `NoJumpDelay` | Removes the delay between jumps. |
 | `rocket-boost` | Extends each firework's boost window. `auto-speed` (on by default) works out every tick the highest multiplier Grim still accepts for your look direction; with it off the fixed `speed-multiplier` is used. It can brake near terrain. Can trace every boosted tick to a CSV for tuning. |
@@ -116,13 +118,14 @@ Commands use the configured Meteor command prefix.
 | `sorter` | Setup and withdrawal for the shulker sorter: `input`, `dest`, `reserve`, `station`, `remove`, `list`, `get`, `categories`, `check`, `reload`, `resetfull`. |
 | `trails` | List, restore, forget one or clear the trails chunk-radar remembers. |
 
-## HUD elements (24)
+## HUD elements (26)
 
-All HUD elements are registered in the `HunterBuddy` HUD group.
+All HUD elements are registered in the `HunterBuddy` HUD group. The glass HUDs offer Glass, Flat and Glow styles.
 
 | HUD name | Description |
 |---|---|
 | `ChunkRadar` | Top-down view of the 1.12 trail the chunk-radar module is following. |
+| `Coords` | Current coordinates and their Overworld or Nether equivalent in a glass panel. `dimensions` shows the current one, the opposite one or both; `labels` Full, Short or None; facing direction and per-axis colors. |
 | `elytra-helper` | Central flight panel: elytra durability, flight time estimates, session stats and hunt module status. |
 | `ElytraStatus` | Compact one-line elytra status: speed, pitch, rockets, durability. |
 | `FindsTicker` | Recent finds and sightings as a fading feed. |
@@ -130,9 +133,10 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `FollowerRoute` | The follower's route as a line of milestones, with a halo on the current one and +N for the rest. |
 | `HuntTally` | Session tally: portals, ender chests, shulkers, rockets, stashes, blocks. |
 | `MessengerBubble` | Messenger button with three shapes, three drawn icons, Flat or Glass finishes and a colored unread badge. Click it in chat to open contacts. |
+| `ModuleToast` | Fading glass notifications when a module is turned on or off, with its keybind. |
 | `movement-status` | Current sneaking and sprinting status. |
 | `Odometer` | Session distance on mechanical drums, lifetime total below. |
-| `Performance` | FPS, ping and server TPS in one line, colored by level and flashing on spikes and drops. |
+| `Performance` | Three glass capsules for FPS, ping and server TPS, colored by level and flashing on spikes and drops. A compact mode drops the title. |
 | `PingMeter` | Ping with sparkline, jitter and keepalive freshness. |
 | `Pitch40Cycle` | The pitch40 climb/dive cycle as a wave, with your position on it. |
 | `PlayerCards` | Glass cards for players in range, nearest first: head, name, gear, distance and whether they are closing in, holding or moving away. |
@@ -142,7 +146,7 @@ All HUD elements are registered in the `HunterBuddy` HUD group.
 | `SpawnerRun` | Current step of the spawner farm run while SpawnerDetector is on, as a console log, card, single line or timeline. |
 | `SpeedSpectrum` | Equalizer bars driven by your speed, spiking on rocket boosts. |
 | `SpiralCoverage` | AreaLoader coverage in any mode: flown legs, current leg, planned turns. |
-| `SystemStats` | RAM and CPU usage with line graphs. |
+| `SystemStats` | Heap memory and process CPU usage with compact bars and sparklines. |
 | `TimerGauge` | Meteor Timer's current speed multiplier, including speeds forced by other modules. |
 | `TpsCardiogram` | Server TPS as a scrolling cardiogram, flatlining on lag. |
 | `Travel` | Distance, ETA and speed toward a named waypoint, checked against elytra range. |
@@ -175,7 +179,7 @@ You need **Minecraft 1.21.11**, **Java 21**, **Fabric Loader** and a **Meteor Cl
 - **Baritone** is required for automatic dungeon farming, pathfinding and travel. We recommend [HunterBuddy Baritone](https://github.com/Likon69/hunterbuddy-baritone), our fork for Minecraft 1.21.11. The elytra flight and regear helpers use fixes and APIs from this fork.
 - **Xaero's Minimap, Xaero's World Map and XaeroPlus** are required for map and waypoint features, including `waypoint-follower`, chunk-radar's waypoint marks and the `Travel` HUD. Install the Fabric versions for Minecraft 1.21.11.
 
-These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.6.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
+These mods are not included in the HunterBuddy JAR. Put them and `hunterbuddy-1.0.7.jar` in your Minecraft instance's `mods` folder, then launch with Fabric.
 
 ## Files and network
 
@@ -194,7 +198,7 @@ Java 21 is required. Use the included Gradle wrapper:
 .\gradlew.bat build
 ```
 
-The built addon JAR is written to `build/libs/hunterbuddy-1.0.6.jar`.
+The built addon JAR is written to `build/libs/hunterbuddy-1.0.7.jar`.
 
 ## Credits and provenance
 
